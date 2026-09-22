@@ -1,7 +1,7 @@
 docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait
- Container greenguard-dev-postgres-1 Running 
- Container greenguard-dev-postgres-1 Waiting 
- Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-postgres-1 Running
+ Container greenguard-dev-postgres-1 Waiting
+ Container greenguard-dev-postgres-1 Healthy
 npm run build
 
 > greenguard@0.1.0 build

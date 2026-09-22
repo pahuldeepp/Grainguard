@@ -1,6 +1,6 @@
 node scripts/sonar.mjs scan
- Container grainguard-quality-scanner-run-7192c98b637a Creating 
- Container grainguard-quality-scanner-run-7192c98b637a Created 
+ Container grainguard-quality-scanner-run-7192c98b637a Creating
+ Container grainguard-quality-scanner-run-7192c98b637a Created
 01:00:11.480 INFO  Scanner configuration file: /opt/sonar-scanner/conf/sonar-scanner.properties
 01:00:11.483 INFO  Project root configuration file: /usr/src/sonar-project.properties
 01:00:11.500 INFO  SonarScanner CLI 8.1.0.6389

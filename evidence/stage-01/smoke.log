@@ -28,9 +28,9 @@ node scripts/smoke.mjs
 device-service listening on localhost
 device-service listening on localhost
 PASS: live database readiness, unavailable database returns 503, application database privileges and cross-database denial.
- Container greenguard-dev-postgres-1 Running 
- Container greenguard-dev-postgres-1 Waiting 
- Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-postgres-1 Running
+ Container greenguard-dev-postgres-1 Waiting
+ Container greenguard-dev-postgres-1 Healthy
 2026/09/21 19:46:12 INFO telemetry-ingest listening address=127.0.0.1:18080
 2026/09/21 19:46:12 INFO telemetry-ingest listening address=127.0.0.1:18081
 

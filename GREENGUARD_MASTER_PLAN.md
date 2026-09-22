@@ -895,7 +895,7 @@ These are new user-requested target requirements, not capabilities demonstrated 
 
 Source chapter: [docs/IMPLEMENTATION_BACKLOG.md](docs/IMPLEMENTATION_BACKLOG.md).
 
-Build in this order. Stage 00 is complete. Stage 01 now has a locally verified foundation; remote CI remains pending. Stages 02–14 remain planned. See [current milestone status](docs/MILESTONES.md). Estimates are intentionally omitted until the first vertical slice is measured. One feature is complete only when its executable acceptance evidence is saved.
+Build in this order. Stage 00 is complete. Stage 01 now has a locally verified foundation; CI and local SonarQube are configured, with release currently blocked by the coverage gate; see [CI/CD status](docs/CI_CD.md). Stages 02–14 remain planned. See [current milestone status](docs/MILESTONES.md). Estimates are intentionally omitted until the first vertical slice is measured. One feature is complete only when its executable acceptance evidence is saved.
 
 The confirmed target is all three dimensions: 10m accounts, 10m tenant organizations, and 10m concurrent active users. [Scale and production readiness](docs/SCALE_AND_PRODUCTION_READINESS.md) is part of every stage: introduce bounded tenancy/placement contracts early, then certify cells and the regional fleet in Stages12–14. A passing local demo does not satisfy those capacity gates.
 

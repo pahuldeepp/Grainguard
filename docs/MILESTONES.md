@@ -5,7 +5,7 @@ All 14 implementation milestones are defined in the [acceptance backlog](IMPLEME
 | Stage | Milestone | Status |
 |---|---|---|
 | 00 | Archive, source inspection, architecture and coverage register | Complete — [evidence](../evidence/STAGE_00_VALIDATION.md) |
-| 01 | Reproducible local workspace, first services, database and CI | In progress — local foundation verified; results in [evidence](../evidence/STAGE_01_VALIDATION.md); remote CI pending |
+| 01 | Reproducible local workspace, first services, database and CI | In progress — local foundation verified; CI/SonarQube configured but coverage gate failing; results in [evidence](../evidence/STAGE_01_VALIDATION.md); [delivery status](CI_CD.md) |
 | 02 | Domain model, contracts, migrations, authentication and tenant RLS | Planned |
 | 03 | Durable telemetry write, transactional outbox, idempotency and audit | Planned |
 | 04 | Kafka, schema registry, CDC, retries and DLQ | Planned |
@@ -16,7 +16,7 @@ All 14 implementation milestones are defined in the [acceptance backlog](IMPLEME
 | 09 | SaaS identity, billing, quotas, entitlements and audit export | Planned |
 | 10 | Remaining technology profiles, adapters, mobile and reference labs | Planned |
 | 11 | End-to-end observability, SLOs and runbooks | Planned |
-| 12 | Secure delivery, infrastructure, Kubernetes and GitOps | Planned |
+| 12 | Secure delivery, infrastructure, Kubernetes and GitOps | Initial GitHub Actions, SonarQube and local Docker delivery implemented; Kubernetes/GitOps/cloud work planned |
 | 13 | Capacity, load, soak, chaos and resilience certification | Planned |
 | 14 | Recovery, regional operations, incident exercises and final coverage audit | Planned |
 

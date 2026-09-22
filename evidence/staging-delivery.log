@@ -1,7 +1,7 @@
 docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wait
- Image grainguard/telemetry-ingest:local Building 
- Image grainguard/dashboard:local Building 
- Image grainguard/device-service:local Building 
+ Image grainguard/telemetry-ingest:local Building
+ Image grainguard/dashboard:local Building
+ Image grainguard/device-service:local Building
 #1 [internal] load local bake definitions
 #1 reading from stdin 1.94kB done
 #1 DONE 0.0s
@@ -105,12 +105,12 @@ docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wai
 #27 DONE 0.0s
 
 #23 [device-service build 6/8] RUN npm ci
-#23 3.712 
+#23 3.712
 #23 3.712 added 300 packages, and audited 303 packages in 4s
-#23 3.712 
+#23 3.712
 #23 3.712 96 packages are looking for funding
 #23 3.712   run `npm fund` for details
-#23 3.713 
+#23 3.713
 #23 3.713 found 0 vulnerabilities
 #23 3.713 npm notice
 #23 3.713 npm notice New major version of npm available! 11.19.0 -> 12.0.2
@@ -144,17 +144,17 @@ docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wai
 #34 DONE 0.0s
 
 #35 [device-service build 8/8] RUN npm run build --workspace @greenguard/device-service && npm prune --omit=dev
-#35 0.128 
+#35 0.128
 #35 0.128 > @greenguard/device-service@0.1.0 build
 #35 0.128 > tsc
-#35 0.128 
+#35 0.128
 #35 ...
 
 #36 [dashboard build 8/8] RUN npm run build --workspace @greenguard/dashboard
-#36 0.127 
+#36 0.127
 #36 0.127 > @greenguard/dashboard@0.1.0 build
 #36 0.127 > tsc --noEmit && vite build
-#36 0.127 
+#36 0.127
 #36 0.765 vite v8.3.0 building client environment for production...
 #36 0.775 transforming...
 #36 0.806 ✓ 16 modules transformed.
@@ -163,7 +163,7 @@ docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wai
 #36 0.845 dist/index.html                   0.36 kB │ gzip:  0.27 kB
 #36 0.845 dist/assets/index-Bwd2RBqp.css    2.30 kB │ gzip:  0.89 kB
 #36 0.845 dist/assets/index-B1zM5Jpw.js   222.33 kB │ gzip: 69.66 kB
-#36 0.845 
+#36 0.845
 #36 0.846 ✓ built in 80ms
 #36 DONE 0.9s
 
@@ -187,12 +187,12 @@ docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wai
 #40 DONE 0.0s
 
 #35 [device-service build 8/8] RUN npm run build --workspace @greenguard/device-service && npm prune --omit=dev
-#35 3.900 
+#35 3.900
 #35 3.900 removed 183 packages, and audited 120 packages in 3s
-#35 3.900 
+#35 3.900
 #35 3.900 41 packages are looking for funding
 #35 3.900   run `npm fund` for details
-#35 3.901 
+#35 3.901
 #35 3.901 found 0 vulnerabilities
 #35 DONE 3.9s
 
@@ -214,31 +214,31 @@ docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wai
 
 #44 [device-service] resolving provenance for metadata file
 #44 DONE 0.0s
- Image grainguard/device-service:local Built 
- Image grainguard/telemetry-ingest:local Built 
- Image grainguard/dashboard:local Built 
- Container grainguard-staging-postgres-1 Running 
- Container grainguard-staging-telemetry-ingest-1 Running 
- Container grainguard-staging-device-service-1 Recreate 
- Container grainguard-staging-device-service-1 Recreated 
- Container grainguard-staging-dashboard-1 Recreate 
- Container grainguard-staging-dashboard-1 Recreated 
- Container grainguard-staging-postgres-1 Waiting 
- Container grainguard-staging-postgres-1 Waiting 
- Container grainguard-staging-postgres-1 Healthy 
- Container grainguard-staging-device-service-1 Starting 
- Container grainguard-staging-postgres-1 Healthy 
- Container grainguard-staging-device-service-1 Started 
- Container grainguard-staging-dashboard-1 Starting 
- Container grainguard-staging-dashboard-1 Started 
- Container grainguard-staging-postgres-1 Waiting 
- Container grainguard-staging-device-service-1 Waiting 
- Container grainguard-staging-telemetry-ingest-1 Waiting 
- Container grainguard-staging-dashboard-1 Waiting 
- Container grainguard-staging-dashboard-1 Healthy 
- Container grainguard-staging-device-service-1 Healthy 
- Container grainguard-staging-telemetry-ingest-1 Healthy 
- Container grainguard-staging-postgres-1 Healthy 
+ Image grainguard/device-service:local Built
+ Image grainguard/telemetry-ingest:local Built
+ Image grainguard/dashboard:local Built
+ Container grainguard-staging-postgres-1 Running
+ Container grainguard-staging-telemetry-ingest-1 Running
+ Container grainguard-staging-device-service-1 Recreate
+ Container grainguard-staging-device-service-1 Recreated
+ Container grainguard-staging-dashboard-1 Recreate
+ Container grainguard-staging-dashboard-1 Recreated
+ Container grainguard-staging-postgres-1 Waiting
+ Container grainguard-staging-postgres-1 Waiting
+ Container grainguard-staging-postgres-1 Healthy
+ Container grainguard-staging-device-service-1 Starting
+ Container grainguard-staging-postgres-1 Healthy
+ Container grainguard-staging-device-service-1 Started
+ Container grainguard-staging-dashboard-1 Starting
+ Container grainguard-staging-dashboard-1 Started
+ Container grainguard-staging-postgres-1 Waiting
+ Container grainguard-staging-device-service-1 Waiting
+ Container grainguard-staging-telemetry-ingest-1 Waiting
+ Container grainguard-staging-dashboard-1 Waiting
+ Container grainguard-staging-dashboard-1 Healthy
+ Container grainguard-staging-device-service-1 Healthy
+ Container grainguard-staging-telemetry-ingest-1 Healthy
+ Container grainguard-staging-postgres-1 Healthy
 /Library/Developer/CommandLineTools/usr/bin/make staging-check
 node scripts/staging-check.mjs
 Staging passed: dashboard served; both database-backed API routes ready through nginx.

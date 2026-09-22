@@ -1,6 +1,6 @@
 # Implementation from the basics
 
-Build in this order. Stage 00 (archive, inspection and architecture scaffold) is complete. Stage 01 local foundation is implemented and locally verified; remote CI remains pending. Stages 02–14 are planned. See the [live milestone tracker](MILESTONES.md). Estimates are intentionally omitted until the first vertical slice is measured. One feature is complete only when its executable acceptance evidence is saved.
+Build in this order. Stage 00 (archive, inspection and architecture scaffold) is complete. Stage 01 local foundation is implemented and locally verified; GitHub CI and SonarQube are configured, with release blocked by the strict coverage gate. Stages 02–14 remain planned except for the early delivery foundation documented in [CI/CD setup](CI_CD.md). See the [live milestone tracker](MILESTONES.md). Estimates are intentionally omitted until the first vertical slice is measured. One feature is complete only when its executable acceptance evidence is saved.
 
 The confirmed target is all three dimensions: 10m accounts, 10m tenant organizations, and 10m concurrent active users. [Scale and production readiness](SCALE_AND_PRODUCTION_READINESS.md) is part of every stage: introduce bounded tenancy/placement contracts early, then certify cells and the regional fleet in Stages12–14. A passing local demo does not satisfy those capacity gates.
 

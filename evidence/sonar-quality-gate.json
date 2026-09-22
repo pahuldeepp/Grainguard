@@ -1,0 +1,87 @@
+{
+  "gate": {
+    "status": "ERROR",
+    "conditions": [
+      {
+        "status": "ERROR",
+        "metricKey": "new_coverage",
+        "comparator": "LT",
+        "errorThreshold": "100",
+        "actualValue": "7.1"
+      },
+      {
+        "status": "ERROR",
+        "metricKey": "coverage",
+        "comparator": "LT",
+        "errorThreshold": "100",
+        "actualValue": "47.9"
+      },
+      {
+        "status": "OK",
+        "metricKey": "new_duplicated_lines_density",
+        "comparator": "GT",
+        "errorThreshold": "0",
+        "actualValue": "0.0"
+      },
+      {
+        "status": "OK",
+        "metricKey": "duplicated_lines_density",
+        "comparator": "GT",
+        "errorThreshold": "0",
+        "actualValue": "0.0"
+      },
+      {
+        "status": "OK",
+        "metricKey": "new_violations",
+        "comparator": "GT",
+        "errorThreshold": "0",
+        "actualValue": "0"
+      },
+      {
+        "status": "OK",
+        "metricKey": "violations",
+        "comparator": "GT",
+        "errorThreshold": "0",
+        "actualValue": "0"
+      }
+    ],
+    "ignoredConditions": false,
+    "period": {
+      "mode": "PREVIOUS_VERSION",
+      "date": "2026-09-22T00:56:38+0000"
+    },
+    "caycStatus": "over-compliant"
+  },
+  "measures": [
+    {
+      "metric": "coverage",
+      "value": "47.9",
+      "bestValue": false
+    },
+    {
+      "metric": "duplicated_lines_density",
+      "value": "0.0",
+      "bestValue": true
+    },
+    {
+      "metric": "branch_coverage",
+      "value": "50.0",
+      "bestValue": false
+    },
+    {
+      "metric": "violations",
+      "value": "0",
+      "bestValue": true
+    },
+    {
+      "metric": "line_coverage",
+      "value": "47.5",
+      "bestValue": false
+    },
+    {
+      "metric": "security_hotspots",
+      "value": "0",
+      "bestValue": true
+    }
+  ]
+}

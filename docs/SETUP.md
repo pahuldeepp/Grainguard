@@ -33,7 +33,7 @@ make smoke     # Docker database, actual readiness, failure responses, DB privil
 
 The smoke test uses ports 13001, 13002, 18080 and 18081 and stops its own service processes on completion. PostgreSQL remains running until `make db-down`. Avoid running multiple smoke tests simultaneously.
 
-The CI workflow runs bootstrap, verify, and smoke as one failing-on-error job. Configure `required-foundation` as a required branch protection check after publishing this repository. A workflow file alone does not configure GitHub branch protection. A remote CI run and fresh Linux checkout validation are still pending; local results are in [Stage 01 evidence](../evidence/STAGE_01_VALIDATION.md).
+The CI workflow runs bootstrap, verify, and smoke as one failing-on-error job. Configure `required-foundation` as a required branch protection check after publishing this repository. A workflow file alone does not configure GitHub branch protection. GitHub CI is now configured in `pahuldeepp/Grainguard`; the strict SonarQube coverage gate currently blocks release. See [delivery setup](CI_CD.md). Initial local results are in [Stage 01 evidence](../evidence/STAGE_01_VALIDATION.md).
 
 ## Data and credentials
 

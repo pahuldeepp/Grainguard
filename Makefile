@@ -47,7 +47,7 @@ staging-check:
 staging-down:
 	docker compose --env-file .env -f infra/staging/compose.yaml down
 review:
-	coderabbit review --agent --uncommitted --base main
+	node scripts/review.mjs
 
 .PHONY: deploy rollback
 deploy:
