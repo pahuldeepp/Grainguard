@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/dist
+**/coverage
+build
+.env
+.env.*
+evidence
+.scannerwork
+.local

@@ -1,0 +1,34 @@
+{
+  "name": "greenguard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/dashboard",
+    "services/device-service"
+  ],
+  "engines": {
+    "node": ">=24.21.0 <25"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint apps/dashboard/src services/device-service/src scripts/*.mjs",
+    "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"scripts/*.mjs\"",
+    "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"scripts/*.mjs\"",
+    "coverage": "node scripts/coverage.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.6",
+    "c8": "^12.0.0",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "prettier": "3.9.8",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1"
+  }
+}

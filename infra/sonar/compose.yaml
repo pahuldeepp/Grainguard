@@ -1,0 +1,41 @@
+name: grainguard-quality
+services:
+  database:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: sonar
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?}
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U sonar -d sonar]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  sonarqube:
+    image: sonarqube:community@sha256:58b068af30bdfdccf91222de36e310529033e853dfae221b429cba80d10d5751
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://database:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?}
+      # Local/ephemeral CI only; production must satisfy Elasticsearch host checks.
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: 'true'
+    ports: ["127.0.0.1:9000:9000"]
+    depends_on:
+      database: {condition: service_healthy}
+    volumes: ["data:/opt/sonarqube/data", "extensions:/opt/sonarqube/extensions", "logs:/opt/sonarqube/logs"]
+  scanner:
+    platform: linux/amd64
+    image: sonarsource/sonar-scanner-cli:latest@sha256:a3f4215076706c95a17a68c19322ee916e40a3acd081a8c1a1e839e0194afa57
+    profiles: [scan]
+    environment:
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+    working_dir: /usr/src
+    volumes: ["../..:/usr/src"]
+    command: ["-Dsonar.scanner.skipJreProvisioning=true"]
+volumes:
+  database:
+  data:
+  extensions:
+  logs:

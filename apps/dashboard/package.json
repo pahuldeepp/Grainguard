@@ -1,0 +1,25 @@
+{
+  "name": "@greenguard/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=lcov --coverage.reporter=text --coverage.include=src/** --coverage.exclude=src/**/*.test.*"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitest/coverage-v8": "^5.0.1",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  }
+}

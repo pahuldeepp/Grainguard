@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: gomod
+    directory: /services/telemetry-ingest
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directories: [/apps/dashboard, /services/device-service, /services/telemetry-ingest]
+    schedule: {interval: weekly}

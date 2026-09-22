@@ -1,0 +1,50 @@
+name: grainguard-staging
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
+      TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  device-service:
+    image: ${IMAGE_PREFIX:-grainguard}/device-service:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/device-service/Dockerfile
+    environment:
+      INVENTORY_DATABASE_URL: postgresql://inventory_app:${INVENTORY_DB_PASSWORD:?}@postgres:5432/greenguard_inventory
+    depends_on:
+      postgres: {condition: service_healthy}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  telemetry-ingest:
+    image: ${IMAGE_PREFIX:-grainguard}/telemetry-ingest:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/telemetry-ingest/Dockerfile
+    environment:
+      TELEMETRY_DATABASE_URL: postgresql://telemetry_app:${TELEMETRY_DB_PASSWORD:?}@postgres:5432/greenguard_telemetry
+    depends_on:
+      postgres: {condition: service_healthy}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+  dashboard:
+    image: ${IMAGE_PREFIX:-grainguard}/dashboard:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+    ports: ["127.0.0.1:5174:8080"]
+    depends_on: [device-service, telemetry-ingest]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+volumes:
+  postgres-data:

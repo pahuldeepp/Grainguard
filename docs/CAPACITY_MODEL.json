@@ -1,0 +1,33 @@
+{
+  "status": "arithmetic forecast only; excludes unmeasured storage/network/device-count/skew/replay bottlenecks",
+  "api_rps": 2000000.0,
+  "device_count": 100000000,
+  "telemetry_eps": 1666666.6666666667,
+  "telemetry_payload_bytes_per_second": 1706666666.6666667,
+  "logical_event_payload_TB_per_day": 147.456,
+  "replicated_kafka_payload_TB_for_retention": 3096.5759999999996,
+  "concurrent_websockets": 10000000,
+  "delivered_push_messages_per_second": 1000000.0,
+  "push_payload_bytes_per_second": 1024000000.0,
+  "refresh_requests_per_second_if_evenly_distributed": 11111.111111111111,
+  "baseline_cell_forecast": {
+    "dimension_lower_bounds": {
+      "api": 100,
+      "telemetry": 84,
+      "sessions": 100,
+      "tenants": 100
+    },
+    "required_cells_lower_bound": 100,
+    "provisioned_cells_with_region_reserve_lower_bound": 150
+  },
+  "burst_cell_forecast": {
+    "dimension_lower_bounds": {
+      "api": 200,
+      "telemetry": 417,
+      "sessions": 100,
+      "tenants": 100
+    },
+    "required_cells_lower_bound": 417,
+    "provisioned_cells_with_region_reserve_lower_bound": 626
+  }
+}

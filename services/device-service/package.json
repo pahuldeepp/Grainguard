@@ -1,0 +1,23 @@
+{
+  "name": "@greenguard/device-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test dist/app.test.js",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test dist/app.test.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.0.4",
+    "@nestjs/core": "12.0.4",
+    "@nestjs/platform-express": "12.0.4",
+    "pg": "8.23.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

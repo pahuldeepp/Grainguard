@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  auto_review:
+    enabled: true
+  path_filters:
+    - "!package-lock.json"
+    - "!docs/TECHNOLOGY_CATALOG.json"
+    - "!docs/DEPENDENCY_DISPOSITION.json"
+    - "!evidence/**"
+  path_instructions:
+    - path: ".github/workflows/**"
+      instructions: "Check untrusted PR handling, permissions, immutable action references, mandatory quality gates, secret exposure, and deployment provenance. Required failures must never be suppressed."
+    - path: "services/**"
+      instructions: "Check transaction boundaries, tenant isolation, bounded resource use, graceful shutdown, and readiness. Architecture documents describe future capabilities; do not assume they are implemented."

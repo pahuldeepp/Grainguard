@@ -1,0 +1,35 @@
+docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait
+ Container greenguard-dev-postgres-1 Running 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-postgres-1 Healthy 
+npm run build
+
+> greenguard@0.1.0 build
+> npm run build --workspaces
+
+
+> @greenguard/dashboard@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 16 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.36 kB │ gzip:  0.27 kB
+dist/assets/index-Bwd2RBqp.css    2.30 kB │ gzip:  0.89 kB
+dist/assets/index-B1zM5Jpw.js   222.33 kB │ gzip: 69.66 kB
+
+✓ built in 67ms
+
+> @greenguard/device-service@0.1.0 build
+> tsc
+
+mkdir -p build
+cd services/telemetry-ingest && go build -o ../../build/telemetry-ingest .
+node scripts/smoke.mjs
+device-service listening on localhost
+device-service listening on localhost
+2026/09/21 20:03:04 INFO telemetry-ingest listening address=127.0.0.1:18081
+2026/09/21 20:03:04 INFO telemetry-ingest listening address=127.0.0.1:18080
+PASS: live database readiness, unavailable database returns 503, application database privileges and cross-database denial.

@@ -1,0 +1,95 @@
+python3 scripts/check_plan.py
+Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.
+This check validates planning files only. Run make verify and make smoke for application checks.
+npm run format:check
+
+> greenguard@0.1.0 format:check
+> prettier --check "apps/dashboard/src/**/*.{ts,tsx,css}" "services/device-service/src/**/*.ts" "scripts/*.mjs"
+
+Checking formatting...
+All matched files use Prettier code style!
+npm run lint
+
+> greenguard@0.1.0 lint
+> eslint apps/dashboard/src services/device-service/src scripts/*.mjs
+
+npm run typecheck
+
+> greenguard@0.1.0 typecheck
+> npm run typecheck --workspaces
+
+
+> @greenguard/dashboard@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/device-service@0.1.0 typecheck
+> tsc --noEmit
+
+npm test
+
+> greenguard@0.1.0 test
+> npm run test --workspaces
+
+
+> @greenguard/dashboard@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.1 /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/apps/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  19:46:07
+   Duration  84ms (tests 39%, transform 38%, import 16%, worker 6%)
+
+
+> @greenguard/device-service@0.1.0 test
+> npm run build && node --test dist/app.test.js
+
+
+> @greenguard/device-service@0.1.0 build
+> tsc
+
+✔ database failures change readiness but not liveness; shutdown closes probe (61.417416ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 209.511584
+cd services/telemetry-ingest && test -z "$(gofmt -l .)"
+cd services/telemetry-ingest && go vet ./...
+cd services/telemetry-ingest && go test -race ./...
+ok  	greenguard.local/telemetry-ingest	(cached)
+/Library/Developer/CommandLineTools/usr/bin/make build
+npm run build
+
+> greenguard@0.1.0 build
+> npm run build --workspaces
+
+
+> @greenguard/dashboard@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 16 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.36 kB │ gzip:  0.27 kB
+dist/assets/index-B-_jd4II.css    2.30 kB │ gzip:  0.89 kB
+dist/assets/index-Da8Gp5pZ.js   222.30 kB │ gzip: 69.66 kB
+
+✓ built in 132ms
+
+> @greenguard/device-service@0.1.0 build
+> tsc
+
+mkdir -p build
+cd services/telemetry-ingest && go build -o ../../build/telemetry-ingest .
+
+Exit code: 0

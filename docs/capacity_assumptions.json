@@ -1,0 +1,7 @@
+{
+  "status": "planning assumptions, not measured capacity",
+  "user_confirmed": {"registered_accounts": 10000000, "tenant_organizations": 10000000, "concurrent_active_users": 10000000},
+  "workload_assumptions": {"api_requests_per_active_user_per_second": 0.2, "api_burst_factor": 2, "devices_per_tenant": 10, "device_report_interval_seconds": 60, "event_bytes": 1024, "telemetry_burst_factor": 5, "kafka_replication_factor": 3, "kafka_retention_days_example": 7, "websocket_sessions_per_active_user": 1, "push_messages_per_session_per_second": 0.1, "push_payload_bytes": 1024, "token_refresh_interval_seconds_example": 900},
+  "unverified_safe_cell_targets": {"api_requests_per_second": 20000, "telemetry_events_per_second": 20000, "concurrent_sessions": 100000, "tenant_organizations": 100000},
+  "resilience_assumptions": {"equally_sized_regions": 3, "regions_to_survive_losing": 1}
+}

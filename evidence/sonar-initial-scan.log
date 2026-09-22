@@ -1,0 +1,141 @@
+node scripts/sonar.mjs scan
+ Container grainguard-quality-scanner-run-7192c98b637a Creating 
+ Container grainguard-quality-scanner-run-7192c98b637a Created 
+01:00:11.480 INFO  Scanner configuration file: /opt/sonar-scanner/conf/sonar-scanner.properties
+01:00:11.483 INFO  Project root configuration file: /usr/src/sonar-project.properties
+01:00:11.500 INFO  SonarScanner CLI 8.1.0.6389
+01:00:11.515 INFO  Linux 7.0.12-linuxkit amd64
+01:00:12.870 INFO  Communicating with SonarQube Community Build 26.9.0.129388
+01:00:12.874 INFO  JRE provisioning is disabled
+01:00:12.874 INFO  Using the java executable '/usr/lib/jvm/java-21-amazon-corretto/bin/java' from JAVA_HOME
+01:00:14.299 INFO  Starting SonarScanner Engine...
+01:00:14.299 INFO  Java 21.0.12.1 Amazon.com Inc. (64-bit)
+01:00:16.186 INFO  Load global settings
+01:00:16.281 INFO  Load global settings (done) | time=94ms
+01:00:16.285 INFO  Server id: C7D770A6-AaDGm_FCBvPuL27wdkiZ
+01:00:16.309 INFO  Loading required plugins
+01:00:16.310 INFO  Load plugins index
+01:00:16.333 INFO  Load plugins index (done) | time=24ms
+01:00:16.335 INFO  Load/download plugins
+01:00:16.734 INFO  Load/download plugins (done) | time=398ms
+01:00:17.357 INFO  Process project properties
+01:00:17.375 INFO  Process project properties (done) | time=18ms
+01:00:17.393 INFO  Project key: grainguard
+01:00:17.394 INFO  Base dir: /usr/src
+01:00:17.394 INFO  Working dir: /tmp/.scannerwork
+01:00:17.406 INFO  Load project settings for component key: 'grainguard'
+01:00:17.420 INFO  Load project settings for component key: 'grainguard' (done) | time=14ms
+01:00:17.465 INFO  Load quality profiles
+01:00:17.500 INFO  Load quality profiles (done) | time=35ms
+01:00:17.580 INFO  Load active rules
+01:00:17.869 INFO  Load active rules (done) | time=289ms
+01:00:17.888 INFO  Load analysis cache
+01:00:17.902 INFO  Load analysis cache | time=15ms
+01:00:18.234 INFO  Preprocessing files...
+01:00:18.372 INFO  4 languages detected in 13 preprocessed files (done) | time=137ms
+01:00:18.373 INFO  13 files ignored because of inclusion/exclusion patterns
+01:00:18.373 INFO  0 files ignored because of scm ignore settings
+01:00:18.383 INFO  Loading plugins for detected languages
+01:00:18.383 INFO  Load/download plugins
+01:00:18.957 INFO  Load/download plugins (done) | time=572ms
+01:00:19.378 INFO  Load project repositories
+01:00:19.459 INFO  Load project repositories (done) | time=83ms
+01:00:19.504 INFO  Indexing files...
+01:00:19.504 INFO  Project configuration:
+01:00:19.506 INFO    Excluded sources: **/*.test.ts, **/*.test.tsx, **/*_test.go, **/*.test.ts, **/*.test.tsx, **/*_test.go
+01:00:19.507 INFO    Included tests: **/*.test.ts, **/*.test.tsx, **/*_test.go
+01:00:19.546 INFO  13 files indexed (done) | time=40ms
+01:00:19.547 INFO  Quality profile for css: Sonar way
+01:00:19.548 INFO  Quality profile for docker: Sonar way
+01:00:19.549 INFO  Quality profile for go: Sonar way
+01:00:19.549 INFO  Quality profile for ts: Sonar way
+01:00:19.550 INFO  ------------- Run sensors on module Grainguard
+01:00:19.626 INFO  Load metrics repository
+01:00:19.671 INFO  Load metrics repository (done) | time=45ms
+01:00:20.128 INFO  Sensor IaC YAML File Type Classification Sensor [iac]
+01:00:20.134 INFO  Sensor IaC YAML File Type Classification Sensor [iac] (done) | time=6ms
+01:00:20.138 INFO  Sensor Code Quality and Security for Go [go]
+01:00:20.216 INFO  1 folder (2 files) to be analyzed
+01:00:20.543 INFO  1/1 folder (2 files) has been analyzed
+01:00:20.543 INFO  Sensor Code Quality and Security for Go [go] (done) | time=408ms
+01:00:20.544 INFO  Sensor Go Cover sensor for Go coverage [go]
+01:00:20.546 INFO  Load coverage report from '/usr/src/coverage/go.out'
+01:00:20.586 INFO  Sensor Go Cover sensor for Go coverage [go] (done) | time=43ms
+01:00:20.586 INFO  Sensor IaC hadolint report Sensor [iac]
+01:00:20.587 INFO  Sensor IaC hadolint report Sensor [iac] (done) | time=0ms
+01:00:20.587 INFO  Sensor Java Config Sensor [iac]
+01:00:20.588 INFO  There are no files to be analyzed for the Java language
+01:00:20.588 INFO  Sensor Java Config Sensor [iac] (done) | time=1ms
+01:00:20.588 INFO  Sensor IaC Docker Sensor [iac]
+01:00:20.662 INFO  1 source file to be analyzed
+01:00:20.740 INFO  1/1 source file has been analyzed
+01:00:20.740 INFO  Sensor IaC Docker Sensor [iac] (done) | time=152ms
+01:00:20.741 INFO  Sensor JavaScript/TypeScript Coverage [javascript]
+01:00:20.743 INFO  Analysing [/usr/src/apps/dashboard/coverage/lcov.info, /usr/src/services/device-service/coverage/lcov.info]
+01:00:20.783 INFO  Sensor JavaScript/TypeScript Coverage [javascript] (done) | time=41ms
+01:00:20.783 INFO  Sensor TextAndSecretsSensor [text]
+01:00:20.808 INFO  Available processors: 15
+01:00:20.808 INFO  Using 15 threads for analysis.
+01:00:21.201 INFO  Start fetching files for the text and secrets analysis
+01:00:21.244 INFO  Using Git CLI to retrieve dirty files
+01:00:21.370 INFO  Retrieving language associated files and files included via "sonar.text.inclusions" that are tracked by git
+01:00:21.374 INFO  Starting the text and secrets analysis
+01:00:21.380 INFO  10 source files to be analyzed for the text and secrets analysis
+01:00:21.537 INFO  10/10 source files have been analyzed for the text and secrets analysis
+01:00:21.549 INFO  Sensor TextAndSecretsSensor [text] (done) | time=766ms
+01:00:21.557 INFO  ------------- Run sensors on project
+01:00:21.878 INFO  Sensor GoProjectSensor [go]
+01:00:21.879 INFO  Sensor GoProjectSensor [go] (done) | time=1ms
+01:00:21.880 INFO  Sensor JavaScript/TypeScript/CSS analysis [javascript]
+01:00:22.147 INFO  Detected os: Linux arch: amd64 alpine: false. Platform: LINUX_X64
+01:00:22.172 INFO  Deploy location /opt/sonar-scanner/.sonar/js/node-runtime, tagetRuntime: /opt/sonar-scanner/.sonar/js/node-runtime/node,  version: /opt/sonar-scanner/.sonar/js/node-runtime/version.txt
+01:00:24.646 INFO  Using embedded Node.js runtime.
+01:00:24.647 INFO  Using Node.js executable: '/opt/sonar-scanner/.sonar/js/node-runtime/node'.
+01:00:27.267 INFO  Memory configuration: OS (7933 MB), Node.js (2240 MB).
+01:00:27.271 INFO  gRPC analyze-project server listening on 127.0.0.1:44331
+01:00:27.520 INFO  Plugin version: [13.8.0.44569]
+01:00:28.708 INFO  Found 2 tsconfig.json file(s): [/usr/src/apps/dashboard/tsconfig.json, /usr/src/services/device-service/tsconfig.json]
+01:00:31.865 INFO  7 source files to be analyzed
+01:00:31.866 INFO  Creating TypeScript(6.0.3) program with configuration file /usr/src/apps/dashboard/tsconfig.json [lib: lib.es2022.d.ts, lib.dom.d.ts, lib.dom.iterable.d.ts]
+01:00:31.866 INFO  Analyzing 3 file(s) from tsconfig /usr/src/apps/dashboard/tsconfig.json (252 total files in program)
+01:00:31.867 INFO  Creating TypeScript(6.0.3) program with configuration file /usr/src/services/device-service/tsconfig.json [lib: lib.es2024.d.ts, lib.dom.d.ts]
+01:00:31.867 INFO  Analyzing 3 file(s) from tsconfig /usr/src/services/device-service/tsconfig.json (654 total files in program)
+01:00:31.867 INFO  7/7 source files have been analyzed
+01:00:31.887 INFO  Hit the cache for 0 out of 6
+01:00:31.889 INFO  Miss the cache for 6 out of 6: ANALYSIS_MODE_INELIGIBLE [6/6]
+01:00:31.890 INFO  Sensor JavaScript/TypeScript/CSS analysis [javascript] (done) | time=10011ms
+01:00:31.890 INFO  Sensor IaC Project Sensor [iac]
+01:00:31.897 INFO  Sensor IaC Project Sensor [iac] (done) | time=5ms
+01:00:31.897 INFO  Sensor Zero Coverage Sensor
+01:00:31.899 INFO  Sensor Zero Coverage Sensor (done) | time=3ms
+01:00:31.900 INFO  ------------- Gather SCA dependencies on project
+01:00:31.948 INFO  Dependency analysis skipped
+01:00:31.953 INFO  SCM Publisher SCM provider for this project is: git
+01:00:31.956 INFO  SCM Publisher 10 source files to be analyzed
+01:00:32.171 INFO  SCM Publisher 0/10 source files have been analyzed (done) | time=214ms
+01:00:32.171 WARN  Missing blame information for the following files:
+01:00:32.172 WARN    * apps/dashboard/src/style.css
+01:00:32.172 WARN    * services/telemetry-ingest/main_test.go
+01:00:32.172 WARN    * apps/dashboard/src/health.test.ts
+01:00:32.172 WARN    * services/device-service/src/app.test.ts
+01:00:32.172 WARN    * apps/dashboard/src/main.tsx
+01:00:32.172 WARN    * services/device-service/src/main.ts
+01:00:32.173 WARN    * apps/dashboard/src/health.ts
+01:00:32.173 WARN    * services/device-service/src/app.ts
+01:00:32.173 WARN    * services/telemetry-ingest/main.go
+01:00:32.173 WARN    * services/telemetry-ingest/Dockerfile
+01:00:32.173 WARN  This may lead to missing/broken features in SonarQube
+01:00:32.183 INFO  CPD Executor 1 file had no CPD blocks
+01:00:32.183 INFO  CPD Executor Calculating CPD for 5 files
+01:00:32.190 INFO  CPD Executor CPD calculation finished (done) | time=6ms
+01:00:32.199 INFO  SCM revision ID 'f53dec342146736e9b22d514d98e97114b291a21'
+01:00:32.342 INFO  Analysis report generated in 137ms, dir size=335.4 kB
+01:00:32.364 INFO  Analysis report compressed in 20ms, zip size=62.7 kB
+01:00:32.409 INFO  Analysis report uploaded in 45ms
+01:00:32.411 INFO  ------------- Check Quality Gate status
+01:00:32.412 INFO  Waiting for the analysis report to be processed (max 300s)
+01:00:37.613 ERROR QUALITY GATE STATUS: FAILED - View details on http://sonarqube:9000/dashboard?id=grainguard
+01:00:37.632 INFO  EXECUTION FAILURE
+01:00:37.635 INFO  Total time: 26.157s
+
+make: *** [sonar-scan] Error 3

@@ -1,0 +1,366 @@
+[
+  {
+    "path": "apps/dashboard",
+    "stages": "08",
+    "stack": "React, Vite, TypeScript, Tailwind, Apollo Client, TanStack Query",
+    "responsibility": "Tenant dashboard, device telemetry, risk, alerts, administration and billing.",
+    "status": "foundation implemented; domain features planned"
+  },
+  {
+    "path": "apps/mobile",
+    "stages": "10",
+    "stack": "React Native",
+    "responsibility": "Mobile alert and acknowledgement journey.",
+    "status": "planned"
+  },
+  {
+    "path": "services/gateway",
+    "stages": "02,08,09",
+    "stack": "Node/TypeScript, Express, Auth0",
+    "responsibility": "Edge policy, tenant identity, quotas, public APIs and routing.",
+    "status": "planned"
+  },
+  {
+    "path": "services/bff",
+    "stages": "08",
+    "stack": "Node/TypeScript, Express, Apollo GraphQL",
+    "responsibility": "UI aggregation, DataLoader, cache-aside and subscriptions.",
+    "status": "planned"
+  },
+  {
+    "path": "services/device-service",
+    "stages": "02",
+    "stack": "NestJS, Prisma, Postgres",
+    "responsibility": "Authoritative farm/site/bin/device aggregate owner.",
+    "status": "foundation implemented; domain features planned"
+  },
+  {
+    "path": "services/telemetry-ingest",
+    "stages": "03",
+    "stack": "Go, gRPC/Protobuf, HTTP, pgx",
+    "responsibility": "Single durable ingest path; reading and outbox in one transaction.",
+    "status": "foundation implemented; domain features planned"
+  },
+  {
+    "path": "services/asset-registry",
+    "stages": "07",
+    "stack": "Go, gRPC",
+    "responsibility": "Provisioning/configuration bindings and compensating commands.",
+    "status": "planned"
+  },
+  {
+    "path": "services/cdc-transformer",
+    "stages": "04",
+    "stack": "Go, Kafka, Debezium",
+    "responsibility": "Normalize CDC envelopes without losing event identity or tracing.",
+    "status": "planned"
+  },
+  {
+    "path": "services/projection-builder",
+    "stages": "05",
+    "stack": "Go, Kafka, Postgres",
+    "responsibility": "Dashboard and analytic read models, inbox and replay.",
+    "status": "planned"
+  },
+  {
+    "path": "services/cassandra-writer",
+    "stages": "05,13",
+    "stack": "Go, Cassandra",
+    "responsibility": "Time-bucketed telemetry history, retention and rollups.",
+    "status": "planned"
+  },
+  {
+    "path": "services/risk-engine",
+    "stages": "06",
+    "stack": "Python, FastAPI, Pydantic, NumPy/scikit-learn",
+    "responsibility": "Versioned agricultural scoring and reliable result publication.",
+    "status": "planned"
+  },
+  {
+    "path": "services/workflow-alerts",
+    "stages": "06",
+    "stack": "NestJS, Prisma",
+    "responsibility": "Rules, lifecycle, acknowledgement, escalation and outbox.",
+    "status": "planned"
+  },
+  {
+    "path": "services/saga-orchestrator",
+    "stages": "07",
+    "stack": "Go, Postgres, Kafka",
+    "responsibility": "Durable provisioning state machine, retry and compensation.",
+    "status": "planned"
+  },
+  {
+    "path": "services/billing-service",
+    "stages": "09",
+    "stack": "NestJS, Prisma, Stripe",
+    "responsibility": "Usage ledger, subscriptions, provider inbox and entitlements.",
+    "status": "planned"
+  },
+  {
+    "path": "services/jobs-worker",
+    "stages": "06",
+    "stack": "Node/TypeScript, Express, RabbitMQ",
+    "responsibility": "Durable work dispatch, retries, DLQ and receipts.",
+    "status": "planned"
+  },
+  {
+    "path": "services/notification-service",
+    "stages": "06,10",
+    "stack": "Node/TypeScript, provider adapters",
+    "responsibility": "Email, SMS, push and webhook delivery, templates and preferences.",
+    "status": "planned"
+  },
+  {
+    "path": "services/search-indexer",
+    "stages": "05,10",
+    "stack": "Python asyncio, Elasticsearch/OpenSearch",
+    "responsibility": "Tenant-safe bulk indexing, delete propagation and reindex.",
+    "status": "planned"
+  },
+  {
+    "path": "services/integration-gateway",
+    "stages": "10",
+    "stack": "Python, FastAPI, SQLAlchemy Core, Alembic",
+    "responsibility": "Agricultural imports/exports and legacy schema adapters.",
+    "status": "planned"
+  },
+  {
+    "path": "services/dlq-reprocessor",
+    "stages": "04,06",
+    "stack": "Go, Kafka/RabbitMQ",
+    "responsibility": "Authorized, bounded and audited replay.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/contracts",
+    "stages": "02",
+    "stack": "JSON Schema, OpenAPI, GraphQL, Protobuf",
+    "responsibility": "Canonical generated contracts and compatibility fixtures.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/tenant-auth",
+    "stages": "02",
+    "stack": "Go/Node/Python helpers",
+    "responsibility": "Claim normalization, tenant boundaries and service/device identity.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/otel",
+    "stages": "02,11",
+    "stack": "OpenTelemetry Go/Node/Python",
+    "responsibility": "Tracer/meter/logger bootstraps and broker propagation.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/audit",
+    "stages": "03,09",
+    "stack": "Go/Node/Python, Postgres",
+    "responsibility": "Durable audit envelopes and append-only storage adapters.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/idempotency",
+    "stages": "03",
+    "stack": "SQL inbox/outbox ports",
+    "responsibility": "Effect atomicity, key contracts and deterministic receipt handling.",
+    "status": "planned"
+  },
+  {
+    "path": "packages/feature-flags",
+    "stages": "09,10",
+    "stack": "OpenFeature, DynamoDB",
+    "responsibility": "Tenant flag evaluation, fallback and audited rollout.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/compose",
+    "stages": "01",
+    "stack": "Docker Compose",
+    "responsibility": "Progressive local profiles and real readiness checks.",
+    "status": "foundation implemented; domain features planned"
+  },
+  {
+    "path": "infra/terraform",
+    "stages": "12",
+    "stack": "Terraform, AWS",
+    "responsibility": "Platform/network/managed-store ownership.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/cdk",
+    "stages": "10,12",
+    "stack": "Python AWS CDK",
+    "responsibility": "Separately owned serverless integration resources.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/kubernetes",
+    "stages": "12",
+    "stack": "Kubernetes",
+    "responsibility": "Base policies, workload/service identities, resources and probes.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/helm",
+    "stages": "12",
+    "stack": "Helm",
+    "responsibility": "Portable app chart with verified per-environment values.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/gitops",
+    "stages": "12",
+    "stack": "ArgoCD, Argo Rollouts",
+    "responsibility": "Immutable image promotion and metric-backed canary rollback.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/observability",
+    "stages": "11",
+    "stack": "OTel, Prometheus, Grafana, Loki, Tempo",
+    "responsibility": "Live metrics/logs/traces, SLOs, exporters and probes.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/mesh",
+    "stages": "12,13",
+    "stack": "Istio / Linkerd profiles",
+    "responsibility": "Equivalent mTLS and traffic-policy acceptance exercises.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/unit",
+    "stages": "02",
+    "stack": "Go test/Jest/Vitest/pytest",
+    "responsibility": "Domain invariants and boundary-independent behavior.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/contract",
+    "stages": "02",
+    "stack": "Pact, schemas, generated SDKs",
+    "responsibility": "Producer/consumer compatibility and provider adapter suites.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/integration",
+    "stages": "03",
+    "stack": "Testcontainers, real stores/brokers",
+    "responsibility": "Transaction/ack/crash/tenant correctness.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/e2e",
+    "stages": "08",
+    "stack": "Playwright",
+    "responsibility": "Tenant user journey through real BFF/gateway.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/performance",
+    "stages": "13",
+    "stack": "k6, profilers",
+    "responsibility": "Reproducible load/soak and resource budgets.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/chaos",
+    "stages": "07,13,14",
+    "stack": "Toxiproxy, Chaos Toolkit",
+    "responsibility": "Fault/recovery evidence including committed-event preservation.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/search-opensearch",
+    "stages": "10",
+    "stack": "OpenSearch",
+    "responsibility": "Search adapter parity against Elasticsearch.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/cache-memcached",
+    "stages": "10",
+    "stack": "Memcached",
+    "responsibility": "Disposable-cache comparison, eviction and outage behavior.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/mysql-cdc",
+    "stages": "10",
+    "stack": "MySQL, Debezium",
+    "responsibility": "Legacy partner import/CDC and schema normalization.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/citus",
+    "stages": "13",
+    "stack": "Citus",
+    "responsibility": "Tenant sharding/placement and migration exercise.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/coordination-etcd",
+    "stages": "07,13",
+    "stack": "etcd",
+    "responsibility": "Leader election, leases, fencing and stale-writer tests.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/clinical-reference",
+    "stages": "10",
+    "stack": "FHIR R4, NEWS2/qSOFA, HAPI/CDS Hooks",
+    "responsibility": "Synthetic clinical reference only; no clinical formulas in agricultural scoring.",
+    "status": "planned"
+  },
+  {
+    "path": "labs/historical-compatibility",
+    "stages": "10,13",
+    "stack": "Historical versions/providers in disposition register",
+    "responsibility": "Named exercises for historical-only tooling; preserve evidence and test migration path.",
+    "status": "planned"
+  },
+  {
+    "path": "docs/runbooks",
+    "stages": "11,14",
+    "stack": "Operations procedures",
+    "responsibility": "Incident, backlog, connector, restore and failover guidance with rehearsal evidence.",
+    "status": "planned"
+  },
+  {
+    "path": "evidence",
+    "stages": "01-14",
+    "stack": "Command results, test reports and reviewed links",
+    "responsibility": "Stage-specific implementation proof. No credentials, live customer data or tokens.",
+    "status": "planned"
+  },
+  {
+    "path": "services/tenant-control-plane",
+    "stages": "09,12",
+    "stack": "Existing platform contracts, services and IaC; baseline selected in Stage01",
+    "responsibility": "Tenant lifecycle, membership and fenced placement; extract the first-slice tenant module before fleet scale.",
+    "status": "planned"
+  },
+  {
+    "path": "services/cell-router",
+    "stages": "12",
+    "stack": "Existing platform contracts, services and IaC; baseline selected in Stage01",
+    "responsibility": "Authorize tenant placement, route to home cell and reject stale ownership generations.",
+    "status": "planned"
+  },
+  {
+    "path": "infra/cells",
+    "stages": "12,13,14",
+    "stack": "Existing platform contracts, services and IaC; baseline selected in Stage01",
+    "responsibility": "Bounded regional cell templates, quota registers, staged rollout and recovery capacity.",
+    "status": "planned"
+  },
+  {
+    "path": "tests/fleet",
+    "stages": "13,14",
+    "stack": "Existing platform contracts, services and IaC; baseline selected in Stage01",
+    "responsibility": "Joint active-user, tenant and telemetry scale, cell routing and regional failure tests.",
+    "status": "planned"
+  }
+]

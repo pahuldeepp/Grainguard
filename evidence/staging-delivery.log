@@ -1,0 +1,244 @@
+docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wait
+ Image grainguard/telemetry-ingest:local Building 
+ Image grainguard/dashboard:local Building 
+ Image grainguard/device-service:local Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.94kB done
+#1 DONE 0.0s
+
+#2 [dashboard internal] load build definition from Dockerfile
+#2 transferring dockerfile: 647B done
+#2 DONE 0.0s
+
+#3 [telemetry-ingest internal] load build definition from Dockerfile
+#3 transferring dockerfile: 545B done
+#3 DONE 0.0s
+
+#4 [device-service internal] load build definition from Dockerfile
+#4 transferring dockerfile: 827B done
+#4 DONE 0.0s
+
+#5 [dashboard internal] load metadata for docker.io/nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b12a702dc98bb82226d2d9a508
+#5 DONE 0.0s
+
+#6 [device-service internal] load metadata for docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+#6 DONE 0.0s
+
+#7 [telemetry-ingest internal] load metadata for docker.io/library/golang@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414
+#7 DONE 0.0s
+
+#8 [telemetry-ingest internal] load .dockerignore
+#8 transferring context: 128B done
+#8 DONE 0.0s
+
+#9 [telemetry-ingest build 1/6] FROM docker.io/library/golang@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414
+#9 resolve docker.io/library/golang@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 done
+#9 DONE 0.0s
+
+#10 [device-service build 1/8] FROM docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+#10 resolve docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 done
+#10 DONE 0.0s
+
+#11 [dashboard stage-1 1/3] FROM docker.io/nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b12a702dc98bb82226d2d9a508
+#11 resolve docker.io/nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b12a702dc98bb82226d2d9a508 done
+#11 DONE 0.0s
+
+#12 [telemetry-ingest internal] load build context
+#12 transferring context: 1.31kB done
+#12 DONE 0.0s
+
+#13 [dashboard internal] load build context
+#13 transferring context: 11.95kB done
+#13 DONE 0.0s
+
+#14 [device-service internal] load build context
+#14 transferring context: 6.30kB done
+#14 DONE 0.0s
+
+#15 [telemetry-ingest build 2/6] WORKDIR /src
+#15 CACHED
+
+#16 [telemetry-ingest build 3/6] COPY services/telemetry-ingest/go.* ./
+#16 CACHED
+
+#17 [telemetry-ingest build 4/6] RUN go mod download
+#17 CACHED
+
+#18 [device-service build 3/8] COPY package*.json ./
+#18 CACHED
+
+#19 [device-service build 2/8] WORKDIR /app
+#19 CACHED
+
+#20 [dashboard build 4/8] COPY apps/dashboard/package.json apps/dashboard/package.json
+#20 CACHED
+
+#21 [telemetry-ingest build 5/6] COPY services/telemetry-ingest/*.go ./
+#21 DONE 0.0s
+
+#22 [device-service build 5/8] COPY services/device-service/package.json services/device-service/package.json
+#22 DONE 0.0s
+
+#23 [dashboard build 6/8] RUN npm ci
+#23 ...
+
+#24 [telemetry-ingest build 6/6] RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /telemetry-ingest .
+#24 DONE 3.4s
+
+#23 [dashboard build 6/8] RUN npm ci
+#23 ...
+
+#25 [telemetry-ingest stage-1 1/2] COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+#25 CACHED
+
+#26 [telemetry-ingest stage-1 2/2] COPY --from=build /telemetry-ingest /telemetry-ingest
+#26 CACHED
+
+#27 [telemetry-ingest] exporting to image
+#27 exporting layers done
+#27 exporting manifest sha256:8ccc92319117b0f9ab8aef8ee0f9dea7dc58d81ae824e1e26bf56d38a5e27500 done
+#27 exporting config sha256:9e15b3829502a0b922cb61f315878e3724305fe1548c1985e5c2b2840189f73c done
+#27 exporting attestation manifest sha256:28006444f331c78c2f96233f4ffc3efd6c7fa085fd5a139815aca9c35d5a4dab done
+#27 exporting manifest list sha256:512e919f10bff6c37364e9860a58ab4b5d00e4eee50b09995dfab0bd049a448b done
+#27 naming to docker.io/grainguard/telemetry-ingest:local done
+#27 unpacking to docker.io/grainguard/telemetry-ingest:local done
+#27 DONE 0.0s
+
+#23 [device-service build 6/8] RUN npm ci
+#23 3.712 
+#23 3.712 added 300 packages, and audited 303 packages in 4s
+#23 3.712 
+#23 3.712 96 packages are looking for funding
+#23 3.712   run `npm fund` for details
+#23 3.713 
+#23 3.713 found 0 vulnerabilities
+#23 3.713 npm notice
+#23 3.713 npm notice New major version of npm available! 11.19.0 -> 12.0.2
+#23 3.713 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#23 3.713 npm notice To update run: npm install -g npm@12.0.2
+#23 3.713 npm notice
+#23 DONE 3.8s
+
+#28 [dashboard build 3/8] COPY package*.json ./
+#28 CACHED
+
+#19 [dashboard build 2/8] WORKDIR /app
+#19 CACHED
+
+#29 [dashboard build 4/8] COPY apps/dashboard/package.json apps/dashboard/package.json
+#29 CACHED
+
+#30 [dashboard build 6/8] RUN npm ci
+#30 CACHED
+
+#31 [dashboard build 5/8] COPY services/device-service/package.json services/device-service/package.json
+#31 CACHED
+
+#32 [telemetry-ingest] resolving provenance for metadata file
+#32 DONE 0.0s
+
+#33 [device-service build 7/8] COPY services/device-service services/device-service
+#33 DONE 0.0s
+
+#34 [dashboard build 7/8] COPY apps/dashboard apps/dashboard
+#34 DONE 0.0s
+
+#35 [device-service build 8/8] RUN npm run build --workspace @greenguard/device-service && npm prune --omit=dev
+#35 0.128 
+#35 0.128 > @greenguard/device-service@0.1.0 build
+#35 0.128 > tsc
+#35 0.128 
+#35 ...
+
+#36 [dashboard build 8/8] RUN npm run build --workspace @greenguard/dashboard
+#36 0.127 
+#36 0.127 > @greenguard/dashboard@0.1.0 build
+#36 0.127 > tsc --noEmit && vite build
+#36 0.127 
+#36 0.765 vite v8.3.0 building client environment for production...
+#36 0.775 transforming...
+#36 0.806 ✓ 16 modules transformed.
+#36 0.824 rendering chunks...
+#36 0.842 computing gzip size...
+#36 0.845 dist/index.html                   0.36 kB │ gzip:  0.27 kB
+#36 0.845 dist/assets/index-Bwd2RBqp.css    2.30 kB │ gzip:  0.89 kB
+#36 0.845 dist/assets/index-B1zM5Jpw.js   222.33 kB │ gzip: 69.66 kB
+#36 0.845 
+#36 0.846 ✓ built in 80ms
+#36 DONE 0.9s
+
+#37 [dashboard stage-1 2/3] COPY apps/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
+#37 CACHED
+
+#38 [dashboard stage-1 3/3] COPY --from=build /app/apps/dashboard/dist /usr/share/nginx/html
+#38 DONE 0.0s
+
+#39 [dashboard] exporting to image
+#39 exporting layers 0.0s done
+#39 exporting manifest sha256:2b94da2231d9aabd45097ee7a5d61b0d4e7bed8f91e626ab155ac74247b0df49 done
+#39 exporting config sha256:5f46a661e76592fa4555a4d65c96f0a8e3cda9df0702dc597ad222b4c0fa826d done
+#39 exporting attestation manifest sha256:0af8d4adab6bfffe38bdd1ba48e716dd0116f2bc674aab58f26c0012e104b363 done
+#39 exporting manifest list sha256:9dc4e6b62bcdac90c094d55bada7320932765b83bcb0666a7fc4a16e96504b5e done
+#39 naming to docker.io/grainguard/dashboard:local done
+#39 unpacking to docker.io/grainguard/dashboard:local 0.0s done
+#39 DONE 0.1s
+
+#40 [dashboard] resolving provenance for metadata file
+#40 DONE 0.0s
+
+#35 [device-service build 8/8] RUN npm run build --workspace @greenguard/device-service && npm prune --omit=dev
+#35 3.900 
+#35 3.900 removed 183 packages, and audited 120 packages in 3s
+#35 3.900 
+#35 3.900 41 packages are looking for funding
+#35 3.900   run `npm fund` for details
+#35 3.901 
+#35 3.901 found 0 vulnerabilities
+#35 DONE 3.9s
+
+#41 [device-service stage-1 3/4] COPY --from=build --chown=node:node /app/node_modules ./node_modules
+#41 CACHED
+
+#42 [device-service stage-1 4/4] COPY --from=build --chown=node:node /app/services/device-service ./services/device-service
+#42 DONE 0.0s
+
+#43 [device-service] exporting to image
+#43 exporting layers 0.0s done
+#43 exporting manifest sha256:564bfdad49353b703f6db9d12124bfd17c15ef62225e4da84d151548f71253dd done
+#43 exporting config sha256:36402332c94f2fc3e49f7159b05d3e09788468be5d2f9dce4c77f8bab37ae25d done
+#43 exporting attestation manifest sha256:47181aa7a0bd00e89dd8ac06ed9dd429c92c612371ea3db91816594f1c75873b done
+#43 exporting manifest list sha256:13f21f44e681679562c40c1d566a65af18b5d7407d0d64e1646f3d44af60c383 done
+#43 naming to docker.io/grainguard/device-service:local done
+#43 unpacking to docker.io/grainguard/device-service:local 0.0s done
+#43 DONE 0.1s
+
+#44 [device-service] resolving provenance for metadata file
+#44 DONE 0.0s
+ Image grainguard/device-service:local Built 
+ Image grainguard/telemetry-ingest:local Built 
+ Image grainguard/dashboard:local Built 
+ Container grainguard-staging-postgres-1 Running 
+ Container grainguard-staging-telemetry-ingest-1 Running 
+ Container grainguard-staging-device-service-1 Recreate 
+ Container grainguard-staging-device-service-1 Recreated 
+ Container grainguard-staging-dashboard-1 Recreate 
+ Container grainguard-staging-dashboard-1 Recreated 
+ Container grainguard-staging-postgres-1 Waiting 
+ Container grainguard-staging-postgres-1 Waiting 
+ Container grainguard-staging-postgres-1 Healthy 
+ Container grainguard-staging-device-service-1 Starting 
+ Container grainguard-staging-postgres-1 Healthy 
+ Container grainguard-staging-device-service-1 Started 
+ Container grainguard-staging-dashboard-1 Starting 
+ Container grainguard-staging-dashboard-1 Started 
+ Container grainguard-staging-postgres-1 Waiting 
+ Container grainguard-staging-device-service-1 Waiting 
+ Container grainguard-staging-telemetry-ingest-1 Waiting 
+ Container grainguard-staging-dashboard-1 Waiting 
+ Container grainguard-staging-dashboard-1 Healthy 
+ Container grainguard-staging-device-service-1 Healthy 
+ Container grainguard-staging-telemetry-ingest-1 Healthy 
+ Container grainguard-staging-postgres-1 Healthy 
+/Library/Developer/CommandLineTools/usr/bin/make staging-check
+node scripts/staging-check.mjs
+Staging passed: dashboard served; both database-backed API routes ready through nginx.
