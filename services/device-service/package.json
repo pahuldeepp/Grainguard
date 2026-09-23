@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "prisma generate && tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "prisma generate && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "prisma migrate deploy"
