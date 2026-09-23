@@ -161,7 +161,8 @@ export async function registerDevice(
     return await withTenant(db, ctx.tenantId, async (tx) => {
       // Pessimistic, transaction-scoped: concurrent retries of one command queue here
       // instead of racing to insert. Safe under PgBouncer transaction pooling.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${ctx.tenantId}:device.register:${ctx.idempotencyKey}`}, 0))`;
+      const lockKey = `${ctx.tenantId}:device.register:${ctx.idempotencyKey}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
       const receipt = await tx.commandReceipt.findUnique({
         where: { tenantId_commandType_idempotencyKey: receiptKey },
       });
@@ -224,7 +225,7 @@ export async function changeDeviceBinding(
     binId: string | null;
   },
 ): Promise<DeviceChanged> {
-  if (!/^[1-9][0-9]{0,18}$/.test(input.expectedVersion))
+  if (!/^[1-9]\d{0,18}$/.test(input.expectedVersion))
     throw new InvalidInputError(
       "expectedVersion must be a positive integer string",
     );

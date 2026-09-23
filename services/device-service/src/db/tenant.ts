@@ -38,8 +38,10 @@ export async function withTenant<T>(
     return await db.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-        if (options.lockTimeoutMs !== undefined)
-          await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${options.lockTimeoutMs}ms`}, true)`;
+        if (options.lockTimeoutMs !== undefined) {
+          const lockTimeout = `${options.lockTimeoutMs}ms`;
+          await tx.$executeRaw`SELECT set_config('lock_timeout', ${lockTimeout}, true)`;
+        }
         return work(tx);
       },
       { isolationLevel: options.isolationLevel, timeout: options.timeoutMs },

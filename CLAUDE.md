@@ -83,6 +83,7 @@ Per-service commands are in each service's `CLAUDE.md` or `README.md`.
 
 - Treat [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) as open work: when a task touches one of its gaps (P1–P5, R1–R7, O1–O5), close the gap or say why not.
 - Coverage gate is 100% with 0 duplication, issues and hotspots. Add tests; never lower the gate or add coverage exclusions to pass.
+- Before pushing, run `make coverage && make sonar-scan` locally (after `make sonar-up sonar-init` once). CI's gate also fails on Sonar code-smell rules, which `make verify` does not check. Also type-check from a clean state: generated code (the Prisma client) is not committed.
 - Keep entry points testable: take config/env/context as parameters (see `services/telemetry-ingest/main.go` `run(ctx, getenv)` and `services/device-service/src/config.ts`).
 - Run `coderabbit review` before finishing non-trivial work; treat its findings like a human reviewer's.
 - A service folder with only a `README.md` is not implemented. Check for source and tests before assuming a capability exists.
