@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/app.test.js",
-    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test dist/app.test.js"
+    "test": "npm run build && node --test dist/*.test.js",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test dist/*.test.js"
   },
   "dependencies": {
     "@nestjs/common": "12.0.4",
