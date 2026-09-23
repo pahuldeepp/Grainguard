@@ -1,15 +1,29 @@
 # services/device-service
 
-Status: **planned scaffold; implementation not started**.
+Status: **Stage 02a implemented** (inventory model, migrations, tenant isolation, concurrency control). HTTP domain APIs and authentication are Stage 02b.
 
-Stages: 02.
+Technology: NestJS, Prisma 7 (`@prisma/adapter-pg`), PostgreSQL, PgBouncer.
 
-Technology: NestJS, Prisma, Postgres.
+Responsibility: authoritative owner of tenants, sites, bins and devices (`greenguard_inventory`), with command receipts, an immutable outbox and an append-only audit log.
 
-Responsibility: Authoritative farm/site/bin/device aggregate owner.
+## Data access
 
-Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.
+| Connection                                                | Role                                                | Used by                      |
+| --------------------------------------------------------- | --------------------------------------------------- | ---------------------------- |
+| `INVENTORY_DATABASE_URL` (PgBouncer, transaction pooling) | `inventory_app`: not owner, no BYPASSRLS, no DELETE | runtime and tests            |
+| `INVENTORY_MIGRATION_URL` (direct)                        | `inventory_migrator`: owns the tables               | `prisma migrate deploy` only |
 
-## Stage 01 implementation
+- Every tenant query goes through `withTenant` (`src/db/tenant.ts`), which sets `app.tenant_id` with `set_config(..., true)` inside the transaction. RLS is forced on all seven tables; queries also filter on `tenant_id`.
+- Composite keys keep references inside one tenant, and a device's bin inside the device's site.
+- Registering a device writes the device, its `device.registered` outbox event, an audit record and an idempotency receipt in one transaction.
+- Concurrency rules: [ADR-0002](../../docs/adr/0002-concurrency-control.md).
 
-Local foundation is implemented. See [setup](../../docs/SETUP.md) for commands, current scope and verification. Domain features described above remain planned.
+## Commands
+
+```bash
+make db-migrate                              # start Postgres + PgBouncer, apply migrations
+npm test -w services/device-service          # needs the .env variables; `make verify` exports them
+npm run coverage -w services/device-service
+```
+
+Schema changes: edit `prisma/schema.prisma`, add a new numbered folder under `prisma/migrations/` (generate the base with `prisma migrate diff`, then append RLS, grants and checks by hand). The D01 test fails if migrations and the schema drift apart.

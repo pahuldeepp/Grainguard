@@ -5,8 +5,8 @@ All 14 implementation milestones are defined in the [acceptance backlog](IMPLEME
 | Stage | Milestone | Status |
 |---|---|---|
 | 00 | Archive, source inspection, architecture and coverage register | Complete — [evidence](../evidence/STAGE_00_VALIDATION.md) |
-| 01 | Reproducible local workspace, first services, database and CI | In progress — local foundation verified; CI/SonarQube configured but coverage gate failing; results in [evidence](../evidence/STAGE_01_VALIDATION.md); [delivery status](CI_CD.md) |
-| 02 | Domain model, contracts, migrations, authentication and tenant RLS | Planned |
+| 01 | Reproducible local workspace, first services, database and CI | Complete — local foundation, [green CI with 100% SonarQube gate](https://github.com/pahuldeepp/Grainguard/actions/runs/35890498228), deliberate-failure evidence; see [evidence](../evidence/STAGE_01_VALIDATION.md) |
+| 02 | Domain model, contracts, migrations, authentication and tenant RLS | In progress — 02a (inventory model, migrations, forced RLS, PgBouncer, concurrency control) implemented with D01–D03 tests; see [evidence](../evidence/STAGE_02A_VALIDATION.md). 02b (authentication, APIs, event contracts, Go tenant helper) next |
 | 03 | Durable telemetry write, transactional outbox, idempotency and audit | Planned |
 | 04 | Kafka, schema registry, CDC, retries and DLQ | Planned |
 | 05 | CQRS read models, history, search and replay | Planned |

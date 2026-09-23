@@ -1,6 +1,6 @@
-# Local development — Stage 01
+# Local development
 
-This workspace implements the first runnable foundation. It does not yet implement tenant/device CRUD, ingestion writes, authentication, Kafka, RLS, outbox, or production deployment. Those remain ordered in the [milestones](MILESTONES.md) and [acceptance backlog](IMPLEMENTATION_BACKLOG.md).
+This workspace implements the Stage 01 foundation and the Stage 02a inventory data layer (Prisma models, migrations, forced RLS, PgBouncer, outbox/audit writes and concurrency control). It does not yet implement authenticated HTTP domain APIs, ingestion writes, Kafka, CDC or production deployment. Those remain ordered in the [milestones](MILESTONES.md) and [acceptance backlog](IMPLEMENTATION_BACKLOG.md).
 
 ## Start
 
@@ -13,31 +13,33 @@ make dev
 
 Open http://127.0.0.1:5173. The dashboard checks both services through Vite's local proxy every five seconds. A green status means a live database query succeeded. There are no simulated users, devices, throughput figures, or capacity claims.
 
-Bootstrap creates a private ignored `.env` with random local passwords and installs locked Node/Go dependencies. It preserves an existing `.env`. `make dev` starts PostgreSQL, compiles the services and starts the dashboard. React and NestJS changes reload automatically; restart `make dev` after Go changes. Ctrl+C stops the app processes; `make db-down` stops PostgreSQL and preserves its named volume. No cloud resources are created.
+Bootstrap creates a private ignored `.env` with random local passwords and installs locked Node/Go dependencies. It keeps existing passwords, adds any new ones, regenerates the derived connection URLs, and writes the PgBouncer user list to `.local/pgbouncer/`. `make dev` starts PostgreSQL and PgBouncer, applies migrations, compiles the services and starts the dashboard. React and NestJS changes reload automatically; restart `make dev` after Go changes. Ctrl+C stops the app processes; `make db-down` stops PostgreSQL and preserves its named volume. No cloud resources are created.
 
 | Component | Local address | Implemented |
 |---|---|---|
 | React dashboard | http://127.0.0.1:5173 | Live service readiness, foundation screen |
 | NestJS device service | http://127.0.0.1:3001 | GET /healthz, GET /readyz |
 | Go telemetry service | http://127.0.0.1:8080 | GET /healthz, GET /readyz |
-| PostgreSQL 16 | 127.0.0.1:55432 | Inventory, telemetry, and reserved read databases |
+| PostgreSQL 16 | 127.0.0.1:55432 | Inventory, telemetry, and reserved read databases; direct connections for migrations and tests |
+| PgBouncer 1.24 | 127.0.0.1:56432 | Transaction pooling for `inventory_app` runtime traffic |
 
-All listeners bind to localhost. Service runtime roles cannot administer PostgreSQL or connect to each other's database. Domain table permissions, migration ownership, tenant context and RLS will be implemented in Stage 02; separate database roles alone do not prove tenant isolation.
+All listeners bind to localhost. Service runtime roles cannot administer PostgreSQL or connect to each other's database. Inventory tables are owned by `inventory_migrator`; the runtime role `inventory_app` has no DELETE, cannot update identity columns and cannot bypass the forced RLS policies. Tenant isolation is proven by the D02/D03 tests, not by the roles alone.
 
 ## Verification
 
 ```sh
-make verify    # plan links, formatting, lint, types, unit/HTTP tests, Go race/vet, builds
+make db-migrate  # start PostgreSQL + PgBouncer and apply migrations
+make verify    # plan links, migrations, formatting, lint, types, unit + database tests, Go race/vet, builds
 make smoke     # Docker database, actual readiness, failure responses, DB privilege isolation
 ```
 
 The smoke test uses ports 13001, 13002, 18080 and 18081 and stops its own service processes on completion. PostgreSQL remains running until `make db-down`. Avoid running multiple smoke tests simultaneously.
 
-The CI workflow runs bootstrap, verify, and smoke as one failing-on-error job. Configure `required-foundation` as a required branch protection check after publishing this repository. A workflow file alone does not configure GitHub branch protection. GitHub CI is now configured in `pahuldeepp/Grainguard`; the strict SonarQube coverage gate currently blocks release. See [delivery setup](CI_CD.md). Initial local results are in [Stage 01 evidence](../evidence/STAGE_01_VALIDATION.md).
+The CI workflow runs bootstrap, verify, and smoke as one failing-on-error job. Configure `required-foundation` as a required branch protection check after publishing this repository. A workflow file alone does not configure GitHub branch protection. GitHub CI runs in `pahuldeepp/Grainguard` and passes the 100% SonarQube gate. See [delivery setup](CI_CD.md). Initial local results are in [Stage 01 evidence](../evidence/STAGE_01_VALIDATION.md).
 
 ## Data and credentials
 
-The Compose project is named `greenguard-dev` and uses the volume `greenguard-dev_postgres-data`. Database initialization runs only when the volume is first created. Changing `.env` does not rotate database passwords in an existing volume. Keep the original `.env`, or deliberately rotate the database roles and update matching URL/password values together. Do not delete the volume to solve a credential problem if it contains data you need.
+The Compose project is named `greenguard-dev` and uses the volume `greenguard-dev_postgres-data`. Database initialization (roles and databases) runs only when the volume is first created. A volume created before Stage 02a lacks the `inventory_migrator` role; if it holds nothing you need, recreate it with `docker compose --env-file .env -f infra/compose/compose.yaml down -v`, then `make db-migrate`. Changing `.env` does not rotate database passwords in an existing volume. Keep the original `.env`, or deliberately rotate the database roles and update matching URL/password values together. Do not delete the volume to solve a credential problem if it contains data you need.
 
 Never commit `.env`, secrets, dependencies, or build outputs. `.env.example` contains placeholders only. The original repositories and GitHub exports remain in adjacent archive folders, separate from this application's source. Historical links outside the repository require that archive; the standalone planning check validates links inside this project only.
 

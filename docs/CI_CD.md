@@ -25,13 +25,13 @@ Open http://127.0.0.1:9000/dashboard?id=grainguard. Sign in as `admin`, using `S
 
 This is local/ephemeral-CI SonarQube, bound to localhost with a separate PostgreSQL database and pinned images. Elasticsearch bootstrap host checks are disabled only for this local profile. A production SonarQube deployment would require proper host sizing, TLS, backups and operational configuration. The scanner image runs as linux/amd64, including through Docker emulation on Apple Silicon.
 
-## Strict quality policy and current gap
+## Strict quality policy
 
 The configured gate requires **100% coverage, 0% duplication, and zero issues** across the analyzed foundation, plus the corresponding new-code requirements. Hotspots must be reviewed in SonarQube and the scan script separately requires zero hotspots, because SonarQube prohibits a raw hotspot-count quality-gate condition. Overall conditions ensure a fresh CI analysis cannot pass simply because it has no new-code baseline. The small-change coverage exemption is disabled.
 
 The [first GitHub CI run](https://github.com/pahuldeepp/Grainguard/actions/runs/35674452983) completed all functional checks and artifact upload, then correctly blocked publication at the coverage gate.
 
-At setup validation, SonarQube reported **47.9% coverage, 0 issues, 0% duplication and 0 security hotspots** after fixing seven initial findings. Therefore **the quality gate correctly fails and image publication remains blocked**. Tests for dashboard lifecycle, database adapter paths, service startup and shutdown are the next work needed to reach the coverage target. No source files were excluded to manufacture a passing score.
+At setup the gate reported 47.9% coverage and correctly failed. Tests were then added for every entry point, database adapter and dashboard lifecycle path (no source exclusions); the [CI run on e675d22](https://github.com/pahuldeepp/Grainguard/actions/runs/35890498228) passed the gate at **100% coverage, 0% duplication, 0 issues and 0 security hotspots** and published images with SBOM and provenance attestations. Generated Prisma client code (`**/generated/**`) and shared test fixtures (`**/testing/**`) are not product source and are excluded from analysis.
 
 ## Local staging and release deployment
 

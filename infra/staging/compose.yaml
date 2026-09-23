@@ -5,6 +5,7 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
+      INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data

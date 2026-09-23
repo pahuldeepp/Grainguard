@@ -1,0 +1,119 @@
+// Row-level security policies, grants and CHECK constraints are not expressible in
+// Prisma; they live in the SQL migrations and are verified by the isolation tests.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+  runtime             = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Tenant {
+  tenantId  String   @id @map("tenant_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  sites     Site[]
+
+  @@map("tenants")
+}
+
+model Site {
+  tenantId  String   @map("tenant_id") @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  tenant    Tenant   @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict, onUpdate: Restrict)
+  bins      Bin[]
+  devices   Device[]
+
+  @@id([tenantId, siteId])
+  @@map("sites")
+}
+
+model Bin {
+  tenantId  String   @map("tenant_id") @db.Uuid
+  binId     String   @map("bin_id") @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  site      Site     @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
+  devices   Device[]
+
+  @@id([tenantId, binId])
+  @@unique([tenantId, siteId, binId])
+  @@map("bins")
+}
+
+model Device {
+  tenantId       String   @map("tenant_id") @db.Uuid
+  deviceId       String   @map("device_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  binId          String?  @map("bin_id") @db.Uuid
+  serialNumber   String   @map("serial_number")
+  status         String
+  // Optimistic concurrency: every change to assignment or lifecycle increments this.
+  bindingVersion BigInt   @default(1) @map("binding_version")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  site           Site     @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
+  // Composite key keeps the bin in the same tenant and the same site as the device.
+  bin            Bin?     @relation(fields: [tenantId, siteId, binId], references: [tenantId, siteId, binId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([tenantId, deviceId])
+  @@unique([tenantId, serialNumber])
+  @@map("devices")
+}
+
+model CommandReceipt {
+  tenantId          String   @map("tenant_id") @db.Uuid
+  idempotencyKey    String   @map("idempotency_key")
+  commandType       String   @map("command_type")
+  commandId         String   @map("command_id") @db.Uuid
+  normalizedRequest Json     @map("normalized_request")
+  responseBody      Json     @map("response_body")
+  acceptedAt        DateTime @map("accepted_at") @db.Timestamptz(6)
+
+  @@id([tenantId, commandType, idempotencyKey])
+  @@map("command_receipts")
+}
+
+model OutboxEvent {
+  eventId          String   @id @map("event_id") @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  aggregateType    String   @map("aggregate_type")
+  aggregateId      String   @map("aggregate_id") @db.Uuid
+  aggregateVersion BigInt   @map("aggregate_version")
+  eventType        String   @map("event_type")
+  schemaVersion    Int      @map("schema_version")
+  occurredAt       DateTime @map("occurred_at") @db.Timestamptz(6)
+  correlationId    String   @map("correlation_id") @db.Uuid
+  causationId      String   @map("causation_id") @db.Uuid
+  traceparent      String
+  payload          Json
+  createdAt        DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, aggregateType, aggregateId, aggregateVersion])
+  @@map("outbox_events")
+}
+
+model AuditEvent {
+  auditId      String   @id @map("audit_id") @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  actorType    String   @map("actor_type")
+  actorId      String   @map("actor_id")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id") @db.Uuid
+  commandId    String   @map("command_id") @db.Uuid
+  eventId      String?  @map("event_id") @db.Uuid
+  outcome      String
+  occurredAt   DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([tenantId, resourceType, resourceId])
+  @@map("audit_events")
+}

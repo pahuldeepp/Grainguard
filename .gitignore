@@ -16,3 +16,6 @@ evidence/private/
 .scannerwork/
 .local/
 *.tsbuildinfo
+services/device-service/src/generated/
+.omc/
+.serena/

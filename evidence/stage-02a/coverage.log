@@ -1,0 +1,9 @@
+# coverage — 2026-09-23T17:03:28Z
+src/app.ts lines 68/68 branches 14/14
+src/config.ts lines 17/17 branches 6/6
+src/main.ts lines 6/6 branches 0/0
+src/db/client.ts lines 10/10 branches 1/1
+src/db/errors.ts lines 23/23 branches 8/8
+src/db/tenant.ts lines 49/49 branches 8/8
+src/inventory/errors.ts lines 35/35 branches 7/7
+src/inventory/repository.ts lines 377/377 branches 49/49

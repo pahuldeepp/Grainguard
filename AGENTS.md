@@ -29,11 +29,12 @@ Check the specific service's README for its own test command before assuming one
 
 ## Commits
 
-Make small, focused commits.
+Keep the number of commits small: finish a complete piece of work, then commit it once.
 
-- One logical change per commit: one feature slice, one fix, one refactor, or one docs update. Do not mix refactors or formatting with behaviour changes.
-- Aim for under about 300 changed lines, excluding lockfiles and generated files. Split larger work into a sequence that builds and passes at every step.
-- Tests go in the same commit as the code they cover, so every commit passes `make verify` and the 100% coverage gate.
+- Batch related changes. A commit is a whole deliverable, such as a finished stage slice, a complete feature with its tests and docs, or a full review round. Do not commit after each file or each small edit.
+- Do not commit work in progress. Commit only when the batch passes `make verify` and the 100% coverage gate, with tests in the same commit as the code they cover.
+- Fold follow-up fixes (formatting, review comments, typos) into the batch before committing, rather than adding separate small commits.
+- Each pushed commit triggers CI and cancels the previous run, so fewer pushes also means fewer wasted CI runs.
 - Message: an imperative subject under 72 characters, then a short body explaining why.
 - Stage files by name; never `git add -A` or `git add .`. Never commit `.env*` (except `.env.example`), `.omc/`, `.serena/`, `coverage/` or `evidence/private/`.
 - Commit and push only when the user asks.

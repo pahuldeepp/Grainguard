@@ -39,17 +39,17 @@ Open only the file for the task. [GREENGUARD_MASTER_PLAN.md](GREENGUARD_MASTER_P
 
 Build strictly in stage order; do not start a later stage's infrastructure early.
 
-| Stage | Build                                                                                      | Status  |
-| ----- | ------------------------------------------------------------------------------------------ | ------- |
-| 01    | Workspace, first three components, Postgres, CI, SonarQube 100% gate                       | Closing |
-| 02    | Tenant/site/bin/device models, migrations, RLS, PgBouncer, auth, contracts (split 02a/02b) | Next    |
-| 03    | Durable ingest: reading + outbox + receipt + audit in one transaction                      | Planned |
-| 04    | Kafka, Schema Registry, Debezium CDC, canonical transformer, DLQ/quarantine                | Planned |
-| 05    | CQRS read DB, projections, Cassandra history, search, replay                               | Planned |
-| 06    | Risk scoring, alerts, RabbitMQ jobs, notifications                                         | Planned |
-| 07    | Sagas (orchestrated, choreographed, TCC), locking, Redis/etcd coordination, mTLS           | Planned |
-| 08    | Gateway, GraphQL BFF, subscriptions, full dashboard                                        | Planned |
-| 09–14 | SaaS/billing, remaining profiles, observability, delivery/K8s, capacity, recovery          | Planned |
+| Stage | Build                                                                                      | Status                     |
+| ----- | ------------------------------------------------------------------------------------------ | -------------------------- |
+| 01    | Workspace, first three components, Postgres, CI, SonarQube 100% gate                       | Complete                   |
+| 02    | Tenant/site/bin/device models, migrations, RLS, PgBouncer, auth, contracts (split 02a/02b) | 02a done locally; 02b next |
+| 03    | Durable ingest: reading + outbox + receipt + audit in one transaction                      | Planned                    |
+| 04    | Kafka, Schema Registry, Debezium CDC, canonical transformer, DLQ/quarantine                | Planned                    |
+| 05    | CQRS read DB, projections, Cassandra history, search, replay                               | Planned                    |
+| 06    | Risk scoring, alerts, RabbitMQ jobs, notifications                                         | Planned                    |
+| 07    | Sagas (orchestrated, choreographed, TCC), locking, Redis/etcd coordination, mTLS           | Planned                    |
+| 08    | Gateway, GraphQL BFF, subscriptions, full dashboard                                        | Planned                    |
+| 09–14 | SaaS/billing, remaining profiles, observability, delivery/K8s, capacity, recovery          | Planned                    |
 
 `docs/MILESTONES.md` is the source of truth for status; update this table only when it changes.
 
