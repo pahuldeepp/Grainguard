@@ -27,6 +27,17 @@ Check the specific service's README for its own test command before assuming one
 5. **Pin dependencies.** One tested lockfile per toolchain; `make verify` must be green after any dependency change.
 6. **Preserve history, don't import old bugs.** Source commit IDs from the original repos are preserved as evidence; implement and test behavior fresh rather than porting known-broken code.
 
+## Commits
+
+Make small, focused commits.
+
+- One logical change per commit: one feature slice, one fix, one refactor, or one docs update. Do not mix refactors or formatting with behaviour changes.
+- Aim for under about 300 changed lines, excluding lockfiles and generated files. Split larger work into a sequence that builds and passes at every step.
+- Tests go in the same commit as the code they cover, so every commit passes `make verify` and the 100% coverage gate.
+- Message: an imperative subject under 72 characters, then a short body explaining why.
+- Stage files by name; never `git add -A` or `git add .`. Never commit `.env*` (except `.env.example`), `.omc/`, `.serena/`, `coverage/` or `evidence/private/`.
+- Commit and push only when the user asks.
+
 ## Layout
 
 ```
