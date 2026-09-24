@@ -1,0 +1,12 @@
+test_bulk_partial_failure_quarantines_one_and_retries_transient (test_search_indexer.IndexerTests.test_bulk_partial_failure_quarantines_one_and_retries_transient) ... ok
+test_identity_and_tenant_document (test_search_indexer.IndexerTests.test_identity_and_tenant_document) ... ok
+test_invalid_identity_is_quarantined (test_search_indexer.IndexerTests.test_invalid_identity_is_quarantined) ... ok
+test_partial_event_preserves_existing_fields (test_search_indexer.IndexerTests.test_partial_event_preserves_existing_fields) ... ok
+test_query_always_filters_tenant_and_promotion_is_atomic (test_search_indexer.IndexerTests.test_query_always_filters_tenant_and_promotion_is_atomic) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.011s
+
+OK
+PASS: live index, replay idempotence, tenant isolation, count comparison, alias swap
+PASS: Kafka facility event consumed and indexed with tenant identity

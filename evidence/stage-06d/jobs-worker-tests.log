@@ -1,0 +1,154 @@
+=== RUN   TestRecordEventIsIdempotentAndTenantIsolated
+--- PASS: TestRecordEventIsIdempotentAndTenantIsolated (0.05s)
+=== RUN   TestNoTenantContextSeesNothingAndCannotDelete
+--- PASS: TestNoTenantContextSeesNothingAndCannotDelete (0.02s)
+=== RUN   TestDispatchScanPolicyIsReadOnlyIdentifiers
+--- PASS: TestDispatchScanPolicyIsReadOnlyIdentifiers (0.03s)
+=== RUN   TestCrashBeforeCommitLeavesNothingThenRetrySucceeds
+--- PASS: TestCrashBeforeCommitLeavesNothingThenRetrySucceeds (0.03s)
+=== RUN   TestConcurrentDispatchersPublishEachIntentOnce
+--- PASS: TestConcurrentDispatchersPublishEachIntentOnce (0.12s)
+=== RUN   TestCrashAfterConfirmRepublishesSameMessageID
+--- PASS: TestCrashAfterConfirmRepublishesSameMessageID (0.03s)
+=== RUN   TestPublishFailureBacksOffThenDeadLetters
+--- PASS: TestPublishFailureBacksOffThenDeadLetters (0.03s)
+=== RUN   TestDispatcherRunOnceBoundsConcurrency
+2026/09/24 12:01:13 ERROR dispatch scan failed error="set context: timeout: context deadline exceeded\nconn closed"
+--- PASS: TestDispatcherRunOnceBoundsConcurrency (0.12s)
+=== RUN   TestReceiptsAreMonotonic
+--- PASS: TestReceiptsAreMonotonic (0.05s)
+=== RUN   TestIntakeCommitsAfterEffectOrQuarantine
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+2026/09/24 12:01:13 ERROR alert intake failed error="poll: broker gone"
+--- PASS: TestIntakeCommitsAfterEffectOrQuarantine (0.04s)
+=== RUN   TestIntakeRetriesTransientErrorsWithoutCommitting
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+2026/09/24 12:01:13 WARN alert event not applied; retrying topic=alerts partition=0 offset=0 error="begin transaction: database unavailable"
+--- PASS: TestIntakeRetriesTransientErrorsWithoutCommitting (0.02s)
+=== RUN   TestReceiptHandler
+--- PASS: TestReceiptHandler (0.03s)
+=== RUN   TestMigrationsApplyTwiceOnAFreshDatabase
+--- PASS: TestMigrationsApplyTwiceOnAFreshDatabase (0.19s)
+=== RUN   TestParseFixture
+--- PASS: TestParseFixture (0.00s)
+=== RUN   TestParseRejectsPoison
+--- PASS: TestParseRejectsPoison (0.00s)
+=== RUN   TestIntentIDIsStableAndDistinct
+--- PASS: TestIntentIDIsStableAndDistinct (0.00s)
+=== RUN   TestChannelPolicy
+--- PASS: TestChannelPolicy (0.00s)
+=== RUN   TestBackoffIsExponentialAndCapped
+--- PASS: TestBackoffIsExponentialAndCapped (0.00s)
+=== RUN   TestConfig
+--- PASS: TestConfig (0.00s)
+=== RUN   TestMetricsHaveNoTenantLabels
+--- PASS: TestMetricsHaveNoTenantLabels (0.00s)
+=== RUN   TestTruncate
+--- PASS: TestTruncate (0.00s)
+=== RUN   TestRunRejectsMissingConfig
+--- PASS: TestRunRejectsMissingConfig (0.00s)
+=== RUN   TestRunStartsAndStopsEveryComponent
+2026/09/24 12:01:14 WARN receipt consumer stopped; reconnecting error="dial tcp 127.0.0.1:1: connect: connection refused"
+2026/09/24 12:01:14 WARN KAFKA_BROKERS is empty; alert intake is disabled
+2026/09/24 12:01:14 WARN receipt consumer stopped; reconnecting error="dial tcp 127.0.0.1:1: connect: connection refused"
+--- PASS: TestRunStartsAndStopsEveryComponent (0.40s)
+=== RUN   TestServeHTTPExposesHealthAndMetrics
+--- PASS: TestServeHTTPExposesHealthAndMetrics (0.09s)
+=== RUN   TestRunAllStopsSiblingsWhenOneFails
+--- PASS: TestRunAllStopsSiblingsWhenOneFails (0.00s)
+=== RUN   TestMainExitsNonZeroOnFailure
+2026/09/24 12:01:14 ERROR jobs-worker failed error="JOBS_DATABASE_URL and RABBITMQ_URL are required"
+--- PASS: TestMainExitsNonZeroOnFailure (0.00s)
+=== RUN   TestKafkaSourcePollHonoursCancellation
+--- PASS: TestKafkaSourcePollHonoursCancellation (0.00s)
+=== RUN   TestLiveDispatchSurvivesBrokerRestartWithStableIDs
+    rabbit_live_test.go:60: RABBITMQ_LIVE is not 1; run make rabbitmq-test
+--- SKIP: TestLiveDispatchSurvivesBrokerRestartWithStableIDs (0.00s)
+=== RUN   TestLiveDeliveryLimitDeadLettersAndReplayPreservesID
+    rabbit_live_test.go:142: RABBITMQ_LIVE is not 1; run make rabbitmq-test
+--- SKIP: TestLiveDeliveryLimitDeadLettersAndReplayPreservesID (0.00s)
+=== RUN   TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent
+    rabbit_live_test.go:206: RABBITMQ_LIVE is not 1; run make rabbitmq-test
+--- SKIP: TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent (0.00s)
+=== RUN   TestDeadTransitionCopiesMetadataOnlyRecordToDLQ
+--- PASS: TestDeadTransitionCopiesMetadataOnlyRecordToDLQ (0.04s)
+=== RUN   TestFailedDLQPublishKeepsDeadAndRedriveRestoresSameIntent
+2026/09/24 12:01:14 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=6ede93bd-f464-568e-a952-299de35a9983 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/24 12:01:14 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=8d843327-a4dc-53cc-a20b-ef06e52a1562 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/24 12:01:14 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=a75afb25-4af9-559b-8fbc-a51bea8ad26d error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+--- PASS: TestFailedDLQPublishKeepsDeadAndRedriveRestoresSameIntent (0.07s)
+=== RUN   TestDLQReplayAfterRedriveIsANoOp
+--- PASS: TestDLQReplayAfterRedriveIsANoOp (0.09s)
+=== RUN   TestRedriveTenantFilterIsIsolatedByRLS
+--- PASS: TestRedriveTenantFilterIsIsolatedByRLS (0.08s)
+=== RUN   TestOperatorCommands
+--- PASS: TestOperatorCommands (0.06s)
+PASS
+coverage: 92.6% of statements
+ok  	greenguard.local/jobs-worker	3.192s	coverage: 92.6% of statements
+=== RUN   TestRunRequiresTheMigrationURL
+--- PASS: TestRunRequiresTheMigrationURL (0.00s)
+=== RUN   TestRunAppliesMigrationsIdempotently
+--- PASS: TestRunAppliesMigrationsIdempotently (0.05s)
+=== RUN   TestMainExitsNonZeroOnFailure
+2026/09/24 12:01:13 ERROR migration failed error="JOBS_MIGRATION_URL is required"
+--- PASS: TestMainExitsNonZeroOnFailure (0.00s)
+=== RUN   TestMainSucceedsAgainstTheLocalDatabase
+--- PASS: TestMainSucceedsAgainstTheLocalDatabase (0.02s)
+PASS
+coverage: 100.0% of statements
+ok  	greenguard.local/jobs-worker/cmd/migrate	1.887s	coverage: 100.0% of statements
+	greenguard.local/jobs-worker/migrations		coverage: 0.0% of statements
+=== RUN   TestPrepareDeclaresEveryObject
+--- PASS: TestPrepareDeclaresEveryObject (0.00s)
+=== RUN   TestQueuesUseQuorumAndAtLeastOnceDeadLettering
+--- PASS: TestQueuesUseQuorumAndAtLeastOnceDeadLettering (0.00s)
+=== RUN   TestPublishWaitsForConfirmAndKeepsMessageID
+--- PASS: TestPublishWaitsForConfirmAndKeepsMessageID (0.00s)
+=== RUN   TestPublishFailuresResetOrReport
+--- PASS: TestPublishFailuresResetOrReport (0.00s)
+=== RUN   TestConsumeSettlesByHandlerResult
+--- PASS: TestConsumeSettlesByHandlerResult (0.00s)
+=== RUN   TestConsumeStopsOnContextAndSetupErrors
+--- PASS: TestConsumeStopsOnContextAndSetupErrors (0.00s)
+=== RUN   TestReplayDLQPreservesIntentIDAndCountsReplays
+--- PASS: TestReplayDLQPreservesIntentIDAndCountsReplays (0.00s)
+=== RUN   TestReplayDLQRequeuesWhenPublishFailsAndHonoursLimit
+--- PASS: TestReplayDLQRequeuesWhenPublishFailsAndHonoursLimit (0.00s)
+=== RUN   TestLiveDialFailsFast
+--- PASS: TestLiveDialFailsFast (0.00s)
+=== RUN   TestReplayDLQRedrivesDispatchDeadRecordsInsteadOfRepublishing
+--- PASS: TestReplayDLQRedrivesDispatchDeadRecordsInsteadOfRepublishing (0.00s)
+PASS
+coverage: 85.1% of statements
+ok  	greenguard.local/jobs-worker/rabbit	1.270s	coverage: 85.1% of statements

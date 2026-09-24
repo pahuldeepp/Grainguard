@@ -1,0 +1,53 @@
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/rabbitmq/compose.yaml up -d --wait rabbitmq
+time="2026-09-24T12:01:16-05:00" level=warning msg="Found orphan containers (greenguard-dev-elasticsearch-1, greenguard-dev-cassandra-1, greenguard-dev-connect-1, greenguard-dev-schema-registry-1, greenguard-dev-kafka-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-rabbitmq-1 Running
+ Container greenguard-dev-rabbitmq-1 Waiting
+ Container greenguard-dev-rabbitmq-1 Healthy
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+cd services/jobs-worker && RABBITMQ_LIVE=1 RABBITMQ_RESTART_CMD='docker compose --env-file /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/.env -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/compose/compose.yaml -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/rabbitmq/compose.yaml restart rabbitmq >/dev/null 2>&1 && docker compose --env-file /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/.env -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/compose/compose.yaml -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/rabbitmq/compose.yaml up -d --wait rabbitmq >/dev/null 2>&1' go test -count=1 -race -run 'Live' -v .
+=== RUN   TestLiveDispatchSurvivesBrokerRestartWithStableIDs
+    rabbit_live_test.go:108: missing=0 of 120
+    rabbit_live_test.go:117: intents=120 published=137 retried=660 duplicate-copies=2 (deduplicated by intent id downstream)
+--- PASS: TestLiveDispatchSurvivesBrokerRestartWithStableIDs (9.96s)
+=== RUN   TestLiveDeliveryLimitDeadLettersAndReplayPreservesID
+    rabbit_live_test.go:193: deliveries before dead-lettering=6, replay kept message id 5e970700-1f62-48ed-aaf3-b1d90cef5763
+--- PASS: TestLiveDeliveryLimitDeadLettersAndReplayPreservesID (0.17s)
+=== RUN   TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent
+2026/09/24 12:01:29 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=063dc3c7-6066-5e31-baed-fb41e01484be error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/24 12:01:29 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=41dfb582-f942-5dee-a2c2-ad8c5df43421 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/24 12:01:29 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=f8664ad4-3431-5522-b6ce-dd87561b94c5 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+    rabbit_live_test.go:236: dead intent 063dc3c7-6066-5e31-baed-fb41e01484be: DLQ record -> dlq-replay -> redriven to pending with the same id (replayed 1 DLQ messages
+        )
+--- PASS: TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent (0.12s)
+PASS
+ok  	greenguard.local/jobs-worker	11.560s
+npm run live -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 live
+> npm run build && node --test --test-concurrency=1 "dist/testing/*.live.js"
+
+
+> @greenguard/notification-service@0.1.0 build
+> tsc
+
+✔ consumer crash before ack redelivers and records ONE delivery (204.710375ms)
+✔ provider timeout leaves unknown, then the retry queue drives reconciliation (165.525ms)
+✔ transient failures dead-letter after max attempts; replay keeps the intent id (301.026916ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 748.193083

@@ -1,0 +1,16 @@
+node scripts/events-e2e.mjs
+2026/09/24 01:45:36 INFO telemetry-ingest listening address=127.0.0.1:18080
+PASS: committed inventory outbox -> raw -> transformer -> canonical -> binding
+PASS: poison preserved in quarantine; following good event applied
+2026/09/24 01:45:40 INFO telemetry-ingest listening address=127.0.0.1:18080
+2026/09/24 01:46:31 ERROR service stopped error="context deadline exceeded"
+file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/events-e2e.mjs:116
+  throw new Error(`Timed out: ${label}`);
+        ^
+
+Error: Timed out: replay drain
+    at until (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/events-e2e.mjs:116:9)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/events-e2e.mjs:433:3
+
+Node.js v24.21.0
+make: *** [events-e2e] Error 1
