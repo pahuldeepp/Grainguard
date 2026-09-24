@@ -6,7 +6,7 @@ import {
   type JWTVerifyGetKey,
 } from "jose";
 
-export type Role = "viewer" | "operator" | "admin";
+export type Role = "viewer" | "operator" | "admin" | "device";
 
 export interface Principal {
   subject: string;
@@ -63,7 +63,12 @@ function isKeyServiceFailure(error: unknown): boolean {
   );
 }
 
-const ROLES: ReadonlySet<string> = new Set(["viewer", "operator", "admin"]);
+const ROLES: ReadonlySet<string> = new Set([
+  "viewer",
+  "operator",
+  "admin",
+  "device",
+]);
 const TENANT_ID =
   /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/;
 const BEARER = /^bearer (\S+)$/i;

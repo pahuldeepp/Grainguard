@@ -311,3 +311,13 @@ test("a healthy key server that lacks the token's key stays 401 invalid_token", 
     (url) => rejects(remoteVerifier(url).verify(token), 401, "invalid_token"),
   );
 });
+
+test("the device role is accepted and carries the device id as subject", async () => {
+  const deviceId = "3f2b8c1e-5d4a-4b7e-9c1a-2e6f8a9b0c1d";
+  const principal = await verifier.verify(
+    bearer(await issuer.sign({ roles: ["device"], sub: deviceId })),
+  );
+  assert.deepEqual(principal.roles, ["device"]);
+  assert.equal(principal.subject, deviceId);
+  assert.throws(() => requireRole(principal, "operator", "admin"), AuthError);
+});

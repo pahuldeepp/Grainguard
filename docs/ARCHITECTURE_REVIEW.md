@@ -78,3 +78,10 @@ Added:
 | Q2  | Bounded rejection sample      | Reason, device, payload hash and time, rate-limited per device with short retention, so bad input cannot grow storage. Audit rows stay for accepted changes and security-relevant rejections (for example a foreign device).                                           |
 | Q3  | Reason returned to the device | A rejected reading gets a 4xx with a stable code and is never silently lost; the device decides whether to retry or drop it.                                                                                                                                           |
 | Q4  | Lateness policy ADR           | Allowed lateness per device class; late readings are always stored, flagged, and cause a recompute of the affected window; readings beyond a maximum age take a separate late-data path. Window semantics and watermarks are settled here before the Stage 05 rollups. |
+
+Also decided for Stage 03 ([ADR-0007](adr/0007-ingest-rate-limiting.md)):
+
+| #   | Addition                   | Detail                                                                                                                                                                                            |
+| --- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q5  | Token-bucket rate limiting | Per device and per tenant, after authentication and before parsing; `429` with `Retry-After`; in-memory now behind a `Limiter` interface, a Redis-backed shared tenant limit in Stages 08 and 13. |
+| Q6  | Device tokens              | Ingest accepts a `device` role token whose subject is the device ID; a device may only write its own readings. Operators and admins may write for any device of their tenant.                     |

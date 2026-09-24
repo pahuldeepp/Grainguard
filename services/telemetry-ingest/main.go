@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,32 +14,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func handler(ping func(context.Context) error) http.Handler {
-	mux := http.NewServeMux()
-	respond := func(w http.ResponseWriter, code int, status string) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(map[string]string{"service": "telemetry-ingest", "status": status})
-	}
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, "ok") })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
-		defer cancel()
-		if err := ping(ctx); err != nil {
-			respond(w, 503, "not_ready")
-			return
-		}
-		respond(w, 200, "ready")
-	})
-	return mux
-}
-
-var newPool = pgxpool.NewWithConfig
+var (
+	newPool = pgxpool.NewWithConfig
+	newApp  = buildApp
+)
 
 func run(ctx context.Context, getenv func(string) string) error {
 	url := getenv("TELEMETRY_DATABASE_URL")
 	if url == "" {
 		return errors.New("TELEMETRY_DATABASE_URL is required")
+	}
+	cfg, err := loadIngestConfig(getenv)
+	if err != nil {
+		return err
 	}
 	config, err := pgxpool.ParseConfig(url)
 	if err != nil {
@@ -55,11 +41,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return errors.New("database pool initialization failed")
 	}
 	defer pool.Close()
+	app, shutdownTracing, err := newApp(pool, cfg)
+	if err != nil {
+		return err
+	}
+	defer shutdownTracing()
 	addr := getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	server := &http.Server{Addr: addr, Handler: handler(pool.Ping), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: addr, Handler: newHandler(app), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()
 	slog.Info("telemetry-ingest listening", "address", addr)
@@ -71,6 +62,42 @@ func run(ctx context.Context, getenv func(string) string) error {
 		defer cancel()
 		return server.Shutdown(shutdown)
 	}
+}
+
+// buildApp assembles the ingest endpoint when authentication is configured; otherwise the
+// service serves only its health probes.
+func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
+	app := App{Ping: pool.Ping}
+	shutdown := func() {
+		// Nothing to release: tracing is off.
+	}
+	if cfg.OTLPEndpoint != "" {
+		tracing, err := InitTracing(TracingConfig{ServiceName: serviceName, OTLPEndpoint: cfg.OTLPEndpoint, SampleRatio: cfg.SampleRatio})
+		if err != nil {
+			return App{}, nil, err
+		}
+		app.Tracing = tracing
+		shutdown = func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = tracing.Shutdown(ctx)
+		}
+	}
+	if cfg.Auth == nil {
+		slog.Warn("AUTH_* not set: the ingest endpoint is disabled (health probes only)")
+		return app, shutdown, nil
+	}
+	verifier, err := NewVerifier(*cfg.Auth)
+	if err != nil {
+		shutdown()
+		return App{}, nil, err
+	}
+	app.Verifier = verifier
+	app.Metrics = NewMetrics()
+	app.Limiter = NewTokenBuckets(cfg.Limits, nil)
+	app.Ingestor = NewIngestor(pool, cfg.Policy, nil)
+	app.Recorder = NewRejectionRecorder(pool, app.Metrics, nil)
+	return app, shutdown, nil
 }
 
 var exit = os.Exit

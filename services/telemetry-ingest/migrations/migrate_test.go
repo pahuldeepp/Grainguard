@@ -64,7 +64,7 @@ func TestUpBuildsAnEmptyDatabaseAndIsRepeatable(t *testing.T) {
 		        (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relforcerowsecurity)`).Scan(&policies, &tables); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 7 || tables != 7 {
+	if policies != 8 || tables != 8 {
 		t.Fatalf("policies %d, forced-RLS tables %d", policies, tables)
 	}
 }

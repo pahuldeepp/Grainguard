@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-var tenantTables = []string{"audit_events", "consumer_inbox", "device_bindings", "device_streams", "ingest_receipts", "outbox_events", "readings"}
+var tenantTables = []string{"audit_events", "consumer_inbox", "device_bindings", "device_streams", "ingest_receipts", "ingest_rejection_samples", "outbox_events", "readings"}
 
 func sqlState(err error) string {
 	var pgErr *pgconn.PgError

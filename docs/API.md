@@ -6,7 +6,7 @@ The API is mounted only when `AUTH_ISSUER`, `AUTH_AUDIENCE` and `AUTH_JWKS_URL` 
 
 ## Authentication and tenancy
 
-`Authorization: Bearer <RS256 JWT>`. The token must carry `iss`, `aud`, `exp`, `sub`, `tenant_id` (lowercase UUID) and `roles` (any of `viewer`, `operator`, `admin`). The tenant is taken **only** from the signed `tenant_id` claim; a tenant header, query or body field is ignored. Keys come from the JWKS URL (cached; a rotated key is picked up after the cooldown). Real identity-provider setup is Stage 09.
+`Authorization: Bearer <RS256 JWT>`. The token must carry `iss`, `aud`, `exp`, `sub`, `tenant_id` (lowercase UUID) and `roles` (any of `viewer`, `operator`, `admin`, `device`; `device` tokens are for the telemetry ingest service, where the subject is the device ID, and are not accepted by the inventory endpoints). The tenant is taken **only** from the signed `tenant_id` claim; a tenant header, query or body field is ignored. Keys come from the JWKS URL (cached; a rotated key is picked up after the cooldown). Real identity-provider setup is Stage 09.
 
 | Role     | Allowed                                               |
 | -------- | ----------------------------------------------------- |

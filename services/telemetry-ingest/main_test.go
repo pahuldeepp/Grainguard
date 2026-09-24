@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,7 @@ func TestHealthReadiness(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := handler(func(ctx context.Context) error {
+			h := newHandler(App{Ping: func(ctx context.Context) error {
 				if _, ok := ctx.Deadline(); !ok {
 					t.Fatal("missing readiness timeout")
 				}
@@ -37,7 +38,7 @@ func TestHealthReadiness(t *testing.T) {
 					return errors.New("secret database URL")
 				}
 				return nil
-			})
+			}})
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 			if w.Code != tc.want {
@@ -200,6 +201,83 @@ func TestRunReportsPoolInitializationFailure(t *testing.T) {
 	defer func() { newPool = pgxpool.NewWithConfig }()
 	err := run(context.Background(), env(map[string]string{"TELEMETRY_DATABASE_URL": "postgres://u:p@127.0.0.1:1/db"}))
 	if err == nil || err.Error() != "database pool initialization failed" {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRunReportsInvalidIngestConfigurationBeforeConnecting(t *testing.T) {
+	err := run(context.Background(), env(map[string]string{
+		"TELEMETRY_DATABASE_URL": "postgres://u:p@127.0.0.1:1/db",
+		"AUTH_ISSUER":            "https://idp.example",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "must be set together") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRunServesTheIngestEndpointEndToEnd(t *testing.T) {
+	issuer := newTestIssuer(t)
+	tenant, device := randomUUID(), randomUUID()
+	mustApply(t, pooled(t, 2), eventSpec{kind: "device.registered", tenant: tenant, device: device, version: 1}, BindingApplied)
+	addr := freeAddr(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, env(map[string]string{
+			"TELEMETRY_DATABASE_URL":      os.Getenv("TELEMETRY_DATABASE_URL"),
+			"HTTP_ADDR":                   addr,
+			"AUTH_ISSUER":                 issuer.Issuer,
+			"AUTH_AUDIENCE":               issuer.Audience,
+			"AUTH_JWKS_URL":               issuer.URL,
+			"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:1",
+		}))
+	}()
+	waitFor(t, "http://"+addr+"/healthz", 200)
+	body := fmt.Sprintf(`{"source_message_id":"run-1","observed_at":%q,"temperature_c":19.5}`,
+		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano))
+	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/devices/"+device+"/readings", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+issuer.sign(map[string]any{"tenant_id": tenant, "sub": "op-1", "roles": []string{RoleOperator}}))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("ingest through run(): %d", resp.StatusCode)
+	}
+	waitFor(t, "http://"+addr+"/metrics", 200)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("graceful shutdown returned %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+}
+
+func TestBuildAppReportsSetupFailures(t *testing.T) {
+	pool := pooled(t, 1)
+	if _, _, err := buildApp(pool, ingestConfig{OTLPEndpoint: "ftp://collector"}); err == nil {
+		t.Fatal("an invalid OTLP endpoint must fail")
+	}
+	// A verifier that cannot be built must release the tracer that was already started.
+	if _, _, err := buildApp(pool, ingestConfig{OTLPEndpoint: "http://127.0.0.1:1", Auth: &AuthConfig{}}); err == nil {
+		t.Fatal("an unusable auth configuration must fail")
+	}
+	app, shutdown, err := buildApp(pool, ingestConfig{})
+	if err != nil || app.Verifier != nil || app.Tracing != nil {
+		t.Fatalf("without auth only the probes are served: %+v %v", app, err)
+	}
+	shutdown()
+}
+
+func TestRunReportsAppSetupFailures(t *testing.T) {
+	newApp = func(*pgxpool.Pool, ingestConfig) (App, func(), error) { return App{}, nil, errors.New("setup failed") }
+	defer func() { newApp = buildApp }()
+	err := run(context.Background(), env(map[string]string{"TELEMETRY_DATABASE_URL": "postgres://u:p@127.0.0.1:1/db"}))
+	if err == nil || err.Error() != "setup failed" {
 		t.Fatalf("got %v", err)
 	}
 }
