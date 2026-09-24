@@ -6,13 +6,15 @@ COMPOSE = docker compose --env-file .env -f infra/compose/compose.yaml
 bootstrap:
 	node scripts/bootstrap.mjs
 db-up:
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up -d --wait --build
+	$(COMPOSE) exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
 db-down:
 	$(COMPOSE) down
 db-logs:
 	$(COMPOSE) logs --tail=100 postgres pgbouncer
 db-migrate: db-up
 	npm run migrate -w services/device-service
+	cd services/telemetry-ingest && go run ./cmd/migrate
 build:
 	npm run build
 	mkdir -p build

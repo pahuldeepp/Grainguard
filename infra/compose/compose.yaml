@@ -7,6 +7,7 @@ services:
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
+      TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
     ports: ["127.0.0.1:55432:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data

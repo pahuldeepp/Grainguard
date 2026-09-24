@@ -24,6 +24,7 @@ const admin = secret("POSTGRES_PASSWORD");
 const inventory = secret("INVENTORY_DB_PASSWORD");
 const migrator = secret("INVENTORY_MIGRATOR_PASSWORD");
 const telemetry = secret("TELEMETRY_DB_PASSWORD");
+const telemetryMigrator = secret("TELEMETRY_MIGRATOR_PASSWORD");
 const direct = "127.0.0.1:55432";
 const pooled = "127.0.0.1:56432";
 env.set(
@@ -40,7 +41,15 @@ env.set(
 );
 env.set(
   "TELEMETRY_DATABASE_URL",
+  `postgresql://telemetry_app:${telemetry}@${pooled}/greenguard_telemetry`,
+);
+env.set(
+  "TELEMETRY_DIRECT_URL",
   `postgresql://telemetry_app:${telemetry}@${direct}/greenguard_telemetry`,
+);
+env.set(
+  "TELEMETRY_MIGRATION_URL",
+  `postgresql://telemetry_migrator:${telemetryMigrator}@${direct}/greenguard_telemetry`,
 );
 env.set(
   "POSTGRES_ADMIN_URL",
@@ -52,7 +61,7 @@ writeFileSync(".env", [...env].map(([k, v]) => `${k}=${v}`).join("\n") + "\n", {
 mkdirSync(".local/pgbouncer", { recursive: true });
 writeFileSync(
   ".local/pgbouncer/userlist.txt",
-  `"inventory_app" "${inventory}"\n`,
+  `"inventory_app" "${inventory}"\n"telemetry_app" "${telemetry}"\n`,
   { mode: 0o644 },
 );
 console.log("Local .env and PgBouncer user list are ready.");

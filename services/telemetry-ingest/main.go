@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -47,6 +48,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	config.MaxConns = 5
 	config.ConnConfig.ConnectTimeout = time.Second
+	// PgBouncer transaction pooling cannot keep named prepared statements.
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 	pool, err := newPool(context.Background(), config)
 	if err != nil {
 		return errors.New("database pool initialization failed")

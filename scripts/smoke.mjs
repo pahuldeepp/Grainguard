@@ -59,7 +59,7 @@ try {
   await check("http://127.0.0.1:13002/readyz", "device-service", 503);
   for (const [key, other] of [
     ["INVENTORY_DIRECT_URL", "greenguard_telemetry"],
-    ["TELEMETRY_DATABASE_URL", "greenguard_inventory"],
+    ["TELEMETRY_DIRECT_URL", "greenguard_inventory"],
   ]) {
     const own = new pg.Client({ connectionString: process.env[key] });
     try {

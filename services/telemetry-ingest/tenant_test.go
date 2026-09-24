@@ -217,3 +217,9 @@ func TestWithTenantDoesNotLeakOnPooledConnection(t *testing.T) {
 		t.Errorf("leaked after error: %q", got)
 	}
 }
+
+type failingDB struct{}
+
+func (failingDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	return nil, errors.New("database unavailable")
+}

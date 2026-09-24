@@ -15,13 +15,13 @@ Open http://127.0.0.1:5173. The dashboard checks both services through Vite's lo
 
 Bootstrap creates a private ignored `.env` with random local passwords and installs locked Node/Go dependencies. It keeps existing passwords, adds any new ones, regenerates the derived connection URLs, and writes the PgBouncer user list to `.local/pgbouncer/`. `make dev` starts PostgreSQL and PgBouncer, applies migrations, compiles the services and starts the dashboard. React and NestJS changes reload automatically; restart `make dev` after Go changes. Ctrl+C stops the app processes; `make db-down` stops PostgreSQL and preserves its named volume. No cloud resources are created.
 
-| Component | Local address | Implemented |
-|---|---|---|
-| React dashboard | http://127.0.0.1:5173 | Live service readiness, foundation screen |
-| NestJS device service | http://127.0.0.1:3001 | GET /healthz, GET /readyz |
-| Go telemetry service | http://127.0.0.1:8080 | GET /healthz, GET /readyz |
-| PostgreSQL 16 | 127.0.0.1:55432 | Inventory, telemetry, and reserved read databases; direct connections for migrations and tests |
-| PgBouncer 1.24 | 127.0.0.1:56432 | Transaction pooling for `inventory_app` runtime traffic |
+| Component             | Local address         | Implemented                                                                                    |
+| --------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
+| React dashboard       | http://127.0.0.1:5173 | Live service readiness, foundation screen                                                      |
+| NestJS device service | http://127.0.0.1:3001 | GET /healthz, GET /readyz                                                                      |
+| Go telemetry service  | http://127.0.0.1:8080 | GET /healthz, GET /readyz                                                                      |
+| PostgreSQL 16         | 127.0.0.1:55432       | Inventory, telemetry, and reserved read databases; direct connections for migrations and tests |
+| PgBouncer 1.24        | 127.0.0.1:56432       | Transaction pooling for `inventory_app` runtime traffic                                        |
 
 All listeners bind to localhost. Service runtime roles cannot administer PostgreSQL or connect to each other's database. Inventory tables are owned by `inventory_migrator`; the runtime role `inventory_app` has no DELETE, cannot update identity columns and cannot bypass the forced RLS policies. Tenant isolation is proven by the D02/D03 tests, not by the roles alone.
 
@@ -39,7 +39,7 @@ The CI workflow runs bootstrap, verify, and smoke as one failing-on-error job. C
 
 ## Data and credentials
 
-The Compose project is named `greenguard-dev` and uses the volume `greenguard-dev_postgres-data`. Database initialization (roles and databases) runs only when the volume is first created. A volume created before Stage 02a lacks the `inventory_migrator` role; if it holds nothing you need, recreate it with `docker compose --env-file .env -f infra/compose/compose.yaml down -v`, then `make db-migrate`. Changing `.env` does not rotate database passwords in an existing volume. Keep the original `.env`, or deliberately rotate the database roles and update matching URL/password values together. Do not delete the volume to solve a credential problem if it contains data you need.
+The Compose project is named `greenguard-dev` and uses the volume `greenguard-dev_postgres-data`. Roles, databases and their ownership are provisioned by `infra/compose/init-databases.sql`, which is idempotent: PostgreSQL runs it when the volume is first created, and `make db-up` runs it again every time. An existing volume therefore gains new roles (for example `telemetry_migrator`) and database ownership without being recreated, and `.env` passwords are re-applied to the roles, so a rotated password takes effect on the next `make db-up`. Tables that were created earlier by another owner are not moved; if a volume holds nothing you need, recreate it with `docker compose --env-file .env -f infra/compose/compose.yaml down -v` and run `make db-migrate`. Do not delete a volume that contains data you need.
 
 Never commit `.env`, secrets, dependencies, or build outputs. `.env.example` contains placeholders only. The original repositories and GitHub exports remain in adjacent archive folders, separate from this application's source. Historical links outside the repository require that archive; the standalone planning check validates links inside this project only.
 
