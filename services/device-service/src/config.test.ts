@@ -21,3 +21,50 @@ test("honours PORT and HOST overrides", () => {
     { databaseUrl: "postgres://x", port: 4100, host: "0.0.0.0" },
   );
 });
+
+const base = { INVENTORY_DATABASE_URL: "postgres://x" };
+test("auth is optional but all-or-nothing", () => {
+  assert.equal(readConfig(base).auth, undefined);
+  assert.deepEqual(
+    readConfig({
+      ...base,
+      AUTH_ISSUER: "https://idp.example",
+      AUTH_AUDIENCE: "greenguard-api",
+      AUTH_JWKS_URL: "https://idp.example/.well-known/jwks.json",
+    }).auth,
+    {
+      issuer: "https://idp.example",
+      audience: "greenguard-api",
+      jwksUrl: "https://idp.example/.well-known/jwks.json",
+    },
+  );
+  for (const partial of [
+    { AUTH_ISSUER: "https://idp.example" },
+    { AUTH_AUDIENCE: "a", AUTH_JWKS_URL: "https://idp.example/jwks" },
+    { AUTH_JWKS_URL: "https://idp.example/jwks" },
+  ])
+    assert.throws(
+      () => readConfig({ ...base, ...partial }),
+      /must be set together/,
+    );
+});
+test("the JWKS URL must be https, or loopback http for local development", () => {
+  const withUrl = (AUTH_JWKS_URL: string) =>
+    readConfig({
+      ...base,
+      AUTH_ISSUER: "i",
+      AUTH_AUDIENCE: "a",
+      AUTH_JWKS_URL,
+    });
+  assert.equal(
+    withUrl("http://127.0.0.1:4010/jwks").auth?.jwksUrl,
+    "http://127.0.0.1:4010/jwks",
+  );
+  assert.equal(
+    withUrl("http://localhost/jwks").auth?.jwksUrl,
+    "http://localhost/jwks",
+  );
+  assert.throws(() => withUrl("http://idp.example/jwks"), /must use https/);
+  assert.throws(() => withUrl("ftp://localhost/jwks"), /must use https/);
+  assert.throws(() => withUrl("not a url"));
+});

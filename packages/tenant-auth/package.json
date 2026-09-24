@@ -1,0 +1,27 @@
+{
+  "name": "@greenguard/tenant-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/issuer.d.ts",
+      "default": "./dist/testing/issuer.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  }
+}

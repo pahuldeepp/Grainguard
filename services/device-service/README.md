@@ -1,6 +1,6 @@
 # services/device-service
 
-Status: **Stage 02a implemented** (inventory model, migrations, tenant isolation, concurrency control). HTTP domain APIs and authentication are Stage 02b.
+Status: **Stages 02a and 02b implemented**: inventory data layer plus the authenticated, versioned HTTP API ([API reference](../../docs/API.md)).
 
 Technology: NestJS, Prisma 7 (`@prisma/adapter-pg`), PostgreSQL, PgBouncer.
 
@@ -17,6 +17,10 @@ Responsibility: authoritative owner of tenants, sites, bins and devices (`greeng
 - Composite keys keep references inside one tenant, and a device's bin inside the device's site.
 - Registering a device writes the device, its `device.registered` outbox event, an audit record and an idempotency receipt in one transaction.
 - Concurrency rules: [ADR-0002](../../docs/adr/0002-concurrency-control.md).
+
+## HTTP API
+
+`/v1` sites, bins and devices with RS256 bearer tokens (`@greenguard/tenant-auth`), `Idempotency-Key`, `ETag`/`If-Match`, header-based `API-Version` with `Deprecation`/`Sunset`, problem+json errors and correlation IDs. Configure with `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_JWKS_URL` (all three or none) and optionally `API_VERSION_POLICY`. Details: [docs/API.md](../../docs/API.md), [ADR-0003](../../docs/adr/0003-api-versioning.md).
 
 ## Commands
 

@@ -1,0 +1,22 @@
+# coverage — 2026-09-24T01:03:37Z
+packages/tenant-auth/src/index.ts lines 153/153 branches 40/40
+packages/contracts/src/index.ts lines 158/158 branches 22/22
+services/device-service/src/app.ts lines 118/118 branches 23/23
+services/device-service/src/config.ts lines 51/51 branches 21/21
+services/device-service/src/main.ts lines 22/22 branches 2/2
+services/device-service/src/api/auth.guard.ts lines 28/28 branches 4/4
+services/device-service/src/api/context.ts lines 52/52 branches 12/12
+services/device-service/src/api/dto.ts lines 130/130 branches 49/49
+services/device-service/src/api/errors.ts lines 5/5 branches 1/1
+services/device-service/src/api/http.ts lines 18/18 branches 3/3
+services/device-service/src/api/inventory.controller.ts lines 173/173 branches 24/24
+services/device-service/src/api/problem.ts lines 138/138 branches 36/36
+services/device-service/src/api/versioning/index.ts lines 12/12 branches 0/0
+services/device-service/src/api/versioning/middleware.ts lines 116/116 branches 25/25
+services/device-service/src/api/versioning/policy.ts lines 162/162 branches 70/70
+services/device-service/src/db/client.ts lines 10/10 branches 1/1
+services/device-service/src/db/errors.ts lines 23/23 branches 8/8
+services/device-service/src/db/tenant.ts lines 53/53 branches 9/9
+services/device-service/src/inventory/errors.ts lines 37/37 branches 7/7
+services/device-service/src/inventory/repository.ts lines 390/390 branches 56/56
+services/telemetry-ingest (all files) statements 64/64

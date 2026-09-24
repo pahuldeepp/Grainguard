@@ -7,8 +7,22 @@ import {
   ServiceUnavailableException,
   type OnModuleDestroy,
 } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import pg from "pg";
+import type { Db } from "./db/client.js";
+import {
+  AuthGuard,
+  TOKEN_VERIFIER,
+  type TokenVerifier,
+} from "./api/auth.guard.js";
+import { correlationMiddleware } from "./api/context.js";
+import { DB, InventoryController } from "./api/inventory.controller.js";
+import { ProblemFilter } from "./api/problem.js";
+import {
+  createApiVersionMiddleware,
+  DEFAULT_REGISTRY,
+  type VersionRegistry,
+} from "./api/versioning/index.js";
 export interface Probe {
   ping(): Promise<void>;
   onModuleDestroy?(): Promise<void>;
@@ -52,17 +66,53 @@ class HealthController {
     return { service: "device-service", status: "ready" };
   }
 }
+export interface ApiOptions {
+  db: Db;
+  verifier: TokenVerifier;
+  versions?: VersionRegistry;
+  now?: () => Date;
+}
+
+class DbLifecycle implements OnModuleDestroy {
+  constructor(@Inject(DB) private readonly db: Db) {}
+  async onModuleDestroy() {
+    await this.db.$disconnect();
+  }
+}
+
 @Module({})
 class AppModule {}
-export async function createApp(probe: Probe) {
+export async function createApp(probe: Probe, api?: ApiOptions) {
   const app = await NestFactory.create(
     {
       module: AppModule,
-      controllers: [HealthController],
-      providers: [{ provide: "DATABASE_PROBE", useValue: probe }],
+      controllers: api
+        ? [HealthController, InventoryController]
+        : [HealthController],
+      providers: [
+        { provide: "DATABASE_PROBE", useValue: probe },
+        ...(api
+          ? [
+              { provide: DB, useValue: api.db },
+              { provide: TOKEN_VERIFIER, useValue: api.verifier },
+              AuthGuard,
+              DbLifecycle,
+            ]
+          : []),
+      ],
     },
     { logger: ["error", "warn"] },
   );
+  if (api) {
+    app.use(correlationMiddleware);
+    app.use(
+      "/v1",
+      createApiVersionMiddleware(api.versions ?? DEFAULT_REGISTRY, api.now),
+    );
+    app.useGlobalFilters(
+      new ProblemFilter(app.get(HttpAdapterHost).httpAdapter),
+    );
+  }
   app.enableShutdownHooks();
   return app;
 }

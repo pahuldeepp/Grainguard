@@ -7,7 +7,12 @@ function run(cmd, args, cwd = process.cwd()) {
 }
 mkdirSync("coverage", { recursive: true });
 run("npm", ["run", "coverage", "--workspaces"]);
-for (const workspace of ["apps/dashboard", "services/device-service"]) {
+for (const workspace of [
+  "apps/dashboard",
+  "packages/tenant-auth",
+  "packages/contracts",
+  "services/device-service",
+]) {
   const filename = `${workspace}/coverage/lcov.info`;
   const normalized = readFileSync(filename, "utf8").replace(
     /^SF:(.+)$/gm,
