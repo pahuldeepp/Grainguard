@@ -19,6 +19,7 @@ db-migrate: db-up
 	$(MAKE) projection-migrate
 	$(MAKE) risk-migrate
 	$(MAKE) jobs-migrate
+	$(MAKE) saga-migrate
 build:
 	npm run build
 	mkdir -p build
@@ -57,6 +58,9 @@ verify: check-plan db-migrate
 	cd services/jobs-worker && test -z "$$(gofmt -l .)"
 	cd services/jobs-worker && go vet ./...
 	cd services/jobs-worker && go test -race ./...
+	cd services/saga-orchestrator && test -z "$$(gofmt -l .)"
+	cd services/saga-orchestrator && go vet ./...
+	$(MAKE) saga-test
 	$(MAKE) build
 check-plan:
 	python3 scripts/check_plan.py
@@ -128,6 +132,8 @@ lot-events-e2e: events-up
 wal-check:
 	node scripts/wal-check.mjs
 events-faults:
+	mkdir -p build
+	cd services/cdc-transformer && go build -o ../../build/cdc-transformer .
 	node scripts/events-faults.mjs
 
 .PHONY: binding-feed-reset
@@ -177,6 +183,12 @@ search-test: search-up events-up
 jobs-migrate:
 	cd services/jobs-worker && go run ./cmd/migrate
 	npm run migrate -w services/notification-service
+
+.PHONY: saga-migrate saga-test
+saga-migrate:
+	cd services/saga-orchestrator && go run ./cmd/migrate
+saga-test:
+	cd services/saga-orchestrator && go test -race ./...
 
 # Opt-in RabbitMQ overlay (Stage 06d); never part of dev/verify/smoke.
 RABBITMQ_COMPOSE = $(COMPOSE) -f infra/rabbitmq/compose.yaml

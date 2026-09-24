@@ -241,4 +241,22 @@ writeFileSync(
     "services/jobs-worker/",
   ),
 );
+run(
+  "go",
+  [
+    "test",
+    "-race",
+    "-coverpkg=./...",
+    "-coverprofile=../../coverage/saga-orchestrator.raw.out",
+    "./...",
+  ],
+  "services/saga-orchestrator",
+);
+writeFileSync(
+  "coverage/saga-orchestrator.out",
+  readFileSync("coverage/saga-orchestrator.raw.out", "utf8").replaceAll(
+    "greenguard.local/saga-orchestrator/",
+    "services/saga-orchestrator/",
+  ),
+);
 console.log("Coverage reports ready for SonarQube.");

@@ -116,3 +116,21 @@ GRANT CONNECT ON DATABASE greenguard_alerts TO alerts_app, cdc_reader;
 \connect greenguard_alerts
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO alerts_app;
+
+-- Stage 07 saga authority. The runtime role cannot own tables or bypass RLS.
+\getenv saga_password SAGA_DB_PASSWORD
+\getenv saga_migrator_password SAGA_MIGRATOR_PASSWORD
+\connect postgres
+SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
+  FROM (VALUES ('saga_app'), ('saga_migrator')) AS roles(r)
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+ALTER ROLE saga_app PASSWORD :'saga_password';
+ALTER ROLE saga_migrator PASSWORD :'saga_migrator_password';
+SELECT 'CREATE DATABASE greenguard_sagas OWNER saga_migrator'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_sagas') \gexec
+ALTER DATABASE greenguard_sagas OWNER TO saga_migrator;
+REVOKE ALL ON DATABASE greenguard_sagas FROM PUBLIC;
+GRANT CONNECT ON DATABASE greenguard_sagas TO saga_app;
+\connect greenguard_sagas
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO saga_app;

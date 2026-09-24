@@ -118,7 +118,7 @@ func TestVersionedHistoryMaintenanceTargetsOnlyRequestedSchema(t *testing.T) {
 func historyAt(t *testing.T, tenant, device string, v int, at time.Time) map[string]any {
 	t.Helper()
 	e := dbEvent(t, tenant, device, v)
-	e[fieldPayload].(map[string]any)["observed_at"] = at.UTC().Format(time.RFC3339Nano)
+	e[fieldPayload].(map[string]any)["observed_at"] = at.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	return e
 }
 

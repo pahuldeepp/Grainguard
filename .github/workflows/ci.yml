@@ -31,6 +31,7 @@ jobs:
             services/cdc-transformer/go.sum
             services/projection-builder/go.sum
             services/jobs-worker/go.sum
+            services/saga-orchestrator/go.sum
       - run: make bootstrap
       - run: make verify
       - name: Prove read-role tenant isolation against PostgreSQL
@@ -55,6 +56,7 @@ jobs:
             coverage/go-common.out \
             coverage/go-migrations.out \
             coverage/jobs-worker.out \
+            coverage/saga-orchestrator.out \
             coverage/sonar-quality-gate.json \
             apps/dashboard/coverage/lcov.info \
             services/device-service/coverage/lcov.info \
@@ -84,6 +86,7 @@ jobs:
             services/workflow-alerts/coverage/lcov.info
             services/notification-service/coverage/lcov.info
             coverage/jobs-worker.out
+            coverage/saga-orchestrator.out
             packages/read-model/coverage/lcov.info
             services/search-indexer/coverage.xml
             services/risk-engine/coverage.xml
@@ -258,7 +261,7 @@ jobs:
       - run: make bootstrap
       - run: npm run build -w services/workflow-alerts -w services/notification-service
       - run: make events-up rabbitmq-up
-      - run: npm run migrate -w services/notification-service
+      - run: make jobs-migrate
       - run: make rabbitmq-test
       - run: node scripts/stage06-connect.mjs
       - run: node scripts/stage06-e2e.mjs

@@ -96,6 +96,7 @@ for (const [prefix, role, db] of [
   ["NOTIFICATIONS", "notifications", "greenguard_notifications"],
   // Stage 06b workflow-alerts owner (greenguard_alerts).
   ["ALERTS", "alerts", "greenguard_alerts"],
+  ["SAGA", "saga", "greenguard_sagas"],
 ]) {
   const app = secret(`${prefix}_DB_PASSWORD`);
   const owner = secret(`${prefix}_MIGRATOR_PASSWORD`);

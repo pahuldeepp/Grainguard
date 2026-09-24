@@ -94,7 +94,7 @@ func dbEvent(t *testing.T, tenant, device string, v int) map[string]any {
 	p[fieldDevice] = device
 	p["reading_id"] = randomUUID()
 	p["source_message_id"] = fmt.Sprint(v)
-	p["observed_at"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	p["observed_at"] = time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	return e
 }
 func dbCount(t *testing.T, pool *pgxpool.Pool, tenant, query string, args ...any) int {
@@ -111,7 +111,7 @@ func TestDatabaseProjectionReorderCrashReplayIsolation(t *testing.T) {
 	s := &Store{DB: pool}
 	ctx := context.Background()
 	tenant, foreign, device := randomUUID(), randomUUID(), randomUUID()
-	observed := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	observed := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	events := applyTelemetryVersions(t, s, tenant, device, []int{42, 40, 41}, func() string { return observed })
 	f, err := s.Freshness(ctx, tenant, device)
 	if err != nil || f.MaxSeenStreamVersion != "42" || f.ContiguousThroughVersion != "0" || !f.HasKnownGap {
@@ -122,7 +122,7 @@ func TestDatabaseProjectionReorderCrashReplayIsolation(t *testing.T) {
 		earlier = append(earlier, v)
 	}
 	events = append(events, applyTelemetryVersions(t, s, tenant, device, earlier, func() string {
-		return time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339Nano)
+		return time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond).Format(time.RFC3339Nano)
 	})...)
 	f, err = s.Freshness(ctx, tenant, device)
 	if err != nil || f.HasKnownGap || f.ContiguousThroughVersion != "42" {

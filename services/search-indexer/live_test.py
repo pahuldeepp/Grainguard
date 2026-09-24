@@ -3,11 +3,13 @@
 import json
 import os
 import tempfile
+import time
+import urllib.error
 import uuid
 from pathlib import Path
 
 os.environ["SEARCH_ALIAS"] = f"greenguard-inventory-test-{uuid.uuid4().hex[:12]}"
-from search_indexer import ALIAS, Elastic, Indexer, Record, TOPICS, action_for, document_hash, index_name
+from search_indexer import ALIAS, Elastic, Indexer, Record, SearchError, TOPICS, action_for, document_hash, index_name
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/events"
 
@@ -19,6 +21,21 @@ def event(filename, tenant, resource, version):
     item["aggregate_version"] = str(version)
     item["payload"][f"{item['aggregate_type']}_id"] = resource
     return item
+
+
+def create_index_after_startup(elastic, index):
+    """Elasticsearch can answer health probes before its first mapping write is ready."""
+    deadline = time.monotonic() + 120
+    while True:
+        try:
+            elastic.create_index(index)
+            return
+        except (TimeoutError, urllib.error.URLError, SearchError) as exc:
+            if isinstance(exc, SearchError) and exc.status not in (429, 500, 502, 503, 504):
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
 
 
 def run():
@@ -34,7 +51,7 @@ def run():
     with tempfile.TemporaryDirectory() as folder:
         records = [Record(TOPICS[1], 0, i, json.dumps(item).encode()) for i, item in enumerate(events)]
         for index in (first, second):
-            elastic.create_index(index)
+            create_index_after_startup(elastic, index)
             indexer = Indexer(elastic, index, str(Path(folder) / "quarantine.jsonl"))
             indexer.process(records)
             indexer.process(records)  # external-version conflicts are idempotent
