@@ -4,6 +4,7 @@ import {
   type CanActivate,
   type ExecutionContext,
 } from "@nestjs/common";
+import { annotateActiveSpan } from "@greenguard/otel";
 import type { Principal } from "@greenguard/tenant-auth";
 import type { ApiRequest } from "./http.js";
 
@@ -23,6 +24,7 @@ export class AuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<ApiRequest>();
     req.principal = await this.verifier.verify(req.headers.authorization);
+    annotateActiveSpan({ "greenguard.tenant_id": req.principal.tenantId });
     return true;
   }
 }

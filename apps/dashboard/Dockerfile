@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
 COPY services/device-service/package.json services/device-service/package.json
+COPY packages/otel/package.json packages/otel/package.json
 COPY packages/tenant-auth/package.json packages/tenant-auth/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci

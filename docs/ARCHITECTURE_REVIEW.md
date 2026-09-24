@@ -65,3 +65,16 @@ The gaps below are fixable plan additions. None of them requires changing the ce
 1. Close Stage 01: green remote CI, broken-check evidence, update the stale docs.
 2. Fold P3, P4, R1, R2 and R6 into the Stage 02 plan before writing its code.
 3. Decide R4 and O3 before Stage 09; add P1, P2, R3, R5, O1, O2, O4 and O5 to the backlog stages that own them.
+
+## Added to Stage 03: ingest data quality and lateness
+
+Already designed in `docs/FIRST_VERTICAL_SLICE.md`: strict schema, device and tenant binding checks, `observed_at` versus `received_at` with a 5-minute future limit, finite values within -80 to 120 C and 0 to 100 percent, at least one metric, and `source_message_id` idempotency.
+
+Added:
+
+| #   | Addition                      | Detail                                                                                                                                                                                                                                                                 |
+| --- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | Rejection counters            | One counter per reason (schema, unknown or foreign device, disabled or not ready, future timestamp, out of range, non-finite, conflict). Tenant and device go on logs and traces, never on metric labels. Alert on a rejection-rate spike.                             |
+| Q2  | Bounded rejection sample      | Reason, device, payload hash and time, rate-limited per device with short retention, so bad input cannot grow storage. Audit rows stay for accepted changes and security-relevant rejections (for example a foreign device).                                           |
+| Q3  | Reason returned to the device | A rejected reading gets a 4xx with a stable code and is never silently lost; the device decides whether to retry or drop it.                                                                                                                                           |
+| Q4  | Lateness policy ADR           | Allowed lateness per device class; late readings are always stored, flagged, and cause a recompute of the affected window; readings beyond a maximum age take a separate late-data path. Window semantics and watermarks are settled here before the Stage 05 rollups. |

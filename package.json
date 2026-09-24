@@ -5,6 +5,7 @@
   "type": "module",
   "workspaces": [
     "apps/dashboard",
+    "packages/otel",
     "packages/tenant-auth",
     "packages/contracts",
     "services/device-service"
@@ -18,7 +19,7 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "eslint apps/dashboard/src services/device-service/src packages/tenant-auth/src packages/contracts/src scripts/*.mjs",
+    "lint": "eslint apps/dashboard/src services/device-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src scripts/*.mjs",
     "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
     "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
     "coverage": "node scripts/coverage.mjs"

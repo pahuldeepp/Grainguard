@@ -1,0 +1,31 @@
+{
+  "name": "@greenguard/otel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.11.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.222.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-trace-node": "2.11.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/exporter.d.ts",
+      "default": "./dist/testing/exporter.js"
+    }
+  }
+}

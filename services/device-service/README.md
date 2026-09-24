@@ -20,7 +20,7 @@ Responsibility: authoritative owner of tenants, sites, bins and devices (`greeng
 
 ## HTTP API
 
-`/v1` sites, bins and devices with RS256 bearer tokens (`@greenguard/tenant-auth`), `Idempotency-Key`, `ETag`/`If-Match`, header-based `API-Version` with `Deprecation`/`Sunset`, problem+json errors and correlation IDs. Configure with `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_JWKS_URL` (all three or none) and optionally `API_VERSION_POLICY`. Details: [docs/API.md](../../docs/API.md), [ADR-0003](../../docs/adr/0003-api-versioning.md).
+`/v1` sites, bins and devices with RS256 bearer tokens (`@greenguard/tenant-auth`), `Idempotency-Key`, `ETag`/`If-Match`, header-based `API-Version` with `Deprecation`/`Sunset`, problem+json errors and correlation IDs. Configure with `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_JWKS_URL` (all three or none) and optionally `API_VERSION_POLICY`, `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_TRACES_SAMPLE_RATIO`. Details: [docs/API.md](../../docs/API.md), [ADR-0003](../../docs/adr/0003-api-versioning.md).
 
 ## Commands
 

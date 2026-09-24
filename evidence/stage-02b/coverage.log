@@ -1,11 +1,12 @@
-# coverage — 2026-09-24T01:03:37Z
+# coverage — 2026-09-24T01:12:28Z
+packages/otel/src/index.ts lines 131/131 branches 26/26
 packages/tenant-auth/src/index.ts lines 153/153 branches 40/40
 packages/contracts/src/index.ts lines 158/158 branches 22/22
-services/device-service/src/app.ts lines 118/118 branches 23/23
-services/device-service/src/config.ts lines 51/51 branches 21/21
-services/device-service/src/main.ts lines 22/22 branches 2/2
-services/device-service/src/api/auth.guard.ts lines 28/28 branches 4/4
-services/device-service/src/api/context.ts lines 52/52 branches 12/12
+services/device-service/src/app.ts lines 136/136 branches 30/30
+services/device-service/src/config.ts lines 71/71 branches 35/35
+services/device-service/src/main.ts lines 30/30 branches 3/3
+services/device-service/src/api/auth.guard.ts lines 30/30 branches 4/4
+services/device-service/src/api/context.ts lines 55/55 branches 13/13
 services/device-service/src/api/dto.ts lines 130/130 branches 49/49
 services/device-service/src/api/errors.ts lines 5/5 branches 1/1
 services/device-service/src/api/http.ts lines 18/18 branches 3/3

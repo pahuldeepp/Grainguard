@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { activeTraceparent } from "@greenguard/otel";
 import { isUuid } from "../db/tenant.js";
 import {
   header,
@@ -30,7 +31,9 @@ export function correlationMiddleware(
   const supplied = header(req, "x-correlation-id");
   req.correlationId = supplied && isUuid(supplied) ? supplied : randomUUID();
   const match = TRACEPARENT.exec(header(req, "traceparent") ?? "");
-  req.traceparent = match ? sampledOnly(match) : newTraceparent();
+  // With tracing on, the request's server span is the origin trace of any event it writes.
+  req.traceparent =
+    activeTraceparent() ?? (match ? sampledOnly(match) : newTraceparent());
   res.setHeader("X-Correlation-Id", req.correlationId);
   next();
 }

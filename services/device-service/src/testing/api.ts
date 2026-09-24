@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import type { Tracing } from "@greenguard/otel";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import { createTokenVerifier } from "@greenguard/tenant-auth";
 import { createApp } from "../app.js";
@@ -31,6 +32,7 @@ export async function startApi(
     versions?: VersionRegistry;
     now?: () => Date;
     ping?: () => Promise<void>;
+    tracing?: Tracing;
   } = {},
 ) {
   const issuer = await createTestIssuer();
@@ -46,6 +48,7 @@ export async function startApi(
       }),
       versions: options.versions,
       now: options.now,
+      tracing: options.tracing,
     },
   );
   await app.listen(0, "127.0.0.1");

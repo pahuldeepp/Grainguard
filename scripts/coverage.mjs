@@ -9,6 +9,7 @@ mkdirSync("coverage", { recursive: true });
 run("npm", ["run", "coverage", "--workspaces"]);
 for (const workspace of [
   "apps/dashboard",
+  "packages/otel",
   "packages/tenant-auth",
   "packages/contracts",
   "services/device-service",

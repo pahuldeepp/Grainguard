@@ -63,3 +63,39 @@ test("startup with an invalid version policy fails before listening", async () =
       delete process.env[key];
   }
 });
+
+test("startup enables tracing when a collector endpoint is configured", async () => {
+  process.env.INVENTORY_DATABASE_URL = "postgres://u:p@127.0.0.1:1/db";
+  process.env.PORT = "0";
+  process.env.AUTH_ISSUER = "https://issuer.test";
+  process.env.AUTH_AUDIENCE = "greenguard-api";
+  process.env.AUTH_JWKS_URL = "http://127.0.0.1:1/jwks";
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:1";
+  try {
+    const { app } = await load("tracing");
+    try {
+      const base = await app.getUrl();
+      const res = await fetch(`${base}/v1/devices`, {
+        headers: {
+          traceparent:
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        },
+      });
+      assert.equal(res.status, 401);
+      assert.match(
+        res.headers.get("x-correlation-id") ?? "",
+        /^[0-9a-f-]{36}$/,
+      );
+    } finally {
+      await app.close();
+    }
+  } finally {
+    for (const key of [
+      "AUTH_ISSUER",
+      "AUTH_AUDIENCE",
+      "AUTH_JWKS_URL",
+      "OTEL_EXPORTER_OTLP_ENDPOINT",
+    ])
+      delete process.env[key];
+  }
+});

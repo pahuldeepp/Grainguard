@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import pg from "pg";
+import { httpTracingMiddleware, type Tracing } from "@greenguard/otel";
 import type { Db } from "./db/client.js";
 import {
   AuthGuard,
@@ -66,17 +67,27 @@ class HealthController {
     return { service: "device-service", status: "ready" };
   }
 }
+const TRACING = "TRACING";
+
 export interface ApiOptions {
   db: Db;
   verifier: TokenVerifier;
   versions?: VersionRegistry;
   now?: () => Date;
+  tracing?: Tracing;
 }
 
 class DbLifecycle implements OnModuleDestroy {
   constructor(@Inject(DB) private readonly db: Db) {}
   async onModuleDestroy() {
     await this.db.$disconnect();
+  }
+}
+
+class TracingLifecycle implements OnModuleDestroy {
+  constructor(@Inject(TRACING) private readonly tracing: Tracing) {}
+  async onModuleDestroy() {
+    await this.tracing.shutdown();
   }
 }
 
@@ -97,6 +108,12 @@ export async function createApp(probe: Probe, api?: ApiOptions) {
               { provide: TOKEN_VERIFIER, useValue: api.verifier },
               AuthGuard,
               DbLifecycle,
+              ...(api.tracing
+                ? [
+                    { provide: TRACING, useValue: api.tracing },
+                    TracingLifecycle,
+                  ]
+                : []),
             ]
           : []),
       ],
@@ -104,6 +121,7 @@ export async function createApp(probe: Probe, api?: ApiOptions) {
     { logger: ["error", "warn"] },
   );
   if (api) {
+    if (api.tracing) app.use(httpTracingMiddleware(api.tracing.tracer));
     app.use(correlationMiddleware);
     app.use(
       "/v1",

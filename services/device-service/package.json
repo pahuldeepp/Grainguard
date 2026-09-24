@@ -9,9 +9,10 @@
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "prisma migrate deploy",
-    "build:deps": "npm run build -w @greenguard/tenant-auth -w @greenguard/contracts"
+    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts"
   },
   "dependencies": {
+    "@greenguard/otel": "0.1.0",
     "@greenguard/tenant-auth": "0.1.0",
     "@nestjs/common": "12.0.4",
     "@nestjs/core": "12.0.4",

@@ -1,3 +1,4 @@
+import { initTracing } from "@greenguard/otel";
 import { createTokenVerifier } from "@greenguard/tenant-auth";
 import { loadVersionRegistry } from "./api/versioning/index.js";
 import { createApp, DatabaseProbe } from "./app.js";
@@ -12,6 +13,13 @@ const api = config.auth && {
     keys: { jwksUrl: config.auth.jwksUrl },
   }),
   versions: loadVersionRegistry(process.env),
+  tracing:
+    config.otel &&
+    initTracing({
+      serviceName: "device-service",
+      otlpEndpoint: config.otel.otlpEndpoint,
+      sampleRatio: config.otel.sampleRatio,
+    }),
 };
 if (!api)
   console.warn(

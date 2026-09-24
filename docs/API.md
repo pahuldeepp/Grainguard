@@ -65,6 +65,10 @@ Body: `{type, title, status, code, detail?, correlation_id}`. Codes: `missing_to
 
 Send `X-Correlation-Id` (lowercase UUID) and `traceparent` (W3C, non-zero IDs) to keep them; malformed values are replaced; a `traceparent` keeps its trace and span IDs but only the sampled bit of its flags. The response echoes `X-Correlation-Id`, and both values are stored on the outbox events the request creates.
 
+## Tracing
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set (an OTLP/HTTP collector URL such as `http://collector:4318`), each `/v1` request runs in a server span that continues the caller's `traceparent`. The `traceparent` stored on any outbox event the request writes is that span's context, so later hops link to the request. `OTEL_TRACES_SAMPLE_RATIO` (0 to 1, default 1) sets the share of new traces recorded; a sampling decision made by the caller is kept. Spans carry `greenguard.tenant_id`. Without an endpoint, tracing is off and a valid caller `traceparent` is passed through as before. See [ADR-0004](adr/0004-tracing.md).
+
 ## Events
 
 Registering, rebinding and status changes write `device.registered`, `device.binding_changed` and `device.status_changed` to the outbox. Their contracts are `contracts/events/device-*.v1.schema.json`; `@greenguard/contracts` validates them and the API tests validate every event the API writes.
