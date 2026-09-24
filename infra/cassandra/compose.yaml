@@ -1,0 +1,25 @@
+# Opt-in history overlay (Stage 05c): never loaded by make dev / verify / smoke.
+# Layer after the base and Kafka files: make cassandra-up.
+services:
+  cassandra:
+    # cassandra:5.0 (5.0.9); index digest resolved with docker buildx imagetools inspect.
+    image: cassandra@sha256:ee178b38a2746a8e15a115bd038ad1f864391d04a84162a018cb0dd79511709a
+    ports: ["127.0.0.1:59042:9042"]
+    environment:
+      CASSANDRA_CLUSTER_NAME: greenguard-local
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_NUM_TOKENS: 16
+      # Laptop profile: single node, RF1, not highly available.
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    mem_limit: 1536m
+    volumes: [cassandra-data:/var/lib/cassandra]
+    healthcheck:
+      test: [CMD-SHELL, "cqlsh -e 'SELECT release_version FROM system.local' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+volumes:
+  cassandra-data:

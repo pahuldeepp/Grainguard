@@ -83,7 +83,8 @@ Every row below is **proposed**, except the telemetry schema and fixture already
 | Canonical topic | Owner / event types | Aggregate/key; principal consumers |
 |---|---|---|
 | `greenguard.inventory.tenant.v1` | Tenancy module, extracted to control plane at Stage 09: `tenant.created`, `tenant.updated`, `membership.changed`, `tenant.suspended` | Tenant; authorization/entitlement projections, audit export; restrict membership payload access; retain contract through owner migration |
-| `greenguard.inventory.facility.v1` | Inventory: `site.changed`, `bin.changed`, `lot.changed`, `lot.retired` | Site/bin/lot; projections, risk, integrations |
+| `greenguard.inventory.facility.v1` | Inventory: `site.changed`, `bin.changed` | Site/bin; projections, risk, integrations |
+| `greenguard.inventory.lot.v1` | Inventory: `lot.changed`, `lot.retired` | Grain lot and effective bin occupancy; risk, later projections/integrations |
 | `greenguard.inventory.device.v1` | Inventory: `device.registered`, `device.binding_changed`, `device.disabled`; versioned activation addition later | Device/binding version; ingest binding, projections, saga, search |
 | `greenguard.telemetry.recorded.v1` | Ingest: `telemetry.recorded` | Device telemetry stream; read projection, risk, Cassandra, selected indexing/usage consumers |
 | `greenguard.risk.assessment.v1` | Risk: `risk.assessed`, `risk.assessment_invalidated` | Assessment stream for tenant/bin or device; alerts, projections, search |

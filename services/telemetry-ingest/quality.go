@@ -147,6 +147,18 @@ func checkTimestamp(observed, now time.Time, policy QualityPolicy) *Rejection {
 
 // ParseReadingRequest validates a device payload against the ingest data-quality rules.
 func ParseReadingRequest(body []byte, now time.Time, policy QualityPolicy) (ReadingRequest, *Rejection) {
+	req, rej := parseReadingRequest(body)
+	if rej != nil {
+		return ReadingRequest{}, rej
+	}
+	if rej := checkTimestamp(req.ObservedAt, now.UTC().Truncate(time.Microsecond), policy.withDefaults()); rej != nil {
+		return ReadingRequest{}, rej
+	}
+	return req, nil
+}
+
+// parseReadingRequest validates stable payload fields independently of arrival time.
+func parseReadingRequest(body []byte) (ReadingRequest, *Rejection) {
 	fields, rej := decodeObject(body)
 	if rej != nil {
 		return ReadingRequest{}, rej
@@ -157,9 +169,6 @@ func ParseReadingRequest(body []byte, now time.Time, policy QualityPolicy) (Read
 	}
 	temperature, humidity, rej := parseMeasurements(fields)
 	if rej != nil {
-		return ReadingRequest{}, rej
-	}
-	if rej := checkTimestamp(observed, now.UTC().Truncate(time.Microsecond), policy.withDefaults()); rej != nil {
 		return ReadingRequest{}, rej
 	}
 	return ReadingRequest{SourceMessageID: id, ObservedAt: observed, TemperatureC: temperature, RelativeHumidityPercent: humidity}, nil

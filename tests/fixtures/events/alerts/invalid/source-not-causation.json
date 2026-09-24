@@ -1,0 +1,30 @@
+{
+  "event_id": "1e6b5c1a-2d3f-5a4b-8c7d-1e2f3a4b5c6d",
+  "event_type": "alert.updated",
+  "schema_version": 1,
+  "occurred_at": "2026-09-21T15:00:02.250000Z",
+  "tenant_id": "11111111-1111-4111-8111-111111111111",
+  "aggregate_type": "alert_episode",
+  "aggregate_id": "9a1f3c52-7d0e-5b4a-9c61-2f8e4d7b1a30",
+  "aggregate_version": "2",
+  "correlation_id": "4d9d9d30-d209-446e-99ea-d40ab0953d0d",
+  "causation_id": "77777777-7777-4777-8777-777777777777",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "payload": {
+    "episode_id": "9a1f3c52-7d0e-5b4a-9c61-2f8e4d7b1a30",
+    "episode_version": "2",
+    "rule_id": "2b7c1e90-4f3a-5d6b-8e21-7a9c0d3f5b64",
+    "rule_key": "grain-risk-default",
+    "resource_type": "bin",
+    "resource_id": "55555555-5555-4555-8555-555555555555",
+    "state": "open",
+    "severity": "critical",
+    "score": 82,
+    "open_window_start": "2026-09-21T15:00:01.125000Z",
+    "opened_at": "2026-09-21T15:00:02.250000Z",
+    "transition_at": "2026-09-21T15:00:02.250000Z",
+    "acknowledged_by": null,
+    "escalation_level": 0,
+    "source_event_id": "a25824f7-a94b-4256-b89f-6f9b4e39cad6"
+  }
+}

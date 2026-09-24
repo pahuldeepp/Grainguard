@@ -4,6 +4,11 @@ import type {
   RegisterDeviceInput,
 } from "../inventory/repository.js";
 import { isUuid } from "../db/tenant.js";
+import {
+  GRAIN_TYPE,
+  isUtcMillis,
+  placementTime,
+} from "../inventory/lot-validation.js";
 import { PreconditionRequiredError } from "./errors.js";
 
 const STATUSES: ReadonlySet<string> = new Set([
@@ -49,6 +54,26 @@ export function parseBin(body: unknown) {
     siteId: uuid(fields.siteId, "siteId"),
     name: text(fields.name, "name", 200),
   };
+}
+
+export function parseLotPlacement(body: unknown) {
+  const fields = object(body, ["grainType", "variety", "effectiveFrom"]);
+  const grainType = text(fields.grainType, "grainType", 32);
+  if (!GRAIN_TYPE.test(grainType))
+    throw new InvalidInputError("grainType must be a lowercase grain code");
+  const variety =
+    fields.variety == null ? null : text(fields.variety, "variety", 100);
+  const effectiveFrom = text(fields.effectiveFrom, "effectiveFrom", 24);
+  placementTime(effectiveFrom);
+  return { grainType, variety, effectiveFrom };
+}
+
+export function parseObservedAt(value: string | undefined): Date {
+  if (!isUtcMillis(value))
+    throw new InvalidInputError(
+      "observedAt must be a UTC millisecond timestamp",
+    );
+  return new Date(value);
 }
 
 export function parseRegister(body: unknown): RegisterDeviceInput {

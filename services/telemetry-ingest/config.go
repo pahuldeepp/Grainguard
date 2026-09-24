@@ -11,11 +11,12 @@ import (
 // ingestConfig is everything the ingest endpoint needs beyond the database. Auth is nil when
 // no AUTH_* setting is present, which leaves the service with its health probes only.
 type ingestConfig struct {
-	Auth         *AuthConfig
-	OTLPEndpoint string
-	SampleRatio  float64
-	Limits       LimitConfig
-	Policy       QualityPolicy
+	BindingFeedMaxStale time.Duration
+	Auth                *AuthConfig
+	OTLPEndpoint        string
+	SampleRatio         float64
+	Limits              LimitConfig
+	Policy              QualityPolicy
 }
 
 var loopbackHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
@@ -41,7 +42,8 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 	if cfg.Policy.MaxFutureSkew, err = envDuration(getenv, "INGEST_MAX_FUTURE_SKEW", 5*time.Minute); err != nil {
 		return ingestConfig{}, err
 	}
-	return cfg, nil
+	cfg.BindingFeedMaxStale, err = loadBindingFeedBound(getenv)
+	return cfg, err
 }
 
 // The three AUTH_* settings are all or nothing: a partial set is a deployment mistake and
@@ -121,4 +123,12 @@ func envDuration(getenv func(string) string, key string, fallback time.Duration)
 		return 0, fmt.Errorf("%s must be a positive duration such as 5m", key)
 	}
 	return value, nil
+}
+
+func loadBindingFeedBound(getenv func(string) string) (time.Duration, error) {
+	raw := getenv("INGEST_BINDING_FEED_MAX_STALE")
+	if raw == "0" {
+		return 0, nil
+	}
+	return envDuration(getenv, "INGEST_BINDING_FEED_MAX_STALE", 5*time.Minute)
 }

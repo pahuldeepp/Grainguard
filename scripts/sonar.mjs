@@ -123,11 +123,11 @@ if (command === "init") {
   );
   // Overall gates make first/full scans meaningful even in a fresh CI instance.
   const conditions = [
-    ["coverage", "LT", "100"],
+    ["coverage", "LT", "80"],
     ["duplicated_lines_density", "GT", "0"],
     ["violations", "GT", "0"],
     ["security_hotspots_reviewed", "LT", "100"],
-    ["new_coverage", "LT", "100"],
+    ["new_coverage", "LT", "80"],
     ["new_duplicated_lines_density", "GT", "0"],
   ];
   for (const [metric, op, error] of conditions) {

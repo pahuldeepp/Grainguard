@@ -75,9 +75,9 @@ export async function seedTenant(db: Db): Promise<TenantFixture> {
   const otherSiteId = randomUUID();
   const binId = randomUUID();
   await createTenant(db, tenantId, `tenant ${tenantId.slice(0, 8)}`);
-  await createSite(db, tenantId, siteId, "North yard");
-  await createSite(db, tenantId, otherSiteId, "South yard");
-  await createBin(db, tenantId, { binId, siteId, name: "Bin 1" });
+  await createSite(db, context(tenantId), siteId, "North yard");
+  await createSite(db, context(tenantId), otherSiteId, "South yard");
+  await createBin(db, context(tenantId), { binId, siteId, name: "Bin 1" });
   const { deviceId } = await registerDevice(db, context(tenantId), {
     serialNumber: `SN-${randomUUID()}`,
     siteId,

@@ -522,7 +522,7 @@ func TestAuthServesAKnownKeyBrieflyWhileTheKeyServerIsDownThenFailsClosed(t *tes
 	}
 }
 
-func TestAuthAnUnknownKeyIsStill401WhileTheKeyServerIsDown(t *testing.T) {
+func TestAuthAnUnknownKeyIs503WhileTheKeyServerIsDown(t *testing.T) {
 	i := newTestIssuer(t)
 	v := authStaleVerifier(t, i, 30*time.Millisecond, 300*time.Millisecond)
 	if _, err := v.Verify(authBearer + i.sign(nil)); err != nil {
@@ -533,5 +533,74 @@ func TestAuthAnUnknownKeyIsStill401WhileTheKeyServerIsDown(t *testing.T) {
 	i.set(func() { i.status = http.StatusInternalServerError })
 	time.Sleep(60 * time.Millisecond)
 	_, err := v.Verify(rotated)
-	authWantCode(t, err, 401, "invalid_token")
+	authWantCode(t, err, 503, codeUnavailable)
+	_, err = v.Verify(rotated)
+	authWantCode(t, err, 503, codeUnavailable)
+}
+
+// The fetch stays blocked until the cached verification finishes, so this checks
+// independence from network progress without relying on a fast key server.
+func TestAuthCachedVerificationDuringStalledRefresh(t *testing.T) {
+	for _, age := range []time.Duration{0, 2 * time.Minute} {
+		t.Run(age.String(), func(t *testing.T) {
+			i := newTestIssuer(t)
+			started, release := make(chan struct{}), make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				close(started)
+				<-release
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer server.Close()
+			defer close(release)
+			cfg := i.config()
+			cfg.JWKSURL, cfg.Timeout = server.URL, 5*time.Second
+			cache, err := newJWKSCache(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cache.keys = map[string]*rsa.PublicKey{i.signer.kid: &i.signer.key.PublicKey}
+			cache.fetchedAt = time.Now().Add(-age)
+			cfg.Keyfunc = cache.keyfunc
+			v, err := NewVerifier(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refresh := make(chan error, 1)
+			go func() { _, err := cache.key("rotated"); refresh <- err }()
+			<-started
+			verified := make(chan error, 1)
+			token := authBearer + i.sign(nil)
+			go func() { _, err := v.Verify(token); verified <- err }()
+			select {
+			case err := <-verified:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("cached verification blocked on JWKS fetch")
+			}
+		})
+	}
+}
+
+func TestAuthConcurrentColdCacheSharesRefresh(t *testing.T) {
+	i := newTestIssuer(t)
+	i.set(func() { i.delay = 100 * time.Millisecond })
+	cache, err := newJWKSCache(i.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const callers = 12
+	results := make(chan error, callers)
+	for n := 0; n < callers; n++ {
+		go func() { _, err := cache.key(i.signer.kid); results <- err }()
+	}
+	for n := 0; n < callers; n++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if i.hits.Load() != 1 {
+		t.Fatalf("expected one shared fetch, got %d", i.hits.Load())
+	}
 }

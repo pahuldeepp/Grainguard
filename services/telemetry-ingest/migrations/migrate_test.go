@@ -58,14 +58,15 @@ func TestUpBuildsAnEmptyDatabaseAndIsRepeatable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(context.Background())
-	var policies, tables int
+	var policies, tables, cdcPolicies int
 	if err := conn.QueryRow(context.Background(),
 		`SELECT (SELECT count(*) FROM pg_policies WHERE policyname = 'tenant_isolation'),
-		        (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relforcerowsecurity)`).Scan(&policies, &tables); err != nil {
+		        (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relforcerowsecurity),
+		        (SELECT count(*) FROM pg_policies WHERE policyname = 'cdc_outbox_snapshot')`).Scan(&policies, &tables, &cdcPolicies); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 8 || tables != 8 {
-		t.Fatalf("policies %d, forced-RLS tables %d", policies, tables)
+	if policies != 8 || tables != 8 || cdcPolicies != 1 {
+		t.Fatalf("tenant policies %d, forced-RLS tables %d, CDC policies %d", policies, tables, cdcPolicies)
 	}
 }
 

@@ -1,0 +1,21 @@
+{
+  "name": "@greenguard/notification-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
+    "migrate": "npm run build && node dist/migrate.js",
+    "live": "npm run build && node --test --test-concurrency=1 \"dist/testing/*.live.js\""
+  },
+  "dependencies": {
+    "amqplib": "2.0.1",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

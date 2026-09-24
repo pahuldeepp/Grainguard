@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:alert-lifecycle:v1",
+  "title": "GreenGuard alert lifecycle v1 (topic greenguard.alerts.lifecycle.v1)",
+  "description": "alert.opened, alert.updated, alert.acknowledged, alert.escalated and alert.resolved for one alert episode. aggregate_version is the episode version, monotone per episode. Cross-field rules (state per event type, source_event_id = causation_id) are enforced by the semantic validators.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version", "correlation_id", "causation_id", "traceparent", "payload"],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": { "enum": ["alert.opened", "alert.updated", "alert.acknowledged", "alert.escalated", "alert.resolved"] },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "$ref": "#/$defs/utcTimestamp" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_type": { "const": "alert_episode" },
+    "aggregate_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_version": { "$ref": "#/$defs/positiveBigintString" },
+    "correlation_id": { "$ref": "#/$defs/uuid" },
+    "causation_id": { "$ref": "#/$defs/uuid" },
+    "traceparent": { "type": "string", "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["episode_id", "episode_version", "rule_id", "rule_key", "resource_type", "resource_id", "state", "severity", "score", "open_window_start", "opened_at", "transition_at", "acknowledged_by", "escalation_level", "source_event_id"],
+      "properties": {
+        "episode_id": { "$ref": "#/$defs/uuid" },
+        "episode_version": { "$ref": "#/$defs/positiveBigintString" },
+        "rule_id": { "$ref": "#/$defs/uuid" },
+        "rule_key": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "resource_type": { "const": "bin" },
+        "resource_id": { "$ref": "#/$defs/uuid" },
+        "state": { "enum": ["open", "acknowledged", "resolved"] },
+        "severity": { "enum": ["warning", "critical"] },
+        "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "open_window_start": { "$ref": "#/$defs/utcTimestamp" },
+        "opened_at": { "$ref": "#/$defs/utcTimestamp" },
+        "transition_at": { "$ref": "#/$defs/utcTimestamp" },
+        "acknowledged_by": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 255 }, { "type": "null" }] },
+        "escalation_level": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "source_event_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "utcTimestamp": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$" },
+    "positiveBigintString": { "type": "string", "minLength": 1, "maxLength": 19, "pattern": "^[1-9][0-9]{0,18}$" }
+  }
+}

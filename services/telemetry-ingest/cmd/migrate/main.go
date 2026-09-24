@@ -1,32 +1,17 @@
-// Command migrate applies the telemetry database migrations.
+// Command migrate applies the telemetry-ingest database migrations.
 package main
 
 import (
-	"log/slog"
-	"os"
-
+	shared "greenguard.local/go-migrations"
 	"greenguard.local/telemetry-ingest/migrations"
+	"os"
 )
 
 var exit = os.Exit
 
-func run(getenv func(string) string) error {
-	url := getenv("TELEMETRY_MIGRATION_URL")
-	if url == "" {
-		return errUsage
-	}
-	return migrations.Up(url)
-}
+const migrationURL = "TELEMETRY_MIGRATION_URL"
 
-func main() {
-	if err := run(os.Getenv); err != nil {
-		slog.Error("migration failed", "error", err)
-		exit(1)
-	}
-}
+var errUsage = shared.UsageError(migrationURL + " is required")
 
-type usageError string
-
-func (e usageError) Error() string { return string(e) }
-
-const errUsage = usageError("TELEMETRY_MIGRATION_URL is required")
+func run(getenv func(string) string) error { return shared.Run(migrationURL, getenv, migrations.Up) }
+func main()                                { shared.Main(migrationURL, migrations.Up, exit) }

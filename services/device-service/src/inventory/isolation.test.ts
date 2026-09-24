@@ -24,9 +24,11 @@ import {
 
 const TABLES = [
   "audit_events",
+  "bin_occupancies",
   "bins",
   "command_receipts",
   "devices",
+  "grain_lots",
   "outbox_events",
   "sites",
   "tenants",
@@ -76,7 +78,9 @@ test("D02: without a tenant context the runtime role sees no rows", async () => 
     "tenants",
     "sites",
     "bins",
+    "bin_occupancies",
     "devices",
+    "grain_lots",
     "command_receipts",
   ]) {
     const [{ count }] = await appQuery<{ count: string }>(
@@ -154,7 +158,7 @@ test("D02: tenant B cannot reference tenant A's site or bin", async () => {
     InvalidReferenceError,
   );
   await assert.rejects(
-    createBin(db, b.tenantId, {
+    createBin(db, context(b.tenantId), {
       binId: randomUUID(),
       siteId: a.siteId,
       name: "x",
@@ -196,4 +200,80 @@ test("runtime role cannot delete, rewrite identity, or touch history", async () 
     ),
     "42501",
   );
+});
+
+test("H6: tenant A cannot create or read tenant B facilities or outbox", async () => {
+  await rejectsWithCode(
+    withTenant(db, a.tenantId, (tx) =>
+      tx.site.create({
+        data: {
+          tenantId: b.tenantId,
+          siteId: randomUUID(),
+          name: "forged",
+        },
+      }),
+    ),
+    "42501",
+  );
+  await rejectsWithCode(
+    withTenant(db, a.tenantId, (tx) =>
+      tx.bin.create({
+        data: {
+          tenantId: b.tenantId,
+          binId: randomUUID(),
+          siteId: b.siteId,
+          name: "forged",
+        },
+      }),
+    ),
+    "42501",
+  );
+  const visible = await withTenant(db, a.tenantId, async (tx) => ({
+    sites: await tx.site.findMany({ where: { tenantId: b.tenantId } }),
+    bins: await tx.bin.findMany({ where: { tenantId: b.tenantId } }),
+  }));
+  assert.deepEqual(visible, { sites: [], bins: [] });
+  await rejectsWithCode(
+    withTenant(db, a.tenantId, (tx) =>
+      tx.outboxEvent.findMany({ where: { tenantId: b.tenantId } }),
+    ),
+    "42501",
+  );
+  await rejectsWithCode(
+    withTenant(db, a.tenantId, (tx) =>
+      tx.outboxEvent.createMany({
+        data: [
+          {
+            eventId: randomUUID(),
+            tenantId: b.tenantId,
+            aggregateType: "site",
+            aggregateId: b.siteId,
+            aggregateVersion: 99n,
+            eventType: "site.changed",
+            schemaVersion: 1,
+            occurredAt: new Date(),
+            correlationId: randomUUID(),
+            causationId: randomUUID(),
+            traceparent: "",
+            payload: {},
+          },
+        ],
+      }),
+    ),
+    "42501",
+  );
+  const binId = randomUUID();
+  await assert.rejects(
+    createBin(db, context(a.tenantId), {
+      binId,
+      siteId: b.siteId,
+      name: "foreign",
+    }),
+    InvalidReferenceError,
+  );
+  const [row] = await adminQuery<{ events: string }>(
+    "SELECT count(*) AS events FROM outbox_events WHERE aggregate_id = $1",
+    [binId],
+  );
+  assert.equal(row.events, "0");
 });

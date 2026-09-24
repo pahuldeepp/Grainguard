@@ -1,0 +1,95 @@
+[
+  {
+    "file": "telemetry.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "",
+    "ignored": "",
+    "canonical": "telemetry.canonical.json"
+  },
+  {
+    "file": "device.json",
+    "topic": "greenguard.raw.inventory.outbox",
+    "reason": "",
+    "ignored": "",
+    "canonical": "device.canonical.json"
+  },
+  {
+    "file": "snapshot.json",
+    "topic": "greenguard.raw.inventory.outbox",
+    "reason": "",
+    "ignored": "",
+    "canonical": "snapshot.canonical.json"
+  },
+  {
+    "file": "update.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "",
+    "ignored": "u"
+  },
+  {
+    "file": "delete.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "",
+    "ignored": "d"
+  },
+  {
+    "file": "missing-tenant.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "missing_field",
+    "ignored": ""
+  },
+  {
+    "file": "unknown-type.json",
+    "topic": "greenguard.raw.inventory.outbox",
+    "reason": "unknown_event_type",
+    "ignored": ""
+  },
+  {
+    "file": "bad-trace.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "schema_invalid",
+    "ignored": ""
+  },
+  {
+    "file": "oversized-bigint.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "bad_bigint",
+    "ignored": ""
+  },
+  {
+    "file": "bad-timestamp.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "bad_timestamp",
+    "ignored": ""
+  },
+  {
+    "file": "out-of-range-measurement.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "schema_invalid",
+    "ignored": ""
+  },
+  {
+    "file": "unsupported-op.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "unsupported_op",
+    "ignored": ""
+  },
+  {
+    "file": "malformed.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "bad_envelope",
+    "ignored": ""
+  },
+  {
+    "file": "nonfinite.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "bad_envelope",
+    "ignored": ""
+  },
+  {
+    "file": "tombstone.json",
+    "topic": "greenguard.raw.telemetry.outbox",
+    "reason": "",
+    "ignored": "tombstone"
+  }
+]

@@ -22,6 +22,7 @@ func TestMetricsExactText(t *testing.T) {
 	m.IncAccepted()
 	want := `# HELP ingest_rejections_total Readings rejected, by reason.
 # TYPE ingest_rejections_total counter
+ingest_rejections_total{reason="binding_feed_stale"} 0
 ingest_rejections_total{reason="device_disabled"} 0
 ingest_rejections_total{reason="device_forbidden"} 0
 ingest_rejections_total{reason="device_not_ready"} 0

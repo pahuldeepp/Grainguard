@@ -4,13 +4,13 @@ GitHub repository: https://github.com/pahuldeepp/Grainguard (private). The local
 
 ## Pipeline
 
-Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, and a Docker staging check. It then starts a fresh isolated SonarQube instance, imports all three application components' coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days.
+Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, a live two-tenant read-role test, and a Docker staging check. Separate isolated jobs exercise the event backbone, Cassandra history faults, and Kafka-to-Elasticsearch search. The quality job starts a fresh SonarQube instance, imports TypeScript, Go, and Python coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days. These new jobs have only local validation until this working tree is pushed.
 
 GitHub returned HTTP 403 when querying branch protection: this account needs GitHub Pro (or a public repository) to protect this private branch. The repository remains private. Required merge checks cannot currently be enforced by GitHub branch protection; the workflow still blocks image publication on failed quality checks. No paid upgrade was performed.
 
 Only a successful **main push** can publish dashboard, device-service and telemetry-ingest images to private GHCR packages. Image tags are the full commit SHA; local release deployment resolves them to immutable digests and stores those digests for rollback; builds include SBOM and provenance attestations. PR code has read-only GitHub permissions and no production/registry credentials. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
 
-The SonarQube scope is the three implemented application components. Future services join the source and coverage configuration when implemented. CI/deployment scripts are linted; workflow YAML is also validated locally with actionlint. SonarQube does not generate coverage: Vitest V8 generates dashboard LCOV, c8 maps compiled NestJS execution to TypeScript LCOV, and Go produces its native coverage profile. Source paths are normalized for the scanner's container workspace. Untested entry points remain included.
+The SonarQube scope includes the implemented dashboard, TypeScript services/packages, Go services, and Python search indexer. CI/deployment scripts are linted; workflow YAML is also validated locally with actionlint. SonarQube does not generate coverage: Vitest V8 and c8 generate LCOV, Go produces native profiles, and coverage.py generates Cobertura XML for Python. Source paths are normalized for the scanner's container workspace. Untested entry points remain included.
 
 ## Local SonarQube
 
@@ -27,7 +27,7 @@ This is local/ephemeral-CI SonarQube, bound to localhost with a separate Postgre
 
 ## Strict quality policy
 
-The configured gate requires **100% coverage, 0% duplication, and zero issues** across the analyzed foundation, plus the corresponding new-code requirements. Hotspots must be reviewed in SonarQube and the scan script separately requires zero hotspots, because SonarQube prohibits a raw hotspot-count quality-gate condition. Overall conditions ensure a fresh CI analysis cannot pass simply because it has no new-code baseline. The small-change coverage exemption is disabled.
+The configured gate requires **at least 80% coverage (lowered from 100% by the owner on 2026-09-24), 0% duplication, and zero issues** across the analyzed foundation, plus the corresponding new-code requirements. Hotspots must be reviewed in SonarQube and the scan script separately requires zero hotspots, because SonarQube prohibits a raw hotspot-count quality-gate condition. Overall conditions ensure a fresh CI analysis cannot pass simply because it has no new-code baseline. The small-change coverage exemption is disabled.
 
 The [first GitHub CI run](https://github.com/pahuldeepp/Grainguard/actions/runs/35674452983) completed all functional checks and artifact upload, then correctly blocked publication at the coverage gate.
 

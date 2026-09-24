@@ -1,23 +1,31 @@
 \set ON_ERROR_STOP on
+\getenv projection_password PROJECTION_DB_PASSWORD
+\getenv read_query_password READ_QUERY_DB_PASSWORD
+\getenv projection_migrator_password PROJECTION_MIGRATOR_PASSWORD
+\getenv cdc_password CDC_DB_PASSWORD
 \getenv inventory_password INVENTORY_DB_PASSWORD
 \getenv inventory_migrator_password INVENTORY_MIGRATOR_PASSWORD
 \getenv telemetry_password TELEMETRY_DB_PASSWORD
 \getenv telemetry_migrator_password TELEMETRY_MIGRATOR_PASSWORD
+\getenv risk_password RISK_DB_PASSWORD
+\getenv risk_migrator_password RISK_MIGRATOR_PASSWORD
 
 -- Idempotent: Postgres runs this on a fresh volume, and `make db-up` re-runs it so an
 -- existing volume gains new roles and picks up rotated passwords.
 -- Runtime roles never own tables and never bypass row-level security; migrators own the
 -- schema objects and are used only by migrations.
 SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
-  FROM (VALUES ('inventory_app'), ('inventory_migrator'), ('telemetry_app'), ('telemetry_migrator')) AS roles(r)
+  FROM (VALUES ('inventory_app'), ('inventory_migrator'), ('telemetry_app'), ('telemetry_migrator'), ('projection_app'), ('projection_migrator'), ('read_query')) AS roles(r)
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+SELECT 'CREATE ROLE cdc_reader' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cdc_reader') \gexec
+ALTER ROLE cdc_reader LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD :'cdc_password';
 ALTER ROLE inventory_app PASSWORD :'inventory_password';
 ALTER ROLE inventory_migrator PASSWORD :'inventory_migrator_password';
 ALTER ROLE telemetry_app PASSWORD :'telemetry_password';
 ALTER ROLE telemetry_migrator PASSWORD :'telemetry_migrator_password';
 
 SELECT format('CREATE DATABASE %I OWNER %I', d, o)
-  FROM (VALUES ('greenguard_inventory', 'inventory_migrator'), ('greenguard_telemetry', 'telemetry_migrator'), ('greenguard_read', 'postgres')) AS dbs(d, o)
+  FROM (VALUES ('greenguard_inventory', 'inventory_migrator'), ('greenguard_telemetry', 'telemetry_migrator'), ('greenguard_read', 'projection_migrator')) AS dbs(d, o)
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = d) \gexec
 ALTER DATABASE greenguard_inventory OWNER TO inventory_migrator;
 ALTER DATABASE greenguard_telemetry OWNER TO telemetry_migrator;
@@ -25,8 +33,8 @@ ALTER DATABASE greenguard_telemetry OWNER TO telemetry_migrator;
 REVOKE ALL ON DATABASE greenguard_inventory FROM PUBLIC;
 REVOKE ALL ON DATABASE greenguard_telemetry FROM PUBLIC;
 REVOKE ALL ON DATABASE greenguard_read FROM PUBLIC;
-GRANT CONNECT ON DATABASE greenguard_inventory TO inventory_app;
-GRANT CONNECT ON DATABASE greenguard_telemetry TO telemetry_app;
+GRANT CONNECT ON DATABASE greenguard_inventory TO inventory_app, cdc_reader;
+GRANT CONNECT ON DATABASE greenguard_telemetry TO telemetry_app, cdc_reader;
 
 \connect greenguard_inventory
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -34,3 +42,77 @@ GRANT USAGE ON SCHEMA public TO inventory_app;
 \connect greenguard_telemetry
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO telemetry_app;
+
+ALTER ROLE projection_app PASSWORD :'projection_password';
+ALTER ROLE read_query PASSWORD :'read_query_password';
+ALTER ROLE projection_migrator PASSWORD :'projection_migrator_password';
+ALTER DATABASE greenguard_read OWNER TO projection_migrator;
+GRANT CONNECT ON DATABASE greenguard_read TO projection_app;
+GRANT CONNECT ON DATABASE greenguard_read TO read_query;
+\connect greenguard_read
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO projection_app;
+
+-- Stage 06a risk-engine owner: runtime risk_app, schema owner risk_migrator.
+SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
+  FROM (VALUES ('risk_app'), ('risk_migrator')) AS roles(r)
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+ALTER ROLE risk_app PASSWORD :'risk_password';
+ALTER ROLE risk_migrator PASSWORD :'risk_migrator_password';
+\connect postgres
+SELECT 'CREATE DATABASE greenguard_risk OWNER risk_migrator'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_risk') \gexec
+ALTER DATABASE greenguard_risk OWNER TO risk_migrator;
+REVOKE ALL ON DATABASE greenguard_risk FROM PUBLIC;
+GRANT CONNECT ON DATABASE greenguard_risk TO risk_app, cdc_reader;
+\connect greenguard_risk
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO risk_app;
+
+-- Stage 06d jobs-worker owner (intent ledger) and notification-service owner (delivery ledger).
+\getenv jobs_password JOBS_DB_PASSWORD
+\getenv jobs_migrator_password JOBS_MIGRATOR_PASSWORD
+\getenv notifications_password NOTIFICATIONS_DB_PASSWORD
+\getenv notifications_migrator_password NOTIFICATIONS_MIGRATOR_PASSWORD
+\connect postgres
+SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
+  FROM (VALUES ('jobs_app'), ('jobs_migrator'), ('notifications_app'), ('notifications_migrator')) AS roles(r)
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+ALTER ROLE jobs_app PASSWORD :'jobs_password';
+ALTER ROLE jobs_migrator PASSWORD :'jobs_migrator_password';
+ALTER ROLE notifications_app PASSWORD :'notifications_password';
+ALTER ROLE notifications_migrator PASSWORD :'notifications_migrator_password';
+SELECT 'CREATE DATABASE greenguard_jobs OWNER jobs_migrator'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_jobs') \gexec
+SELECT 'CREATE DATABASE greenguard_notifications OWNER notifications_migrator'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_notifications') \gexec
+ALTER DATABASE greenguard_jobs OWNER TO jobs_migrator;
+ALTER DATABASE greenguard_notifications OWNER TO notifications_migrator;
+REVOKE ALL ON DATABASE greenguard_jobs FROM PUBLIC;
+REVOKE ALL ON DATABASE greenguard_notifications FROM PUBLIC;
+GRANT CONNECT ON DATABASE greenguard_jobs TO jobs_app;
+GRANT CONNECT ON DATABASE greenguard_notifications TO notifications_app;
+\connect greenguard_jobs
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO jobs_app;
+\connect greenguard_notifications
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO notifications_app;
+
+-- Stage 06b workflow-alerts owner: runtime alerts_app, schema owner alerts_migrator.
+\getenv alerts_password ALERTS_DB_PASSWORD
+\getenv alerts_migrator_password ALERTS_MIGRATOR_PASSWORD
+\connect postgres
+SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
+  FROM (VALUES ('alerts_app'), ('alerts_migrator')) AS roles(r)
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+ALTER ROLE alerts_app PASSWORD :'alerts_password';
+ALTER ROLE alerts_migrator PASSWORD :'alerts_migrator_password';
+SELECT 'CREATE DATABASE greenguard_alerts OWNER alerts_migrator'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_alerts') \gexec
+ALTER DATABASE greenguard_alerts OWNER TO alerts_migrator;
+REVOKE ALL ON DATABASE greenguard_alerts FROM PUBLIC;
+GRANT CONNECT ON DATABASE greenguard_alerts TO alerts_app, cdc_reader;
+\connect greenguard_alerts
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO alerts_app;

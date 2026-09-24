@@ -34,10 +34,12 @@ async function tenant() {
   const operator = await api.token(tenantId, ["operator"], "operator-1");
   const viewer = await api.token(tenantId, ["viewer"], "viewer-1");
   const site = await api.call("POST", "/v1/sites", {
+    headers: { "idempotency-key": randomUUID() },
     token: admin,
     body: { name: "North" },
   });
   const bin = await api.call("POST", "/v1/bins", {
+    headers: { "idempotency-key": randomUUID() },
     token: admin,
     body: { siteId: site.json?.siteId, name: "Bin 1" },
   });
@@ -99,15 +101,72 @@ test("authorization: viewers read but cannot write; only admins create sites and
   assert.equal(forbidden.status, 403);
   assert.equal(forbidden.json?.code, "insufficient_role");
   const site = await api.call("POST", "/v1/sites", {
+    headers: { "idempotency-key": randomUUID() },
     token: t.operator,
     body: { name: "x" },
   });
   assert.equal(site.status, 403);
   const bin = await api.call("POST", "/v1/bins", {
+    headers: { "idempotency-key": randomUUID() },
     token: t.operator,
     body: { siteId: t.siteId, name: "x" },
   });
   assert.equal(bin.status, 403);
+});
+
+test("grain lot placement is admin-only, tenant-scoped and validates its outbox contract", async () => {
+  const a = await tenant();
+  const b = await tenant();
+  const effectiveFrom = "2026-09-20T08:00:00.000Z";
+  const path = `/v1/bins/${a.binId}/lots`;
+  const body = { grainType: "wheat", variety: "spring", effectiveFrom };
+  const forbidden = await api.call("POST", path, {
+    token: a.operator,
+    headers: { "idempotency-key": randomUUID() },
+    body,
+  });
+  assert.equal(forbidden.status, 403);
+  const placed = await api.call("POST", path, {
+    token: a.admin,
+    headers: { "idempotency-key": randomUUID() },
+    body,
+  });
+  assert.equal(placed.status, 201);
+  assert.equal(placed.json?.occupancyVersion, "1");
+  const at = `/v1/bins/${a.binId}/lots/at?observedAt=${encodeURIComponent(effectiveFrom)}`;
+  const own = await api.call("GET", at, { token: a.viewer });
+  assert.equal(
+    (own.json?.placement as { grainType?: string })?.grainType,
+    "wheat",
+  );
+  const foreign = await api.call("GET", at, { token: b.viewer });
+  assert.equal(foreign.json?.placement, null);
+  const [row] = await adminQuery<OutboxRecord>(
+    `SELECT event_id, tenant_id, aggregate_type, aggregate_id,
+      aggregate_version::text, event_type, schema_version, occurred_at,
+      correlation_id, causation_id, traceparent, payload
+      FROM outbox_events WHERE event_id=$1`,
+    [placed.json?.eventId],
+  );
+  assert.equal(
+    validateEvent(
+      outboxRowToEvent({
+        eventId: row.event_id,
+        tenantId: row.tenant_id,
+        aggregateType: row.aggregate_type,
+        aggregateId: row.aggregate_id,
+        aggregateVersion: BigInt(row.aggregate_version),
+        eventType: row.event_type,
+        schemaVersion: row.schema_version,
+        occurredAt: row.occurred_at,
+        correlationId: row.correlation_id,
+        causationId: row.causation_id,
+        traceparent: row.traceparent,
+        payload: row.payload,
+      }),
+    ).ok,
+    true,
+  );
 });
 
 test("tenant isolation over HTTP: tenant B cannot see or change tenant A, and a forged tenant header is ignored", async () => {
@@ -343,11 +402,18 @@ test("malformed requests get problem+json without leaking internals", async () =
     ["/v1/bins", { siteId: t.siteId }],
   ] as const) {
     assert.equal(
-      (await api.call("POST", path, { token: t.admin, body })).status,
+      (
+        await api.call("POST", path, {
+          token: t.admin,
+          body,
+          headers: { "idempotency-key": randomUUID() },
+        })
+      ).status,
       400,
     );
   }
   const foreignBin = await api.call("POST", "/v1/bins", {
+    headers: { "idempotency-key": randomUUID() },
     token: t.admin,
     body: { siteId: randomUUID(), name: "x" },
   });
@@ -466,5 +532,39 @@ test("traceparent flags are normalised to the sampled bit so stored events stay 
       }),
     );
     assert.equal(result.ok, true, flags);
+  }
+});
+
+test("H6: facility commands require valid keys and replay stable responses", async () => {
+  const t = await tenant();
+  for (const [path, body] of [
+    ["/v1/sites", { name: "Idempotent" }],
+    ["/v1/bins", { name: "Idempotent", siteId: t.siteId }],
+  ] as const) {
+    for (const headers of [{}, { "idempotency-key": "with spaces" }] as Record<
+      string,
+      string
+    >[]) {
+      const response = await api.call("POST", path, {
+        token: t.admin,
+        body,
+        headers,
+      });
+      assert.equal(response.status, 400);
+    }
+    const options = {
+      token: t.admin,
+      body,
+      headers: { "idempotency-key": randomUUID() },
+    };
+    const first = await api.call("POST", path, options);
+    assert.equal(first.status, 201);
+    assert.deepEqual((await api.call("POST", path, options)).json, first.json);
+    assert.ok(first.json?.eventId);
+    const conflict = await api.call("POST", path, {
+      ...options,
+      body: { ...body, name: "different" },
+    });
+    assert.equal(conflict.status, 409);
   }
 });

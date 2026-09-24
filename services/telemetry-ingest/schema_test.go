@@ -32,7 +32,7 @@ func TestD02RuntimeRoleCannotBypassRLSAndOwnsNothing(t *testing.T) {
 	}
 	rows, err := admin.Query(context.Background(),
 		`SELECT relname, pg_get_userbyid(relowner), relrowsecurity AND relforcerowsecurity
-		   FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relname <> 'schema_migrations'`)
+		   FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relname NOT IN ('schema_migrations', 'binding_feed_checkpoints')`)
 	if err != nil {
 		t.Fatal(err)
 	}

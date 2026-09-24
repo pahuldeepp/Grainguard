@@ -27,7 +27,7 @@ Body (max 16 KiB, unknown fields rejected):
 
 **202** (a retry returns the same body): `{"status":"stored","reading_id":"...","event_id":"...","stream_version":"42","projection_status":"pending"}`. `projection_status` describes the moment of acknowledgement, not the current state of the read model.
 
-The reading, its `telemetry.recorded` outbox event, an idempotency receipt and an audit row commit in one database transaction. A retry with the same `source_message_id` and the same values returns the original acknowledgement and changes nothing; the same ID with different values is `409 idempotency_conflict`.
+The reading, its `telemetry.recorded` outbox event, an idempotency receipt and an audit row commit in one database transaction. Receipt lookup precedes timestamp-window validation, so a committed reading remains retryable after it ages beyond seven days. A retry with the same `source_message_id` and the same values returns the original acknowledgement and changes nothing; the same ID with different values is `409 idempotency_conflict`.
 
 ## Order of checks and reasons
 

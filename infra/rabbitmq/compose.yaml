@@ -1,0 +1,22 @@
+# Opt-in Stage 06d RabbitMQ overlay; never part of dev/verify/smoke.
+# Management-less image pinned by digest (rabbitmq:4.2-alpine, 2026-09-24).
+# A fixed hostname keeps the node name, so durable quorum queues survive a restart.
+services:
+  rabbitmq:
+    image: rabbitmq:4.2-alpine@sha256:b5c3420a9bf1066be2a01edf5bafbe846fc7a23e9f7cc5b36c04421d1eeb5af0
+    hostname: greenguard-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: greenguard
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Run make bootstrap}
+    ports: ["127.0.0.1:55672:5672"]
+    mem_limit: 256m
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 3s
+      timeout: 10s
+      retries: 40
+    restart: "no"
+volumes:
+  rabbitmq-data:

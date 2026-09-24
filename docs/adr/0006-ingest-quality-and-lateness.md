@@ -4,7 +4,7 @@ Status: accepted, 2026-09-24 (Stage 03b).
 
 ## Data quality at the ingest boundary
 
-A reading is checked in this order before any transaction starts, and the first failure wins: first the device ID in the path must be a lowercase UUID (`invalid_field`) and the caller must be allowed to write that device (`device_forbidden`); then the body checks below run in order. Each failure has one stable reason code and HTTP status that is returned to the device:
+A reading’s stable fields are checked before the transaction starts, and the first failure wins: first the device ID in the path must be a lowercase UUID (`invalid_field`) and the caller must be allowed to write that device (`device_forbidden`); then the body checks below run in order. Each failure has one stable reason code and HTTP status that is returned to the device:
 
 | Reason                 | Status | Meaning                                                                                                     |
 | ---------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
@@ -20,11 +20,13 @@ A reading is checked in this order before any transaction starts, and the first 
 | `device_disabled`      | 403    | the binding is not active                                                                                   |
 | `idempotency_conflict` | 409    | same `source_message_id` with different measurements                                                        |
 
+Inside the transaction, the stream lock and receipt lookup precede timestamp checks. An identical committed retry returns its original acknowledgement even after the reading exceeds the age limit; new readings still undergo both timestamp checks before storage.
+
 The tenant comes only from the verified token. A device in another tenant is indistinguishable from an unbound device (`device_not_ready`), because row-level security hides it.
 
 ## Rejections
 
-A rejected reading is never stored as a reading and never lost silently: the device gets the reason and decides whether to retry or drop it. Rejections are counted per reason (`ingest_rejections_total{reason}`; tenant and device go on logs and traces, never on metric labels). A bounded sample keeps evidence for debugging, and only for devices that have a binding (an unbound device ID is caller-chosen, so it is counted and never sampled): `ingest_rejection_samples` holds at most 20 rows per device by construction (a random-slot upsert), stores a payload hash and never the payload, and is written at most once per device per 10 seconds. Bad input can therefore not grow storage or force one write per request. Audit rows remain for accepted changes only.
+A rejected reading is never stored as a reading and never lost silently: the device gets the reason and decides whether to retry or drop it. Rejections are counted per reason (`ingest_rejections_total{reason}`; tenant and device go on logs and traces, never on metric labels). A bounded sample keeps evidence for debugging, and only for devices that have a binding (an unbound device ID is caller-chosen, so it is counted and never sampled): `ingest_rejection_samples` holds at most 20 rows per device by construction (a random-slot upsert), stores a payload hash and never the payload, and is written at most once per device per 10 seconds. Throttle entries are allocated only after a tenant-scoped binding check. At capacity only entries whose ten-second window has elapsed are evicted; otherwise new samples are dropped. Bad input can therefore not grow storage or force one write per request. Audit rows remain for accepted changes only.
 
 ## Lateness
 

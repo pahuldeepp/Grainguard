@@ -490,3 +490,23 @@ func TestAnInvalidPathDeviceIdNeverCreatesLimiterState(t *testing.T) {
 		t.Fatal("a rejected path must not touch the tenant bucket either")
 	}
 }
+
+func TestUnknownRotatedKeyDuringOutageReturnsRetryAfter(t *testing.T) {
+	f := newAPIFixture(t, apiRoomyLimits(), false)
+	if _, err := f.app.Verifier.Verify(authBearer + f.issuer.sign(nil)); err != nil {
+		t.Fatal(err)
+	}
+	f.issuer.rotate()
+	token := f.issuer.sign(nil)
+	f.issuer.set(func() { f.issuer.status = http.StatusServiceUnavailable })
+	time.Sleep(80 * time.Millisecond)
+	resp, data := f.post(token, randomUUID(), "{}")
+	apiProblem(t, resp, data, http.StatusServiceUnavailable, codeUnavailable)
+	if resp.Header.Get("Retry-After") != "5" {
+		t.Fatalf("missing retry guidance: %v", resp.Header)
+	}
+	f.issuer.set(func() { f.issuer.status = http.StatusOK; f.issuer.keys = nil })
+	time.Sleep(80 * time.Millisecond)
+	resp, data = f.post(token, randomUUID(), "{}")
+	apiProblem(t, resp, data, http.StatusUnauthorized, codeInvalidToken)
+}

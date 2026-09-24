@@ -18,11 +18,14 @@ model Tenant {
   name      String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   sites     Site[]
+  grainLots GrainLot[]
 
   @@map("tenants")
 }
 
 model Site {
+  // Optimistic concurrency for future edits.
+  version   BigInt   @default(1)
   tenantId  String   @map("tenant_id") @db.Uuid
   siteId    String   @map("site_id") @db.Uuid
   name      String
@@ -36,17 +39,50 @@ model Site {
 }
 
 model Bin {
-  tenantId  String   @map("tenant_id") @db.Uuid
-  binId     String   @map("bin_id") @db.Uuid
-  siteId    String   @map("site_id") @db.Uuid
-  name      String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  site      Site     @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
-  devices   Device[]
+  // Optimistic concurrency for future edits.
+  version     BigInt         @default(1)
+  tenantId    String         @map("tenant_id") @db.Uuid
+  binId       String         @map("bin_id") @db.Uuid
+  siteId      String         @map("site_id") @db.Uuid
+  name        String
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  site        Site           @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
+  devices     Device[]
+  occupancies BinOccupancy[]
 
   @@id([tenantId, binId])
   @@unique([tenantId, siteId, binId])
   @@map("bins")
+}
+
+model GrainLot {
+  tenantId    String         @map("tenant_id") @db.Uuid
+  lotId       String         @map("lot_id") @db.Uuid
+  grainType   String         @map("grain_type")
+  variety     String?
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  tenant      Tenant         @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict, onUpdate: Restrict)
+  occupancies BinOccupancy[]
+
+  @@id([tenantId, lotId])
+  @@map("grain_lots")
+}
+
+model BinOccupancy {
+  tenantId         String    @map("tenant_id") @db.Uuid
+  binId            String    @map("bin_id") @db.Uuid
+  occupancyVersion BigInt    @map("occupancy_version")
+  lotId            String    @map("lot_id") @db.Uuid
+  effectiveFrom    DateTime  @map("effective_from") @db.Timestamptz(6)
+  effectiveTo      DateTime? @map("effective_to") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  bin              Bin       @relation(fields: [tenantId, binId], references: [tenantId, binId], onDelete: Restrict, onUpdate: Restrict)
+  lot              GrainLot  @relation(fields: [tenantId, lotId], references: [tenantId, lotId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([tenantId, binId, occupancyVersion])
+  @@unique([tenantId, lotId])
+  @@index([tenantId, binId, effectiveFrom])
+  @@map("bin_occupancies")
 }
 
 model Device {

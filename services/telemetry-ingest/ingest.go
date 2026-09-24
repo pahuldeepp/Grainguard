@@ -26,6 +26,7 @@ const (
 
 // Ingestor stores validated readings durably and idempotently.
 type Ingestor struct {
+	feed   *BindingFeed
 	db     TxStarter
 	policy QualityPolicy
 	now    func() time.Time
@@ -79,6 +80,8 @@ type attempt struct {
 	meta      RequestMeta
 	now       time.Time
 	request   string
+	feed      *BindingFeed
+	policy    QualityPolicy
 }
 
 // record is the set of identifiers and values written by one accepted reading.
@@ -111,11 +114,11 @@ func (g *Ingestor) Ingest(ctx context.Context, p Principal, deviceID string, bod
 		return IngestResult{}, rej
 	}
 	now := g.now().UTC().Truncate(time.Microsecond)
-	req, rej := ParseReadingRequest(body, now, g.policy)
+	req, rej := parseReadingRequest(body)
 	if rej != nil {
 		return IngestResult{}, rej
 	}
-	a := attempt{principal: p, deviceID: deviceID, req: req, meta: meta, now: now}
+	a := attempt{principal: p, deviceID: deviceID, req: req, meta: meta, now: now, policy: g.policy, feed: g.feed}
 	normalized, _ := json.Marshal(normalizedRequest{
 		SourceMessageID: req.SourceMessageID, DeviceID: deviceID, ObservedAt: formatTimestamp(req.ObservedAt),
 		Measurements: measurementsJSON{TemperatureC: req.TemperatureC, RelativeHumidityPercent: req.RelativeHumidityPercent},
@@ -158,9 +161,17 @@ func storeReading(ctx context.Context, tx pgx.Tx, a attempt) (IngestResult, erro
 	if prior != nil {
 		return *prior, nil
 	}
+	if rej := checkTimestamp(a.req.ObservedAt, a.now, a.policy); rej != nil {
+		return IngestResult{}, rej
+	}
 	binding, err := lockBinding(ctx, tx, a)
 	if err != nil {
 		return IngestResult{}, err
+	}
+	if a.feed != nil {
+		if err := a.feed.Check(ctx, tx); err != nil {
+			return IngestResult{}, err
+		}
 	}
 	rec := record{attempt: a, binding: binding, version: last + 1,
 		readingID: newUUIDv4(), eventID: newUUIDv4(), commandID: newUUIDv4(), audit: newUUIDv4()}

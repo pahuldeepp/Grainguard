@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	rejectionSlots       = 20
-	rejectionThrottle    = 10 * time.Second
-	rejectionThrottleCap = 10_000
+	rejectionSlots    = 20
+	rejectionThrottle = 10 * time.Second
+	// A full map is swept at most once per interval, so a flood of new devices cannot
+	// turn every rejection into a full-map scan under the lock.
+	rejectionSweepInterval = time.Second
+	rejectionThrottleCap   = 10_000
 )
 
 // RejectionRecorder counts every refusal and keeps a small, bounded sample per device for
@@ -26,9 +29,10 @@ type RejectionRecorder struct {
 	counter RejectionCounter
 	now     func() time.Time
 
-	mu       sync.Mutex
-	last     map[string]time.Time
-	capacity int
+	mu        sync.Mutex
+	last      map[string]time.Time
+	capacity  int
+	lastSweep time.Time
 }
 
 func NewRejectionRecorder(db TxStarter, counter RejectionCounter, now func() time.Time) *RejectionRecorder {
@@ -39,7 +43,7 @@ func NewRejectionRecorder(db TxStarter, counter RejectionCounter, now func() tim
 }
 
 // allow limits sample writes per device so a flood of bad requests cannot become a flood
-// of database writes. The map is bounded and simply starts over when full.
+// of database writes. Only expired entries may be evicted; a full active map drops new samples.
 func (r *RejectionRecorder) allow(tenantID, deviceID string, now time.Time) bool {
 	key := tenantID + "/" + deviceID
 	r.mu.Lock()
@@ -48,10 +52,26 @@ func (r *RejectionRecorder) allow(tenantID, deviceID string, now time.Time) bool
 		return false
 	}
 	if len(r.last) >= r.capacity {
-		r.last = map[string]time.Time{}
+		r.sweep(now)
+		if len(r.last) >= r.capacity {
+			return false
+		}
 	}
 	r.last[key] = now
 	return true
+}
+
+// sweep evicts expired entries, at most once per rejectionSweepInterval. Callers hold r.mu.
+func (r *RejectionRecorder) sweep(now time.Time) {
+	if !r.lastSweep.IsZero() && now.Sub(r.lastSweep) < rejectionSweepInterval {
+		return
+	}
+	r.lastSweep = now
+	for key, last := range r.last {
+		if now.Sub(last) >= rejectionThrottle {
+			delete(r.last, key)
+		}
+	}
 }
 
 func randomSlot() int16 {
@@ -70,11 +90,17 @@ func (r *RejectionRecorder) Record(ctx context.Context, tenantID, deviceID strin
 		return
 	}
 	now := r.now().UTC().Truncate(time.Microsecond)
-	if !r.allow(tenantID, deviceID, now) {
-		return
-	}
 	digest := sha256.Sum256(body)
 	err := WithTenant(ctx, r.db, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var bound bool
+		if err := tx.QueryRow(ctx,
+			"SELECT EXISTS (SELECT 1 FROM device_bindings WHERE tenant_id = $1 AND device_id = $2)",
+			tenantID, deviceID).Scan(&bound); err != nil {
+			return err
+		}
+		if !bound || !r.allow(tenantID, deviceID, now) {
+			return nil
+		}
 		_, err := tx.Exec(ctx,
 			`INSERT INTO ingest_rejection_samples (tenant_id, device_id, slot, reason, payload_sha256, rejected_at)
 			 SELECT $1::uuid, $2::uuid, $3::smallint, $4::text, $5::text, $6::timestamptz

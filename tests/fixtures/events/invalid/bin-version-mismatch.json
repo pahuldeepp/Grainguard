@@ -1,0 +1,19 @@
+{
+  "event_id": "6f1c2b7e-3a4d-4e5f-8a9b-0c1d2e3f4a5b",
+  "event_type": "bin.changed",
+  "schema_version": 1,
+  "occurred_at": "2026-09-21T15:00:00.125000Z",
+  "tenant_id": "11111111-1111-4111-8111-111111111111",
+  "aggregate_type": "bin",
+  "aggregate_id": "33333333-3333-4333-8333-333333333333",
+  "aggregate_version": "1",
+  "correlation_id": "4d9d9d30-d209-446e-99ea-d40ab0953d0d",
+  "causation_id": "8a2d3d4f-6b73-4fca-9348-4a0a6d3ce7a1",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "payload": {
+    "bin_id": "33333333-3333-4333-8333-333333333333",
+    "name": "North bin",
+    "bin_version": "2",
+    "site_id": "22222222-2222-4222-8222-222222222222"
+  }
+}

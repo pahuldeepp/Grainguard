@@ -17,6 +17,7 @@ import {
   InvalidReferenceError,
   VersionConflictError,
 } from "./errors.js";
+import { GRAIN_TYPE, placementTime } from "./lot-validation.js";
 
 export interface CommandContext {
   tenantId: string;
@@ -48,9 +49,10 @@ export interface DeviceRegistered extends DeviceChanged {
 interface EventSpec {
   commandId: string;
   eventType: string;
-  deviceId: string;
+  aggregateType: "device" | "site" | "bin" | "bin_occupancy";
+  aggregateId: string;
   version: bigint;
-  payload: Record<string, unknown>;
+  payload: Record<string, string | null>;
   action: string;
 }
 
@@ -74,8 +76,8 @@ async function appendEvent(tx: Tx, ctx: CommandContext, spec: EventSpec) {
       {
         eventId,
         tenantId: ctx.tenantId,
-        aggregateType: "device",
-        aggregateId: spec.deviceId,
+        aggregateType: spec.aggregateType,
+        aggregateId: spec.aggregateId,
         aggregateVersion: spec.version,
         eventType: spec.eventType,
         schemaVersion: 1,
@@ -83,7 +85,10 @@ async function appendEvent(tx: Tx, ctx: CommandContext, spec: EventSpec) {
         correlationId: ctx.correlationId,
         causationId: spec.commandId,
         traceparent: ctx.traceparent,
-        payload: { ...spec.payload, binding_version: spec.version.toString() },
+        payload:
+          spec.aggregateType === "device"
+            ? { ...spec.payload, binding_version: spec.version.toString() }
+            : spec.payload,
       },
     ],
   });
@@ -95,8 +100,8 @@ async function appendEvent(tx: Tx, ctx: CommandContext, spec: EventSpec) {
         actorType: ctx.actorType,
         actorId: ctx.actorId,
         action: spec.action,
-        resourceType: "device",
-        resourceId: spec.deviceId,
+        resourceType: spec.aggregateType,
+        resourceId: spec.aggregateId,
         commandId: spec.commandId,
         eventId,
         outcome: "succeeded",
@@ -113,31 +118,299 @@ export async function createTenant(db: Db, tenantId: string, name: string) {
   );
 }
 
-export async function createSite(
+interface FacilityCreated {
+  name: string;
+  eventId: string;
+}
+
+// The receipt lock serializes retries; future edits use optimistic version checks.
+async function createFacility<T extends FacilityCreated>(
   db: Db,
-  tenantId: string,
+  ctx: CommandContext,
+  aggregateType: "site" | "bin",
+  request: Record<string, string>,
+  write: (tx: Tx) => Promise<{
+    aggregateId: string;
+    payload: Record<string, string>;
+    response: Omit<T, "eventId">;
+  }>,
+): Promise<T> {
+  const receiptKey = {
+    tenantId: ctx.tenantId,
+    commandType: `${aggregateType}.create`,
+    idempotencyKey: ctx.idempotencyKey,
+  };
+  return withTenant(db, ctx.tenantId, async (tx) => {
+    const lockKey = `${ctx.tenantId}:${receiptKey.commandType}:${ctx.idempotencyKey}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    const receipt = await tx.commandReceipt.findUnique({
+      where: { tenantId_commandType_idempotencyKey: receiptKey },
+    });
+    if (receipt) {
+      if (!isDeepStrictEqual(receipt.normalizedRequest, request))
+        throw new IdempotencyConflictError();
+      return receipt.responseBody as unknown as T;
+    }
+    const result = await write(tx);
+    const commandId = randomUUID();
+    const eventId = await appendEvent(tx, ctx, {
+      commandId,
+      aggregateType,
+      aggregateId: result.aggregateId,
+      version: 1n,
+      eventType: `${aggregateType}.changed`,
+      payload: result.payload,
+      action: receiptKey.commandType,
+    });
+    const response = { ...result.response, eventId };
+    await tx.commandReceipt.create({
+      data: {
+        ...receiptKey,
+        commandId,
+        normalizedRequest: request,
+        responseBody: response,
+        acceptedAt: new Date(),
+      },
+    });
+    return response as T;
+  });
+}
+
+export function createSite(
+  db: Db,
+  ctx: CommandContext,
   siteId: string,
   name: string,
 ) {
-  await withTenant(db, tenantId, (tx) =>
-    tx.site.create({ data: { tenantId, siteId, name } }),
-  );
+  return createFacility<
+    FacilityCreated & { siteId: string; siteVersion: string }
+  >(db, ctx, "site", { name }, async (tx) => {
+    await tx.site.create({ data: { tenantId: ctx.tenantId, siteId, name } });
+    return {
+      aggregateId: siteId,
+      payload: { site_id: siteId, name, site_version: "1" },
+      response: { siteId, name, siteVersion: "1" },
+    };
+  });
 }
 
 export async function createBin(
   db: Db,
-  tenantId: string,
+  ctx: CommandContext,
   input: { binId: string; siteId: string; name: string },
 ) {
   try {
-    await withTenant(db, tenantId, (tx) =>
-      tx.bin.create({ data: { tenantId, ...input } }),
+    return await createFacility<
+      FacilityCreated & { binId: string; siteId: string; binVersion: string }
+    >(
+      db,
+      ctx,
+      "bin",
+      { site_id: input.siteId, name: input.name },
+      async (tx) => {
+        await tx.bin.create({ data: { tenantId: ctx.tenantId, ...input } });
+        return {
+          aggregateId: input.binId,
+          payload: {
+            bin_id: input.binId,
+            site_id: input.siteId,
+            name: input.name,
+            bin_version: "1",
+          },
+          response: { ...input, binVersion: "1" },
+        };
+      },
     );
   } catch (error) {
     throw postgresCode(error) === "23505"
       ? new DuplicateBinError()
       : mapWriteError(error);
   }
+}
+
+export interface PlaceGrainLotInput {
+  binId: string;
+  lotId?: string;
+  grainType: string;
+  variety?: string | null;
+  effectiveFrom: string;
+}
+
+export interface GrainLotPlacement {
+  binId: string;
+  lotId: string;
+  grainType: string;
+  occupancyVersion: string;
+  effectiveFrom: string;
+  eventId: string;
+}
+
+// Receipt lock handles retries; a bin row lock serializes distinct placement
+// commands. The exclusion constraint additionally forbids overlapping ranges.
+export async function placeGrainLot(
+  db: Db,
+  ctx: CommandContext,
+  input: PlaceGrainLotInput,
+): Promise<GrainLotPlacement> {
+  if (
+    !isUuid(input.binId) ||
+    (input.lotId !== undefined && !isUuid(input.lotId))
+  )
+    throw new InvalidInputError("binId and lotId must be lowercase UUIDs");
+  if (!GRAIN_TYPE.test(input.grainType))
+    throw new InvalidInputError("grainType must be a lowercase grain code");
+  if (
+    input.variety != null &&
+    (input.variety.length < 1 || input.variety.length > 100)
+  )
+    throw new InvalidInputError("variety must be 1-100 characters");
+  const effectiveFrom = placementTime(input.effectiveFrom);
+  const request = {
+    bin_id: input.binId,
+    lot_id: input.lotId ?? null,
+    grain_type: input.grainType,
+    variety: input.variety ?? null,
+    effective_from: input.effectiveFrom,
+  };
+  const receiptKey = {
+    tenantId: ctx.tenantId,
+    commandType: "lot.place",
+    idempotencyKey: ctx.idempotencyKey,
+  };
+  return withTenant(
+    db,
+    ctx.tenantId,
+    async (tx) => {
+      const lockKey = `${ctx.tenantId}:${receiptKey.commandType}:${ctx.idempotencyKey}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      const receipt = await tx.commandReceipt.findUnique({
+        where: { tenantId_commandType_idempotencyKey: receiptKey },
+      });
+      if (receipt) {
+        if (!isDeepStrictEqual(receipt.normalizedRequest, request))
+          throw new IdempotencyConflictError();
+        return receipt.responseBody as unknown as GrainLotPlacement;
+      }
+      const lotId = input.lotId ?? randomUUID();
+      const bins = await tx.$queryRaw<{ site_id: string }[]>`
+      SELECT site_id FROM bins WHERE tenant_id = ${ctx.tenantId}::uuid
+        AND bin_id = ${input.binId}::uuid FOR UPDATE`;
+      if (bins.length !== 1) throw new InvalidReferenceError();
+      const previous = await tx.binOccupancy.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          binId: input.binId,
+          effectiveTo: null,
+        },
+      });
+      if (previous && effectiveFrom <= previous.effectiveFrom)
+        throw new InvalidInputError(
+          "effectiveFrom must follow the current batch start",
+        );
+      const next = previous ? previous.occupancyVersion + 1n : 1n;
+      if (previous) {
+        await tx.binOccupancy.update({
+          where: {
+            tenantId_binId_occupancyVersion: {
+              tenantId: ctx.tenantId,
+              binId: input.binId,
+              occupancyVersion: previous.occupancyVersion,
+            },
+          },
+          data: { effectiveTo: effectiveFrom },
+        });
+      }
+      await tx.grainLot.create({
+        data: {
+          tenantId: ctx.tenantId,
+          lotId,
+          grainType: input.grainType,
+          variety: input.variety ?? null,
+        },
+      });
+      await tx.binOccupancy.create({
+        data: {
+          tenantId: ctx.tenantId,
+          binId: input.binId,
+          occupancyVersion: next,
+          lotId,
+          effectiveFrom,
+        },
+      });
+      const commandId = randomUUID();
+      const eventId = await appendEvent(tx, ctx, {
+        commandId,
+        eventType: "lot.changed",
+        aggregateType: "bin_occupancy",
+        aggregateId: input.binId,
+        version: next,
+        payload: {
+          bin_id: input.binId,
+          site_id: bins[0].site_id,
+          lot_id: lotId,
+          grain_type: input.grainType,
+          variety: input.variety ?? null,
+          occupancy_version: next.toString(),
+          effective_from: input.effectiveFrom,
+          previous_lot_id: previous?.lotId ?? null,
+        },
+        action: "lot.place",
+      });
+      const response = {
+        binId: input.binId,
+        lotId,
+        grainType: input.grainType,
+        occupancyVersion: next.toString(),
+        effectiveFrom: input.effectiveFrom,
+        eventId,
+      };
+      await tx.commandReceipt.create({
+        data: {
+          ...receiptKey,
+          commandId,
+          normalizedRequest: request,
+          responseBody: response,
+          acceptedAt: new Date(),
+        },
+      });
+      return response;
+    },
+    { lockTimeoutMs: DEFAULT_LOCK_TIMEOUT_MS },
+  );
+}
+
+// Risk consumers use this same as-of rule on their own local lot projection.
+// This owner query is a reference for event-time correctness and tenant RLS.
+export function grainLotAt(
+  db: Db,
+  tenantId: string,
+  binId: string,
+  observedAt: Date,
+) {
+  if (!isUuid(binId) || Number.isNaN(observedAt.getTime()))
+    throw new InvalidInputError("valid binId and observedAt are required");
+  return withTenant(db, tenantId, async (tx) => {
+    const occupancy = await tx.binOccupancy.findFirst({
+      where: {
+        tenantId,
+        binId,
+        effectiveFrom: { lte: observedAt },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: observedAt } }],
+      },
+      include: { lot: true },
+      orderBy: { occupancyVersion: "desc" },
+    });
+    return (
+      occupancy && {
+        binId,
+        lotId: occupancy.lotId,
+        grainType: occupancy.lot.grainType,
+        occupancyVersion: occupancy.occupancyVersion.toString(),
+        effectiveFrom: occupancy.effectiveFrom.toISOString(),
+        effectiveTo: occupancy.effectiveTo?.toISOString() ?? null,
+      }
+    );
+  });
 }
 
 // Idempotent: a retry with the same key and request returns the original result;
@@ -186,7 +459,8 @@ export async function registerDevice(
       const eventId = await appendEvent(tx, ctx, {
         commandId,
         eventType: "device.registered",
-        deviceId,
+        aggregateType: "device",
+        aggregateId: deviceId,
         version: 1n,
         payload: { device_id: deviceId, ...request, status: "active" },
         action: "device.register",
@@ -262,7 +536,8 @@ export async function changeDeviceBinding(
       const eventId = await appendEvent(tx, ctx, {
         commandId: randomUUID(),
         eventType: "device.binding_changed",
-        deviceId: input.deviceId,
+        aggregateType: "device",
+        aggregateId: input.deviceId,
         version: next,
         payload: {
           device_id: input.deviceId,
@@ -339,7 +614,8 @@ export async function setDeviceStatus(
       const eventId = await appendEvent(tx, ctx, {
         commandId: randomUUID(),
         eventType: "device.status_changed",
-        deviceId: input.deviceId,
+        aggregateType: "device",
+        aggregateId: input.deviceId,
         version: next,
         payload: { device_id: input.deviceId, status: input.status },
         action: "device.set_status",

@@ -15,8 +15,10 @@ import (
 )
 
 var (
-	newPool = pgxpool.NewWithConfig
-	newApp  = buildApp
+	newPool           = pgxpool.NewWithConfig
+	newApp            = buildApp
+	serveHTTP         = (*http.Server).ListenAndServe
+	newBindingRuntime = startBindingConsumer
 )
 
 func run(ctx context.Context, getenv func(string) string) error {
@@ -46,17 +48,27 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer shutdownTracing()
+	worker, err := newBindingRuntime(ctx, pool, cfg, getenv, &app)
+	if err != nil {
+		return err
+	}
+	defer worker.close()
 	addr := getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
 	server := &http.Server{Addr: addr, Handler: newHandler(app), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
-	go func() { done <- server.ListenAndServe() }()
+	go func() { done <- serveHTTP(server) }()
 	slog.Info("telemetry-ingest listening", "address", addr)
 	select {
 	case err := <-done:
 		return err
+	case err := <-worker.done:
+		err = bindingWorkerResult(ctx, err)
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return errors.Join(err, server.Shutdown(shutdown))
 	case <-ctx.Done():
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -109,4 +121,11 @@ func main() {
 		slog.Error("service stopped", "error", err)
 		exit(1)
 	}
+}
+
+func bindingWorkerResult(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }

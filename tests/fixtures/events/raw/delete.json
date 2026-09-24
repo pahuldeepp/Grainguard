@@ -1,0 +1,10 @@
+{
+  "payload": {
+    "op": "d",
+    "after": null,
+    "source": {
+      "table": "outbox_events",
+      "schema": "public"
+    }
+  }
+}

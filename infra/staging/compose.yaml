@@ -3,11 +3,22 @@ services:
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
+      CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
+      PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}
+      PROJECTION_MIGRATOR_PASSWORD: ${PROJECTION_MIGRATOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
       TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
+      RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?Run make bootstrap}
+      RISK_MIGRATOR_PASSWORD: ${RISK_MIGRATOR_PASSWORD:?Run make bootstrap}
+      JOBS_DB_PASSWORD: ${JOBS_DB_PASSWORD:?Run make bootstrap}
+      JOBS_MIGRATOR_PASSWORD: ${JOBS_MIGRATOR_PASSWORD:?Run make bootstrap}
+      NOTIFICATIONS_DB_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD:?Run make bootstrap}
+      NOTIFICATIONS_MIGRATOR_PASSWORD: ${NOTIFICATIONS_MIGRATOR_PASSWORD:?Run make bootstrap}
+      ALERTS_DB_PASSWORD: ${ALERTS_DB_PASSWORD:?Run make bootstrap}
+      ALERTS_MIGRATOR_PASSWORD: ${ALERTS_MIGRATOR_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro

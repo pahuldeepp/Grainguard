@@ -13,7 +13,7 @@ const reasonOther = "other"
 var knownReasons = []string{
 	ReasonInvalidBody, ReasonInvalidField, ReasonNoMeasurements, ReasonNonFiniteValue,
 	ReasonValueOutOfRange, ReasonTimestampInFuture, ReasonTimestampTooOld, ReasonDeviceForbidden,
-	ReasonDeviceNotReady, ReasonDeviceDisabled, ReasonIdempotencyConflict, ReasonRateLimited, reasonOther,
+	ReasonDeviceNotReady, bindingFeedStale, ReasonDeviceDisabled, ReasonIdempotencyConflict, ReasonRateLimited, reasonOther,
 }
 
 // Metrics holds ingest counters. The reason map is fixed at construction, so reads need no lock.

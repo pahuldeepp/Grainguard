@@ -1,0 +1,16 @@
+{
+  "name": "@greenguard/read-model",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": { "pg": "8.23.0" },
+  "devDependencies": { "@types/pg": "8.23.1" }
+}

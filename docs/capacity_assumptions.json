@@ -1,7 +1,89 @@
 {
   "status": "planning assumptions, not measured capacity",
-  "user_confirmed": {"registered_accounts": 10000000, "tenant_organizations": 10000000, "concurrent_active_users": 10000000},
-  "workload_assumptions": {"api_requests_per_active_user_per_second": 0.2, "api_burst_factor": 2, "devices_per_tenant": 10, "device_report_interval_seconds": 60, "event_bytes": 1024, "telemetry_burst_factor": 5, "kafka_replication_factor": 3, "kafka_retention_days_example": 7, "websocket_sessions_per_active_user": 1, "push_messages_per_session_per_second": 0.1, "push_payload_bytes": 1024, "token_refresh_interval_seconds_example": 900},
-  "unverified_safe_cell_targets": {"api_requests_per_second": 20000, "telemetry_events_per_second": 20000, "concurrent_sessions": 100000, "tenant_organizations": 100000},
-  "resilience_assumptions": {"equally_sized_regions": 3, "regions_to_survive_losing": 1}
+  "user_confirmed": {
+    "registered_accounts": 10000000,
+    "tenant_organizations": 10000000,
+    "concurrent_active_users": 10000000
+  },
+  "workload_assumptions": {
+    "api_requests_per_active_user_per_second": 0.2,
+    "api_burst_factor": 2,
+    "devices_per_tenant": 10,
+    "device_report_interval_seconds": 60,
+    "event_bytes": 1024,
+    "telemetry_burst_factor": 5,
+    "kafka_replication_factor": 3,
+    "kafka_retention_days_example": 7,
+    "websocket_sessions_per_active_user": 1,
+    "push_messages_per_session_per_second": 0.1,
+    "push_payload_bytes": 1024,
+    "token_refresh_interval_seconds_example": 900
+  },
+  "unverified_safe_cell_targets": {
+    "api_requests_per_second": 20000,
+    "telemetry_events_per_second": 20000,
+    "concurrent_sessions": 100000,
+    "tenant_organizations": 100000
+  },
+  "resilience_assumptions": {
+    "equally_sized_regions": 3,
+    "regions_to_survive_losing": 1
+  },
+  "tiers": {
+    "tier_1": {
+      "status": "FIRST CERTIFIED TIER target; UNMEASURED until Stage 13 evidence",
+      "registered_accounts": 100000,
+      "concurrent_active_users": 10000,
+      "tenant_organizations_assumed": 10000,
+      "cells_assumed": 1,
+      "tenant_organizations_per_cell_assumed": 10000,
+      "connected_devices": 1000000,
+      "normal_telemetry_events_per_second": 20000,
+      "peak_telemetry_events_per_second": 50000,
+      "device_report_interval_seconds": 50,
+      "telemetry_burst_factor": 2.5,
+      "typical_event_bytes_max": 2000,
+      "api_p95_ms_exclusive_max": 300,
+      "commit_to_canonical_and_projection_p95_ms_exclusive_max": 1000,
+      "availability_slo_min": 0.999,
+      "availability_window_days": 30,
+      "acknowledged_event_loss_max": 0,
+      "failure_domain_assumed": "One cell across three AZs in one region; survive one component or AZ loss; whole-region loss excluded, confirm with owner",
+      "certification_stage": "13",
+      "sizing_unmeasured": {
+        "ingest_events_per_second_per_replica": 2500,
+        "target_utilization": 0.7,
+        "ingest_replicas_normal": 12,
+        "ingest_replicas_peak": 29,
+        "ingest_replicas_peak_one_az_loss": 45,
+        "postgres_rows_per_event_current": 4,
+        "wal_and_index_amplification_factor": null,
+        "raw_partitions_per_topic": 1,
+        "canonical_partitions_per_topic": 6,
+        "transformer_sequential_round_trip_ms_example": 5,
+        "read_model_rows_per_event_assumed": 2,
+        "cassandra_logical_writes_per_event_assumed": 1,
+        "cassandra_replication_factor_assumed": 3
+      }
+    },
+    "tier_u": {
+      "status": "Ultimate target; UNMEASURED; certify only with Stages 12-14 cell/fleet evidence",
+      "registered_accounts": 10000000,
+      "tenant_organizations": 10000000,
+      "concurrent_active_users": 10000000,
+      "legacy_input_keys": [
+        "user_confirmed",
+        "workload_assumptions",
+        "unverified_safe_cell_targets",
+        "resilience_assumptions"
+      ],
+      "api_p95_ms_exclusive_max": 500,
+      "accepted_to_projection_or_alert_p95_ms_exclusive_max": 2000,
+      "availability_slo_min": 0.9995,
+      "availability_window_days": 30,
+      "regional_rpo_seconds_max": 300,
+      "regional_rto_seconds_max": 1800,
+      "acknowledged_event_loss_max_within_synchronous_az_domain": 0
+    }
+  }
 }

@@ -184,15 +184,17 @@ func parseRoles(raw any) ([]string, bool) {
 }
 
 type jwksCache struct {
-	url         string
-	client      *http.Client
-	maxAge      time.Duration
-	maxStale    time.Duration
-	cooldown    time.Duration
-	mu          sync.Mutex
-	keys        map[string]*rsa.PublicKey
-	fetchedAt   time.Time
-	lastAttempt time.Time
+	url           string
+	client        *http.Client
+	maxAge        time.Duration
+	maxStale      time.Duration
+	cooldown      time.Duration
+	mu            sync.Mutex
+	keys          map[string]*rsa.PublicKey
+	fetchedAt     time.Time
+	lastAttempt   time.Time
+	refreshing    chan struct{}
+	refreshFailed bool
 }
 
 func newJWKSCache(cfg AuthConfig) (*jwksCache, error) {
@@ -220,24 +222,45 @@ func (c *jwksCache) keyfunc(token *jwt.Token) (any, error) {
 	return c.key(kid)
 }
 
-// The lock is held across the fetch so concurrent requests share one refresh.
+// A single caller fetches without holding mu. Cached readers continue immediately;
+// callers without a usable key share the in-flight refresh.
 func (c *jwksCache) key(kid string) (*rsa.PublicKey, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	now := time.Now()
 	if k, ok := c.keys[kid]; ok && now.Sub(c.fetchedAt) < c.maxAge {
+		c.mu.Unlock()
 		return k, nil
 	}
+	if done := c.refreshing; done != nil {
+		key, err := c.lookup(kid, now)
+		c.mu.Unlock()
+		if err == nil {
+			return key, nil
+		}
+		<-done
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.lookup(kid, time.Now())
+	}
 	if !c.lastAttempt.IsZero() && now.Sub(c.lastAttempt) < c.cooldown {
+		defer c.mu.Unlock()
 		return c.lookup(kid, now)
 	}
 	c.lastAttempt = now
+	c.refreshing = make(chan struct{})
+	c.mu.Unlock()
+
 	keys, err := c.fetch()
-	if err != nil {
-		return c.lookup(kid, now)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refreshFailed = err != nil
+	if err == nil {
+		c.keys, c.fetchedAt = keys, now
 	}
-	c.keys, c.fetchedAt = keys, now
-	return c.lookup(kid, now)
+	close(c.refreshing)
+	c.refreshing = nil
+	return c.lookup(kid, time.Now())
 }
 
 // lookup returns a cached key if it is fresh, or stale by no more than maxStale. Beyond that
@@ -248,6 +271,9 @@ func (c *jwksCache) lookup(kid string, now time.Time) (*rsa.PublicKey, error) {
 	}
 	k, ok := c.keys[kid]
 	if !ok {
+		if c.refreshFailed {
+			return nil, errKeyUnavailable
+		}
 		return nil, errUnknownKey
 	}
 	if now.Sub(c.fetchedAt) >= c.maxAge+c.maxStale {

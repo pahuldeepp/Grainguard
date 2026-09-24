@@ -306,7 +306,7 @@ test("receipt, outbox event and audit record share one command ID", async () => 
 
 test("a duplicate bin is reported as a duplicate bin", async () => {
   await assert.rejects(
-    createBin(db, t.tenantId, {
+    createBin(db, context(t.tenantId), {
       binId: t.binId,
       siteId: t.siteId,
       name: "again",
@@ -319,7 +319,7 @@ test("device lists are bounded keyset pages", async () => {
   const tenantId = randomUUID();
   const siteId = randomUUID();
   await createTenant(db, tenantId, "paging");
-  await createSite(db, tenantId, siteId, "yard");
+  await createSite(db, context(tenantId), siteId, "yard");
   for (let i = 0; i < 3; i++)
     await registerDevice(db, context(tenantId), {
       serialNumber: `P-${i}`,
@@ -372,3 +372,72 @@ test("malformed versions and cursors are rejected as invalid input", async () =>
     InvalidInputError,
   );
 });
+
+for (const kind of ["site", "bin"] as const) {
+  test(`H6: ${kind} creation is atomic, traced and idempotent`, async () => {
+    const ctx = context(t.tenantId);
+    const id = randomUUID();
+    const create = (name: string) =>
+      kind === "site"
+        ? createSite(db, ctx, id, name)
+        : createBin(db, ctx, { binId: id, siteId: t.siteId, name });
+    const results = await Promise.all([create("facility"), create("facility")]);
+    assert.deepEqual(results[0], results[1]);
+    await assert.rejects(create("different"), IdempotencyConflictError);
+    const [event] = await adminQuery<Record<string, unknown>>(
+      `SELECT event_id, aggregate_type, aggregate_version::text AS version,
+       event_type, correlation_id, traceparent, payload FROM outbox_events WHERE aggregate_id = $1`,
+      [id],
+    );
+    assert.deepEqual(event, {
+      event_id: results[0].eventId,
+      aggregate_type: kind,
+      version: "1",
+      event_type: `${kind}.changed`,
+      correlation_id: ctx.correlationId,
+      traceparent: ctx.traceparent,
+      payload:
+        kind === "site"
+          ? { site_id: id, name: "facility", site_version: "1" }
+          : {
+              bin_id: id,
+              site_id: t.siteId,
+              name: "facility",
+              bin_version: "1",
+            },
+    });
+    const [counts] = await adminQuery<Record<string, string>>(
+      `SELECT
+      (SELECT count(*) FROM outbox_events WHERE aggregate_id = $1::uuid) AS events,
+      (SELECT count(*) FROM audit_events a JOIN command_receipts r ON a.command_id = r.command_id
+       JOIN outbox_events e ON e.causation_id = r.command_id
+       WHERE a.resource_id = $1::uuid AND a.resource_type = $2) AS linked`,
+      [id, kind],
+    );
+    assert.deepEqual(counts, { events: "1", linked: "1" });
+  });
+
+  test(`H6: ${kind} outbox failure rolls back the facility and receipt`, async () => {
+    const ctx = context(t.tenantId, { correlationId: "invalid-uuid" });
+    const id = randomUUID();
+    await assert.rejects(
+      kind === "site"
+        ? createSite(db, ctx, id, "rollback")
+        : createBin(db, ctx, { binId: id, siteId: t.siteId, name: "rollback" }),
+    );
+    const [row] = await adminQuery<Record<string, string>>(
+      `SELECT
+      (SELECT count(*) FROM ${kind === "site" ? "sites WHERE site_id" : "bins WHERE bin_id"} = $1::uuid) AS facilities,
+      (SELECT count(*) FROM outbox_events WHERE aggregate_id = $1::uuid) AS events,
+      (SELECT count(*) FROM audit_events WHERE resource_id = $1::uuid) AS audits,
+      (SELECT count(*) FROM command_receipts WHERE tenant_id = $2::uuid AND idempotency_key = $3) AS receipts`,
+      [id, t.tenantId, ctx.idempotencyKey],
+    );
+    assert.deepEqual(row, {
+      facilities: "0",
+      events: "0",
+      audits: "0",
+      receipts: "0",
+    });
+  });
+}

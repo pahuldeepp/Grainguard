@@ -29,6 +29,8 @@ const (
 // ingest endpoint is mounted and Ingestor, Limiter, Recorder and Metrics must be set too;
 // without it the service exposes only its health probes.
 type App struct {
+	Consumer *BindingConsumer
+	Feed     *BindingFeed
 	Ping     func(context.Context) error
 	Verifier *Verifier
 	Ingestor *Ingestor
@@ -44,14 +46,17 @@ func newHandler(app App) http.Handler {
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 		defer cancel()
-		if err := app.Ping(ctx); err != nil {
+		if err := app.Ping(ctx); err != nil || (app.Consumer != nil && !app.Consumer.Ready.Load()) {
 			writeStatus(w, http.StatusServiceUnavailable, "not_ready")
 			return
 		}
 		writeStatus(w, http.StatusOK, "ready")
 	})
+	if app.Verifier == nil && app.Consumer != nil {
+		mux.Handle("GET /metrics", app.metricsHandler())
+	}
 	if app.Verifier != nil {
-		mux.Handle("GET /metrics", app.Metrics.Handler())
+		mux.Handle("GET /metrics", app.metricsHandler())
 		mux.HandleFunc("POST /v1/devices/{deviceId}/readings", app.ingest)
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -167,5 +172,26 @@ func (a App) ingest(w http.ResponseWriter, r *http.Request) {
 
 func (a App) refuse(w http.ResponseWriter, r *http.Request, p Principal, deviceID string, rejection *Rejection, body []byte) {
 	a.Recorder.Record(r.Context(), p.TenantID, deviceID, rejection, body)
+	if rejection.Reason == bindingFeedStale {
+		writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail, headerRetryAfter, authRetryAfter)
+		return
+	}
 	writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail)
+}
+
+func (a App) metricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(headerContentType, "text/plain; version=0.0.4; charset=utf-8")
+		if a.Metrics != nil {
+			_, _ = io.WriteString(w, a.Metrics.render())
+		}
+		if a.Consumer != nil {
+			_, _ = io.WriteString(w, a.Consumer.metrics())
+		}
+		if a.Feed != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+			defer cancel()
+			_, _ = io.WriteString(w, a.Feed.metrics(ctx))
+		}
+	})
 }

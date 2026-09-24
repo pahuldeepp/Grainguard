@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:lot-changed:v1",
+  "title": "GreenGuard lot.changed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version", "correlation_id", "causation_id", "traceparent", "payload"],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": { "const": "lot.changed" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "$ref": "#/$defs/utcTimestamp" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_type": { "const": "bin_occupancy" },
+    "aggregate_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_version": { "$ref": "#/$defs/positiveBigintString" },
+    "correlation_id": { "$ref": "#/$defs/uuid" },
+    "causation_id": { "$ref": "#/$defs/uuid" },
+    "traceparent": { "type": "string", "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bin_id", "site_id", "lot_id", "grain_type", "variety", "occupancy_version", "effective_from", "previous_lot_id"],
+      "properties": {
+        "bin_id": { "$ref": "#/$defs/uuid" },
+        "site_id": { "$ref": "#/$defs/uuid" },
+        "lot_id": { "$ref": "#/$defs/uuid" },
+        "grain_type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+        "variety": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 100 }, { "type": "null" }] },
+        "occupancy_version": { "$ref": "#/$defs/positiveBigintString" },
+        "effective_from": { "$ref": "#/$defs/utcTimestamp" },
+        "previous_lot_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "utcTimestamp": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$" },
+    "positiveBigintString": { "type": "string", "minLength": 1, "maxLength": 19, "pattern": "^[1-9][0-9]{0,18}$" }
+  }
+}

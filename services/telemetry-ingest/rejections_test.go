@@ -97,21 +97,52 @@ func TestRejectionsWithoutValidIdentityAreOnlyCounted(t *testing.T) {
 	}
 }
 
-func TestThrottleMapIsBoundedAndResetsWhenFull(t *testing.T) {
-	rec := NewRejectionRecorder(scriptDB{steps: []step{{rows: 1}, {rows: 1}}}, &ingCounter{}, nil)
-	rec.capacity = 3
-	tenant := randomUUID()
-	for i := 0; i < 10; i++ {
-		rec.Record(context.Background(), tenant, randomUUID(), ingRejection, nil)
-		if len(rec.last) > 3 {
-			t.Fatalf("throttle map grew to %d", len(rec.last))
-		}
+func TestThrottleMapEvictsOnlyExpiredEntries(t *testing.T) {
+	const tenant, recent = "tenant", "recent"
+	rec := NewRejectionRecorder(nil, &ingCounter{}, nil)
+	rec.capacity = 2
+	if !rec.allow(tenant, "old", ingNow) || !rec.allow(tenant, recent, ingNow.Add(time.Second)) {
+		t.Fatal("initial admission failed")
+	}
+	if rec.allow(tenant, "new", ingNow.Add(2*time.Second)) {
+		t.Fatal("full active map must drop new samples")
+	}
+	if rec.allow(tenant, recent, ingNow.Add(3*time.Second)) {
+		t.Fatal("capacity pressure readmitted a throttled device")
+	}
+	if !rec.allow(tenant, "new", ingNow.Add(rejectionThrottle)) {
+		t.Fatal("expired entry was not evicted")
+	}
+	if len(rec.last) != 2 || rec.allow(tenant, recent, ingNow.Add(rejectionThrottle)) {
+		t.Fatal("eviction must preserve still-active entries")
+	}
+	if !rec.allow(tenant, recent, ingNow.Add(rejectionThrottle+time.Second)) {
+		t.Fatal("device must be admitted at the throttle boundary")
+	}
+}
+
+func TestFullThrottleMapIsSweptAtMostOncePerInterval(t *testing.T) {
+	rec := NewRejectionRecorder(nil, &ingCounter{}, nil)
+	rec.capacity = 1
+	if !rec.allow("tenant", "a", ingNow) {
+		t.Fatal("initial admission failed")
+	}
+	sweptAt := ingNow.Add(rejectionThrottle - 500*time.Millisecond)
+	if rec.allow("tenant", "b", sweptAt) {
+		t.Fatal("active entry evicted")
+	}
+	// "a" has expired, but the last sweep was under an interval ago: no rescan yet.
+	if rec.allow("tenant", "b", sweptAt.Add(rejectionSweepInterval/2)) {
+		t.Fatal("full map rescanned within the sweep interval")
+	}
+	if !rec.allow("tenant", "b", sweptAt.Add(rejectionSweepInterval)) {
+		t.Fatal("expired entry not evicted by the next sweep")
 	}
 }
 
 func TestRecordNeverFailsTheCallerWhenTheDatabaseDoes(t *testing.T) {
-	for i := 0; i < 2; i++ {
-		steps := []step{{rows: 1}, {rows: 1}}
+	for i := 0; i < 3; i++ {
+		steps := []step{{rows: 1}, {scan: func(d []any) { *(d[0].(*bool)) = true }}, {rows: 1}}
 		steps[i] = step{err: errBoom}
 		counter := &ingCounter{}
 		NewRejectionRecorder(scriptDB{steps}, counter, nil).Record(context.Background(), randomUUID(), randomUUID(), ingRejection, nil)
@@ -179,6 +210,9 @@ func TestOnlyDevicesWithABindingGetRejectionSamples(t *testing.T) {
 	}
 	if n := adminInt(t, "SELECT count(*) FROM ingest_rejection_samples WHERE tenant_id = $1", tenant); n != 0 {
 		t.Fatalf("unbound, caller-chosen device ids must never create sample rows, found %d", n)
+	}
+	if len(rec.last) != 0 {
+		t.Fatal("unbound devices allocated throttle entries")
 	}
 	rec.Record(context.Background(), tenant, bound, ingRejection, []byte("x"))
 	if ingSamples(t, tenant, bound) != 1 {

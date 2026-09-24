@@ -52,3 +52,9 @@ Reference: [Nest first steps](https://docs.nestjs.com/first-steps), [Nest migrat
 ## Next implementation
 
 Stage 02 establishes tenant/site/bin/device schemas, migration roles, RLS, authenticated tenant context and two-tenant access tests. Stage 03 adds durable writes and transactional outbox. Implementing these in order keeps the full architecture covered without pretending all services already work.
+
+## Opt-in event infrastructure
+
+Stage 04a adds Kafka, Schema Registry and Debezium without starting them during normal
+development or verification. See [event infrastructure](EVENTS_INFRA.md) for
+`make events-up`, `make events-test`, and `make events-down`.

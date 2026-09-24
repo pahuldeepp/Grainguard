@@ -220,7 +220,7 @@ func TestIngestRetryReturnsTheStoredResultAndCreatesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.ingestor.now = func() time.Time { return ingNow.Add(time.Minute) }
+	f.ingestor.now = func() time.Time { return ingNow.Add(8 * 24 * time.Hour) }
 	again, err := f.ingest("msg-r", `,"temperature_c":10.0`)
 	if err != nil || again != first {
 		t.Fatalf("retry: %+v %v, first %+v", again, err, first)

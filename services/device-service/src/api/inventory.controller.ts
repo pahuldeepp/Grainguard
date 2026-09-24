@@ -16,13 +16,15 @@ import {
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
 import type { Db } from "../db/client.js";
 import { isUuid } from "../db/tenant.js";
-import { DeviceNotFoundError } from "../inventory/errors.js";
+import { DeviceNotFoundError, InvalidInputError } from "../inventory/errors.js";
 import {
   changeDeviceBinding,
   createBin,
   createSite,
+  grainLotAt,
   getDevice,
   listDevices,
+  placeGrainLot,
   registerDevice,
   setDeviceStatus,
 } from "../inventory/repository.js";
@@ -34,6 +36,8 @@ import {
   parseBinding,
   parseIdempotencyKey,
   parseIfMatch,
+  parseLotPlacement,
+  parseObservedAt,
   parsePage,
   parseRegister,
   parseSite,
@@ -68,20 +72,65 @@ export class InventoryController {
 
   @Post("sites")
   async createSite(@Req() req: ApiRequest, @Body() body: unknown) {
-    const principal = authorized(req, "admin");
+    authorized(req, "admin");
+    const key = parseIdempotencyKey(header(req, "idempotency-key"));
     const { name } = parseSite(body);
     const siteId = randomUUID();
-    await createSite(this.db, principal.tenantId, siteId, name);
-    return { siteId, name };
+    return createSite(
+      this.db,
+      commandContext(req as Required<ApiRequest>, key),
+      siteId,
+      name,
+    );
   }
 
   @Post("bins")
   async createBin(@Req() req: ApiRequest, @Body() body: unknown) {
-    const principal = authorized(req, "admin");
+    authorized(req, "admin");
+    const key = parseIdempotencyKey(header(req, "idempotency-key"));
     const input = parseBin(body);
     const binId = randomUUID();
-    await createBin(this.db, principal.tenantId, { binId, ...input });
-    return { binId, ...input };
+    return createBin(
+      this.db,
+      commandContext(req as Required<ApiRequest>, key),
+      { binId, ...input },
+    );
+  }
+
+  @Post("bins/:id/lots")
+  async placeLot(
+    @Req() req: ApiRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    authorized(req, "admin");
+    if (!isUuid(id))
+      throw new InvalidInputError("bin id must be a lowercase UUID");
+    const key = parseIdempotencyKey(header(req, "idempotency-key"));
+    return placeGrainLot(
+      this.db,
+      commandContext(req as Required<ApiRequest>, key),
+      { binId: id, ...parseLotPlacement(body) },
+    );
+  }
+
+  @Get("bins/:id/lots/at")
+  async lotAt(
+    @Req() req: ApiRequest,
+    @Param("id") id: string,
+    @Query("observedAt") observedAt?: string,
+  ) {
+    const principal = authorized(req, ...READ);
+    if (!isUuid(id))
+      throw new InvalidInputError("bin id must be a lowercase UUID");
+    return {
+      placement: await grainLotAt(
+        this.db,
+        principal.tenantId,
+        id,
+        parseObservedAt(observedAt),
+      ),
+    };
   }
 
   @Post("devices")

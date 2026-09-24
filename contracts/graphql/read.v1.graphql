@@ -1,0 +1,36 @@
+# Proposed Stage 05e contract; Apollo BFF implementation belongs to Stage 08.
+scalar DateTime
+
+type DeviceView {
+  id: ID!
+  siteId: ID!
+  binId: ID
+  serialNumber: String!
+  status: String!
+  inventoryVersion: String!
+}
+
+type Reading {
+  id: ID!
+  deviceId: ID!
+  observedAt: DateTime!
+  receivedAt: DateTime!
+  temperatureC: Float
+  relativeHumidityPercent: Float
+}
+
+type DeviceFreshness {
+  deviceId: ID!
+  readingId: ID!
+  selectedObservedAt: DateTime!
+  projectedAt: DateTime!
+}
+
+type Query {
+  device(id: ID!): DeviceView
+  devicesBySite(siteId: ID!, limit: Int = 100): [DeviceView!]!
+  latestReading(deviceId: ID!): Reading
+  reading(id: ID!): Reading
+  readings(deviceId: ID!, from: DateTime!, to: DateTime!, limit: Int = 100): [Reading!]!
+  deviceFreshness(deviceId: ID!): DeviceFreshness
+}

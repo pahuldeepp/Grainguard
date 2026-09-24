@@ -12,7 +12,7 @@ The API is mounted only when `AUTH_ISSUER`, `AUTH_AUDIENCE` and `AUTH_JWKS_URL` 
 | -------- | ----------------------------------------------------- |
 | viewer   | `GET`                                                 |
 | operator | viewer + register devices, change bindings and status |
-| admin    | operator + create sites and bins                      |
+| admin    | operator + create sites, bins and grain-lot placements |
 
 ## Versioning and sunset
 
@@ -49,13 +49,17 @@ Invalid policy (bad JSON or dates, sunset before deprecation, unknown default or
 
 | Method and path                                     | Role     | Notes                                                                                                                                                                                                               |
 | --------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /v1/sites` `{name}`                           | admin    | `201 {siteId, name}`                                                                                                                                                                                                |
-| `POST /v1/bins` `{siteId, name}`                    | admin    | `201`; the site must belong to the tenant, else `422`                                                                                                                                                               |
+| `POST /v1/sites` `{name}`                           | admin    | Requires `Idempotency-Key`; `201 {siteId, name, siteVersion, eventId}`                                                                                                                                              |
+| `POST /v1/bins` `{siteId, name}`                    | admin    | Requires `Idempotency-Key`; `201 {binId, siteId, name, binVersion, eventId}`; the site must belong to the tenant, else `422`                                                                                        |
+| `POST /v1/bins/{id}/lots` `{grainType, variety?, effectiveFrom}` | admin | Requires `Idempotency-Key`; `effectiveFrom` is exact UTC milliseconds such as `2026-09-20T08:00:00.000Z` and may be at most five minutes ahead of server time. Places one new lot, closes the previous interval, and returns `{binId, lotId, grainType, occupancyVersion, effectiveFrom, eventId}`. The next start must be later than the current start. |
+| `GET /v1/bins/{id}/lots/at?observedAt=...` | viewer | Returns the batch occupying the bin at the requested UTC millisecond instant, or `{placement:null}`. At a replacement boundary, the new lot owns that instant. |
 | `POST /v1/devices` `{serialNumber, siteId, binId?}` | operator | Requires `Idempotency-Key` (1-200 printable characters). `201` with `ETag: "1"` and `Location`. A retry with the same key returns the original result; the same key with another body is `409 idempotency_conflict` |
 | `GET /v1/devices?limit&after`                       | viewer   | Keyset pages, `limit` 1-500 (default 50), `nextCursor` is the last device ID or `null`                                                                                                                              |
 | `GET /v1/devices/{id}`                              | viewer   | `ETag` is the binding version; `If-None-Match` gives `304`                                                                                                                                                          |
 | `PATCH /v1/devices/{id}` `{siteId, binId}`          | operator | Requires `If-Match: "<version>"`. Missing is `428`, stale is `412` with the current `ETag`                                                                                                                          |
 | `POST /v1/devices/{id}/status` `{status}`           | operator | `active`, `disabled` or `deleted`; takes a row lock with a 2 s limit, busy is `409 resource_locked` with `Retry-After`                                                                                              |
+
+Site, bin, grain-lot placement and device creation require an `Idempotency-Key` of 1–200 printable characters without spaces. Missing or malformed keys return `400 invalid_request`. A retry with the same tenant, command type, key and normalized body returns the original response and event ID without another row or event; a different body returns `409 idempotency_conflict`. Keys are scoped by tenant and command type.
 
 ## Errors
 
@@ -72,3 +76,9 @@ When `OTEL_EXPORTER_OTLP_ENDPOINT` is set (an OTLP/HTTP collector URL such as `h
 ## Events
 
 Registering, rebinding and status changes write `device.registered`, `device.binding_changed` and `device.status_changed` to the outbox. Their contracts are `contracts/events/device-*.v1.schema.json`; `@greenguard/contracts` validates them and the API tests validate every event the API writes.
+
+Creating a site or bin writes `site.changed` or `bin.changed` respectively, with aggregate type `site` or `bin` and aggregate version `"1"`. The row, outbox event, audit record and command receipt commit in one transaction. Contracts are `contracts/events/site-changed.v1.schema.json` and `contracts/events/bin-changed.v1.schema.json`: payloads contain `site_id, name, site_version` and `bin_id, site_id, name, bin_version` respectively. Payload IDs and versions match the envelope; versions are decimal strings. Future edits use optimistic concurrency on the persisted `version` column.
+
+The transformer routes both facility event types to `greenguard.inventory.facility.v1` (six partitions), keyed by `tenant_id:aggregate_id`. Device events retain `greenguard.inventory.device.v1`. Unknown event types are quarantined as `unknown_event_type`. Values are plain JSON with the six headers specified by [ADR-0010](adr/0010-schema-registry-contract.md); correlation, command causation and origin trace context are persisted with each event. Schema Registry is a CI compatibility/registration gate, not a runtime dependency.
+
+Grain-lot placement writes `lot.changed` with aggregate type `bin_occupancy`, aggregate ID equal to the bin ID and a monotone occupancy version. Its payload identifies the new lot/grain, the replaced lot (if any), and the effective start. The transformer routes it to dedicated `greenguard.inventory.lot.v1`, so existing device, facility, telemetry and Cassandra consumers do not receive a new event type. The interval is `[effective_from, next effective_from)`; late sensor readings use the lot active at their observation time. Empty-bin retirement is a later command and event.

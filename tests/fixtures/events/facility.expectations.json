@@ -1,0 +1,16 @@
+{
+  "site-changed.v1.valid.json": true,
+  "invalid/site-identity-mismatch.json": false,
+  "invalid/site-version-mismatch.json": false,
+  "invalid/site-version-overflow.json": false,
+  "invalid/site-empty-name.json": false,
+  "invalid/site-unknown-field.json": false,
+  "bin-changed.v1.valid.json": true,
+  "lot-changed.v1.valid.json": true,
+  "invalid/bin-identity-mismatch.json": false,
+  "invalid/bin-version-mismatch.json": false,
+  "invalid/bin-version-overflow.json": false,
+  "invalid/bin-empty-name.json": false,
+  "invalid/bin-unknown-field.json": false,
+  "invalid/bin-missing-site.json": false
+}

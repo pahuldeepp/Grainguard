@@ -8,7 +8,10 @@
     "packages/otel",
     "packages/tenant-auth",
     "packages/contracts",
-    "services/device-service"
+    "packages/read-model",
+    "services/device-service",
+    "services/workflow-alerts",
+    "services/notification-service"
   ],
   "engines": {
     "node": ">=24.21.0 <25"
@@ -19,9 +22,9 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "eslint apps/dashboard/src services/device-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src scripts/*.mjs",
-    "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
-    "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
+    "lint": "eslint apps/dashboard/src services/device-service/src services/workflow-alerts/src services/notification-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src packages/read-model/src scripts/*.mjs",
+    "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
+    "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
     "coverage": "node scripts/coverage.mjs"
   },
   "devDependencies": {

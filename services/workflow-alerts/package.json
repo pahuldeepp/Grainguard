@@ -1,0 +1,33 @@
+{
+  "name": "@greenguard/workflow-alerts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:deps && prisma generate && tsc",
+    "typecheck": "npm run build:deps && prisma generate && tsc --noEmit",
+    "test": "npm run build && node --test --test-concurrency=1 \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test --test-concurrency=1 \"dist/**/*.test.js\"",
+    "migrate": "prisma migrate deploy",
+    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts"
+  },
+  "dependencies": {
+    "@greenguard/contracts": "0.1.0",
+    "@greenguard/otel": "0.1.0",
+    "@greenguard/tenant-auth": "0.1.0",
+    "@nestjs/common": "12.0.4",
+    "@nestjs/core": "12.0.4",
+    "@nestjs/platform-express": "12.0.4",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "kafkajs": "2.2.4",
+    "kafkajs-snappy": "1.1.0",
+    "pg": "8.23.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.0"
+  }
+}

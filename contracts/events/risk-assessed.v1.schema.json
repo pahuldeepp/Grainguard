@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:risk-assessed:v1",
+  "title": "GreenGuard risk.assessed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version", "correlation_id", "causation_id", "traceparent", "payload"],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": { "const": "risk.assessed" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "$ref": "#/$defs/utcTimestamp" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_type": { "const": "device_risk_stream" },
+    "aggregate_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_version": { "$ref": "#/$defs/positiveBigintString" },
+    "correlation_id": { "$ref": "#/$defs/uuid" },
+    "causation_id": { "$ref": "#/$defs/uuid" },
+    "traceparent": { "type": "string", "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assessment_id", "assessment_version", "device_id", "reading_id", "source_event_id", "bin_id", "lot_id", "grain_type", "occupancy_version", "policy_version", "score", "severity", "alert_eligible", "reasons"],
+      "properties": {
+        "assessment_id": { "$ref": "#/$defs/uuid" },
+        "assessment_version": { "$ref": "#/$defs/positiveBigintString" },
+        "device_id": { "$ref": "#/$defs/uuid" },
+        "reading_id": { "$ref": "#/$defs/uuid" },
+        "source_event_id": { "$ref": "#/$defs/uuid" },
+        "bin_id": { "$ref": "#/$defs/uuid" },
+        "lot_id": { "$ref": "#/$defs/uuid" },
+        "grain_type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+        "occupancy_version": { "$ref": "#/$defs/positiveBigintString" },
+        "policy_version": { "$ref": "#/$defs/positiveBigintString" },
+        "score": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 100 }, { "type": "null" }] },
+        "severity": { "enum": ["normal", "warning", "critical", "insufficient_data"] },
+        "alert_eligible": { "type": "boolean" },
+        "reasons": { "type": "array", "uniqueItems": true, "items": { "enum": ["elevated_temperature", "elevated_humidity", "temperature_c", "relative_humidity_percent"] }, "maxItems": 4 }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "utcTimestamp": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$" },
+    "positiveBigintString": { "type": "string", "minLength": 1, "maxLength": 19, "pattern": "^[1-9][0-9]{0,18}$" }
+  }
+}

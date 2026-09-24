@@ -378,3 +378,12 @@ This is a declared-dependency/history index, not proof that every import runs or
 | runtime | `Python` | >=3.12 | CarePulse | [CarePulse/services/fhir-gateway/pyproject.toml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/services/fhir-gateway/pyproject.toml) |
 
 Every declaration location, blob ID and version is available in [TECHNOLOGY_CATALOG.json](TECHNOLOGY_CATALOG.json).
+
+## Current GreenGuard Stage 05 additions
+
+The historical table above records the archived projects. The current rebuild also
+pins `confluent-kafka==2.13.2` for the Python search consumer and
+`coverage==7.15.2` for its SonarQube XML coverage report in
+`services/search-indexer/requirements*.txt`. Cassandra uses the pinned Go
+driver in `services/cassandra-writer/go.mod`; the read package uses the pinned
+PostgreSQL driver in `packages/read-model/package.json`.

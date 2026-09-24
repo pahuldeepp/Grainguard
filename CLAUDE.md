@@ -41,10 +41,10 @@ Build strictly in stage order; do not start a later stage's infrastructure early
 
 | Stage | Build                                                                                      | Status                   |
 | ----- | ------------------------------------------------------------------------------------------ | ------------------------ |
-| 01    | Workspace, first three components, Postgres, CI, SonarQube 100% gate                       | Complete                 |
+| 01    | Workspace, first three components, Postgres, CI, SonarQube coverage gate                       | Complete                 |
 | 02    | Tenant/site/bin/device models, migrations, RLS, PgBouncer, auth, contracts (split 02a/02b) | 02a and 02b done locally |
-| 03    | Durable ingest: reading + outbox + receipt + audit in one transaction (split 03a/03b)      | 03a and 03b done locally |
-| 04    | Kafka, Schema Registry, Debezium CDC, canonical transformer, DLQ/quarantine                | Planned                  |
+| 03    | Durable ingest: reading + outbox + receipt + audit in one transaction (split 03a/03b)      | Complete                 |
+| 04    | Kafka, Schema Registry, Debezium CDC, canonical transformer, DLQ/quarantine                | In progress: 04a/04b pass local live acceptance |
 | 05    | CQRS read DB, projections, Cassandra history, search, replay                               | Planned                  |
 | 06    | Risk scoring, alerts, RabbitMQ jobs, notifications                                         | Planned                  |
 | 07    | Sagas (orchestrated, choreographed, TCC), locking, Redis/etcd coordination, mTLS           | Planned                  |
@@ -82,10 +82,19 @@ Per-service commands are in each service's `CLAUDE.md` or `README.md`.
 ## Claude-specific rules
 
 - Treat [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) as open work: when a task touches one of its gaps (P1–P5, R1–R7, O1–O5), close the gap or say why not.
-- Coverage gate is 100% with 0 duplication, issues and hotspots. Add tests; never lower the gate or add coverage exclusions to pass.
+- Coverage gate is 80% (lowered from 100% by the owner on 2026-09-24) with 0 duplication, issues and hotspots. Add tests; never lower the gate further or add coverage exclusions to pass. Aim higher than the gate for security-critical paths (tenant isolation, outbox, idempotency).
 - Before pushing, run `make coverage && make sonar-scan` locally (after `make sonar-up sonar-init` once). CI's gate also fails on Sonar code-smell rules, which `make verify` does not check. Also type-check from a clean state: generated code (the Prisma client) is not committed.
 - Instrument through `@greenguard/otel` (see `docs/adr/0004-tracing.md`): store the live span's `traceparent` on outbox events; never invent trace IDs when tracing is on.
 - Keep entry points testable: take config/env/context as parameters (see `services/telemetry-ingest/main.go` `run(ctx, getenv)` and `services/device-service/src/config.ts`).
 - Run `coderabbit review` before finishing non-trivial work; treat its findings like a human reviewer's.
 - A service folder with only a `README.md` is not implemented. Check for source and tests before assuming a capability exists.
 - Update `docs/MILESTONES.md` only with linked evidence under `evidence/`.
+
+## Stage 04b binding feed
+
+Telemetry owns the Kafka binding consumer and checkpoint table. Follow
+[ADR-0009](docs/adr/0009-binding-feed-freshness.md): source WAL checkpoints traverse
+one raw and six canonical partitions; every new observation requires fresh evidence
+after receipt replay. `make events-e2e` is the separate live acceptance command.
+Local code/tests do not mark Stage 04 complete; see the validation evidence for
+sandbox-blocked database, listener and Docker checks.

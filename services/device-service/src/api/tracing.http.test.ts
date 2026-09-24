@@ -23,6 +23,7 @@ test("a request's server span is the origin trace stored on the outbox event", a
     const admin = await api.token(tenantId, ["admin"]);
     const operator = await api.token(tenantId, ["operator"]);
     const site = await api.call("POST", "/v1/sites", {
+      headers: { "idempotency-key": randomUUID() },
       token: admin,
       body: { name: "s" },
     });
