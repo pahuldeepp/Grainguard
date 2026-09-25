@@ -29,13 +29,15 @@ def create_index_after_startup(elastic, index):
     while True:
         try:
             elastic.create_index(index)
-            return
+            health = elastic.request("GET", f"/_cluster/health/{index}?wait_for_status=yellow&timeout=10s")
+            if not health.get("timed_out") and health.get("status") in ("yellow", "green"):
+                return
         except (TimeoutError, urllib.error.URLError, SearchError) as exc:
             if isinstance(exc, SearchError) and exc.status not in (429, 500, 502, 503, 504):
                 raise
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(2)
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"index {index} did not acquire an active shard")
+        time.sleep(2)
 
 
 def run():

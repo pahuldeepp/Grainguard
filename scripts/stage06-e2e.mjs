@@ -151,11 +151,16 @@ async function waitTransformerCaughtUp() {
             })
           )[0].partitions;
           if (
-            high.some(
-              ({ partition, high: offset }) =>
-                committed.find((item) => item.partition === partition)
-                  ?.offset !== offset,
-            )
+            high.some(({ partition, high: offset, low }) => {
+              const current = committed.find(
+                (item) => item.partition === partition,
+              )?.offset;
+              // A fresh, empty topic has no committed group offset yet. There is
+              // nothing to catch up when its low and high watermarks are equal.
+              const emptyUncommitted =
+                low === offset && (current === undefined || current === "-1");
+              return current !== offset && !emptyUncommitted;
+            })
           )
             return false;
         }

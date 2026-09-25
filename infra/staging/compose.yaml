@@ -9,6 +9,7 @@ services:
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
       PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}
       PROJECTION_MIGRATOR_PASSWORD: ${PROJECTION_MIGRATOR_PASSWORD:?Run make bootstrap}
+      READ_QUERY_DB_PASSWORD: ${READ_QUERY_DB_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
       TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
       RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?Run make bootstrap}
@@ -19,6 +20,8 @@ services:
       NOTIFICATIONS_MIGRATOR_PASSWORD: ${NOTIFICATIONS_MIGRATOR_PASSWORD:?Run make bootstrap}
       ALERTS_DB_PASSWORD: ${ALERTS_DB_PASSWORD:?Run make bootstrap}
       ALERTS_MIGRATOR_PASSWORD: ${ALERTS_MIGRATOR_PASSWORD:?Run make bootstrap}
+      SAGA_DB_PASSWORD: ${SAGA_DB_PASSWORD:?Run make bootstrap}
+      SAGA_MIGRATOR_PASSWORD: ${SAGA_MIGRATOR_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
