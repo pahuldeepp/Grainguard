@@ -199,3 +199,141 @@ func TestLiveResultCannotBorrowAnotherSagasCommand(t *testing.T) {
 		t.Fatalf("cross-saga command reference was accepted: %v", err)
 	}
 }
+
+func TestLiveReserveResultAdvancesOnceAndQueuesConfigureAtomically(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s := Store{DB: pool}
+	tenant := testUUID(t)
+	start, err := s.Start(ctx, StartRequest{
+		TenantID: tenant, IdempotencyKey: testUUID(t), DeviceID: testUUID(t), AssetID: testUUID(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commandID string
+	if err := common.WithTenantSchema(ctx, pool, tenant, "", func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT command_id FROM saga_command_outbox
+			WHERE tenant_id=$1 AND saga_id=$2 AND step='asset.reserve'`, tenant, start.SagaID).Scan(&commandID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := ReserveSucceeded{
+		TenantID: tenant, SagaID: start.SagaID, CommandID: commandID, ResultID: testUUID(t),
+		SagaVersion: 1, FencingToken: 1,
+	}
+	assertReserveResultGuards(t, ctx, s, result)
+	advanced, err := s.ApplyReserveSucceeded(ctx, result)
+	if err != nil || advanced.State != "configuring" || advanced.Version != 2 {
+		t.Fatalf("reserve success: %+v %v", advanced, err)
+	}
+	assertReserveReplays(t, ctx, s, result)
+	assertReserveEffects(t, ctx, pool, tenant, start.SagaID)
+	assertConflictingAndConcurrentReserveResults(t, ctx, pool, s, tenant, result.ResultID)
+}
+
+func assertReserveResultGuards(t *testing.T, ctx context.Context, s Store, result ReserveSucceeded) {
+	t.Helper()
+	other := result
+	other.TenantID = testUUID(t)
+	other.ResultID = testUUID(t)
+	if _, err := s.ApplyReserveSucceeded(ctx, other); !errors.Is(err, ErrSagaNotFound) {
+		t.Fatalf("cross-tenant result should see no saga: %v", err)
+	}
+	stale := result
+	stale.FencingToken++
+	if _, err := s.ApplyReserveSucceeded(ctx, stale); !errors.Is(err, ErrStaleResult) {
+		t.Fatalf("wrong fencing token should be rejected: %v", err)
+	}
+}
+
+func assertReserveReplays(t *testing.T, ctx context.Context, s Store, result ReserveSucceeded) {
+	t.Helper()
+	replayWithNewID := result
+	replayWithNewID.ResultID = testUUID(t)
+	for _, replay := range []ReserveSucceeded{result, replayWithNewID} {
+		again, err := s.ApplyReserveSucceeded(ctx, replay)
+		if err != nil || again.State != "configuring" || again.Version != 2 {
+			t.Fatalf("result replay should preserve state: %+v %v", again, err)
+		}
+	}
+}
+
+func assertReserveEffects(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant, sagaID string) {
+	t.Helper()
+	var receipts, commands, audits int
+	if err := common.WithTenantSchema(ctx, pool, tenant, "", func(ctx context.Context, tx pgx.Tx) error {
+		for _, item := range []struct {
+			query string
+			out   *int
+		}{
+			{`SELECT count(*) FROM saga_result_inbox WHERE tenant_id=$1 AND saga_id=$2`, &receipts},
+			{`SELECT count(*) FROM saga_command_outbox WHERE tenant_id=$1 AND saga_id=$2 AND step='asset.configure'`, &commands},
+			{`SELECT count(*) FROM saga_audit WHERE tenant_id=$1 AND saga_id=$2 AND action='asset.reserved'`, &audits},
+		} {
+			if err := tx.QueryRow(ctx, item.query, tenant, sagaID).Scan(item.out); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 1 || commands != 1 || audits != 1 {
+		t.Fatalf("result must commit once with next command and audit: %d %d %d", receipts, commands, audits)
+	}
+}
+
+func assertConflictingAndConcurrentReserveResults(t *testing.T, ctx context.Context, pool *pgxpool.Pool, s Store, tenant, firstResultID string) {
+	t.Helper()
+	second, err := s.Start(ctx, StartRequest{
+		TenantID: tenant, IdempotencyKey: testUUID(t), DeviceID: testUUID(t), AssetID: testUUID(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secondCommand string
+	if err := common.WithTenantSchema(ctx, pool, tenant, "", func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT command_id FROM saga_command_outbox
+			WHERE tenant_id=$1 AND saga_id=$2 AND step='asset.reserve'`, tenant, second.SagaID).Scan(&secondCommand)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondResult := ReserveSucceeded{
+		TenantID: tenant, SagaID: second.SagaID, CommandID: secondCommand,
+		ResultID: firstResultID, SagaVersion: 1, FencingToken: 1,
+	}
+	if _, err := s.ApplyReserveSucceeded(ctx, secondResult); !errors.Is(err, ErrResultConflict) {
+		t.Fatalf("reusing a result ID for another command should conflict: %v", err)
+	}
+	var wg sync.WaitGroup
+	var concurrent [2]Snapshot
+	var concurrentErrs [2]error
+	resultIDs := [2]string{testUUID(t), testUUID(t)}
+	for i := range concurrent {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			candidate := secondResult
+			candidate.ResultID = resultIDs[i]
+			concurrent[i], concurrentErrs[i] = s.ApplyReserveSucceeded(ctx, candidate)
+		}(i)
+	}
+	wg.Wait()
+	for i := range concurrent {
+		if concurrentErrs[i] != nil || concurrent[i].State != "configuring" || concurrent[i].Version != 2 {
+			t.Fatalf("concurrent result %d: %+v %v", i, concurrent[i], concurrentErrs[i])
+		}
+	}
+	var commands int
+	if err := common.WithTenantSchema(ctx, pool, tenant, "", func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM saga_command_outbox
+			WHERE tenant_id=$1 AND saga_id=$2 AND step='asset.configure'`, tenant, second.SagaID).Scan(&commands)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if commands != 1 {
+		t.Fatalf("concurrent results queued %d configure commands", commands)
+	}
+}

@@ -33,7 +33,7 @@ def create_index_after_startup(elastic, index):
             if not health.get("timed_out") and health.get("status") in ("yellow", "green"):
                 return
         except (TimeoutError, urllib.error.URLError, SearchError) as exc:
-            if isinstance(exc, SearchError) and exc.status not in (429, 500, 502, 503, 504):
+            if isinstance(exc, SearchError) and exc.status not in (408, 429, 500, 502, 503, 504):
                 raise
         if time.monotonic() >= deadline:
             raise TimeoutError(f"index {index} did not acquire an active shard")

@@ -1,6 +1,6 @@
 # Stage 07 — Durable provisioning and coordination
 
-Status: in progress. Stage 07a's saga database, tenant RLS, idempotent start and first command outbox are implemented and live-tested; the remaining slices and full acceptance gate are open. Stage 06's score-to-acknowledgement flow passes locally, while remote CI is pending. This plan follows the provisioning flow and acceptance gate in `GREENGUARD_MASTER_PLAN.md`.
+Status: in progress. Stage 07a's saga database, tenant RLS, idempotent start and first command outbox are implemented and live-tested. The first Stage 07b reserve-success result transition is also implemented and live-tested; participant publication/consumption, later transitions, and the full acceptance gate remain open. Stage 06's score-to-acknowledgement flow passes locally, while remote CI is pending. This plan follows the provisioning flow and acceptance gate in `GREENGUARD_MASTER_PLAN.md`.
 
 ## Outcome
 

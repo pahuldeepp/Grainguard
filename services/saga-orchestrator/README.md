@@ -1,6 +1,6 @@
 # services/saga-orchestrator
 
-Status: **Stage 07a authority implemented; participant wiring is pending**.
+Status: **Stage 07a authority and the first Stage 07b result transition implemented; participant wiring is pending**.
 
 Stages: 07.
 
@@ -16,13 +16,19 @@ records `provisioning.requested`. A repeated idempotency key returns the same
 snapshot only when the device and asset match. The partial unique asset index
 allows one active or repair-required claim per tenant and asset; two racing requests cannot both
 win. The state version and fencing token start at 1 and will guard subsequent
-row-locked transitions. Command publication, result handling, API auth, retry,
-compensation and operator repair are the next slices; no end-to-end provisioning
+row-locked transitions. `ApplyReserveSucceeded` now locks the saga row and
+atomically records a definitive reserve result, advances to `configuring`,
+queues `asset.configure`, and appends audit history. A unique command receipt
+and version/fencing checks make repeated or stale results safe. Command
+publication, the remaining results, API auth, retry, compensation and operator repair
+are the next slices; no end-to-end provisioning
 claim is made yet.
 
 Local checks: `make saga-migrate` then `make saga-test` with `SAGA_DIRECT_URL`
 from `make bootstrap`. The live tests prove one saga/command/audit transaction,
 idempotent retry, changed-payload conflict, tenant and unscoped RLS denial, and
-one winner for a concurrent asset claim.
+one winner for a concurrent asset claim. The result live test proves tenant
+isolation, mismatched fencing token rejection, atomic advancement and replay without a
+second configure command.
 
 Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.

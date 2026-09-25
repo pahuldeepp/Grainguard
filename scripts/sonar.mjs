@@ -64,7 +64,7 @@ if (command === "down") {
 if (command === "up") {
   compose(["up", "-d", "database", "sonarqube"]);
   let ready = false;
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 300; i++) {
     try {
       const response = await fetch(host + "/api/system/status", {
         signal: AbortSignal.timeout(2000),
@@ -78,8 +78,11 @@ if (command === "up") {
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  if (!ready)
+  if (!ready) {
+    compose(["ps", "-a"], false);
+    compose(["logs", "--tail", "120", "database", "sonarqube"], false);
     throw new Error("SonarQube did not become ready; inspect Compose logs.");
+  }
   console.log("SonarQube ready at " + host);
   process.exit(0);
 }
