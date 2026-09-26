@@ -12,6 +12,7 @@
     "live": "npm run build && node --test --test-concurrency=1 \"dist/testing/*.live.js\""
   },
   "dependencies": {
+    "@greenguard/otel": "0.1.0",
     "amqplib": "2.0.1",
     "pg": "8.23.0"
   },

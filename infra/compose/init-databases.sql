@@ -3,6 +3,7 @@
 \getenv read_query_password READ_QUERY_DB_PASSWORD
 \getenv projection_migrator_password PROJECTION_MIGRATOR_PASSWORD
 \getenv cdc_password CDC_DB_PASSWORD
+\getenv observability_password OBSERVABILITY_DB_PASSWORD
 \getenv inventory_password INVENTORY_DB_PASSWORD
 \getenv inventory_migrator_password INVENTORY_MIGRATOR_PASSWORD
 \getenv telemetry_password TELEMETRY_DB_PASSWORD
@@ -15,10 +16,12 @@
 -- Runtime roles never own tables and never bypass row-level security; migrators own the
 -- schema objects and are used only by migrations.
 SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
-  FROM (VALUES ('inventory_app'), ('inventory_migrator'), ('telemetry_app'), ('telemetry_migrator'), ('projection_app'), ('projection_migrator'), ('read_query')) AS roles(r)
+  FROM (VALUES ('inventory_app'), ('inventory_migrator'), ('telemetry_app'), ('telemetry_migrator'), ('projection_app'), ('projection_migrator'), ('read_query'), ('greenguard_observer')) AS roles(r)
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
 SELECT 'CREATE ROLE cdc_reader' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cdc_reader') \gexec
 ALTER ROLE cdc_reader LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD :'cdc_password';
+ALTER ROLE greenguard_observer PASSWORD :'observability_password';
+GRANT pg_monitor TO greenguard_observer;
 ALTER ROLE inventory_app PASSWORD :'inventory_password';
 ALTER ROLE inventory_migrator PASSWORD :'inventory_migrator_password';
 ALTER ROLE telemetry_app PASSWORD :'telemetry_password';

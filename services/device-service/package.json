@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@greenguard/contracts": "0.1.0",
+    "@types/express": "^5.0.6",
     "@types/pg": "8.23.1",
     "prisma": "7.10.0"
   }

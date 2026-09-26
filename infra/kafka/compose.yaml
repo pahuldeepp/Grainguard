@@ -62,6 +62,8 @@ services:
       schema-registry: { condition: service_healthy }
     ports: ["127.0.0.1:58083:8083"]
     environment:
+      JMXPORT: 9404
+      JMXHOST: 0.0.0.0
       BOOTSTRAP_SERVERS: kafka:29092
       GROUP_ID: greenguard-connect
       CONFIG_STORAGE_TOPIC: greenguard.connect.configs
@@ -86,5 +88,41 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
+  connect-jmx-exporter:
+    image: bitnami/jmx-exporter@sha256:8ceb602e43c970c0484b78d44fb2d65b04ab3ecdd701cc8b1a3f8e4aa4a12915
+    command: ["9405", "/etc/jmx-exporter/config.yaml"]
+    volumes:
+      - ./jmx-exporter/connect.yaml:/etc/jmx-exporter/config.yaml:ro
+    depends_on:
+      connect: { condition: service_healthy }
+    ports: ["127.0.0.1:19405:9405"]
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:9405/metrics >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  streaming-state-exporter:
+    image: node:22-alpine
+    working_dir: /app
+    command: [node, exporters/streaming-state-exporter.mjs]
+    environment:
+      CONNECT_URL: http://connect:8083
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      PORT: 9309
+    volumes:
+      - ../observability/exporters/streaming-state-exporter.mjs:/app/exporters/streaming-state-exporter.mjs:ro
+    depends_on:
+      connect: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+    ports: ["127.0.0.1:19309:9309"]
+    restart: unless-stopped
+  kafka-exporter:
+    image: danielqsj/kafka-exporter@sha256:4150e46b2e9697ac30e4be8de03ec1704b4bdc7037577b83b8d35a32be298c16
+    command: [--kafka.server=kafka:29092, --web.listen-address=:9308]
+    depends_on:
+      kafka: { condition: service_healthy }
+    ports: ["127.0.0.1:19308:9308"]
+    restart: unless-stopped
 volumes:
   kafka-data:

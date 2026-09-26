@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 	"greenguard.local/jobs-worker/rabbit"
 )
 
@@ -44,7 +45,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer pool.Close()
-	metrics := &Metrics{}
+	metrics := &Metrics{DBPool: pool}
 	pub := rabbit.NewPublisher(cfg.RabbitURL, nil)
 	defer pub.Close()
 	dispatcher := &Dispatcher{DB: pool, Pub: pub, Policy: cfg.Policy, Workers: cfg.Workers, Batch: cfg.Batch, Interval: 500 * time.Millisecond, Metrics: metrics}
@@ -113,7 +114,7 @@ func serveHTTP(addr string, m *Metrics, db pinger) component {
 		mux.Handle("GET /metrics", m)
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 		mux.HandleFunc("GET /readyz", readyHandler(db))
-		srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		srv := &http.Server{Addr: addr, Handler: common.REDMetrics(mux), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
 			<-ctx.Done()
 			sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

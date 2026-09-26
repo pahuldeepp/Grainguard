@@ -79,7 +79,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 // buildApp assembles the ingest endpoint when authentication is configured; otherwise the
 // service serves only its health probes.
 func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
-	app := App{Ping: pool.Ping}
+	app := App{Ping: pool.Ping, DBPool: pool}
 	shutdown := func() {
 		// Nothing to release: tracing is off.
 	}

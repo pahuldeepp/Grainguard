@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 const (
@@ -29,6 +32,7 @@ const (
 // ingest endpoint is mounted and Ingestor, Limiter, Recorder and Metrics must be set too;
 // without it the service exposes only its health probes.
 type App struct {
+	DBPool   *pgxpool.Pool
 	Consumer *BindingConsumer
 	Feed     *BindingFeed
 	Ping     func(context.Context) error
@@ -52,17 +56,14 @@ func newHandler(app App) http.Handler {
 		}
 		writeStatus(w, http.StatusOK, "ready")
 	})
-	if app.Verifier == nil && app.Consumer != nil {
-		mux.Handle("GET /metrics", app.metricsHandler())
-	}
+	mux.Handle("GET /metrics", app.metricsHandler())
 	if app.Verifier != nil {
-		mux.Handle("GET /metrics", app.metricsHandler())
 		mux.HandleFunc("POST /v1/devices/{deviceId}/readings", app.ingest)
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusNotFound, codeNotFound, "")
 	})
-	handler := CorrelationMiddleware(mux)
+	handler := common.REDMetrics(CorrelationMiddleware(mux))
 	if app.Tracing != nil {
 		handler = app.Tracing.Middleware(handler)
 	}
@@ -192,6 +193,10 @@ func (a App) metricsHandler() http.Handler {
 			ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 			defer cancel()
 			_, _ = io.WriteString(w, a.Feed.metrics(ctx))
+		}
+		_, _ = io.WriteString(w, common.RenderREDMetrics())
+		if a.DBPool != nil {
+			_, _ = io.WriteString(w, common.RenderPGXPoolMetrics("telemetry_ingest", a.DBPool.Stat()))
 		}
 	})
 }

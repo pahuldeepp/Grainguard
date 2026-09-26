@@ -1,4 +1,4 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate dev verify check-plan build smoke
+.PHONY: bootstrap db-up db-down db-logs db-migrate dev verify check-plan build smoke observability-up observability-down observability-validate observability-test-rules
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
@@ -64,6 +64,35 @@ verify: check-plan db-migrate
 	$(MAKE) build
 check-plan:
 	python3 scripts/check_plan.py
+observability-up:
+	docker compose -f infra/observability/compose.yaml up -d
+observability-down:
+	docker compose -f infra/observability/compose.yaml down
+observability-validate:
+	node scripts/observability-validate.mjs
+observability-test-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/platform.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/platform.test.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/brokers.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/brokers.test.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/slo.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/slo.test.yaml
+.PHONY: observability-aws-config
+observability-aws-config:
+	node scripts/render-observability-aws-config.mjs
+.PHONY: observability-test-broker-rules
+observability-test-broker-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/brokers.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/brokers.test.yaml
+	node --test infra/observability/exporters/streaming-state-exporter.test.mjs
+.PHONY: observability-runbook-check observability-rehearsal-test observability-rehearse
+observability-runbook-check:
+	node --test scripts/observability-runbook-check.test.mjs
+	node scripts/observability-runbook-check.mjs
+observability-rehearsal-test:
+	node --test scripts/observability-rehearsal.test.mjs
+observability-rehearse: observability-rehearsal-test
+	node scripts/observability-rehearsal.mjs
 smoke: db-migrate build
 	node scripts/smoke.mjs
 

@@ -8,8 +8,13 @@ import {
   type OnModuleDestroy,
 } from "@nestjs/common";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
+import type { Request, Response } from "express";
 import pg from "pg";
-import { httpTracingMiddleware, type Tracing } from "@greenguard/otel";
+import {
+  httpTracingMiddleware,
+  renderPostgresPoolMetrics,
+  type Tracing,
+} from "@greenguard/otel";
 import type { Db } from "./db/client.js";
 import {
   AuthGuard,
@@ -69,6 +74,85 @@ class HealthController {
 }
 const TRACING = "TRACING";
 
+type RequestCounter = {
+  method: string;
+  route: string;
+  status: number;
+  count: number;
+  duration: number;
+  bucketCounts: number[];
+};
+const requestCounters = new Map<string, RequestCounter>();
+const buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+const label = (value: string) =>
+  value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+function recordRequest(req: Request, res: Response, duration: number) {
+  const route = requestRoute(req);
+  const method = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(req.method)
+    ? req.method
+    : "OTHER";
+  const status = res.statusCode;
+  const key = `${method}\0${route}\0${status}`;
+  const current = requestCounters.get(key) ?? {
+    method,
+    route,
+    status,
+    count: 0,
+    duration: 0,
+    bucketCounts: buckets.map(() => 0),
+  };
+  current.count += 1;
+  current.duration += duration;
+  current.bucketCounts = current.bucketCounts.map(
+    (count, index) => count + (duration <= buckets[index] ? 1 : 0),
+  );
+  requestCounters.set(key, current);
+}
+function requestRoute(req: Request) {
+  const path = req.route?.path;
+  if (typeof path !== "string") return "unmatched";
+  const base = req.baseUrl || "";
+  const joined = `${base}/${path}`.replace(/\/+$/, "") || "/";
+  return joined.startsWith("/") ? joined : `/${joined}`;
+}
+function renderHttpMetrics() {
+  const lines = [
+    "# HELP http_server_requests_total Completed HTTP requests.",
+    "# TYPE http_server_requests_total counter",
+    "# HELP http_server_duration_seconds HTTP request duration in seconds.",
+    "# TYPE http_server_duration_seconds histogram",
+  ];
+  for (const row of requestCounters.values()) {
+    if (
+      row.route === "/metrics" ||
+      row.route === "/healthz" ||
+      row.route === "/readyz"
+    )
+      continue;
+    const labels = `method="${label(row.method)}",route="${label(row.route)}",status_code="${row.status}"`;
+    lines.push(`http_server_requests_total{${labels}} ${row.count}`);
+    buckets.forEach((bound, index) =>
+      lines.push(
+        `http_server_duration_seconds_bucket{${labels},le="${bound}"} ${row.bucketCounts[index]}`,
+      ),
+    );
+    lines.push(
+      `http_server_duration_seconds_bucket{${labels},le="+Inf"} ${row.count}`,
+    );
+    lines.push(`http_server_duration_seconds_sum{${labels}} ${row.duration}`);
+    lines.push(`http_server_duration_seconds_count{${labels}} ${row.count}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+function redMiddleware(req: Request, res: Response, next: () => void) {
+  if (["/metrics", "/healthz", "/readyz"].includes(req.path)) return next();
+  const start = process.hrtime.bigint();
+  res.once("finish", () =>
+    recordRequest(req, res, Number(process.hrtime.bigint() - start) / 1e9),
+  );
+  next();
+}
+
 export interface ApiOptions {
   db: Db;
   verifier: TokenVerifier;
@@ -120,6 +204,15 @@ export async function createApp(probe: Probe, api?: ApiOptions) {
     },
     { logger: ["error", "warn"] },
   );
+  app.use(redMiddleware);
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .get("/metrics", (_req: Request, res: Response) => {
+      res
+        .type("text/plain; version=0.0.4; charset=utf-8")
+        .send(`${renderHttpMetrics()}${renderPostgresPoolMetrics()}`);
+    });
   if (api) {
     if (api.tracing) app.use(httpTracingMiddleware(api.tracing.tracer));
     app.use(correlationMiddleware);

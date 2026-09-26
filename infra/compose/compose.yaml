@@ -19,6 +19,7 @@ services:
     environment:
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
+      OBSERVABILITY_DB_PASSWORD: ${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
       PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}

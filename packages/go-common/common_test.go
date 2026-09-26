@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,6 +29,29 @@ func TestCanonicalEnvelopeHelpers(t *testing.T) {
 	}
 	if got, err := Bigint(json.Number("7")); err != nil || got != "7" {
 		t.Fatal(got, err)
+	}
+}
+
+func TestPGXPoolMetricsUseFixedPoolNamesAndExposeSaturation(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://user:pass@127.0.0.1:1/db?pool_max_conns=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	text := RenderPGXPoolMetrics("telemetry_ingest", pool.Stat())
+	for _, expected := range []string{
+		`postgres_pool_size{pool="telemetry_ingest"} 7`,
+		`postgres_pool_total_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_idle_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_acquired_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_empty_acquire_wait_seconds_total{pool="telemetry_ingest"} 0`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing %q in %s", expected, text)
+		}
+	}
+	if leaked := RenderPGXPoolMetrics(`tenant_123`, pool.Stat()); leaked != "" {
+		t.Fatalf("unbounded pool name accepted: %s", leaked)
 	}
 }
 
@@ -83,6 +108,37 @@ func TestHealthRoutesAndBounds(t *testing.T) {
 	server := HTTPServer("127.0.0.1:1", handler)
 	if server.ReadHeaderTimeout == 0 || server.ReadTimeout == 0 || server.WriteTimeout == 0 {
 		t.Fatal("missing server bounds")
+	}
+}
+
+func TestREDMetricsUseRouteTemplatesAndExcludeProbes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/devices/{deviceID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("deviceID") == "bad" {
+			http.Error(w, "failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := REDMetrics(mux)
+	for _, path := range []string{"/v1/devices/one", "/v1/devices/two", "/v1/devices/bad"} {
+		r := httptest.NewRecorder()
+		handler.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	metricsBefore := RenderREDMetrics()
+	if !strings.Contains(metricsBefore, `route="GET /v1/devices/{deviceID}"`) || !strings.Contains(metricsBefore, `status_code="500"`) {
+		t.Fatalf("route template/status missing: %s", metricsBefore)
+	}
+	if strings.Contains(metricsBefore, "one") || strings.Contains(metricsBefore, "two") || strings.Contains(metricsBefore, `route="GET /v1/devices/bad"`) {
+		t.Fatalf("request path value leaked into labels: %s", metricsBefore)
+	}
+	count := strings.Count(metricsBefore, `route="GET /v1/devices/{deviceID}"`)
+	probeMux := http.NewServeMux()
+	probeMux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
+	probeHandler := REDMetrics(probeMux)
+	probeHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if got := strings.Count(RenderREDMetrics(), `route="GET /v1/devices/{deviceID}"`); got != count {
+		t.Fatalf("health probe affected RED series count: before=%d after=%d", count, got)
 	}
 }
 
