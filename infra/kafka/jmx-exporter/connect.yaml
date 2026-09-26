@@ -1,0 +1,57 @@
+hostPort: connect:9404
+startDelaySeconds: 0
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+rules:
+  - pattern: "kafka.connect<type=connect-worker-metrics><>(connector-count|task-count|connector-startup-success-total|connector-startup-failure-total|task-startup-success-total|task-startup-failure-total|connector-startup-success-percentage|connector-startup-failure-percentage|task-startup-success-percentage|task-startup-failure-percentage)"
+    name: kafka_connect_worker_$1
+    type: GAUGE
+  - pattern: "kafka.connect<type=connect-worker-rebalance-metrics><>(completed-rebalances-total|rebalancing|time-since-last-rebalance-ms|worker-rebalance-total|worker-rebalance-max-time-ms|worker-rebalance-avg-time-ms)"
+    name: kafka_connect_rebalance_$1
+    type: GAUGE
+  - pattern: "kafka.connect<type=connector-task-metrics, connector=([^,]+), task=([^,]+)><>(batch-size-avg|batch-size-max|offset-commit-avg-time-ms|offset-commit-failure-percentage|offset-commit-success-percentage|pause-ratio|running-ratio|sink-record-active-count|sink-record-lag-max|sink-record-read-total|sink-record-send-total|source-record-active-count|source-record-poll-rate|source-record-write-rate|source-record-write-total)"
+    name: kafka_connect_task_$3
+    labels:
+      connector: "$1"
+      task: "$2"
+    type: GAUGE
+  - pattern: "debezium.postgres<type=connector-metrics, context=streaming, server=([^,]+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|NumberOfEventsFiltered|NumberOfErroneousEvents|QueueRemainingCapacity|QueueTotalCapacity|TotalNumberOfEventsSeen|TotalNumberOfCreateEventsSeen|TotalNumberOfUpdateEventsSeen|TotalNumberOfDeleteEventsSeen)"
+    name: debezium_postgres_streaming_$2
+    labels:
+      server: "$1"
+    type: GAUGE
+  - pattern: "debezium.postgresql<type=connector-metrics, context=streaming, server=([^,]+)><>(MilliSecondsBehindSource|MilliSecondsSinceLastEvent|NumberOfEventsFiltered|NumberOfErroneousEvents|QueueRemainingCapacity|QueueTotalCapacity|TotalNumberOfEventsSeen|TotalNumberOfCreateEventsSeen|TotalNumberOfUpdateEventsSeen|TotalNumberOfDeleteEventsSeen)"
+    name: debezium_postgres_streaming_$2
+    labels:
+      server: "$1"
+    type: GAUGE
+  - pattern: "debezium.postgres<type=connector-metrics, context=streaming, server=([^,]+)><>Connected"
+    name: debezium_postgres_streaming_connected
+    labels:
+      server: "$1"
+    type: GAUGE
+  - pattern: "debezium.postgresql<type=connector-metrics, context=streaming, server=([^,]+)><>Connected"
+    name: debezium_postgres_streaming_connected
+    labels:
+      server: "$1"
+    type: GAUGE
+  - pattern: "debezium.postgresql<type=connector-metrics, context=snapshot, server=([^,]+)><>(.*)"
+    name: debezium_postgres_snapshot_$2
+    labels:
+      server: "$1"
+    type: GAUGE
+  - pattern: "java.lang<type=Memory><>(HeapMemoryUsage.used|NonHeapMemoryUsage.used)"
+    name: jvm_memory_bytes_used
+    labels:
+      area: "$1"
+    type: GAUGE
+  - pattern: "java.lang<type=GarbageCollector, name=([^,]+)><>CollectionTime"
+    name: jvm_gc_collection_time_ms
+    labels:
+      gc: "$1"
+    type: COUNTER
+  - pattern: "java.lang<type=GarbageCollector, name=([^,]+)><>CollectionCount"
+    name: jvm_gc_collection_count
+    labels:
+      gc: "$1"
+    type: COUNTER

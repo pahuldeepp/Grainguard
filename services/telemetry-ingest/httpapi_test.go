@@ -415,15 +415,20 @@ func apiAssertSpanMatches(t *testing.T, exporter *tracetest.InMemoryExporter, st
 	}
 }
 
-func TestOnlyTheHealthProbesExistWithoutAuthenticationConfigured(t *testing.T) {
+func TestMetricsAndHealthExistWithoutAuthenticationConfigured(t *testing.T) {
 	h := newHandler(App{Ping: func(context.Context) error { return nil }})
-	for _, target := range []string{"POST /v1/devices/" + randomUUID() + "/readings", "GET /metrics", "GET /nope"} {
+	for _, target := range []string{"POST /v1/devices/" + randomUUID() + "/readings", "GET /nope"} {
 		parts := strings.SplitN(target, " ", 2)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(parts[0], parts[1], nil))
 		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != contentTypeProblem {
 			t.Errorf("%s: %d %s", target, w.Code, w.Header().Get("Content-Type"))
 		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "# HELP http_server_requests_total") {
+		t.Fatalf("metrics must remain scrapeable without API auth: %d %s", w.Code, w.Body.String())
 	}
 }
 

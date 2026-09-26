@@ -149,7 +149,7 @@ func TestBindingHTTPReadinessMetricsAndRetryAfter(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	App{}.metricsHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if w.Body.Len() != 0 {
+	if !strings.Contains(w.Body.String(), "# HELP http_server_requests_total") {
 		t.Fatal(w.Body.String())
 	}
 }

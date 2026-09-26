@@ -17,6 +17,7 @@ import (
 
 type app struct {
 	lease              *writerLease
+	dbPool             *pgxpool.Pool
 	processor          *Processor
 	ping               func(context.Context) error
 	close              func()
@@ -86,7 +87,7 @@ func buildApp(getenv func(string) string) (*app, error) {
 	}
 	store := &Store{DB: pool, Schema: targetSchema, HistoryWindow: window, Lease: lease}
 	p := &Processor{Tracer: provider.Tracer(consumerName), Source: kafka, Sink: kafka, Schemas: schemas, Apply: store.Apply, Heartbeat: store.Heartbeat, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 20 * time.Second}
-	return &app{lease: lease, historyOutOfWindow: store.HistoryOutOfWindow.Load, processor: p, ping: func(ctx context.Context) error {
+	return &app{lease: lease, dbPool: pool, historyOutOfWindow: store.HistoryOutOfWindow.Load, processor: p, ping: func(ctx context.Context) error {
 		var leaseErr error
 		if lease != nil {
 			leaseErr = lease.current(ctx)

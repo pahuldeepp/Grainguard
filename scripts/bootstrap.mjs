@@ -21,6 +21,7 @@ const secret = (key) => {
   return env.get(key);
 };
 secret("CDC_DB_PASSWORD");
+secret("OBSERVABILITY_DB_PASSWORD");
 const admin = secret("POSTGRES_PASSWORD");
 const inventory = secret("INVENTORY_DB_PASSWORD");
 const migrator = secret("INVENTORY_MIGRATOR_PASSWORD");

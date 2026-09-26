@@ -2,6 +2,10 @@ import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import {
+  registerPostgresPool,
+  renderPostgresPoolMetrics,
+} from "@greenguard/otel";
+import {
   LocalTestAdapter,
   UnconfiguredAdapter,
   type ProviderAdapter,
@@ -32,7 +36,9 @@ export function metricsServer(metrics: Metrics, providers: Semaphore): Server {
     }
     if (req.url === "/metrics") {
       res.setHeader("content-type", "text/plain; version=0.0.4");
-      res.end(metrics.render({ provider_in_flight: providers.inFlight }));
+      res.end(
+        `${metrics.render({ provider_in_flight: providers.inFlight })}${renderPostgresPoolMetrics()}`,
+      );
       return;
     }
     res.statusCode = 404;
@@ -46,6 +52,7 @@ export async function start(config: Config): Promise<() => Promise<void>> {
     connectionString: config.databaseUrl,
     max: config.prefetch + 2,
   });
+  registerPostgresPool(pool, "notification_service");
   const connection = await connectBroker(config.rabbitUrl);
   const metrics = new Metrics();
   const providers = new Semaphore(config.providerConcurrency);

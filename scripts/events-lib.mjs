@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
 export const composeArgs = [
@@ -50,13 +50,63 @@ export function connectorConfig(database) {
   );
 }
 
+export function allConnectorConfigs() {
+  return Object.fromEntries(
+    readdirSync("infra/kafka/connectors")
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => [
+        file.slice(0, -".json".length),
+        JSON.parse(readFileSync(`infra/kafka/connectors/${file}`, "utf8")),
+      ]),
+  );
+}
+
+export function validateSharedDatabaseHeartbeatConfigs(configs) {
+  const byDatabase = new Map();
+  for (const [name, config] of Object.entries(configs)) {
+    const database = config["database.dbname"];
+    if (!database) throw new Error(`Connector ${name} has no database.dbname`);
+    const group = byDatabase.get(database) ?? [];
+    group.push({ name, config });
+    byDatabase.set(database, group);
+  }
+
+  for (const [database, connectors] of byDatabase) {
+    const heartbeatConnectors = connectors.filter(
+      ({ config }) =>
+        Number(config["heartbeat.interval.ms"] ?? 0) > 0 ||
+        config["heartbeat.action.query"],
+    );
+    if (heartbeatConnectors.length === 0) continue;
+    for (const { name, config } of connectors) {
+      if (heartbeatConnectors.some((heartbeat) => heartbeat.name === name))
+        continue;
+      if (!config["message.prefix.exclude.list"]) {
+        throw new Error(
+          `Connector ${name} shares ${database} with a heartbeat connector but has no message.prefix.exclude.list`,
+        );
+      }
+    }
+  }
+}
+
 export async function connectRequest(path, method = "GET", body) {
-  const response = await fetch(`${connectURL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response;
+  try {
+    response = await fetch(`${connectURL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new Error(`Connect ${method} ${path} timed out after 10s`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
   if (!response.ok) {
     const error = new Error(
       `Connect ${method} ${path}: HTTP ${response.status}`,

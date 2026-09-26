@@ -9,6 +9,11 @@ import {
   type SpanContext,
   type Tracer,
 } from "@opentelemetry/api";
+export {
+  recordPostgresQueryDuration,
+  registerPostgresPool,
+  renderPostgresPoolMetrics,
+} from "./postgres-metrics.js";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	common "greenguard.local/go-common"
 )
 
 type partitionKey struct {
@@ -58,6 +60,9 @@ func (a *app) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = fmt.Fprintf(w, "projection_binding_feed_age_seconds %g\n", age)
 	p.Observations.render(w)
+	if a.dbPool != nil {
+		_, _ = fmt.Fprint(w, common.RenderPGXPoolMetrics("projection_builder", a.dbPool.Stat()))
+	}
 }
 func (o *observations) render(w http.ResponseWriter) {
 	o.mu.Lock()
