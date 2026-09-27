@@ -2,22 +2,47 @@
 
 This is the single Terraform root for a temporary GreenGuard AWS cell. It
 shares the platform resource definitions through the four `../platform/*.tf`
-symlinks, adds optional empty Secrets Manager containers, and keeps its state
-locally. The separate S3 state-bootstrap bucket is **not** required for this
+symlinks, adds private RDS/S3, CloudFront/WAF/ALB, Cognito public OAuth clients
+and optional empty Secrets Manager containers, and keeps its state locally.
+The separate S3 state-bootstrap bucket is **not** required for this
 profile. Run Terraform only from this directory so all commands use the same
 state.
 
-## Start and stop
+**Readiness gate:** This root is still an incomplete application deployment.
+Its ordinary `terraform plan` and `terraform apply` intentionally fail with a
+deployment-readiness error until controller bootstrap, the remaining data
+services, migrations, application releases, real-user enrollment and acceptance
+are implemented. The `allow_incomplete_foundation_plan` switch is
+only for deliberately inspecting or provisioning incomplete resources;
+it is not a full GreenGuard deployment. Leave it unset for normal use.
+
+## Future start and stop workflow
+
+The following workflow is **not runnable as a full deployment yet**. Ordinary
+`terraform plan` and `terraform apply` fail the readiness gate today. Do not
+set the incomplete-foundation override for a GreenGuard end-to-end deployment.
 
 1. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace every
    placeholder with the target account ID and region, supported EKS version, two
    availability zones, and an existing operator role ARN. Set `secret_names`
-   only for secret containers this cell owns. Do not put secret values in
+   only for secret containers this cell owns. Also select a region that supports
+   CloudFront VPC origins and supply a compatible EBS CSI add-on version.
+   Do not put secret values in
    Terraform variables or state.
-2. Use an AWS identity authorized for the resources in this root. The provider
-   checks `target_account_id`; check the region too. Apply creates EKS, EC2
+   For a laptop-run deployment, either connect through a VPN/in-VPC runner to
+   the private EKS API, or set `cluster_endpoint_public_access = true` and
+   `cluster_endpoint_public_access_cidrs` to your operator's public `/32`
+   egress address. The validation rejects all-addresses CIDRs and production.
+   Verify `kubectl` connectivity before destroy; the pre-destroy hook refuses
+   cleanup before deleting the CDK stack if the EKS API is unreachable.
+2. When the missing deployment resources and acceptance gate are complete,
+   use an AWS identity authorized for the resources in this root. The provider
+   checks `target_account_id`; check the region too. Apply would create EKS, EC2
    nodes, NAT gateways, EIPs, ECR repositories, KMS, CloudWatch logs, and optionally
-   Secrets Manager secrets. They incur charges while deployed.
+   Secrets Manager secrets, a private RDS PostgreSQL instance, its RDS-managed
+   master secret, and a private audit-export S3 bucket. They incur charges
+   while deployed. See [DATA_LAYER.md](DATA_LAYER.md) for initialization and
+   migration gates; the new resources are not a complete data plane.
 3. From this directory run:
 
    ```sh
@@ -29,20 +54,33 @@ state.
 4. When finished, from **this same directory and state**, run:
 
    ```sh
-   terraform destroy
+   ./destroy-verified.sh
    ```
+
+   This wrapper reads region, environment, cluster and account from the
+   `disposable_cell_identity` Terraform state output, runs `terraform destroy`,
+   then the AWS inventory, and exits nonzero if either step fails. Optional
+   arguments are accepted only when they match that saved identity exactly.
+   If the output is absent, the wrapper refuses to destroy; inspect and
+   recover the state before cleanup. Raw `terraform destroy` still runs its
+   pre-destroy cleanup but cannot guarantee a final inventory after all
+   Terraform-managed resources are gone. Terraform destroy provisioners fire
+   when their own resource is deleted; a future resource omitted from a
+   dependency chain could be deleted after a supposed final checker. Use the
+   wrapper for a single verified operator command, or run the inventory
+   explicitly after raw `terraform destroy`.
 
    Destroy first runs `pre-destroy.sh` (from `teardown.tf`) while the cluster
    still exists: it deletes the `GreenGuardServerless-<environment>` CDK stack,
    its two Lambda log groups, Kubernetes ingresses, `LoadBalancer` services
-   and PVCs, then waits until
+   disposable data StatefulSets and PVCs, then waits until
    controller-created load balancers are gone. It needs `aws` and `kubectl`
    on `PATH`, access to the private EKS API, and permissions for the CDK stack.
    It checks the AWS account, refuses `environment = "prod"`, and stops network
-   teardown if cleanup fails. Then run
+   teardown if cleanup fails. If raw Terraform was used, then run
 
    ```sh
-   ./check-teardown.sh <region> <environment> <cluster-name>
+   ./check-teardown.sh <region> <environment> <cluster-name> <account-id>
    ```
 
    to list anything GreenGuard-tagged that still exists, including resources
@@ -68,15 +106,32 @@ Terraform destroy cannot make that waiting period disappear.
 Only resources in this root's state are removed by its `terraform destroy`.
 Today that includes its VPC, subnets, routes, NAT gateways/EIPs, EKS cluster
 and managed nodes, ECR repositories, CloudWatch log groups, KMS key deletion
-request, related IAM roles/policies, and any `secret_names` created here.
+request, related IAM roles/policies, any `secret_names` created here, the
+private RDS PostgreSQL instance, audit-export S3 bucket, CloudFront
+distributions/VPC origin, WAF ACL, private ALB and Cognito pool/clients/domain.
+RDS manages
+its own master password in Secrets Manager and [deletes that secret when the
+instance is deleted](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-secrets-manager.html).
 `pre-destroy.sh` additionally deletes this environment's CDK stack and the
 Kubernetes ingress, LoadBalancer service and PVC owners of cloud resources.
 It waits for tagged load balancers, while storage deletion requires a separate
 post-destroy inventory. Destroy does
 **not** include `infra/terraform/bootstrap-state`, another Terraform state,
 other AWS resources Kubernetes controllers may create (for example Route 53
-records from external-dns), or manually created AWS resources. RDS, Kafka/MSK, Cassandra, WAF, Route 53, and the
-complete Stage 12 edge/data stack are not yet implemented in this root.
+records from external-dns), or manually created AWS resources. Kafka/MSK,
+Cassandra, Route 53, and the complete Stage 12 application/data stack are not
+yet implemented in this root. The RDS instance still requires databases,
+roles, migrations, PgBouncer, CDC grants, and connector deployment.
+
+The verified destroy wrapper captures the RDS-managed master secret ARN from
+Terraform state before deletion. The pre-destroy hook records exact EBS
+volume IDs from GreenGuard PVCs before deleting their owners in ignored
+`.last-destroy-pvs`; keep that file until the inventory passes. Its
+post-destroy inventory queries RDS, RDS manual snapshots, S3, the exact
+secret ARN, and those exact EBS IDs in addition to tagged
+resources. Direct `terraform destroy` cannot pass the secret ARN to the final
+inventory because its state output disappears; use `destroy-verified.sh` for
+the strongest one-command teardown evidence.
 
 A `prod` CDK stack retains its data resources on deletion, which is why the
 disposable root refuses `prod`. Do not interpret a successful Terraform exit as an account-wide

@@ -76,6 +76,18 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/platform init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/terraform/platform validate
+      - name: Validate disposable AWS root
+        run: |
+          terraform -chdir=infra/terraform/disposable init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/disposable validate
+      - name: Verify disposable teardown guards offline
+        run: bash infra/terraform/disposable/teardown_test.sh
+      - name: Verify Pod Identity trust scoping
+        run: ruby infra/gitops/disposable/check-pod-identity-trust.rb
+      - name: Verify disposable controller and data contracts
+        run: |
+          ruby infra/gitops/disposable/check-controllers.rb
+          ruby infra/kubernetes/disposable-data/check-contract.rb
 
   image-inventory:
     name: Image and registry inventory
@@ -89,6 +101,10 @@ jobs:
           persist-credentials: false
       - name: Verify Dockerfile, CI matrix and ECR repository inventory
         run: bash scripts/check-image-inventory.sh
+      - name: Verify disposable runtime contract structure
+        run: ruby infra/gitops/disposable/check-contract.rb
+      - name: Verify immutable release image resolution
+        run: ruby infra/gitops/disposable/test-resolve-images.rb
 
   quality:
     name: Required quality gate

@@ -28,3 +28,20 @@ provider "aws" {
     })
   }
 }
+
+# CloudFront WAFv2 is global and must be managed through us-east-1 even when
+# the EKS cell itself runs in another region.
+provider "aws" {
+  alias               = "global"
+  region              = "us-east-1"
+  allowed_account_ids = [var.target_account_id]
+
+  default_tags {
+    tags = merge(var.tags, {
+      Project     = "GreenGuard"
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Lifecycle   = "Disposable"
+    })
+  }
+}

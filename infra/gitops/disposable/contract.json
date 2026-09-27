@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "namespace": "greenguard",
+  "phases": [
+    {"id": "controllers", "requires": ["EKS API reachable", "pinned Argo CD, Istio, KEDA and Argo Rollouts controllers and CRDs healthy"]},
+    {"id": "data", "requires": ["PostgreSQL/PgBouncer", "Kafka/Connect/schema registry", "RabbitMQ", "Redis", "Cassandra", "OpenSearch", "MQTT", "object storage", "OIDC issuer and JWKS over HTTPS"]},
+    {"id": "migrations", "requires": ["all PostgreSQL owner-role migrations applied", "Kafka topics and connectors registered", "Cassandra keyspace/schema applied", "OpenSearch templates/indexes applied", "real tenant membership seeded"]},
+    {"id": "applications", "requires": ["every image digest resolved", "every secret reference exists", "NetworkPolicy peers and mesh principals rendered"]},
+    {"id": "acceptance", "requires": ["all workloads Available/Ready", "web and iPhone OAuth/API journeys", "telemetry to projection and alerts", "ACK and live updates"]}
+  ],
+  "releases": [
+    {"name":"dashboard","chart":"greenguard-dashboard","image":"dashboard","phase":"applications","secret":"dashboard-public-config","health":"/healthz"},
+    {"name":"bff","chart":"greenguard-bff","image":"bff","phase":"applications","secret":"bff-config","health":"/readyz"},
+    {"name":"gateway","chart":"greenguard-service","profile":"gateway","image":"gateway","phase":"applications","secret":"gateway-config","health":"/readyz"},
+    {"name":"device-service","chart":"greenguard-service","profile":"device-service","image":"device-service","phase":"applications","secret":"device-service-config","health":"/readyz"},
+    {"name":"read-api","chart":"greenguard-service","profile":"read-api","image":"read-api","phase":"applications","secret":"read-api-config","health":"/readyz"},
+    {"name":"workflow-alerts","chart":"greenguard-service","profile":"workflow-alerts","image":"workflow-alerts","phase":"applications","secret":"workflow-alerts-config","health":"/readyz"},
+    {"name":"telemetry-ingest","chart":"greenguard-service","profile":"telemetry-ingest","image":"telemetry-ingest","phase":"applications","secret":"telemetry-ingest-config","health":"/readyz"},
+    {"name":"cdc-transformer","chart":"greenguard-service","profile":"cdc-transformer","image":"cdc-transformer","phase":"applications","secret":"cdc-transformer-config","health":"/readyz"},
+    {"name":"projection-builder","chart":"greenguard-service","profile":"projection-builder","image":"projection-builder","phase":"applications","secret":"projection-builder-config","health":"/readyz"},
+    {"name":"cache-invalidator","chart":"greenguard-service","profile":"cache-invalidator","image":"cache-invalidator","phase":"applications","secret":"cache-invalidator-config","health":"/readyz"},
+    {"name":"risk-engine","chart":"greenguard-service","profile":"risk-engine","image":"risk-engine","phase":"applications","secret":"risk-engine-config","health":"/readyz"},
+    {"name":"hardware-service-worker","chart":"greenguard-service","profile":"hardware-service-worker","image":"hardware-service","phase":"applications","secret":"hardware-service-config","health":null},
+    {"name":"eventbridge-bridge","chart":"greenguard-service","profile":"eventbridge-bridge","image":"eventbridge-bridge","phase":"applications","secret":"eventbridge-bridge-config","health":null},
+    {"name":"saga-api","chart":"greenguard-service","profile":"saga-api","image":"saga-orchestrator","phase":"applications","secret":"saga-api-config","health":"tcp:8092"},
+    {"name":"saga-worker","chart":"greenguard-service","profile":"saga-worker","image":"saga-orchestrator","phase":"applications","secret":"saga-worker-config","health":null}
+  ],
+  "blockingGaps": [
+    "No controller/GitOps bootstrap is owned by Terraform",
+    "No complete AWS data and broker provisioning or migration jobs",
+    "No immutable digest promotion from CI to deployment values",
+    "No environment secrets or NetworkPolicy and mesh peer resolution",
+    "Tenant-control-plane, billing, notifications, jobs, Cassandra writer and search indexer lack deployment artifacts",
+    "No AWS web/iPhone acceptance or teardown proof"
+  ]
+}

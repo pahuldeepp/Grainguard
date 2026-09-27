@@ -15,17 +15,19 @@ resource "terraform_data" "pre_destroy_cleanup" {
   }
 
   input = {
-    script      = "${path.module}/pre-destroy.sh"
-    cluster     = aws_eks_cluster.cell.name
-    region      = var.aws_region
-    account     = var.target_account_id
-    environment = var.environment
+    script       = "${path.module}/pre-destroy.sh"
+    pv_inventory = "${path.module}/.last-destroy-pvs"
+    cluster      = aws_eks_cluster.cell.name
+    region       = var.aws_region
+    account      = var.target_account_id
+    environment  = var.environment
   }
 
   depends_on = [
     aws_eks_node_group.general,
     aws_eks_node_group.compute,
     aws_eks_addon.core,
+    aws_eks_addon.ebs_csi,
     aws_eks_access_policy_association.cluster_admin,
     aws_route.private_nat,
     aws_route_table_association.private,
@@ -36,11 +38,12 @@ resource "terraform_data" "pre_destroy_cleanup" {
     interpreter = ["bash", "-c"]
     command     = "\"$GG_SCRIPT\""
     environment = {
-      GG_SCRIPT      = self.input.script
-      GG_CLUSTER     = self.input.cluster
-      GG_REGION      = self.input.region
-      GG_ACCOUNT     = self.input.account
-      GG_ENVIRONMENT = self.input.environment
+      GG_SCRIPT            = self.input.script
+      GG_CLUSTER           = self.input.cluster
+      GG_REGION            = self.input.region
+      GG_ACCOUNT           = self.input.account
+      GG_ENVIRONMENT       = self.input.environment
+      GG_PV_INVENTORY_FILE = self.input.pv_inventory
     }
   }
 }

@@ -12,7 +12,7 @@ if [ "$GG_ENVIRONMENT" = "prod" ]; then
   echo "pre-destroy: refusing to tear down environment 'prod' from the disposable root" >&2
   exit 1
 fi
-for tool in aws kubectl; do
+for tool in aws kubectl python3; do
   command -v "$tool" >/dev/null || { echo "pre-destroy: $tool is required" >&2; exit 1; }
 done
 
@@ -23,11 +23,71 @@ if [ "$actual_account" != "$GG_ACCOUNT" ]; then
 fi
 
 log() { echo "pre-destroy: $*"; }
+pv_inventory="${GG_PV_INVENTORY_FILE:-$(dirname "$0")/.last-destroy-pvs}"
+umask 077
 
-# 1. CDK serverless stack for this environment (see infra/cdk/app.py).
+# The EKS endpoint is private by default. Verify Kubernetes connectivity and
+# admin authorization before deleting the out-of-state CDK stack or any other
+# resource; otherwise a laptop without VPC/VPN access would partially tear
+# down the cell before discovering it cannot remove Kubernetes-owned LBs/PVs.
 stack="GreenGuardServerless-$GG_ENVIRONMENT"
 stack_error="$(mktemp)"
-trap 'rm -f "$stack_error"' EXIT
+cluster_error="$(mktemp)"
+crd_error="$(mktemp)"
+kubeconfig="$(mktemp)"
+trap 'rm -f "$stack_error" "$cluster_error" "$crd_error" "$kubeconfig" "${pv_new:-}"' EXIT
+cluster_present=false
+if aws eks describe-cluster --name "$GG_CLUSTER" >/dev/null 2>"$cluster_error"; then
+  cluster_present=true
+  aws eks update-kubeconfig --name "$GG_CLUSTER" --kubeconfig "$kubeconfig" >/dev/null
+  k() { kubectl --kubeconfig "$kubeconfig" --request-timeout=60s "$@"; }
+  k get --raw=/readyz >/dev/null || {
+    echo "pre-destroy: EKS API is unreachable; connect to the private endpoint before destroy" >&2
+    exit 1
+  }
+  for kind in ingresses services statefulsets persistentvolumeclaims; do
+    if [ "$(k auth can-i delete "$kind" --all-namespaces)" != yes ]; then
+      echo "pre-destroy: Kubernetes identity cannot delete $kind across namespaces" >&2
+      exit 1
+    fi
+  done
+  # Stop reconciliation before CDK or PVC teardown. An API/RBAC failure must
+  # not masquerade as an absent Argo CRD.
+  argo_present=false
+  if k get crd applications.argoproj.io >/dev/null 2>"$crd_error"; then
+    argo_present=true
+  elif ! grep -q 'NotFound' "$crd_error"; then
+    cat "$crd_error" >&2
+    echo "pre-destroy: cannot determine whether Argo Applications exist" >&2
+    exit 1
+  fi
+  if [ "$argo_present" = true ]; then
+    if [ "$(k auth can-i delete applications.argoproj.io --all-namespaces)" != yes ]; then
+      echo "pre-destroy: Kubernetes identity cannot delete Argo Applications" >&2
+      exit 1
+    fi
+    log "deleting this cell's Argo Applications before other resources"
+    k delete applications.argoproj.io --all-namespaces -l "greenguard.io/cell=$GG_CLUSTER" --wait=true --timeout=10m
+    # An unlabeled Application targeting GreenGuard could recreate claims.
+    # Refuse teardown instead of deleting another owner's Application.
+    k get applications.argoproj.io --all-namespaces -o json | python3 -c '
+import json, sys
+for app in json.load(sys.stdin).get("items", []):
+    spec = app.get("spec", {})
+    targets = [spec.get("destination", {})] + spec.get("destinations", [])
+    if any(t.get("namespace") == "greenguard" for t in targets):
+        name = app.get("metadata", {}).get("name", "<unknown>")
+        raise SystemExit(f"pre-destroy: Argo Application {name} still targets greenguard; reconcile/delete its owner first")
+'
+  fi
+elif grep -q 'ResourceNotFoundException' "$cluster_error"; then
+  log "cluster $GG_CLUSTER not found; skipping Kubernetes cleanup"
+else
+  cat "$cluster_error" >&2
+  exit 1
+fi
+
+# 1. CDK serverless stack for this environment (see infra/cdk/app.py).
 if aws cloudformation describe-stacks --stack-name "$stack" >/dev/null 2>"$stack_error"; then
   log "deleting CloudFormation stack $stack"
   aws cloudformation delete-stack --stack-name "$stack"
@@ -55,14 +115,29 @@ for log_group in \
 done
 
 # 2. Kubernetes owners of AWS resources: ingresses, LoadBalancer services, volumes.
-cluster_error="$(mktemp)"
-trap 'rm -f "$stack_error" "$cluster_error"' EXIT
-if aws eks describe-cluster --name "$GG_CLUSTER" >/dev/null 2>"$cluster_error"; then
-  kubeconfig="$(mktemp)"
-  trap 'rm -f "$stack_error" "$cluster_error" "$kubeconfig"' EXIT
-  aws eks update-kubeconfig --name "$GG_CLUSTER" --kubeconfig "$kubeconfig" >/dev/null
-  k() { kubectl --kubeconfig "$kubeconfig" --request-timeout=60s "$@"; }
-
+if [ "$cluster_present" = true ]; then
+  # Save exact EBS volume IDs while PV claim references still exist. This
+  # prevents the post-destroy inventory from blaming another cluster's PVCs.
+  # Keep IDs captured by a previous attempt: its PVCs may already be gone.
+  pv_new="$(mktemp "${pv_inventory}.XXXXXX")"
+  k get pv -o json | python3 -c '
+import json, re, sys
+data = json.load(sys.stdin)
+for pv in data.get("items", []):
+    spec = pv.get("spec", {})
+    if spec.get("csi", {}).get("driver") != "ebs.csi.aws.com":
+        continue
+    if spec.get("claimRef", {}).get("namespace") != "greenguard":
+        continue
+    volume_id = spec["csi"].get("volumeHandle", "")
+    if not re.fullmatch(r"vol-[0-9a-f]+", volume_id):
+        raise SystemExit("pre-destroy: invalid EBS volume ID on a GreenGuard PV")
+    print(volume_id)
+' >"$pv_new"
+  if [ -f "$pv_inventory" ]; then cat "$pv_inventory" >>"$pv_new"; fi
+  sort -u "$pv_new" >"$pv_inventory"
+  rm -f "$pv_new"
+  pv_new=""
   log "deleting ingresses"
   k delete ingress --all --all-namespaces --wait=true --timeout=10m
   log "deleting LoadBalancer services"
@@ -71,15 +146,12 @@ if aws eks describe-cluster --name "$GG_CLUSTER" >/dev/null 2>"$cluster_error"; 
     while read -r namespace name; do
       [ -n "$name" ] && k delete service -n "$namespace" "$name" --wait=true --timeout=10m
     done
+  # Stop disposable data writers before removing their RWO claims. GitOps
+  # reconciliation must already be disabled so it cannot recreate them.
+  log "deleting disposable data StatefulSets"
+  k delete statefulset -n greenguard redis-cluster rabbitmq --ignore-not-found --wait=true --timeout=10m
   log "deleting persistent volume claims"
   k delete pvc --all --all-namespaces --wait=true --timeout=10m
-else
-  if grep -q 'ResourceNotFoundException' "$cluster_error"; then
-    log "cluster $GG_CLUSTER not found; skipping Kubernetes cleanup"
-  else
-    cat "$cluster_error" >&2
-    exit 1
-  fi
 fi
 
 # 3. Wait until controllers have removed the load balancers they own; these
