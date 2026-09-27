@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 )
 
 func TestTTLBounds(t *testing.T) {
@@ -25,5 +27,24 @@ func TestTTLBounds(t *testing.T) {
 	}
 	if Rejected(nil) || Rejected(errors.New("unexpected")) {
 		t.Fatal("unexpected row rejection")
+	}
+}
+
+func TestClusterMetadataCacheModeDefaultsToFullAndCanBeOverridden(t *testing.T) {
+	cfg, err := LoadConfig(func(key string) string {
+		if key == "CASSANDRA_HOSTS" {
+			return "127.0.0.1"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Cluster(cfg.Keyspace).Metadata.CacheMode; got != gocql.Full {
+		t.Fatalf("default metadata cache mode = %v, want Full", got)
+	}
+	cfg.MetadataCacheMode = gocql.Disabled
+	if got := cfg.Cluster(cfg.Keyspace).Metadata.CacheMode; got != gocql.Disabled {
+		t.Fatalf("overridden metadata cache mode = %v, want Disabled", got)
 	}
 }
