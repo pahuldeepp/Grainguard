@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"greenguard.local/cassandra-writer/history"
 )
@@ -61,7 +62,12 @@ func TestLiveCassandraNodeOutageCatchUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activeSession, err := history.Open(cfg)
+	// This session only needs to exercise writes against an unavailable node.
+	// Avoid schema refresh during control-connection reconnect: with full schema
+	// caching, gocql v2.1.2 can block Session.Close while reconnecting after outage.
+	faultConfig := cfg
+	faultConfig.MetadataCacheMode = gocql.Disabled
+	activeSession, err := history.Open(faultConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

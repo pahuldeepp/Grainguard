@@ -19,6 +19,7 @@ type Config struct {
 	Keyspace          string
 	Datacenter        string
 	ReplicationFactor int
+	MetadataCacheMode gocql.MetadataCacheMode
 	Username          string
 	Password          string
 	Timeout           time.Duration
@@ -64,6 +65,7 @@ func (c Config) Cluster(keyspace string) *gocql.ClusterConfig {
 	cluster.Consistency = gocql.LocalQuorum
 	cluster.Timeout = c.Timeout
 	cluster.ConnectTimeout = c.Timeout
+	cluster.Metadata.CacheMode = c.MetadataCacheMode
 	cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.DCAwareRoundRobinPolicy(c.Datacenter))
 	if c.Username != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{Username: c.Username, Password: c.Password}
