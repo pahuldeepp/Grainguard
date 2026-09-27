@@ -1299,8 +1299,11 @@ async function scenarioLoading(alice) {
     await delay(1500);
     // unroute() below can resolve a request that is still in this delay before this handler
     // gets to it; Playwright then throws "Route is already handled!" on the redundant
-    // continue(), which would otherwise crash the whole harness process uncaught.
-    await route.continue().catch(() => undefined);
+    // continue(), which would otherwise crash the whole harness process uncaught. Only that
+    // exact race is swallowed; any other continue() failure still surfaces.
+    await route.continue().catch((error) => {
+      if (!/already handled/i.test(error?.message ?? "")) throw error;
+    });
   });
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.fill("#device-search", `loading-${id}`);
