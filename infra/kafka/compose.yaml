@@ -63,7 +63,10 @@ services:
     ports: ["127.0.0.1:58083:8083"]
     environment:
       JMXPORT: 9404
-      JMXHOST: 0.0.0.0
+      # RMI advertises this hostname in the stub returned to the exporter.
+      # Use the Compose service DNS name; 0.0.0.0 is a bind address, not a
+      # reachable hostname, and causes the JMX exporter to get connection refused.
+      JMXHOST: connect
       BOOTSTRAP_SERVERS: kafka:29092
       GROUP_ID: greenguard-connect
       CONFIG_STORAGE_TOPIC: greenguard.connect.configs
@@ -92,7 +95,7 @@ services:
     image: bitnami/jmx-exporter@sha256:8ceb602e43c970c0484b78d44fb2d65b04ab3ecdd701cc8b1a3f8e4aa4a12915
     command: ["9405", "/etc/jmx-exporter/config.yaml"]
     volumes:
-      - ./jmx-exporter/connect.yaml:/etc/jmx-exporter/config.yaml:ro
+      - ../kafka/jmx-exporter/connect.yaml:/etc/jmx-exporter/config.yaml:ro
     depends_on:
       connect: { condition: service_healthy }
     ports: ["127.0.0.1:19405:9405"]

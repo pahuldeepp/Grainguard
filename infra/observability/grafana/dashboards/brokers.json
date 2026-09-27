@@ -801,6 +801,45 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Confirmed flush LSN advancement (bytes / 5m)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "delta(pg_wal_slot_confirmed_flush_position_bytes[5m])",
+          "legendFormat": "{{database}} {{slot_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown / replication-slot exporter not configured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Change in confirmed_flush_lsn position over five minutes. A flat line while retained WAL grows indicates the slot is not acknowledging source progress; a database timeline reset can produce a negative delta."
     }
   ]
 }

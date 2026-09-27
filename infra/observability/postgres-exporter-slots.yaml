@@ -8,6 +8,7 @@ pg_wal_slot:
     SELECT COALESCE(database, '') AS database,
     slot_name,
     active::int AS active,
+    COALESCE(pg_wal_lsn_diff(confirmed_flush_lsn, '0/0'::pg_lsn), 0)::float8 AS confirmed_flush_position_bytes,
     COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0)::float8 AS retained_bytes,
     CASE WHEN current_setting('max_slot_wal_keep_size') = '-1' THEN -1
     ELSE pg_size_bytes(current_setting('max_slot_wal_keep_size')) END::float8 AS cap_bytes,
@@ -25,6 +26,9 @@ pg_wal_slot:
     - active:
         usage: GAUGE
         description: 1 when a walsender is attached to the slot
+    - confirmed_flush_position_bytes:
+        usage: GAUGE
+        description: Confirmed flush LSN converted to a byte position for progress tracking
     - retained_bytes:
         usage: GAUGE
         description: WAL bytes between the current LSN and the slot restart_lsn

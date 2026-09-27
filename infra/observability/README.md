@@ -73,6 +73,14 @@ Kafka lag and partition metrics come from the kafka-exporter in
 `infra/kafka/compose.yaml`; RabbitMQ from its built-in Prometheus plugin. Lag alerts
 cover only the durable consumer-group allowlist in `rules/brokers.yaml`.
 
+The slot exporter exposes `pg_wal_slot_confirmed_flush_position_bytes`; the
+brokers dashboard shows its five-minute delta so operators can tell whether
+Debezium is advancing its confirmed flush LSN. This is a byte-position gauge,
+not the original PostgreSQL LSN string. The Connect JMX exporter also exposes
+Debezium streaming metrics; `JMXHOST` must be the Compose DNS name `connect`
+because Java RMI advertises that name to the exporter (a wildcard bind address
+such as `0.0.0.0` is not a reachable RMI hostname).
+
 Local storage is bounded for Prometheus (7 days / 2 GB); other backends use local
 volumes and should be reset with `docker compose ... down -v` when a clean lab is
 needed. Do not use this single-node profile for production availability claims.
