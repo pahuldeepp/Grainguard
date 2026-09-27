@@ -17,7 +17,7 @@ This is live local dependency evidence for the inventory/CDC/binding/freshness r
 
 ## Trace and log inspection
 
-Tempo search on the running local backend returned application traces from both `telemetry-ingest` and `cdc-transformer`. A sampled `POST /v1/devices/:id/readings` server trace returned HTTP 202. A CDC producer span named `cdc publish` was also present. The retrieved request trace contains one server span; the retrieved CDC span is in a separate trace. These samples do not establish causal propagation across the full broker journey.
+Tempo search on the running local backend returned application traces from both `telemetry-ingest` and `cdc-transformer`. A sampled `POST /v1/devices/:id/readings` server trace returned HTTP 202. Looking up the traceparent persisted on that exact telemetry outbox row returned the matching CDC producer span under the same trace ID, with the HTTP server span as its parent. This proves causal propagation from the real ingest request through the CDC producer. It does not prove downstream risk, projection, or notification spans.
 
 Loki's label endpoint returned no labels, and a query for the request trace ID returned zero log entries. Therefore trace-to-log correlation is **not proven for this application journey**; only the previously documented synthetic trace/log backend correlation is proven.
 
