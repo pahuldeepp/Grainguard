@@ -15,6 +15,7 @@ test("durations scale down but never below one second", () => {
   assert.equal(scaleDuration("2m", 60), "2s");
   assert.equal(scaleDuration("30s", 60), "1s");
   assert.equal(scaleDuration("1h", 60), "60s");
+  assert.match(scaleRulesText("interval: 1m\n", 60), /interval: 1s/);
 });
 
 test("scaling rewrites for and range selectors only", () => {
@@ -25,6 +26,16 @@ test("scaling rewrites for and range selectors only", () => {
   assert.match(scaled, /rate\(x\[5s\]\) > 2/);
   assert.match(scaled, /for: 10s/);
   assert.match(scaled, /waits 10m/);
+});
+
+test("a sink rehearsal can isolate the SLO alert under test", () => {
+  const source = `groups:\n  - name: slo-alerts\n    rules:\n      - alert: SLOBurnRateFastPage\n        expr: up > 0\n      - alert: SLOBurnRateSlowPage\n        expr: up > 0\n  - name: slo-integrity\n    rules:\n      - alert: IntegrityCDCQuarantined\n        expr: up > 0\n`;
+  const out = scaleRulesText(source, 60, {
+    excludeAlerts: ["SLOBurnRateSlowPage"],
+  });
+  assert.match(out, /alert: SLOBurnRateFastPage/);
+  assert.match(out, /alert: IntegrityCDCQuarantined/);
+  assert.doesNotMatch(out, /alert: SLOBurnRateSlowPage/);
 });
 
 test("the rehearsal Alertmanager keeps the real routing and swaps the URL", () => {
@@ -82,11 +93,14 @@ test("failing counters only grow while their scenario is active", () => {
   const base = target.render();
   target.set("slow-queries", true);
   target.set("cdc-quarantine", true);
+  target.set("slo-burn-fast", true);
   target.tick();
   assert.notEqual(target.render(), base);
   assert.match(target.render(), /^postgres_slow_queries_total [1-9]/m);
   assert.match(target.render(), /^cdc_quarantined_total [1-9]/m);
+  assert.match(target.render(), /status_code="500"\} 100$/m);
   target.set("cdc-quarantine", false);
+  target.set("slo-burn-fast", false);
   const quarantines = /^cdc_quarantined_total (\d+)/m.exec(target.render())[1];
   target.tick();
   assert.equal(

@@ -86,3 +86,9 @@ Added synthetic endpoints for RabbitMQ's detailed queue metric and the PostgreSQ
 The inactive-slot fault also made `ReplicationSlotInactiveCritical` pending; both alerts cleared after recovery. Other broker alerts and SLO burn-rate alert sink paths remain covered by promtool only.
 
 Durations are scaled by 60 and do not represent production detection or notification latency. These are synthetic metric faults; AWS, real contact-point routing, and full trace/log diagnosis are outside this rehearsal.
+
+## Integrated final rehearsal update (2026-09-26)
+
+After integration into the domain-product worktree, `node --test scripts/observability-rehearsal.test.mjs` passed all 7 harness tests and `OBSERVABILITY_DB_PASSWORD=unused node scripts/observability-rehearsal.mjs` completed all 18 scenarios with exit 0. In addition to the 17 scenarios above, `SLOBurnRateFastPage` fired, reached the configured webhook with its expected severity and runbook URL, then resolved after recovery. For this isolated sink rehearsal only, the generated rule copy excludes the slower SLO burn alerts so that the recovery loop remains bounded; checked-in rule files are unchanged. This proves the fast-page alert lifecycle through the local webhook sink, not owner-approved SLO policy, production paging, or the slow/ticket burn alert routes.
+
+The final isolated repository gate, `make -f work/isolation/Makefile verify`, passed on the integrated tree. Its Postgres migrations and live database tests used the isolated PostgreSQL instance at port 55439; the shared development database was not modified. The run also caught and fixed stale module metadata in `services/cdc-transformer`, `services/cache-invalidator`, and `services/cassandra-writer`, plus a projection-builder database test that incorrectly routed dynamically created scratch databases through PgBouncer's static database map. No external AWS or production notification integration was exercised.

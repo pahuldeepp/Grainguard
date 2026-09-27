@@ -102,6 +102,16 @@ async function generate() {
   const slo = scaleRulesText(
     await readFile(join(OBS, "rules/slo.yaml"), "utf8"),
     FACTOR,
+    {
+      // The short fast-page rehearsal otherwise also holds slow-window burn
+      // ticket alerts for minutes after recovery. Those rules stay covered by
+      // promtool; this sink test isolates the alert under test.
+      excludeAlerts: [
+        "SLOBurnRateSlowPage",
+        "SLOBurnRateFastTicket",
+        "SLOBurnRateSlowTicket",
+      ],
+    },
   );
   const am = rehearsalAlertmanager(
     await readFile(join(OBS, "alertmanager.yaml"), "utf8"),
@@ -186,11 +196,12 @@ async function fire(ctx, scenario, row) {
 async function recover(ctx, scenario, row) {
   const t1 = now();
   await control(scenario.control, "heal");
+  const recoveryTimeout = scenario.alert.startsWith("SLOBurnRate") ? 150 : 60;
   await waitFor(
     async () =>
       !(await promAlerts()).some((a) => a.labels.alertname === scenario.alert),
     "alert to leave Prometheus",
-    60,
+    recoveryTimeout,
   );
   await waitFor(
     async () =>
@@ -204,7 +215,7 @@ async function recover(ctx, scenario, row) {
   await waitFor(
     async () => (await promAlerts()).length === 0,
     "all alerts clear",
-    60,
+    recoveryTimeout,
   );
 }
 

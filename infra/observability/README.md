@@ -25,6 +25,10 @@ Grafana is at `http://127.0.0.1:3000` (admin / local-only default), Prometheus a
 `http://127.0.0.1:14318`; the Collector exposes OTLP metrics to Prometheus on
 internal port `8890`. Published ports bind loopback. Use `docker compose -f
 infra/observability/compose.yaml down` to stop; named volumes retain local data.
+The Collector exports OTLP traces to Tempo, metrics to Prometheus, and logs to
+Loki's native OTLP endpoint. Loki's `trace_id` metadata supports Grafana's
+Tempo-to-logs pivot; keep trace and request identifiers in traces/logs, never
+as Prometheus labels.
 
 Dashboards and rules are provisioned from this directory. App targets use their
 documented host development ports: telemetry-ingest 8080, CDC 8081, projection
@@ -49,9 +53,9 @@ SLO targets remain candidates until their SLI boundaries are approved and measur
 `make observability-test-rules` validates and evaluates platform, broker, and SLO
 rules against synthetic series. `make observability-runbook-check` checks all
 alert/runbook links and required sections. `make observability-rehearse` tests
-the platform and Kafka broker alerts through pending, firing, webhook delivery,
-recovery, and resolved notification using scaled timings. Rabbit, slot, cloud,
-and SLO alerts still need sink-based failure rehearsals. The local Alertmanager
+the platform, selected broker, and fast SLO burn page alerts through pending,
+firing, webhook delivery, recovery, and resolved notification using scaled
+timings. Other broker and SLO alerts still need sink-based failure rehearsals. The local Alertmanager
 receiver is a webhook sink; do not configure real Slack/email destinations in
 this local profile.
 

@@ -1,0 +1,85 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [prometheus:9090]
+  - job_name: node-exporter
+    static_configs:
+      - targets: [node-exporter:9100]
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: [host.docker.internal:19187]
+  - job_name: aws-cloudwatch-exporter
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:19106]
+  - job_name: rabbitmq
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics, queue_consumer_count]
+      vhost: [/]
+    static_configs:
+      - targets: [host.docker.internal:15692]
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: [host.docker.internal:19308]
+  - job_name: kafka-connect-jmx
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:19405]
+  - job_name: otel-metrics
+    static_configs:
+      - targets: [otel-collector:8890]
+  # Local development app targets. Unavailable targets appear down until started.
+  - job_name: telemetry-ingest
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8080]
+  - job_name: cdc-transformer
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8081]
+  - job_name: projection-builder
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8082]
+  - job_name: jobs-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8095]
+  - job_name: device-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:3001]
+  - job_name: workflow-alerts
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:3004]
+  - job_name: notification-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8096]
+  - job_name: risk-engine
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:8086]
+
+  - job_name: postgres-wal-slots
+    static_configs:
+      - targets: [host.docker.internal:19188]
+  - job_name: kafka-connect-state
+    static_configs:
+      - targets: [host.docker.internal:19309]
+  - job_name: rabbitmq-node
+    static_configs:
+      - targets: [host.docker.internal:15692]

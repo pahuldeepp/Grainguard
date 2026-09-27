@@ -22,6 +22,7 @@ export const SCENARIOS = [
   { alert: "PostgresClientPoolWaiters", control: "pool-waiters" },
   { alert: "PostgresPoolExhaustion", control: "pool-exhaustion" },
   { alert: "PostgresSlowQueryRateHigh", control: "slow-queries" },
+  { alert: "SLOBurnRateFastPage", control: "slo-burn-fast" },
 ];
 
 export function scaleDuration(text, factor) {
@@ -33,10 +34,22 @@ export function scaleDuration(text, factor) {
   return `${seconds}s`;
 }
 
-// Divides `for:` durations and [range] selectors; every other byte of the
-// real rule file (expressions, labels, annotations) is left untouched.
-export function scaleRulesText(text, factor) {
-  return text
+// Scales evaluation intervals, `for:` durations and [range] selectors in an
+// isolated test copy; rule expressions, labels and annotations stay intact.
+export function scaleRulesText(text, factor, { excludeAlerts = [] } = {}) {
+  const excluded = new Set(excludeAlerts);
+  let skipping = false;
+  const selected = text
+    .split("\n")
+    .filter((line) => {
+      const alert = /^[ ]{6}- alert: (\S+)/.exec(line);
+      if (alert) skipping = excluded.has(alert[1]);
+      else if (/^[ ]{2}- name:/.test(line)) skipping = false;
+      return !skipping;
+    })
+    .join("\n");
+  return selected
+    .replace(/^(\s*interval:\s*)\d+[smhdw]\s*$/gm, (_, head) => `${head}1s`)
     .replace(
       /^(\s*for:\s*)(\d+[smhdw])\s*$/gm,
       (_, head, d) => `${head}${scaleDuration(d, factor)}`,
@@ -66,6 +79,7 @@ alerting:
         - targets: [alertmanager:9093]
 scrape_configs:
   - job_name: rehearsal-target
+    honor_labels: true
     static_configs:
       - targets: [host.docker.internal:${targetPort}]
   - job_name: kafka-exporter

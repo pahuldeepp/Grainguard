@@ -51,3 +51,16 @@ A short OTLP smoke sent one metric and one trace to the Collector. The metric `g
 For read-only dev dependency checks, a temporary pinned Kafka exporter on the existing dev Docker network returned `kafka_brokers 1`; the Compose streaming-state exporter reported Connect/Registry up and Prometheus counted eight RUNNING connectors. RabbitMQ's in-network Prometheus endpoint returned HTTP 200 and queue series, but host port 15692 is not published by the already-running dev container. Direct SQL showed 8/8 logical replication slots active and the control outbox slot active at about 219 MB retained; it also confirmed the observer role is absent. No shared dependency was restarted or altered.
 
 During the live snapshot, Prometheus correctly did not raise `KafkaBrokerUnavailable`; it showed pending alerts for configured durable consumer-group lag and a firing `ProjectionFreshnessUnknown` while app services were stopped. These are observations of this dev snapshot, not a production baseline.
+# Post-integration trace-to-log correlation smoke (2026-09-26)
+
+The integrated local OTel Collector accepts OTLP traces and logs and exports them to Tempo and Loki. A synthetic `greenguard-observability-smoke` span and log were sent to the local collector with matching trace/span IDs. Tempo returned the trace, and Loki returned the log using:
+
+```logql
+{service_name="greenguard-observability-smoke"} | trace_id="0123456789abcdef0123456789abcdef"
+```
+
+This verifies the Grafana backend drill-down path with synthetic telemetry only. It does not establish application-level correlation across GreenGuard services.
+
+## Isolated PostgreSQL exporter smoke (2026-09-26)
+
+Created/rotated the `greenguard_observer` role only in `greenguard-stage11-isolated-postgres-1` and granted PostgreSQL's `pg_monitor` role. Both the standard exporter (`127.0.0.1:19187`) and replication-slot exporter (`127.0.0.1:19188`) returned `pg_up 1`; Prometheus marked `postgres-exporter` and `postgres-wal-slots` up. Their connection target was the isolated database at host port `55439`. The shared development database was not changed or queried during this exporter check.

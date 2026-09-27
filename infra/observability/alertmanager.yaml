@@ -1,0 +1,11 @@
+route:
+  receiver: local-test-sink
+  group_by: [alertname, service, dependency]
+  group_wait: 2s
+  group_interval: 15s
+  repeat_interval: 1h
+receivers:
+  - name: local-test-sink
+    webhook_configs:
+      - url: http://host.docker.internal:18080/alerts
+        send_resolved: true

@@ -53,6 +53,14 @@ if (/tenant_id|device_id|request_id|event_id|trace_id|span_id/.test(rules)) {
     "Prometheus rules contain a forbidden high-cardinality identifier",
   );
 }
+const collector = await readFile(join(root, "otel-collector.yaml"), "utf8");
+if (
+  !/logs:\s*\n\s+receivers:\s*\[otlp\]/.test(collector) ||
+  !/exporters:\s*\[otlphttp\/loki\]/.test(collector) ||
+  !/endpoint:\s*http:\/\/loki:3100\/otlp/.test(collector)
+) {
+  throw new Error("OTLP logs must be exported to Loki's native OTLP endpoint");
+}
 for (const required of [
   "ObservabilityTargetDown",
   "APIHighServerErrorRate",
