@@ -260,6 +260,8 @@ resource "aws_eks_addon" "core" {
 
   cluster_name                = aws_eks_cluster.cell.name
   addon_name                  = each.value
+  addon_version               = each.value == "vpc-cni" ? var.vpc_cni_addon_version : null
+  configuration_values        = each.value == "vpc-cni" ? jsonencode({ enableNetworkPolicy = "true" }) : null
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 

@@ -30,6 +30,15 @@ variable "kubernetes_version" {
   }
 }
 
+variable "vpc_cni_addon_version" {
+  description = "Exact VPC CNI add-on version supported in the selected EKS region; must support Kubernetes NetworkPolicy."
+  type        = string
+  validation {
+    condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", var.vpc_cni_addon_version))
+    error_message = "vpc_cni_addon_version must be an explicit vX.Y.Z-eksbuild.N release."
+  }
+}
+
 variable "vpc_cidr" {
   description = "Non-overlapping VPC CIDR reserved for this cell."
   type        = string
@@ -65,12 +74,12 @@ variable "cluster_endpoint_public_access" {
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
-  description = "Approved operator/VPN CIDRs allowed to reach a public EKS API endpoint."
+  description = "Approved operator/VPN CIDRs allowed to reach a non-production public EKS API endpoint. Never use an all-addresses CIDR."
   type        = list(string)
   default     = []
   validation {
-    condition     = (length(var.cluster_endpoint_public_access_cidrs) == 0 || alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0))])) && (!var.cluster_endpoint_public_access || length(var.cluster_endpoint_public_access_cidrs) > 0)
-    error_message = "Public endpoint access requires at least one valid IPv4/IPv6 CIDR."
+    condition     = (length(var.cluster_endpoint_public_access_cidrs) == 0 || alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0)) && try(tonumber(split("/", cidr)[1]), 0) > 0])) && (!var.cluster_endpoint_public_access || (var.environment != "prod" && length(var.cluster_endpoint_public_access_cidrs) > 0))
+    error_message = "Public EKS API access is non-production only and requires explicit valid operator CIDRs; 0.0.0.0/0 and ::/0 are forbidden."
   }
 }
 
@@ -132,6 +141,12 @@ variable "image_repositories" {
     "hardware-service",
     "eventbridge-bridge",
     "saga-orchestrator",
+    "tenant-control-plane",
+    "billing-service",
+    "notification-service",
+    "jobs-worker",
+    "cassandra-writer",
+    "search-indexer",
   ]
 }
 

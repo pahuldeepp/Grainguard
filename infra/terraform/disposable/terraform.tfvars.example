@@ -4,6 +4,7 @@ environment            = "sandbox"
 cluster_name           = "greenguard-sandbox-cell-1"
 kubernetes_version     = "<supported-eks-version>"
 ebs_csi_addon_version  = "<supported-vX.Y.Z-eksbuild.N>"
+vpc_cni_addon_version  = "<supported-vX.Y.Z-eksbuild.N>"
 availability_zones     = ["<region-az-a>", "<region-az-b>"]
 cluster_admin_role_arn = "arn:aws:iam::<account-id>:role/<operator-role>"
 
