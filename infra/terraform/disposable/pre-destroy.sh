@@ -117,7 +117,8 @@ done
 # 2. Kubernetes owners of AWS resources: ingresses, LoadBalancer services, volumes.
 if [ "$cluster_present" = true ]; then
   # Save exact EBS volume IDs while PV claim references still exist. This
-  # prevents the post-destroy inventory from blaming another cluster's PVCs.
+  # disposable cluster's PVC cleanup spans every namespace, so its inventory
+  # must cover every EBS PV, including released claims and controller namespaces.
   # Keep IDs captured by a previous attempt: its PVCs may already be gone.
   pv_new="$(mktemp "${pv_inventory}.XXXXXX")"
   k get pv -o json | python3 -c '
@@ -126,8 +127,6 @@ data = json.load(sys.stdin)
 for pv in data.get("items", []):
     spec = pv.get("spec", {})
     if spec.get("csi", {}).get("driver") != "ebs.csi.aws.com":
-        continue
-    if spec.get("claimRef", {}).get("namespace") != "greenguard":
         continue
     volume_id = spec["csi"].get("volumeHandle", "")
     if not re.fullmatch(r"vol-[0-9a-f]+", volume_id):
@@ -149,7 +148,7 @@ for pv in data.get("items", []):
   # Stop disposable data writers before removing their RWO claims. GitOps
   # reconciliation must already be disabled so it cannot recreate them.
   log "deleting disposable data StatefulSets"
-  k delete statefulset -n greenguard redis-cluster rabbitmq --ignore-not-found --wait=true --timeout=10m
+  k delete statefulset -n greenguard redis-cluster rabbitmq kafka --ignore-not-found --wait=true --timeout=10m
   log "deleting persistent volume claims"
   k delete pvc --all --all-namespaces --wait=true --timeout=10m
 fi

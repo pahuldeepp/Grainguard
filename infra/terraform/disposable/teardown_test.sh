@@ -127,6 +127,8 @@ echo "terraform $*" >>"$STUB_DIR/calls"
   fi
   exit 0
 }
+[ "$1" = show ] && { cat "$STUB_DIR/show_state" 2>/dev/null || printf '%s\n' '{}'; exit 0; }
+[ "$1" = destroy ] && [ ! -f "$STUB_DIR/terraform_error" ] && { rm -f "$STUB_DIR/cluster"; exit 0; }
 [ ! -f "$STUB_DIR/terraform_error" ]
 EOF
 chmod +x "$work/aws" "$work/kubectl" "$work/sleep" "$work/terraform"
@@ -200,6 +202,15 @@ touch "$STUB_DIR/cluster"
 echo vol-1234abcd >"$GG_PV_INVENTORY_FILE"
 run_pre || fail "retry with deleted PVCs should preserve captured EBS IDs"
 grep -Fxq vol-1234abcd "$GG_PV_INVENTORY_FILE" && ok "retry with remaining EKS merges saved PV IDs"
+
+setup all-namespace-pv-inventory
+touch "$STUB_DIR/cluster"
+printf '%s\n' '{"items":[{"spec":{"csi":{"driver":"ebs.csi.aws.com","volumeHandle":"vol-1111aaaa"},"claimRef":{"namespace":"greenguard"}}},{"spec":{"csi":{"driver":"ebs.csi.aws.com","volumeHandle":"vol-2222bbbb"},"claimRef":{"namespace":"monitoring"}}},{"spec":{"csi":{"driver":"ebs.csi.aws.com","volumeHandle":"vol-3333cccc"}}}]}' >"$STUB_DIR/pvs"
+run_pre || fail "all claimed EBS PVs should be captured before deleting all namespaces' PVCs"
+grep -Fxq vol-1111aaaa "$GG_PV_INVENTORY_FILE" &&
+  grep -Fxq vol-2222bbbb "$GG_PV_INVENTORY_FILE" &&
+  grep -Fxq vol-3333cccc "$GG_PV_INVENTORY_FILE" &&
+  ok "cross-namespace PVC cleanup records claimed and released EBS volumes"
 
 setup stuck
 echo 999 >"$STUB_DIR/lb_polls"
@@ -326,12 +337,44 @@ grep -q "AccessDenied" "$STUB_DIR/out" && ok "tagging API failure cannot pass as
 setup wrapper-clean
 GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1 || fail "verified destroy wrapper succeeds on empty inventory"
 grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
-  grep -q '^aws sts get-caller-identity' "$STUB_DIR/calls" && ok "verified wrapper runs destroy then inventory"
+  [ "$(grep -c '^aws sts get-caller-identity' "$STUB_DIR/calls")" -eq 3 ] &&
+  [ "$(grep -n '^aws sts get-caller-identity' "$STUB_DIR/calls" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^terraform destroy$' "$STUB_DIR/calls" | cut -d: -f1)" ] &&
+  ok "verified wrapper pre-cleans, destroys, then inventories"
+
+setup wrapper-partial-apply
+touch "$STUB_DIR/identity_error" "$STUB_DIR/cluster"
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"aws_eks_cluster.cell","mode":"managed","values":{"arn":"arn:aws:eks:us-east-1:123456789012:cluster/greenguard-sandbox-cell-1","name":"greenguard-sandbox-cell-1","tags_all":{"Project":"GreenGuard","Environment":"sandbox"}}}]}}}' >"$STUB_DIR/show_state"
+GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1 || fail "partial apply with EKS state identity should clean up"
+grep -q '^terraform show -json$' "$STUB_DIR/calls" &&
+  grep -q 'kubectl .*delete pvc --all' "$STUB_DIR/calls" &&
+  grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
+  ok "partial apply recovers EKS scope and pre-cleans before destroy"
+
+setup wrapper-pre-cleanup-fails
+touch "$STUB_DIR/cluster" "$STUB_DIR/api_unreachable"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "unreachable Kubernetes API must block Terraform destroy"; fi
+grep -q 'EKS API is unreachable' "$STUB_DIR/out" &&
+  ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "pre-cleanup failure preserves Terraform state/resources"
+
+setup wrapper-partial-rds-secret-missing
+touch "$STUB_DIR/identity_error"
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"aws_eks_cluster.cell","mode":"managed","values":{"arn":"arn:aws:eks:us-east-1:123456789012:cluster/greenguard-sandbox-cell-1","name":"greenguard-sandbox-cell-1","tags_all":{"Project":"GreenGuard","Environment":"sandbox"}}},{"address":"aws_db_instance.postgres","mode":"managed","values":{"master_user_secret":[]}}]}}}' >"$STUB_DIR/show_state"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "partial RDS state without master secret ARN must stop destroy"; fi
+grep -q 'RDS master secret ARN is unavailable' "$STUB_DIR/out" &&
+  ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "partial state preserves RDS secret inventory requirement"
+
+setup wrapper-invalid-output-identity
+printf '%s\n' '{"region":"invalid","environment":"sandbox","cluster_name":"greenguard-sandbox-cell-1","account_id":"123456789012"}' >"$STUB_DIR/identity"
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"aws_eks_cluster.cell","mode":"managed","values":{"arn":"arn:aws:eks:us-east-1:123456789012:cluster/greenguard-sandbox-cell-1","name":"greenguard-sandbox-cell-1","tags_all":{"Project":"GreenGuard","Environment":"sandbox"}}}]}}}' >"$STUB_DIR/show_state"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "invalid output identity must not fall back to partial state"; fi
+grep -q 'invalid Terraform state identity' "$STUB_DIR/out" &&
+  ! grep -q '^terraform show -json$' "$STUB_DIR/calls" &&
+  ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "invalid saved identity refuses partial-state fallback"
 
 setup wrapper-terraform-fails
 touch "$STUB_DIR/terraform_error"
 if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "Terraform failure must stop wrapper"; fi
-! grep -q '^aws ' "$STUB_DIR/calls" && ok "verified wrapper does not run inventory after failed destroy"
+[ "$(grep -c '^aws sts get-caller-identity' "$STUB_DIR/calls")" -eq 1 ] && ok "verified wrapper does not run inventory after failed destroy"
 
 setup wrapper-inventory-fails
 echo 'arn:aws:ec2:us-east-1:1:natgateway/nat-1' >"$STUB_DIR/tagged"
@@ -365,7 +408,7 @@ grep -q 'do not match' "$STUB_DIR/out" &&
 setup wrapper-missing-identity
 touch "$STUB_DIR/identity_error"
 if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "missing identity must fail"; fi
-grep -q 'missing state identity' "$STUB_DIR/out" &&
+grep -q 'cannot recover a unique cell identity from partial state' "$STUB_DIR/out" &&
   ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper refuses missing state identity"
 
 setup wrapper-output-error
@@ -375,4 +418,4 @@ grep -q 'Terraform state outputs unavailable' "$STUB_DIR/out" &&
   ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper fails closed on state output read error"
 
 echo "teardown tests: $pass passed"
-[ "$pass" -eq 34 ]
+[ "$pass" -eq 40 ]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One operator command for Terraform destroy followed by an AWS inventory.
+# One operator command for pre-cleanup, Terraform destroy, and AWS inventory.
 # Native `terraform destroy` cannot reliably run a final inventory after every
 # managed resource: destroy provisioners run when their own resource is deleted,
 # and future resources could be omitted from a dependency chain.
@@ -34,11 +34,11 @@ outputs_json="$("$terraform_bin" output -json)" || {
 }
 identity_file="$(mktemp)"
 trap 'rm -f "$identity_file"' EXIT
-printf '%s' "$outputs_json" | python3 -c '
+if printf '%s' "$outputs_json" | python3 -c '
 import json, re, sys
 outputs = json.load(sys.stdin)
 if not isinstance(outputs, dict) or "disposable_cell_identity" not in outputs:
-    raise SystemExit("destroy-verified: missing state identity output")
+    raise SystemExit(42)
 identity = outputs["disposable_cell_identity"]
 if not isinstance(identity, dict) or "value" not in identity:
     raise SystemExit("destroy-verified: invalid state identity output")
@@ -61,7 +61,56 @@ if "postgres_master_secret_arn" in outputs:
         raise SystemExit("destroy-verified: invalid RDS master secret output")
     secret = item["value"]
 print(" ".join([*(d[k] for k in keys), secret]))
-' >"$identity_file"
+' >"$identity_file"; then
+  :
+else
+  parse_status=$?
+  if [ "$parse_status" -ne 42 ]; then
+    echo "destroy-verified: invalid Terraform state identity; refusing partial-state recovery" >&2
+    exit 1
+  fi
+  # A failed apply can leave EKS and Helm releases in state before Terraform
+  # has written root outputs or the late pre-destroy hook. Recover scope only
+  # from the exact EKS resource ARN and its Terraform-applied environment tag.
+  # Earlier partial states with no cluster have no Kubernetes owners to clean;
+  # keep refusing automatic deletion rather than trusting typed identifiers.
+  "$terraform_bin" show -json | python3 -c '
+import json, re, sys
+try:
+    state = json.load(sys.stdin)
+    resources = state["values"]["root_module"]["resources"]
+    clusters = [r["values"] for r in resources
+                if r.get("address") == "aws_eks_cluster.cell"
+                and r.get("mode") == "managed"]
+    if len(clusters) != 1:
+        raise ValueError("expected exactly one EKS cluster in partial state")
+    cluster = clusters[0]
+    arn = cluster["arn"]
+    match = re.fullmatch(r"arn:aws[a-z-]*:eks:([a-z]{2}-[a-z]+-[0-9]+):([0-9]{12}):cluster/([A-Za-z0-9][A-Za-z0-9_-]{0,99})", arn)
+    if not match or cluster.get("name") != match.group(3):
+        raise ValueError("EKS cluster ARN/name mismatch")
+    region, account, name = match.groups()
+    environment = cluster["tags_all"]["Environment"]
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,15}", environment) or cluster["tags_all"].get("Project") != "GreenGuard":
+        raise ValueError("EKS cell tags are missing or invalid")
+    secrets = [r["values"] for r in resources
+               if r.get("address") == "aws_db_instance.postgres" and r.get("mode") == "managed"]
+    if len(secrets) > 1:
+        raise ValueError("multiple disposable RDS instances in partial state")
+    secret_arn = ""
+    if secrets:
+        secret = secrets[0].get("master_user_secret")
+        if not isinstance(secret, list) or len(secret) != 1 or not isinstance(secret[0].get("secret_arn"), str):
+            raise ValueError("RDS master secret ARN is unavailable in partial state")
+        secret_arn = secret[0]["secret_arn"]
+    print(" ".join([region, environment, name, account, secret_arn]))
+except (KeyError, TypeError, IndexError, ValueError) as exc:
+    raise SystemExit(f"destroy-verified: cannot recover a unique cell identity from partial state: {exc}")
+' >"$identity_file" || {
+    echo "destroy-verified: retain state and inspect the partial apply before cleanup" >&2
+    exit 1
+  }
+fi
 read -r region environment cluster account master_secret_arn <"$identity_file"
 if [ "$environment" = prod ]; then
   echo "destroy-verified: refusing production" >&2
@@ -80,8 +129,12 @@ if [ -n "$master_secret_arn" ] && [[ ! "$master_secret_arn" =~ ^arn:aws[a-z-]*:s
   exit 1
 fi
 
-# The provider's allowed_account_ids and pre-destroy hook enforce the target
-# account during Terraform cleanup. The inventory checks the explicit account
-# again after the state resources are gone.
+# Run this idempotent hook before Terraform destroy: an interrupted apply may
+# not yet have created terraform_data.pre_destroy_cleanup, so relying on its
+# destroy provisioner alone can strand controller-owned LBs and EBS volumes.
+# The hook verifies AWS account and Kubernetes access before any deletion.
+GG_CLUSTER="$cluster" GG_REGION="$region" GG_ENVIRONMENT="$environment" GG_ACCOUNT="$account" \
+  GG_PV_INVENTORY_FILE="${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}" \
+  "$here/pre-destroy.sh"
 "$terraform_bin" destroy
 "$here/check-teardown.sh" "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}"

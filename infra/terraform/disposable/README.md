@@ -58,26 +58,35 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    ```
 
    This wrapper reads region, environment, cluster and account from the
-   `disposable_cell_identity` Terraform state output, runs `terraform destroy`,
-   then the AWS inventory, and exits nonzero if either step fails. Optional
+   `disposable_cell_identity` Terraform state output, runs `pre-destroy.sh`
+   before `terraform destroy`, then checks the AWS inventory. It exits nonzero
+   if any step fails. If an apply stopped before root outputs were saved, it
+   can recover the identity from the exact EKS resource ARN and tags in the
+   partial state. If neither identity source exists, it refuses cleanup so
+   the operator can inspect the state first. Optional
    arguments are accepted only when they match that saved identity exactly.
-   If the output is absent, the wrapper refuses to destroy; inspect and
-   recover the state before cleanup. Raw `terraform destroy` still runs its
-   pre-destroy cleanup but cannot guarantee a final inventory after all
-   Terraform-managed resources are gone. Terraform destroy provisioners fire
+   If neither the output nor a verified EKS resource identity is available,
+   the wrapper refuses to destroy; inspect and recover the state before
+   cleanup. Raw `terraform destroy` runs its
+   pre-destroy cleanup only if Terraform recorded that hook during apply; a
+   failed apply can leave a cluster before the hook enters state. It also
+   cannot guarantee a final inventory after all Terraform-managed resources
+   are gone. Terraform destroy provisioners fire
    when their own resource is deleted; a future resource omitted from a
    dependency chain could be deleted after a supposed final checker. Use the
    wrapper for a single verified operator command, or run the inventory
    explicitly after raw `terraform destroy`.
 
-   Destroy first runs `pre-destroy.sh` (from `teardown.tf`) while the cluster
+   Verified destroy first runs `pre-destroy.sh` while the cluster
    still exists: it deletes the `GreenGuardServerless-<environment>` CDK stack,
    its two Lambda log groups, Kubernetes ingresses, `LoadBalancer` services
    disposable data StatefulSets and PVCs, then waits until
    controller-created load balancers are gone. It needs `aws` and `kubectl`
    on `PATH`, access to the private EKS API, and permissions for the CDK stack.
    It checks the AWS account, refuses `environment = "prod"`, and stops network
-   teardown if cleanup fails. If raw Terraform was used, then run
+   teardown if cleanup fails. The Terraform destroy provisioner may run the
+   same idempotent hook again when it exists in state. If raw Terraform was used,
+   then run
 
    ```sh
    ./check-teardown.sh <region> <environment> <cluster-name> <account-id>
