@@ -1,0 +1,87 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "Connect image must be a published immutable OCI digest" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.credentialSecret) }}{{ fail "credentialSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.caSecret) }}{{ fail "caSecret must be a Kubernetes Secret name" }}{{ end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: connect
+spec:
+  type: ClusterIP
+  selector: {app: connect}
+  ports:
+    - {name: rest, port: 8083, targetPort: 8083}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connect
+  labels: {app: connect, greenguard.io/lifecycle: disposable}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: connect}
+  template:
+    metadata:
+      labels: {app: connect, greenguard.io/lifecycle: disposable}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: connect
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: BOOTSTRAP_SERVERS, value: kafka.greenguard.svc.cluster.local:29092}
+            - {name: GROUP_ID, value: greenguard-connect}
+            - {name: CONFIG_STORAGE_TOPIC, value: greenguard.connect.configs}
+            - {name: OFFSET_STORAGE_TOPIC, value: greenguard.connect.offsets}
+            - {name: STATUS_STORAGE_TOPIC, value: greenguard.connect.status}
+            - {name: CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR, value: "1"}
+            - {name: CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR, value: "1"}
+            - {name: CONNECT_STATUS_STORAGE_REPLICATION_FACTOR, value: "1"}
+            - {name: CONNECT_OFFSET_STORAGE_PARTITIONS, value: "1"}
+            - {name: CONNECT_STATUS_STORAGE_PARTITIONS, value: "1"}
+            - {name: CONNECT_TOPIC_CREATION_ENABLE, value: "false"}
+            - {name: CONNECT_CONFIG_PROVIDERS, value: env}
+            - {name: CONNECT_CONFIG_PROVIDERS_ENV_CLASS, value: org.apache.kafka.common.config.provider.EnvVarConfigProvider}
+            - {name: CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN, value: "CDC_DB_PASSWORD|SCHEMA_REGISTRY_URL"}
+            - {name: SCHEMA_REGISTRY_URL, value: http://schema-registry.greenguard.svc.cluster.local:8081}
+            - {name: CONNECT_PRODUCER_ACKS, value: all}
+            - {name: OFFSET_FLUSH_INTERVAL_MS, value: "1000"}
+            - {name: HEAP_OPTS, value: "-Xms256m -Xmx768m"}
+            - name: CDC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialSecret | quote }}
+                  key: CDC_DB_PASSWORD
+          ports: [{name: rest, containerPort: 8083}]
+          startupProbe:
+            httpGet: {path: /connectors, port: 8083}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /connectors, port: 8083}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /connectors, port: 8083}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+      volumes:
+        - name: rds-ca
+          secret:
+            secretName: {{ .Values.caSecret | quote }}
+            items:
+              - {key: ca.pem, path: ca.pem}

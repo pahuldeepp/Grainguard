@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-connect
+description: Private single-worker disposable Debezium Connect
+type: application
+version: 0.1.0

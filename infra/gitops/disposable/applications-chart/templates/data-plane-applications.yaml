@@ -1,0 +1,59 @@
+{{- $data := .Values.dataPlane | default dict }}
+{{- if and (hasKey $data "enabled") (not (kindIs "bool" $data.enabled)) }}{{ fail "dataPlane.enabled must be boolean" }}{{ end }}
+{{- if $data.enabled }}
+{{- $images := $data.images | default dict }}
+{{- $secrets := $data.secrets | default dict }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "data plane requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "data plane requires an HTTPS Git repository" }}{{ end }}
+{{- if not .Values.cell }}{{ fail "data plane requires a cell" }}{{ end }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($data.rdsHost | default "")) }}{{ fail "data plane requires an RDS endpoint DNS name" }}{{ end }}
+{{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" }}
+{{- if ne (len $images) (len $names) }}{{ fail "data plane requires exactly three image digests" }}{{ end }}
+{{- range $names }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $images . | default "")) }}{{ fail (printf "data plane image %s must be an immutable OCI digest" .) }}{{ end }}
+{{- end }}
+{{- $secretKeys := list "pgbouncerAuth" "rdsCa" "cdcCredentials" }}
+{{- if ne (len $secrets) (len $secretKeys) }}{{ fail "data plane requires exactly three Secret names" }}{{ end }}
+{{- range $secretKeys }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $secrets . | default "")) }}{{ fail (printf "data plane Secret %s is missing or invalid" .) }}{{ end }}
+{{- end }}
+{{- $apps := list
+  (dict "name" "kafka-topics" "chart" "streaming-topics-chart" "wave" "12" "values" (dict "image" (index $images "kafka-topics")))
+  (dict "name" "pgbouncer" "chart" "pgbouncer-chart" "wave" "22" "values" (dict "image" (index $images "pgbouncer") "rdsHost" $data.rdsHost "authSecret" (index $secrets "pgbouncerAuth") "caSecret" (index $secrets "rdsCa")))
+  (dict "name" "kafka-connect" "chart" "kafka-connect-chart" "wave" "23" "values" (dict "image" (index $images "kafka-connect") "credentialSecret" (index $secrets "cdcCredentials") "caSecret" (index $secrets "rdsCa")))
+}}
+{{- range $index, $app := $apps }}
+{{- if gt $index 0 }}
+---
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-{{ $app.name }}
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ $.Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $app.wave | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ $.Values.repositoryUrl | quote }}
+    targetRevision: {{ $.Values.revision | quote }}
+    path: infra/gitops/disposable/{{ $app.chart }}
+    helm:
+      valuesObject:
+{{ toYaml $app.values | indent 8 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}
+{{- end }}

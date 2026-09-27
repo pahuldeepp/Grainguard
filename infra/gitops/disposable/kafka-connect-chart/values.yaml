@@ -1,0 +1,3 @@
+image: ""
+credentialSecret: greenguard-cdc-credentials
+caSecret: greenguard-rds-ca
