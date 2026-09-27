@@ -82,11 +82,12 @@ jobs:
           terraform -chdir=infra/terraform/disposable validate
       - name: Verify disposable teardown guards offline
         run: bash infra/terraform/disposable/teardown_test.sh
+      - name: Audit disposable Terraform lifecycle offline
+        run: ruby infra/terraform/disposable/lifecycle-audit-test.rb
       - name: Verify Pod Identity trust scoping
         run: ruby infra/gitops/disposable/check-pod-identity-trust.rb
-      - name: Verify disposable controller and data contracts
+      - name: Verify disposable data contracts
         run: |
-          ruby infra/gitops/disposable/check-controllers.rb
           ruby infra/kubernetes/disposable-data/check-contract.rb
 
   image-inventory:
@@ -105,6 +106,57 @@ jobs:
         run: ruby infra/gitops/disposable/check-contract.rb
       - name: Verify immutable release image resolution
         run: ruby infra/gitops/disposable/test-resolve-images.rb
+      - name: Verify verified-digest CI artifact assembly
+        run: ruby infra/gitops/disposable/test-assemble-ci-digests.rb
+      - name: Verify signed-image ECR promotion contract offline
+        run: ruby infra/gitops/disposable/test-promote-images-to-ecr.rb
+
+  helm-static:
+    name: Helm and GitOps render contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned Helm 4.3.0
+        run: |
+          curl -fsSLo /tmp/helm-v4.3.0-linux-amd64.tar.gz https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz
+          echo '86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb  /tmp/helm-v4.3.0-linux-amd64.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/helm-v4.3.0-linux-amd64.tar.gz -C /tmp linux-amd64/helm
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+      - name: Install checksum-pinned kubectl 1.37.0 for Kustomize render
+        run: |
+          curl -fsSLo /tmp/kubectl-v1.37.0 https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+          echo '6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  /tmp/kubectl-v1.37.0' | sha256sum -c -
+          sudo install -m 0755 /tmp/kubectl-v1.37.0 /usr/local/bin/kubectl
+      - name: Validate runtime Helm charts and Kubernetes peers
+        run: bash scripts/helm-validate.sh
+      - name: Validate pinned controller archives and disposable data releases
+        run: |
+          ruby infra/gitops/disposable/check-controllers.rb
+          ruby infra/gitops/disposable/check-observability.rb
+          ruby infra/gitops/disposable/check-rds-bootstrap.rb
+          ruby infra/gitops/disposable/check-owner-migrations.rb
+          ruby infra/gitops/disposable/check-network-peers.rb
+          ruby infra/gitops/disposable/check-auxiliary-peers.rb
+          ruby infra/gitops/disposable/check-data-plane.rb
+          ruby infra/gitops/disposable/test-data-plane-applications.rb
+          ruby infra/gitops/disposable/test-search-application.rb
+          ruby infra/gitops/disposable/test-cassandra-application.rb
+          bash infra/gitops/disposable/cassandra-chart/check-offline.sh
+          bash infra/gitops/disposable/mqtt-chart/check-chart.sh
+          python3 -m unittest infra/gitops/disposable/mqtt-chart/test_check_secret.py -v
+          python3 -m unittest infra/gitops/disposable/connector-registration/test_register.py -v
+          ruby infra/helm/greenguard-opensearch/check-contract.rb
+      - name: Validate guarded secret sync and live-evidence gates offline
+        run: python3 -m unittest infra/gitops/disposable/test_check_secrets_ready.py infra/gitops/disposable/test_sync_secrets.py infra/gitops/disposable/test_seed_generated_secrets.py infra/gitops/disposable/test_check_live_acceptance.py -v
+      - name: Validate disposable Argo tree and edge binding renders
+        run: |
+          ruby infra/gitops/disposable/check-application-tree.rb
+          bash infra/gitops/disposable/check-target-bindings.sh
 
   quality:
     name: Required quality gate
@@ -236,6 +288,7 @@ jobs:
         dependency-and-iac-scan,
         terraform-validate,
         image-inventory,
+        helm-static,
         quality,
         events-integration,
         redis-integration,
@@ -287,6 +340,18 @@ jobs:
             dockerfile: services/eventbridge-bridge/Dockerfile
           - service: saga-orchestrator
             dockerfile: services/saga-orchestrator/Dockerfile
+          - service: tenant-control-plane
+            dockerfile: services/tenant-control-plane/Dockerfile
+          - service: billing-service
+            dockerfile: services/billing-service/Dockerfile
+          - service: notification-service
+            dockerfile: services/notification-service/Dockerfile
+          - service: jobs-worker
+            dockerfile: services/jobs-worker/Dockerfile
+          - service: cassandra-writer
+            dockerfile: services/cassandra-writer/Dockerfile
+          - service: search-indexer
+            dockerfile: services/search-indexer/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -337,6 +402,59 @@ jobs:
             --certificate-identity "${EXPECTED_IDENTITY}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${IMAGE}@${DIGEST}"
+      - name: Record verified digest for release inputs
+        env:
+          SERVICE: ${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          mkdir -p release-digest
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          service = os.environ['SERVICE']
+          image = f'ghcr.io/pahuldeepp/grainguard/{service}@{os.environ["DIGEST"]}'
+          Path(f'release-digest/{service}.json').write_text(json.dumps({
+              'service': service, 'image': image, 'revision': os.environ['REVISION']
+          }) + '\n')
+          PY
+      - name: Upload this verified digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: image-digest-${{ matrix.service }}
+          path: release-digest/${{ matrix.service }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  release-inputs:
+    name: Assemble immutable deployment inputs
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download only this run's verified image digests
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: image-digest-*
+          path: release-digests
+          merge-multiple: true
+      - name: Assemble exact-commit Terraform inputs
+        env:
+          REVISION: ${{ github.sha }}
+        run: ruby infra/gitops/disposable/assemble-ci-digests.rb release-digests "$REVISION" release-inputs
+      - name: Upload reviewed release inputs
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: greenguard-release-inputs-${{ github.sha }}
+          path: release-inputs/
+          if-no-files-found: error
+          retention-days: 30
 
   mysql-cdc-integration:
     name: MySQL snapshot and CDC integration

@@ -21,7 +21,15 @@ abort 'storage must use EBS CSI gp3 with delete reclaim' unless
   storage.dig('parameters', 'encrypted') == 'true' &&
   storage['reclaimPolicy'] == 'Delete'
 
-{ 'rabbitmq' => 1, 'redis-cluster' => 6 }.each do |name, replicas|
+quarantine = find.call('PersistentVolumeClaim', 'search-indexer-quarantine')
+abort 'search indexer quarantine must be disposable encrypted gp3 storage' unless
+  quarantine.dig('metadata', 'namespace') == 'greenguard' &&
+  quarantine.dig('metadata', 'labels', 'greenguard.io/lifecycle') == 'disposable' &&
+  quarantine.dig('spec', 'storageClassName') == 'greenguard-disposable-gp3' &&
+  quarantine.dig('spec', 'accessModes') == ['ReadWriteOnce'] &&
+  quarantine.dig('spec', 'resources', 'requests', 'storage') == '8Gi'
+
+{ 'rabbitmq' => 1, 'redis-cluster' => 6, 'kafka' => 1 }.each do |name, replicas|
   stateful = find.call('StatefulSet', name)
   abort "#{name} replicas changed" unless stateful.dig('spec', 'replicas') == replicas
   abort "#{name} must stay private" unless
@@ -53,5 +61,42 @@ secret_keys = rabbit.dig('spec', 'template', 'spec', 'containers', 0, 'env').fil
 end
 abort 'RabbitMQ credentials must come from Secret' unless
   %w[RABBITMQ_DEFAULT_USER RABBITMQ_DEFAULT_PASS RABBITMQ_ERLANG_COOKIE].all? { |key| secret_keys.include?(key) }
+
+kafka = find.call('StatefulSet', 'kafka')
+kafka_env = kafka.dig('spec', 'template', 'spec', 'containers', 0, 'env').to_h { |env| [env['name'], env['value']] }
+abort 'Kafka must disable topic auto-creation and advertise the stable pod DNS name' unless
+  kafka_env['KAFKA_AUTO_CREATE_TOPICS_ENABLE'] == 'false' &&
+  kafka_env['KAFKA_ADVERTISED_LISTENERS'] ==
+    'INTERNAL://kafka-0.kafka-headless.greenguard.svc.cluster.local:29092'
+registry = find.call('Deployment', 'schema-registry')
+registry_container = registry.dig('spec', 'template', 'spec', 'containers', 0)
+abort 'schema registry must be private, pinned and probed' unless
+  registry_container['image'].match?(/@sha256:[0-9a-f]{64}\z/) &&
+  %w[startupProbe readinessProbe livenessProbe resources].all? { |key| registry_container.key?(key) } &&
+  find.call('Service', 'schema-registry').dig('spec', 'type') == 'ClusterIP'
+{
+  'rabbitmq' => [5672], 'redis' => [6379, 16379],
+  'kafka' => [29092, 9093], 'schema-registry' => [8081]
+}.each do |name, ports|
+  policy = find.call('NetworkPolicy', "disposable-#{name}-ingress")
+  ingress = policy.dig('spec', 'ingress') || []
+  actual_ports = ingress.flat_map { |rule| rule.fetch('ports', []).map { |port| port['port'] } }
+  abort "#{name} ingress port contract changed" unless actual_ports.sort == ports.sort
+  abort "#{name} network policy must select only its workload" unless
+    policy.dig('spec', 'podSelector', 'matchLabels', 'app') ==
+      (name == 'redis' ? 'redis-cluster' : name)
+  abort "#{name} ingress must remain namespace-local and pod-selected" unless
+    policy.dig('metadata', 'namespace') == 'greenguard' &&
+    policy.dig('spec', 'policyTypes') == ['Ingress'] &&
+    ingress.all? do |rule|
+      rule['from'].is_a?(Array) && !rule['from'].empty? && rule['from'].all? do |source|
+        source.key?('podSelector') && !source.key?('namespaceSelector') && !source.key?('ipBlock')
+      end
+    end
+end
+
+if ARGV.include?('--ready')
+  abort 'not ready: Kafka and Schema Registry lack client authentication and TLS; Redis and RabbitMQ require proven mesh mTLS and live client credentials'
+end
 
 puts "disposable data contract: #{docs.length} Kubernetes objects checked"

@@ -97,7 +97,8 @@ metadata:
   labels: {app: redis-cluster-bootstrap, greenguard.io/lifecycle: disposable}
 spec:
   backoffLimit: 6
-  ttlSecondsAfterFinished: 86400
+  # Keep the Completed Job object for Argo health. A TTL would delete it and
+  # make self-heal recreate it while the cell is running.
   template:
     metadata:
       labels: {app: redis-cluster-bootstrap}

@@ -3,7 +3,7 @@
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.workerNamespace) }}{{ fail "workerNamespace must be a Kubernetes namespace" }}{{ end }}
 {{- if not (regexMatch "^[1-9][0-9]*Gi$" .Values.storageSize) }}{{ fail "storageSize must be a positive Gi value" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.storageClassName) }}{{ fail "storageClassName must be a Kubernetes StorageClass name" }}{{ end }}
-{{- if not (hasKey .Values.workerLabels "app.kubernetes.io/name") }}{{ fail "workerLabels must select the hardware worker" }}{{ end }}
+{{- if not (deepEqual .Values.workerLabels (dict "app.kubernetes.io/name" "hardware-service-worker" "app.kubernetes.io/instance" "hardware-service-worker")) }}{{ fail "workerLabels must select exactly the hardware-service-worker release" }}{{ end }}
 {{- if .Values.external.enabled }}
 {{- if not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" .Values.external.hostname) }}{{ fail "external hostname must be a concrete DNS name" }}{{ end }}
 {{- if not (contains "." .Values.external.hostname) }}{{ fail "external hostname must be a concrete DNS name" }}{{ end }}

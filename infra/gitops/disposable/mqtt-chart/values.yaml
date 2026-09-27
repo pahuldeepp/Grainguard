@@ -4,7 +4,8 @@ storageClassName: gp3
 storageSize: 5Gi
 workerNamespace: greenguard
 workerLabels:
-  app.kubernetes.io/name: hardware-service
+  app.kubernetes.io/name: hardware-service-worker
+  app.kubernetes.io/instance: hardware-service-worker
 external:
   enabled: false
   hostname: ""

@@ -10,6 +10,14 @@ for required in 'allow_anonymous false' 'password_file /run/mqtt-auth/passwords'
     exit 1
   fi
 done
+if [[ "$rendered" != *'app.kubernetes.io/name: hardware-service-worker'* || "$rendered" != *'app.kubernetes.io/instance: hardware-service-worker'* ]]; then
+  echo 'MQTT ingress does not select the hardware-service-worker release' >&2
+  exit 1
+fi
+if helm template mqtt . --set "image=$digest" --set workerLabels.app\\.kubernetes\\.io/name=hardware-service >/dev/null 2>&1; then
+  echo 'MQTT chart accepted a stale hardware worker selector' >&2
+  exit 1
+fi
 if helm template mqtt . >/dev/null 2>&1; then
   echo 'MQTT chart accepted an absent image digest' >&2
   exit 1

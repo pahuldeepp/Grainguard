@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - storageclass.yaml
+  - rabbitmq.yaml
+  - redis-cluster.yaml
+  - kafka.yaml
+  - networkpolicy.yaml
+  - search-indexer-pvc.yaml
+patches:
+  # WaitForFirstConsumer remains Pending until the wave-30 search-indexer Pod
+  # schedules. It must not hold the wave-10 data Application unhealthy.
+  - target:
+      kind: PersistentVolumeClaim
+      name: search-indexer-quarantine
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          argocd.argoproj.io/ignore-healthcheck: "true"
