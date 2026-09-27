@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { describeError, fetchWithRetry } from "./browser-e2e-stack.mjs";
+import {
+  describeError,
+  fetchWithRetry,
+  isReadOnlyOperation,
+} from "./browser-e2e-stack.mjs";
 
 function serve(handler) {
   return new Promise((resolve) => {
@@ -88,6 +92,32 @@ test("attempts: 1 sends the request exactly once, even after a reset", async () 
   } finally {
     server.close();
   }
+});
+
+test("only a provably read-only GraphQL document is retryable", () => {
+  assert.equal(
+    isReadOnlyOperation("query Q($id: ID!) { a(id: $id) { b } }"),
+    true,
+  );
+  assert.equal(isReadOnlyOperation("  \n query Q { a }"), true);
+  assert.equal(isReadOnlyOperation("{ a }"), true);
+  assert.equal(isReadOnlyOperation("# note\nquery Q { a }"), true);
+  assert.equal(isReadOnlyOperation("mutation M { a }"), false);
+  assert.equal(
+    isReadOnlyOperation("# leading comment\nmutation M { a }"),
+    false,
+  );
+  assert.equal(
+    isReadOnlyOperation("\n  # one\n  # two\n  mutation M { a }"),
+    false,
+  );
+  assert.equal(isReadOnlyOperation("subscription S { a }"), false);
+  assert.equal(
+    isReadOnlyOperation("fragment F on T { a }\nmutation M { ...F }"),
+    false,
+  );
+  assert.equal(isReadOnlyOperation(""), false);
+  assert.equal(isReadOnlyOperation(undefined), false);
 });
 
 test("describeError includes the underlying cause code", () => {

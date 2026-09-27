@@ -143,6 +143,15 @@ export function describeError(error) {
 // connection (a down service must still fail the check).
 const STALE_SOCKET_CODES = new Set(["UND_ERR_SOCKET", "ECONNRESET", "EPIPE"]);
 
+// Conservative on purpose: only a document that starts (after whitespace and # comments) with
+// `query` or a shorthand `{` is provably read-only. Mutations, subscriptions, fragments-first
+// documents, empty or unknown input are all treated as non-idempotent and sent once.
+export function isReadOnlyOperation(document) {
+  if (typeof document !== "string") return false;
+  const body = document.replace(/^(?:\s|#[^\n]*(?:\n|$))*/, "");
+  return /^query\b/.test(body) || body.startsWith("{");
+}
+
 export async function fetchWithRetry(url, init, { attempts = 3 } = {}) {
   let last;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

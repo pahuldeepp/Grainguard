@@ -562,9 +562,8 @@ async function sagaDb(it, sql, args) {
 }
 
 const hash = (q) => createHash("sha256").update(q).digest("hex");
-// A reset can arrive after the server already applied the request, so a mutation is sent
-// exactly once; only read-only queries are retried after a stale-socket failure.
-const isMutation = (query) => /^\s*mutation\b/.test(query);
+// A reset can arrive after the server already applied the request, so anything that is not
+// provably read-only (mutations, including ones with leading comments) is sent exactly once.
 
 async function gql(token, query, variables, port = PORTS.gateway) {
   const r = await S.fetchWithRetry(
@@ -580,7 +579,7 @@ async function gql(token, query, variables, port = PORTS.gateway) {
         extensions: { persistedQuery: { version: 1, sha256Hash: hash(query) } },
       }),
     },
-    { attempts: isMutation(query) ? 1 : 3 },
+    { attempts: S.isReadOnlyOperation(query) ? 3 : 1 },
   );
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
