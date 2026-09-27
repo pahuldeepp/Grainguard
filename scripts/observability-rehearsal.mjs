@@ -25,6 +25,9 @@ const GENERATED = join(OBS, "rehearsal/.generated");
 const PROJECT = "greenguard-obs-rehearsal";
 const env = process.env;
 const FACTOR = Number(env.REHEARSAL_FACTOR ?? 60);
+const selectedAlerts = env.REHEARSAL_ALERTS
+  ? new Set(env.REHEARSAL_ALERTS.split(",").map((alert) => alert.trim()))
+  : null;
 const PORTS = {
   prom: Number(env.REHEARSAL_PROM_PORT ?? 29090),
   am: Number(env.REHEARSAL_AM_PORT ?? 29093),
@@ -101,17 +104,10 @@ async function generate() {
   );
   const slo = scaleRulesText(
     await readFile(join(OBS, "rules/slo.yaml"), "utf8"),
-    FACTOR,
-    {
-      // The short fast-page rehearsal otherwise also holds slow-window burn
-      // ticket alerts for minutes after recovery. Those rules stay covered by
-      // promtool; this sink test isolates the alert under test.
-      excludeAlerts: [
-        "SLOBurnRateSlowPage",
-        "SLOBurnRateFastTicket",
-        "SLOBurnRateSlowTicket",
-      ],
-    },
+    30000,
+    // Keep enough samples for Prometheus rate() while collapsing long SLO
+    // windows so the full burn-alert set can recover inside the rehearsal.
+    { minRangeSeconds: 5 },
   );
   const am = rehearsalAlertmanager(
     await readFile(join(OBS, "alertmanager.yaml"), "utf8"),
@@ -313,7 +309,13 @@ async function main() {
     const started = await start(images, received, rules);
     servers = started.servers;
     ctx.scaled = started.scaled;
-    for (const scenario of SCENARIOS)
+    const scenarios = selectedAlerts
+      ? SCENARIOS.filter(({ alert }) => selectedAlerts.has(alert))
+      : SCENARIOS;
+    if (selectedAlerts && scenarios.length !== selectedAlerts.size) {
+      throw new Error("REHEARSAL_ALERTS contains an unknown alert name");
+    }
+    for (const scenario of scenarios)
       rows.push(await rehearse(ctx, scenario, rules.get(scenario.alert)));
   } finally {
     await stop(images, servers);

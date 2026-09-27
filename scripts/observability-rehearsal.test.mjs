@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   SCENARIOS,
@@ -15,6 +16,7 @@ test("durations scale down but never below one second", () => {
   assert.equal(scaleDuration("2m", 60), "2s");
   assert.equal(scaleDuration("30s", 60), "1s");
   assert.equal(scaleDuration("1h", 60), "60s");
+  assert.equal(scaleDuration("30d", 30000, 5), "86s");
   assert.match(scaleRulesText("interval: 1m\n", 60), /interval: 1s/);
 });
 
@@ -59,6 +61,23 @@ test("every scenario names a real alert and a target control", async () => {
     assert.ok(alerts.has(scenario.alert), scenario.alert);
     assert.ok(target.scenarios.includes(scenario.control), scenario.control);
   }
+});
+
+test("every configured alert has a sink-rehearsal scenario", () => {
+  const ruleAlerts = ["platform.yaml", "brokers.yaml", "slo.yaml"].flatMap(
+    (file) =>
+      [
+        ...readFileSync(`infra/observability/rules/${file}`, "utf8").matchAll(
+          /^\s{6}- alert: (.+)$/gm,
+        ),
+      ].map((match) => match[1]),
+  );
+  const scenarioAlerts = new Set(SCENARIOS.map(({ alert }) => alert));
+  assert.deepEqual(
+    ruleAlerts.filter((alert) => !scenarioAlerts.has(alert)),
+    [],
+    "add a synthetic target control and recovery scenario for each alert",
+  );
 });
 
 test("the target flips scenarios and exposes the alert series", () => {

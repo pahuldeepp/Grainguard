@@ -5,8 +5,48 @@ export const SCENARIOS = [
   { alert: "ObservabilityTargetDown", control: "target-down" },
   { alert: "KafkaBrokerUnavailable", control: "kafka-brokers-zero" },
   { alert: "KafkaExporterTargetDown", control: "kafka-exporter-down" },
+  { alert: "KafkaOfflinePartitions", control: "kafka-offline-partition" },
+  {
+    alert: "KafkaUnderReplicatedPartitions",
+    control: "kafka-under-replicated",
+  },
+  { alert: "KafkaConsumerGroupLagHigh", control: "kafka-group-lag-high" },
+  { alert: "KafkaConsumerGroupStalled", control: "kafka-group-stalled" },
+  { alert: "KafkaConsumerGroupNoMembers", control: "kafka-group-no-members" },
+  { alert: "KafkaTopicRetainedMessagesHigh", control: "kafka-topic-retained" },
+  { alert: "BindingFeedAgeWarning", control: "binding-age-warning" },
+  { alert: "BindingFeedAgeCritical", control: "binding-age-critical" },
+  { alert: "BindingConsumerQuarantine", control: "binding-quarantine" },
+  { alert: "BindingFeedClockSkew", control: "binding-clock-skew" },
+  { alert: "CDCQuarantinedRecords", control: "cdc-quarantine" },
+  { alert: "KafkaConnectUnreachable", control: "connect-unreachable" },
+  { alert: "KafkaConnectConnectorFailed", control: "connect-connector-failed" },
+  { alert: "KafkaConnectTaskFailed", control: "connect-task-failed" },
+  { alert: "KafkaConnectConnectorPaused", control: "connect-paused" },
+  { alert: "SchemaRegistryDown", control: "schema-registry-down" },
   { alert: "RabbitMQTaskBacklog", control: "rabbit-backlog" },
   { alert: "ReplicationSlotInactive", control: "slot-inactive" },
+  { alert: "ReplicationSlotInactiveCritical", control: "slot-inactive" },
+  { alert: "ReplicationSlotWALRetainedWarning", control: "slot-wal-warning" },
+  { alert: "ReplicationSlotWALRetainedCritical", control: "slot-wal-critical" },
+  { alert: "ReplicationSlotWALCapUnbounded", control: "slot-cap-unbounded" },
+  {
+    alert: "ReplicationSlotWALStatusDegraded",
+    control: "slot-status-degraded",
+  },
+  { alert: "RabbitMQDeadLetterQueueNotEmpty", control: "rabbit-dlq" },
+  { alert: "RabbitMQNoConsumers", control: "rabbit-no-consumers" },
+  { alert: "RabbitMQUnackedHigh", control: "rabbit-unacked" },
+  { alert: "RabbitMQRetryQueueBacklog", control: "rabbit-retry-backlog" },
+  { alert: "RabbitMQPublishConfirmFailures", control: "rabbit-publish-failed" },
+  { alert: "RabbitMQUnconfirmedMessages", control: "rabbit-unconfirmed" },
+  { alert: "RabbitMQMemoryAlarm", control: "rabbit-memory-alarm" },
+  { alert: "RabbitMQDiskAlarm", control: "rabbit-disk-alarm" },
+  { alert: "RabbitMQMemoryHigh", control: "rabbit-memory-high" },
+  { alert: "RabbitMQDiskLow", control: "rabbit-disk-low" },
+  { alert: "JobsDispatchDeadRecords", control: "jobs-dispatch-dead" },
+  { alert: "IntegrityProjectionQuarantined", control: "projection-quarantine" },
+  { alert: "IntegrityJobsDLQPublishFailed", control: "rabbit-publish-failed" },
   { alert: "IntegrityCDCQuarantined", control: "cdc-quarantine" },
   { alert: "APIHighServerErrorRate", control: "api-errors" },
   {
@@ -23,12 +63,15 @@ export const SCENARIOS = [
   { alert: "PostgresPoolExhaustion", control: "pool-exhaustion" },
   { alert: "PostgresSlowQueryRateHigh", control: "slow-queries" },
   { alert: "SLOBurnRateFastPage", control: "slo-burn-fast" },
+  { alert: "SLOBurnRateSlowPage", control: "slo-burn-fast" },
+  { alert: "SLOBurnRateFastTicket", control: "slo-burn-fast" },
+  { alert: "SLOBurnRateSlowTicket", control: "slo-burn-fast" },
 ];
 
-export function scaleDuration(text, factor) {
+export function scaleDuration(text, factor, minimumSeconds = 1) {
   const [, amount, unit] = /^(\d+)([smhdw])$/.exec(text);
   const seconds = Math.max(
-    1,
+    minimumSeconds,
     Math.round((amount * UNIT_SECONDS[unit]) / factor),
   );
   return `${seconds}s`;
@@ -36,7 +79,11 @@ export function scaleDuration(text, factor) {
 
 // Scales evaluation intervals, `for:` durations and [range] selectors in an
 // isolated test copy; rule expressions, labels and annotations stay intact.
-export function scaleRulesText(text, factor, { excludeAlerts = [] } = {}) {
+export function scaleRulesText(
+  text,
+  factor,
+  { excludeAlerts = [], minRangeSeconds = 1 } = {},
+) {
   const excluded = new Set(excludeAlerts);
   let skipping = false;
   const selected = text
@@ -54,7 +101,10 @@ export function scaleRulesText(text, factor, { excludeAlerts = [] } = {}) {
       /^(\s*for:\s*)(\d+[smhdw])\s*$/gm,
       (_, head, d) => `${head}${scaleDuration(d, factor)}`,
     )
-    .replace(/\[(\d+[smhdw])\]/g, (_, d) => `[${scaleDuration(d, factor)}]`);
+    .replace(
+      /\[(\d+[smhdw])\]/g,
+      (_, d) => `[${scaleDuration(d, factor, minRangeSeconds)}]`,
+    );
 }
 
 export function forSeconds(scaledText, alert) {
