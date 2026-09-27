@@ -1,0 +1,11 @@
+aws_region             = "<aws-region>"
+target_account_id      = "<12-digit-account-id>"
+environment            = "sandbox"
+cluster_name           = "greenguard-sandbox-cell-1"
+kubernetes_version     = "<supported-eks-version>"
+availability_zones     = ["<region-az-a>", "<region-az-b>"]
+cluster_admin_role_arn = "arn:aws:iam::<account-id>:role/<operator-role>"
+
+# Optional containers for values supplied outside Terraform. Never put a
+# password, token or secret_string in this file or Terraform state.
+secret_names = []

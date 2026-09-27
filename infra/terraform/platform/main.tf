@@ -195,7 +195,7 @@ resource "aws_iam_role_policy_attachment" "eks_nodes" {
 
 resource "aws_kms_key" "eks_secrets" {
   description             = "EKS Kubernetes Secret envelope encryption for ${var.cluster_name}"
-  deletion_window_in_days = 30
+  deletion_window_in_days = var.kms_deletion_window_days
   enable_key_rotation     = true
 }
 
@@ -392,6 +392,7 @@ resource "aws_ecr_repository" "runtime" {
 
   name                 = "greenguard/${each.value}"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = var.delete_nonempty_ecr_on_destroy
 
   image_scanning_configuration {
     scan_on_push = true

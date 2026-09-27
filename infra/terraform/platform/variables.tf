@@ -135,6 +135,22 @@ variable "image_repositories" {
   ]
 }
 
+variable "delete_nonempty_ecr_on_destroy" {
+  description = "Delete ECR repositories with images during destroy. Enable only for a disposable environment whose images may be discarded."
+  type        = bool
+  default     = false
+}
+
+variable "kms_deletion_window_days" {
+  description = "Waiting period before AWS deletes the EKS secrets KMS key after destroy (AWS allows 7-30 days; a pending key is not billed)."
+  type        = number
+  default     = 30
+  validation {
+    condition     = var.kms_deletion_window_days >= 7 && var.kms_deletion_window_days <= 30
+    error_message = "kms_deletion_window_days must be between 7 and 30."
+  }
+}
+
 variable "eventbridge_event_bus_arn" {
   description = "Existing GreenGuard alert EventBridge bus ARN; paired with the quarantine queue ARN, this enables the bridge's least-privilege Pod Identity association."
   type        = string

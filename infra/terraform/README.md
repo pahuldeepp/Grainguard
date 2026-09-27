@@ -22,6 +22,11 @@ import or recreate those resources here. The first roots are:
   dashboard and all 12 current runtime service images. The EKS Pod Identity
   Agent add-on is installed; the EventBridge bridge identity is optional and
   becomes active only when both exact bus and quarantine-queue ARNs are set.
+- `disposable/`: one local-state root that reuses the platform definitions,
+  deletes nonempty ECR repositories, and can own selected Secrets Manager
+  containers. Run `terraform init`, `terraform plan`, `terraform apply`, and
+  later `terraform destroy` in that same directory. See its
+  [shutdown boundary and runbook](disposable/README.md) before applying.
 
 The compute node group is zero-sized initially and tainted with
 `greenguard.io/workload-class=compute:NoSchedule`; worker pods need both that
@@ -34,6 +39,13 @@ supported Kubernetes version, AZs, and any approved public-endpoint CIDRs are
 operator inputs; do not check credentials or environment tfvars into Git. Three
 NAT gateways, EKS, KMS and CloudWatch incur ongoing AWS charges. No `apply` has
 been run.
+
+The disposable root is the intended temporary entry point for the current
+Terraform-owned cell. Its destroy hook deletes the same-environment CDK stack
+and Kubernetes owners of load balancers and volumes before Terraform removes
+the cluster and VPC. Other controller-created resources and services not yet
+defined here remain outside this workflow; it is not an account-wide zero-bill
+switch.
 
 Local static workflow (Terraform 1.16.4 and network access for the pinned AWS
 provider are required):
