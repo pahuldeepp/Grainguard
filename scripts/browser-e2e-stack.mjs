@@ -127,6 +127,36 @@ export async function waitFor(predicate, label, timeoutMs = 120_000) {
   throw new Error(`${label} timed out: ${last?.message ?? "no match"}`);
 }
 
+// undici puts the real reason for "fetch failed" in error.cause; print it so a CI failure is
+// diagnosable instead of a bare message.
+export function describeError(error) {
+  const cause = error?.cause;
+  const detail = cause
+    ? ` (cause: ${cause.code ?? cause.name ?? "unknown"} ${cause.message ?? ""})`
+    : "";
+  return `${error?.stack ?? error}${detail}`;
+}
+
+// A blocking step (for example spawnSync docker compose) freezes this process while servers
+// close idle keep-alive sockets; the next request then reuses a dead socket and fails before
+// any response. Retry only that socket-level failure, never an HTTP status or a refused
+// connection (a down service must still fail the check).
+const STALE_SOCKET_CODES = new Set(["UND_ERR_SOCKET", "ECONNRESET", "EPIPE"]);
+
+export async function fetchWithRetry(url, init, { attempts = 3 } = {}) {
+  let last;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      last = error;
+      if (!STALE_SOCKET_CODES.has(error?.cause?.code)) throw error;
+      await delay(200 * attempt);
+    }
+  }
+  throw last;
+}
+
 export async function scoped(url, tenant, work) {
   const db = new pg.Client({ connectionString: url });
   await db.connect();

@@ -562,18 +562,26 @@ async function sagaDb(it, sql, args) {
 }
 
 const hash = (q) => createHash("sha256").update(q).digest("hex");
+// A reset can arrive after the server already applied the request, so a mutation is sent
+// exactly once; only read-only queries are retried after a stale-socket failure.
+const isMutation = (query) => /^\s*mutation\b/.test(query);
+
 async function gql(token, query, variables, port = PORTS.gateway) {
-  const r = await fetch(`http://127.0.0.1:${port}/graphql`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+  const r = await S.fetchWithRetry(
+    `http://127.0.0.1:${port}/graphql`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        variables,
+        extensions: { persistedQuery: { version: 1, sha256Hash: hash(query) } },
+      }),
     },
-    body: JSON.stringify({
-      variables,
-      extensions: { persistedQuery: { version: 1, sha256Hash: hash(query) } },
-    }),
-  });
+    { attempts: isMutation(query) ? 1 : 3 },
+  );
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 const code = (res) =>
@@ -771,7 +779,7 @@ function deviceToken(it) {
 
 async function ingest(it, observedAt, temperature, humidity) {
   const sourceMessageId = `bre2e-${id}-${observedAt.getTime()}`;
-  const r = await fetch(
+  const r = await S.fetchWithRetry(
     `http://127.0.0.1:${PORTS.telemetry}/v1/devices/${it.device}/readings`,
     {
       method: "POST",
@@ -791,9 +799,12 @@ async function ingest(it, observedAt, temperature, humidity) {
 }
 
 async function readApi(token, route) {
-  const r = await fetch(`http://127.0.0.1:${PORTS.read}/api/v1/read${route}`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
+  const r = await S.fetchWithRetry(
+    `http://127.0.0.1:${PORTS.read}/api/v1/read${route}`,
+    {
+      headers: { authorization: `Bearer ${token}` },
+    },
+  );
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 
@@ -1491,7 +1502,7 @@ async function main() {
     await run();
   } catch (error) {
     failures.push(`harness: ${error.message}`);
-    console.log(`FAIL harness :: ${error.stack}`);
+    console.log(`FAIL harness :: ${S.describeError(error)}`);
     for (const [name, log] of S.logs)
       console.log(`--- ${name} ---\n${log.slice(-1500)}`);
   } finally {

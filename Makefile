@@ -40,6 +40,7 @@ verify: check-plan db-migrate
 	npm run typecheck
 	npm test
 	node --test scripts/contacts-schema.test.mjs
+	node --test scripts/browser-e2e-stack.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...
