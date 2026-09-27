@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import pg from "pg";
 import { LocalTestAdapter } from "./adapters.js";
-import { beginDelivery, finishDelivery, setPreference } from "./ledger.js";
+import {
+  beginDelivery,
+  expireDeliveryHold,
+  finishDelivery,
+  setPreference,
+} from "./ledger.js";
 import { migrate } from "./migrate.js";
 import { runMigrate } from "./migrate.js";
 import { InvalidTenantError, withTenant } from "./tenant.js";
@@ -142,6 +147,45 @@ test("a crash before commit leaves no delivery row", { skip }, async () => {
   );
   assert.equal(await delivery(task.tenant_id, task.intent_id), undefined);
 });
+
+test(
+  "hold expiry records failure without allocating a provider send attempt",
+  { skip },
+  async () => {
+    const task = makeTask();
+    const expired = await expireDeliveryHold(pool!, task);
+    assert.deepEqual(expired, {
+      action: "receipt",
+      outcome: "failed",
+      park: true,
+    });
+    assert.deepEqual(await delivery(task.tenant_id, task.intent_id), {
+      status: "failed",
+      attempts: 0,
+      reconciles: 0,
+    });
+    const readAttempts = () =>
+      withTenant(pool!, task.tenant_id, async (client) => {
+        const { rows } = await client.query(
+          "SELECT kind, outcome FROM delivery_attempts WHERE intent_id = $1 ORDER BY attempt_no",
+          [task.intent_id],
+        );
+        return rows;
+      });
+    assert.deepEqual(await readAttempts(), [
+      { kind: "hold_expired", outcome: "failed" },
+    ]);
+    assert.deepEqual(await expireDeliveryHold(pool!, task), {
+      action: "receipt",
+      outcome: "failed",
+      park: true,
+    });
+    assert.deepEqual(await readAttempts(), [
+      { kind: "hold_expired", outcome: "failed" },
+    ]);
+    assert.equal((await delivery(task.tenant_id, task.intent_id))?.attempts, 0);
+  },
+);
 
 test(
   "preferences suppress a channel and use optimistic versions",
@@ -401,7 +445,7 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
   try {
     const url = new URL(process.env.NOTIFICATIONS_MIGRATION_URL!);
     url.pathname = `/${name}`;
-    assert.equal((await migrate(url.toString())).length, 2);
+    assert.equal((await migrate(url.toString())).length, 3);
     assert.equal((await migrate(url.toString())).length, 0);
     assert.deepEqual(
       await runMigrate((k) =>

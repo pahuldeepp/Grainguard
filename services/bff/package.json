@@ -1,0 +1,28 @@
+{
+  "name": "@greenguard/bff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build -w @greenguard/membership-client && tsc",
+    "typecheck": "npm run build -w @greenguard/membership-client && tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@apollo/server": "5.5.1",
+    "@as-integrations/express5": "1.1.2",
+    "@greenguard/tenant-auth": "0.1.0",
+    "@greenguard/membership-client": "0.1.0",
+    "@types/ws": "^8.18.1",
+    "dataloader": "2.2.3",
+    "express": "5.2.1",
+    "graphql": "16.13.0",
+    "redis": "^5.1.1",
+    "undici": "7.29.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6"
+  }
+}

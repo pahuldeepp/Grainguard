@@ -31,7 +31,9 @@ fixed the Kafka consumer on franz-go v1.22.0 and every other alert-path consumer
    `quarantined_events` (coordinates, hash, reason; never the payload) before the offset
    commits. Offsets commit only after every record has an effect or a confirmed quarantine.
 2. **Dispatch** (`dispatcher.go`): a scanner lists due outbox identifiers (read-only
-   `dispatch_scan` RLS policy), then a bounded pool (`JOBS_DISPATCH_WORKERS`) locks each intent
+   `jobs_due_dispatch_refs` SECURITY DEFINER selector, IDs only; migration 000005 removed the
+   `app.scope` policies, and the redrive and DLQ scans use `jobs_dead_intent_refs` and
+   `jobs_dead_letter_refs` the same way), then a bounded pool (`JOBS_DISPATCH_WORKERS`) locks each intent
    with `FOR UPDATE SKIP LOCKED`, publishes to RabbitMQ with a **publisher confirm** and
    marks it `dispatched` in the same transaction. A crash between the confirm and the commit
    leaves the row `pending`, so it is re-published with the **same message id**; the
@@ -72,7 +74,7 @@ make redrive-dead ARGS="-reason 'broker restored' -limit 50 [-tenant UUID] [-act
 `intent_redrives` (actor, reason, time, previous attempts/error/dead_at), resets the attempt
 counter, keeps the same `intent_id` and re-arms the outbox. It works even when the DLQ copy
 was never published. With `-tenant`, every read and write runs under that tenant's RLS;
-without it, the read-only `redrive_scan` policy lists dead intents across tenants.
+without it, the `jobs_dead_intent_refs` selector lists bounded dead-intent IDs across tenants.
 
 ## Concurrency choices (ADR-0002)
 
@@ -88,7 +90,7 @@ without it, the read-only `redrive_scan` policy lists dead intents across tenant
 `JOBS_DATABASE_URL`, `RABBITMQ_URL` (required); `KAFKA_BROKERS` (empty disables intake),
 `ALERTS_LIFECYCLE_TOPIC`, `JOBS_KAFKA_GROUP`, `JOBS_HTTP_ADDR` (127.0.0.1:8095),
 `JOBS_DISPATCH_WORKERS` (4), `JOBS_DISPATCH_BATCH` (50), `JOBS_RECEIPT_PREFETCH` (20),
-`JOBS_MAX_DISPATCH_ATTEMPTS` (8). Metrics carry no tenant labels.
+`JOBS_MAX_DISPATCH_ATTEMPTS` (8). Critical opened/escalated/resolved transitions are always retained in the inbox but create no RabbitMQ intents; EventBridge/SQS/Lambda owns those notifications. Warning/non-critical email and SMS remain on RabbitMQ. The split is unconditional and has no runtime feature switch. Metrics carry no tenant labels.
 
 ## Commands
 

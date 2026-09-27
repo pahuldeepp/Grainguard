@@ -1,0 +1,223 @@
+# Opt-in local Redis Cluster for the Read API cache (Stage 08, ADR-0015).
+# 3 primaries + 3 replicas, 32 MB maxmemory each, allkeys-lru eviction.
+# Nodes announce stable hostnames; host clients map them with
+# READ_REDIS_NODE_ADDRESS_MAP (redis-node-N:6379=127.0.0.1:710N).
+# Not part of `make dev` or `make verify`; start with `make redis-up`.
+name: greenguard-redis
+
+x-node: &node
+  image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+  restart: unless-stopped
+  mem_limit: 64m
+  networks: [redis]
+  healthcheck:
+    test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+
+services:
+  redis-node-1:
+    <<: *node
+    hostname: redis-node-1
+    networks:
+      redis:
+        ipv4_address: 10.250.70.11
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-1
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7101:6379"]
+
+  redis-node-2:
+    <<: *node
+    hostname: redis-node-2
+    networks:
+      redis:
+        ipv4_address: 10.250.70.12
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-2
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7102:6379"]
+
+  redis-node-3:
+    <<: *node
+    hostname: redis-node-3
+    networks:
+      redis:
+        ipv4_address: 10.250.70.13
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-3
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7103:6379"]
+
+  redis-node-4:
+    <<: *node
+    hostname: redis-node-4
+    networks:
+      redis:
+        ipv4_address: 10.250.70.14
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-4
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7104:6379"]
+
+  redis-node-5:
+    <<: *node
+    hostname: redis-node-5
+    networks:
+      redis:
+        ipv4_address: 10.250.70.15
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-5
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7105:6379"]
+
+  redis-node-6:
+    <<: *node
+    hostname: redis-node-6
+    networks:
+      redis:
+        ipv4_address: 10.250.70.16
+    command:
+      - redis-server
+      - --port
+      - "6379"
+      - --cluster-enabled
+      - "yes"
+      - --cluster-node-timeout
+      - "2000"
+      - --cluster-announce-hostname
+      - redis-node-6
+      - --cluster-preferred-endpoint-type
+      - hostname
+      - --maxmemory
+      - 32mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --protected-mode
+      - "no"
+    ports: ["127.0.0.1:7106:6379"]
+
+  redis-cluster-init:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    mem_limit: 32m
+    networks: [redis]
+    depends_on:
+      redis-node-1: { condition: service_healthy }
+      redis-node-2: { condition: service_healthy }
+      redis-node-3: { condition: service_healthy }
+      redis-node-4: { condition: service_healthy }
+      redis-node-5: { condition: service_healthy }
+      redis-node-6: { condition: service_healthy }
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        redis-cli -h redis-node-1 cluster info | grep -q 'cluster_state:ok' ||
+        redis-cli --cluster create redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 --cluster-replicas 1 --cluster-yes
+
+networks:
+  redis:
+    # Static addresses: Redis stores peer IPs in nodes.conf, so a restart that
+    # reassigned IPs would leave the cluster with stale peers.
+    ipam:
+      config:
+        - subnet: 10.250.70.0/24

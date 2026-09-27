@@ -16,6 +16,7 @@ export const VERIFIER = "ALERTS_TOKEN_VERIFIER";
 
 export interface Verifier {
   verify(authorization: string | undefined): Promise<Principal>;
+  close?(): void;
 }
 
 export type AlertRequest = IncomingMessage & {

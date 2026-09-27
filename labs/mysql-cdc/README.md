@@ -1,11 +1,36 @@
-# labs/mysql-cdc
+# Stage 10c partner inventory source contract
 
-Status: **planned scaffold; implementation not started**.
+This lab defines the version-one MySQL source schema, Debezium change normalizer, manual-commit importer runtime, and opt-in local MySQL/Kafka proof. Device Service owns the canonical import transaction. PostgreSQL remains GreenGuard's canonical inventory database.
 
-Stages: 10.
+From the repository root, run the unit suite after installing the pinned SQLAlchemy, Alembic and PyMySQL requirements in a Python environment:
 
-Technology: MySQL, Debezium.
+```bash
+python3 -m pip install -r labs/mysql-cdc/requirements.txt
+python3 -m unittest discover -s labs/mysql-cdc -p 'test_*.py' -v
+```
 
-Responsibility: Legacy partner import/CDC and schema normalization.
+From `labs/mysql-cdc`, inspect the versioned MySQL migration without connecting to a server:
 
-Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.
+```bash
+alembic -c alembic.ini upgrade head --sql
+```
+
+For a local partner MySQL instance, set `MYSQL_CDC_SOURCE_DSN` to a SQLAlchemy `mysql+pymysql://` URL and run `alembic -c alembic.ini upgrade head`. The source tables are `inventory_sites`, `inventory_bins`, and `inventory_devices`. Every primary key and foreign key includes `tenant_key`. Device status is `active`, `disabled`, or `deleted`; device `bin_id` may be null. The tables have no canonical GreenGuard credentials or direct canonical write path. Historical migration `0001` contains its own frozen DDL; `0002` strengthens name/serial edge-space checks for MySQL collations that ignore trailing spaces during string equality. A fresh `head` migration and reflected live schema parity are exercised by the opt-in live test.
+
+The v1 normalizer expects Debezium JSON-converter key and value envelopes (`schema` plus `payload`), a full row image, and the trusted `SourceConfig` and source-tenant mapping supplied by the importer. The Kafka key must contain exactly `tenant_key` and the entity ID. The event value must identify the configured MySQL connector, database and one of the three allowlisted tables. It also requires a binlog file, position, row, timestamps, an operation (`r`, `c`, `u`, `d`), and matching snapshot metadata. Debezium 3.x full snapshots use `first`, `first_in_data_collection`, `last_in_data_collection`, or `last` markers for `r` events. `r`/`c` use `after`; `d` uses `before`; `u` requires full `before` and `after` images with unchanged source identity. Bin updates cannot relocate the bin to another site; such changes are rejected for quarantine. Kafka null-value tombstones are not accepted as delete events. Names and serials are bounded, have no leading/trailing ASCII spaces, and contain no control characters; the MySQL CHECK constraints enforce the same rules.
+
+The normalized command contains a canonical tenant UUID from the trusted mapping, stable UUIDv5 entity/reference IDs derived from source ID, tenant, entity type and external ID, a generation/topic/partition/offset coordinate, and a SHA-256 digest of the exact key and value bytes. Source tenant keys do not enter the canonical payload. Offsets are comparable only within the same connector generation, topic and partition. A later task must quarantine mismatched generations/partitions and facility deletes; this contract does not authorize destructive facility operations.
+
+## Importer runtime (Task 3)
+
+`runtime.py` subscribes to the three allowlisted inventory topics with auto commit and auto offset storage disabled. Configure `MYSQL_CDC_KAFKA_BROKERS`, `MYSQL_CDC_GROUP`, `MYSQL_CDC_TOPIC_PREFIX`, `MYSQL_CDC_DATABASE`, `MYSQL_CDC_CONNECTOR_NAME`, `MYSQL_CDC_GENERATION`, `MYSQL_CDC_SOURCE_ID`, `MYSQL_CDC_DLQ_TOPIC`, `MYSQL_CDC_PARKED_TOPIC`, `MYSQL_CDC_API_URL`, `MYSQL_CDC_TOKEN_URL`, and `MYSQL_CDC_TENANTS_JSON` before running `python runtime.py`. The trusted tenant JSON shape is `{"partner-a":{"tenant_id":"<UUID>","client_id":"<OAuth client>","client_secret":"<secret>"}}`; keep it in a secret store or untracked local environment, never in source control. Tenant UUID spelling is canonicalized before credential lookup; aliases that resolve to the same UUID with different credentials reject startup. The OAuth endpoint issues RS256 client-credentials tokens with `inventory:import`; the Device Service verifies their tenant, scope and configured source ID. Non-loopback HTTP URLs are rejected. No mTLS is claimed for this slice.
+
+Use `MYSQL_CDC_OFFSET_RESET=earliest` explicitly for a brand-new snapshot group; the default `error` refuses missing or expired offsets. `MYSQL_CDC_MODE=redrive` subscribes to the DLQ under a separate `-redrive` group and replays the original bytes and source coordinate through the same admission API. Keep both quarantine topics restricted: their base64 payload is the exact source key and value and may contain partner data. If an unresolved child precedes its parent in the DLQ, redrive appends the unchanged envelope/key to the same partition tail with a `redrive_attempt` Kafka header. It commits the old DLQ offset only after the append is confirmed. The header starts at zero and allows at most three DLQ requeues. If the parent is still missing, redrive publishes the unchanged envelope/key to the distinct needs-repair topic with `redrive_attempt=3` and `park_reason=parent_dependency`; only a confirmed parked-topic append permits the old DLQ offset commit, freeing later parent records. A failed parked publish leaves the DLQ offset uncommitted. The local parked topic uses `cleanup.policy=delete,retention.ms=-1` so it does not expire; production needs strict ACLs, TLS and an explicit retention/privacy policy. It has the same partition count as the DLQ. Other invalid redrive records fail closed.
+
+For operator repair, inspect the parked record's fixed reason and original source coordinate without copying its raw payload into logs. Correct/import the missing parent first. Then launch `MYSQL_CDC_MODE=parked-redrive` with the same source ID, connector generation, tenant mapping and parked topic; a new consumer group needs explicit `MYSQL_CDC_OFFSET_RESET=earliest`. This mode does not automatically requeue: if the parent is still absent, it stops and leaves the parked offset uncommitted. After Device Service accepts or fences the original source coordinate, it commits that parked offset. Monitor parked-topic lag and retained records until the backlog is zero; do not delete the topic to clear an incident.
+
+An ingestion offset is synchronously committed only after Device Service accepts the change or the DLQ producer confirms durable publication. Transient API/OAuth outages leave the offset uncommitted after bounded retries. Missing imported parents get bounded retries and then a confirmed DLQ record, allowing later source records to advance; redrive uses the original coordinate after the parent arrives. Replays after an API commit are safe because Device Service fences the same coordinate and digest. A partition revocation or shutdown after the API effect prevents the source offset commit. The Task 3 tests use a fake broker and loopback OAuth/API server; real broker, connector, snapshot and restart evidence belongs to Task 4.
+
+## Opt-in local live proof
+
+Run `make mysql-cdc-test` from the repository root. Each successful run removes its generated MySQL database, Kafka topics and fixture PostgreSQL tenants after the live checks. Failed runs also clean up by default; set `MYSQL_CDC_PRESERVE_FAILED_FIXTURES=1` only when you need to inspect a failed run's database, connector, topics and tenant rows. Cleanup attempts each consumer, API harness, connector, PostgreSQL fixture, Kafka topic set and MySQL database independently. It prints only fixed step names and exception classes when cleanup fails; a primary live-test error remains the reported failure. The stable `partner_inventory` database, persistent connector metadata and shared profile topics are not run-scoped fixtures and remain available for later runs.

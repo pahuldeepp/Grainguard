@@ -90,18 +90,39 @@ export async function getDevice(
     )[0] ?? null
   );
 }
+export async function getDevices(
+  tx: ReadTransaction,
+  tenantId: string,
+  deviceIds: string[],
+): Promise<DeviceView[]> {
+  if (deviceIds.length === 0) return [];
+  if (deviceIds.length > 100) throw new Error("at most 100 device IDs");
+  return rows<DeviceView>(
+    tx,
+    "SELECT * FROM read.device_views WHERE tenant_id=$1 AND device_id = ANY($2::uuid[])",
+    [tenantId, deviceIds],
+  );
+}
 export async function listDevicesBySite(
   tx: ReadTransaction,
   tenantId: string,
   siteId: string,
   limit = 100,
+  after?: string,
 ): Promise<DeviceView[]> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 500)
     throw new Error("limit must be 1..500");
+  if (
+    after !== undefined &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      after,
+    )
+  )
+    throw new Error("after must be a valid device ID");
   return rows<DeviceView>(
     tx,
-    "SELECT * FROM read.device_views WHERE tenant_id=$1 AND site_id=$2 ORDER BY device_id LIMIT $3",
-    [tenantId, siteId, limit],
+    "SELECT * FROM read.device_views WHERE tenant_id=$1 AND site_id=$2 AND ($4::uuid IS NULL OR device_id > $4::uuid) ORDER BY device_id LIMIT $3",
+    [tenantId, siteId, limit, after ?? null],
   );
 }
 export async function getLatestReading(

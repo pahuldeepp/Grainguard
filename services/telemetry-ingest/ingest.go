@@ -173,6 +173,9 @@ func storeReading(ctx context.Context, tx pgx.Tx, a attempt) (IngestResult, erro
 			return IngestResult{}, err
 		}
 	}
+	if err := consumeIngestQuota(ctx, tx, a.principal.TenantID, a.now); err != nil {
+		return IngestResult{}, err
+	}
 	rec := record{attempt: a, binding: binding, version: last + 1,
 		readingID: newUUIDv4(), eventID: newUUIDv4(), commandID: newUUIDv4(), audit: newUUIDv4()}
 	if err := writeRecord(ctx, tx, rec); err != nil {

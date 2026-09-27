@@ -158,6 +158,10 @@ func TestMainShutsDownOnSIGTERM(t *testing.T) {
 	addr := freeAddr(t)
 	t.Setenv("TELEMETRY_DATABASE_URL", "postgres://u:p@127.0.0.1:1/db")
 	t.Setenv("HTTP_ADDR", addr)
+	// A sourced .env may set the control-plane variables; the service rejects a
+	// half configuration, so this test must not inherit either one.
+	t.Setenv("CONTROL_LOOKUP_TOKEN", "")
+	t.Setenv("CONTROL_PLANE_URL", "")
 	guard := make(chan os.Signal, 1)
 	signal.Notify(guard, syscall.SIGTERM)
 	defer signal.Stop(guard)

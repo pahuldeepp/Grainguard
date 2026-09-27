@@ -111,6 +111,9 @@ func Transient(err error) bool {
 	if errors.As(err, &unavailable) || errors.As(err, &writeTimeout) || errors.As(err, &readTimeout) || errors.As(err, &netErr) {
 		return true
 	}
+	if errors.Is(err, ErrNotConnected) || errors.Is(err, gocql.ErrSessionClosed) || errors.Is(err, gocql.ErrNoConnectionsStarted) {
+		return true
+	}
 	if errors.Is(err, gocql.ErrNoConnections) || errors.Is(err, gocql.ErrTimeoutNoResponse) || errors.Is(err, gocql.ErrConnectionClosed) {
 		return true
 	}

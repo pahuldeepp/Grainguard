@@ -78,6 +78,33 @@ func TestLiveHistoryReplayAndTenantIsolation(t *testing.T) {
 	}
 }
 
+func TestLiveHistoryAcceptsUnboundBin(t *testing.T) {
+	if os.Getenv("CASSANDRA_LIVE") != "1" {
+		t.Skip("set CASSANDRA_LIVE=1 after make cassandra-up")
+	}
+	cfg, err := LoadConfig(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := liveSession(t, cfg)
+	defer session.Close()
+	store := &Store{Session: session, TTL: time.Hour, MaxRows: 10, MaxDays: 2}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	observed := time.Now().UTC().Truncate(time.Millisecond)
+	r := Reading{TenantID: "688d3317-6850-4637-9ca9-57cb37225908", DeviceID: "8fb09d32-1dcb-4d85-90ea-17799f272d6b", ReadingID: "760b6875-7978-4e2d-b571-96aac85a3905", EventID: "d5f9da28-a105-4938-8039-0e2ca5ac9712", SiteID: "4edc347a-2d29-4766-b9dc-c3f799c142ae", ObservedAt: observed, ReceivedAt: observed, StreamVersion: 1}
+	if err := store.Write(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.Query(ctx, r.TenantID, r.DeviceID, observed.Add(-time.Second), observed.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Readings) != 1 || result.Readings[0].BinID != "" {
+		t.Fatalf("unbound bin query: %+v", result.Readings)
+	}
+}
+
 func TestLiveHistoryShortTTLExpires(t *testing.T) {
 	if os.Getenv("CASSANDRA_LIVE") != "1" {
 		t.Skip("set CASSANDRA_LIVE=1 after make cassandra-up")

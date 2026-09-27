@@ -114,7 +114,7 @@ func (in *Intake) Run(ctx context.Context) error {
 // Quarantine records a poison record's coordinates, hash and reason (never its payload).
 func Quarantine(ctx context.Context, db TxStarter, rec Record, reason string) error {
 	sum := sha256.Sum256(rec.Value)
-	return inTx(ctx, db, "app.scope", "quarantine", func(ctx context.Context, tx pgx.Tx) error {
+	return withoutTenant(ctx, db, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO quarantined_events (source_topic, source_partition, source_offset, payload_sha256, reason)
 			VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, rec.Topic, rec.Partition, rec.Offset, hex.EncodeToString(sum[:]), truncate(reason, 500))
 		return err

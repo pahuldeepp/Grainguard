@@ -16,7 +16,7 @@ test("entry point mounts the app into #root", async () => {
     await import("./main");
   });
   const root = document.getElementById("root")!;
-  expect(root.querySelector("h1")?.textContent).toContain("Better grain care.");
-  expect(root.querySelectorAll("output")).toHaveLength(2);
+  expect(root.querySelector("h1")?.textContent).toContain("Overview");
+  expect(root.querySelectorAll("output.service-status")).toHaveLength(2);
   vi.unstubAllGlobals();
 });

@@ -59,7 +59,7 @@ func TestDeadTransitionCopiesMetadataOnlyRecordToDLQ(t *testing.T) {
 	tenant := randomUUID()
 	pub := &brokerDown{}
 	d, ids := deadIntents(t, db, tenant, pub)
-	if len(pub.dead) != 3 || d.Metrics.DLQPublished.Load() != 3 {
+	if len(pub.dead) != 2 || d.Metrics.DLQPublished.Load() != 2 {
 		t.Fatalf("dlq records %d", len(pub.dead))
 	}
 	m := pub.dead[0]
@@ -92,14 +92,14 @@ func TestFailedDLQPublishKeepsDeadAndRedriveRestoresSameIntent(t *testing.T) {
 	tenant := randomUUID()
 	pub := &brokerDown{dlqDown: true}
 	d, ids := deadIntents(t, db, tenant, pub)
-	if d.Metrics.DLQPublishFailed.Load() != 3 || len(pub.dead) != 0 {
+	if d.Metrics.DLQPublishFailed.Load() != 2 || len(pub.dead) != 0 {
 		t.Fatalf("failed=%d", d.Metrics.DLQPublishFailed.Load())
 	}
 	if status, _ := intentStatus(t, db, tenant, ids[0]); status != "dead" {
 		t.Fatalf("dead transition undone: %s", status)
 	}
 	done, err := RedriveDead(context.Background(), db, RedriveOptions{Limit: 10, TenantID: tenant, Actor: "ops@example", Reason: "broker restored"})
-	if err != nil || len(done) != 3 {
+	if err != nil || len(done) != 2 {
 		t.Fatalf("%v %v", done, err)
 	}
 	status, attempts := intentStatus(t, db, tenant, ids[0])
@@ -113,10 +113,10 @@ func TestFailedDLQPublishKeepsDeadAndRedriveRestoresSameIntent(t *testing.T) {
 			t.Fatalf("%s %v", o, err)
 		}
 	}
-	if len(good.ids) != 3 || !contains(good.ids, ids[0]) {
+	if len(good.ids) != 2 || !contains(good.ids, ids[0]) {
 		t.Fatalf("redrive changed identity: %v vs %v", good.ids, ids)
 	}
-	if n := countRows(t, db, tenant, "SELECT count(*) FROM notification_intents"); n != 3 {
+	if n := countRows(t, db, tenant, "SELECT count(*) FROM notification_intents"); n != 2 {
 		t.Fatalf("redrive created intents: %d", n)
 	}
 }
@@ -228,7 +228,7 @@ func TestDLQReplayAfterRedriveIsANoOp(t *testing.T) {
 	_ = WithTenant(context.Background(), db, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, "SELECT count(*) FROM intent_redrives WHERE intent_id = $1", ids[0]).Scan(&redrives)
 	})
-	if redrives != 1 || countRows(t, db, tenant, "SELECT count(*) FROM notification_intents") != 3 {
+	if redrives != 1 || countRows(t, db, tenant, "SELECT count(*) FROM notification_intents") != 2 {
 		t.Fatalf("replay of a redriven intent redrove it again: %d", redrives)
 	}
 	if err := handler(context.Background(), amqp.Delivery{MessageId: "other", Body: pub.dead[0].Body}); err == nil {
@@ -245,7 +245,7 @@ func TestRedriveTenantFilterIsIsolatedByRLS(t *testing.T) {
 	_, idsA := deadIntents(t, db, a, &brokerDown{})
 	_, idsB := deadIntents(t, db, b, &brokerDown{})
 	done, err := RedriveDead(context.Background(), db, RedriveOptions{Limit: 100, TenantID: a, Actor: "ops", Reason: "tenant a only"})
-	if err != nil || len(done) != 3 {
+	if err != nil || len(done) != 2 {
 		t.Fatalf("%v %v", done, err)
 	}
 	for _, ref := range done {
@@ -280,7 +280,7 @@ func TestOperatorCommands(t *testing.T) {
 	env := map[string]string{"JOBS_DATABASE_URL": envOrSkip(t, "JOBS_DIRECT_URL"), "USER": "tester"}
 	getenv := func(k string) string { return env[k] }
 	var out bytes.Buffer
-	if err := redriveCommand(context.Background(), []string{"-tenant", tenant, "-reason", "test"}, getenv, &out); err != nil || !strings.Contains(out.String(), "redriven 3 dead intents") {
+	if err := redriveCommand(context.Background(), []string{"-tenant", tenant, "-reason", "test"}, getenv, &out); err != nil || !strings.Contains(out.String(), "redriven 2 dead intents") {
 		t.Fatalf("%v %s", err, out.String())
 	}
 	if err := redriveCommand(context.Background(), []string{"-tenant", tenant}, getenv, &out); !errors.Is(err, ErrRedriveOptions) {

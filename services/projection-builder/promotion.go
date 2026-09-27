@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -92,5 +94,31 @@ func PromoteReadViews(ctx context.Context, db interface {
 	if _, err = tx.Exec(ctx, latest); err != nil {
 		return fmt.Errorf("replace read.latest_readings: %w", err)
 	}
+	if err = emitPromotionEpoch(ctx, tx, schema); err != nil {
+		return fmt.Errorf("record promotion invalidation: %w", err)
+	}
 	return tx.Commit(ctx)
+}
+
+// emitPromotionEpoch inserts one synthetic source receipt and notification in
+// the same transaction as the view swap. The trigger writes the canonical CDC
+// outbox row. A global epoch avoids one write for each of millions of tenants.
+func emitPromotionEpoch(ctx context.Context, tx pgx.Tx, schema string) error {
+	eventID := uuid.NewString()
+	traceID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	traceparent := "00-" + traceID + "-" + traceID[:16] + "-01"
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.tenant_id',$1,true)`, infrastructureTenant); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO public.consumer_inbox
+		(consumer_name,tenant_id,event_id,source_topic,source_partition,source_offset,event)
+		VALUES ('promotion',$1,$2,'projection.promotion',0,0,
+		jsonb_build_object('event_type','projection.promoted','aggregate_version','1',
+		'correlation_id',$2::uuid,'traceparent',$3::text,'schema_name',$4::text))`, infrastructureTenant, eventID, traceparent, schema); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO public.projection_notifications
+		(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,consumer_name)
+		VALUES ($1,$2,'device',$1,$2,'promotion_changed','promotion')`, infrastructureTenant, eventID)
+	return err
 }

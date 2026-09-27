@@ -5,13 +5,24 @@
   "type": "module",
   "workspaces": [
     "apps/dashboard",
+    "apps/mobile",
     "packages/otel",
     "packages/tenant-auth",
     "packages/contracts",
     "packages/read-model",
+    "packages/membership-client",
+    "packages/kafka-runtime",
+    "packages/feature-flags",
+    "packages/entitlements",
+    "packages/audit",
+    "services/tenant-control-plane",
+    "services/billing-service",
+    "services/bff",
+    "services/gateway",
     "services/device-service",
     "services/workflow-alerts",
-    "services/notification-service"
+    "services/notification-service",
+    "services/read-api"
   ],
   "engines": {
     "node": ">=24.21.0 <25"
@@ -22,9 +33,9 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "eslint apps/dashboard/src services/device-service/src services/workflow-alerts/src services/notification-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src packages/read-model/src scripts/*.mjs",
-    "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
-    "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\"",
+    "lint": "eslint apps/dashboard/src apps/mobile/src services/bff/src services/gateway/src services/device-service/src services/workflow-alerts/src services/notification-service/src services/billing-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src packages/read-model/src packages/feature-flags/src packages/entitlements/src packages/audit/src packages/kafka-runtime/src scripts/*.mjs services/read-api/src services/tenant-control-plane/src packages/membership-client/src",
+    "format": "prettier --write \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/bff/src/**/*.ts\" \"services/gateway/src/**/*.ts\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\" \"services/read-api/src/**/*.ts\" \"services/tenant-control-plane/src/**/*.ts\"",
+    "format:check": "prettier --check \"apps/dashboard/src/**/*.{ts,tsx,css}\" \"services/bff/src/**/*.ts\" \"services/gateway/src/**/*.ts\" \"services/device-service/src/**/*.ts\" \"services/workflow-alerts/src/**/*.ts\" \"services/notification-service/src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/*.mjs\" \"services/read-api/src/**/*.ts\" \"services/tenant-control-plane/src/**/*.ts\"",
     "coverage": "node scripts/coverage.mjs"
   },
   "devDependencies": {

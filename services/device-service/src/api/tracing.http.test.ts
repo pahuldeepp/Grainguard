@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { initTracing } from "@greenguard/otel";
 import { InMemorySpanExporter } from "@greenguard/otel/testing";
-import { createTenant } from "../inventory/repository.js";
+import { createTenant } from "../testing/fixtures.js";
 import { startApi } from "../testing/api.js";
 import { adminQuery } from "../testing/fixtures.js";
 

@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "MessageValue",
+  "namespace": "io.debezium.connector.postgresql",
+  "fields": [
+    {
+      "name": "__source_ts_ms",
+      "type": "string"
+    },
+    {
+      "name": "prefix",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "content",
+      "type": ["null", "bytes"],
+      "default": null
+    }
+  ]
+}

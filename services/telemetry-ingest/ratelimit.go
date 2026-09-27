@@ -19,8 +19,8 @@ type BucketConfig struct {
 }
 
 type LimitConfig struct {
-	Device, Tenant BucketConfig
-	MaxEntries     int
+	Device, Tenant, Key BucketConfig
+	MaxEntries          int
 }
 
 // DefaultLimitConfig assumes about one reading per minute per device, with room for a
@@ -29,6 +29,7 @@ func DefaultLimitConfig() LimitConfig {
 	return LimitConfig{
 		Device:     BucketConfig{Rate: 0.2, Burst: 20},
 		Tenant:     BucketConfig{Rate: 200, Burst: 2000},
+		Key:        BucketConfig{Rate: 0.2, Burst: 20},
 		MaxEntries: 100000,
 	}
 }
@@ -45,6 +46,15 @@ func normalizeLimits(cfg LimitConfig) LimitConfig {
 	}
 	if !cfg.Tenant.valid() {
 		cfg.Tenant = defaults.Tenant
+	}
+	if !cfg.Key.valid() {
+		cfg.Key = cfg.Device
+	}
+	if cfg.Key.Rate > cfg.Tenant.Rate {
+		cfg.Key.Rate = cfg.Tenant.Rate
+	}
+	if cfg.Key.Burst > cfg.Tenant.Burst {
+		cfg.Key.Burst = cfg.Tenant.Burst
 	}
 	if cfg.MaxEntries <= 0 {
 		cfg.MaxEntries = defaults.MaxEntries
@@ -124,6 +134,7 @@ type TokenBuckets struct {
 	mu      sync.Mutex
 	devices *bucketSet
 	tenants *bucketSet
+	keys    *bucketSet
 }
 
 func NewTokenBuckets(cfg LimitConfig, now func() time.Time) *TokenBuckets {
@@ -134,7 +145,28 @@ func NewTokenBuckets(cfg LimitConfig, now func() time.Time) *TokenBuckets {
 	newSet := func(c BucketConfig) *bucketSet {
 		return &bucketSet{cfg: c, max: cfg.MaxEntries, items: make(map[string]*bucket)}
 	}
-	return &TokenBuckets{now: now, devices: newSet(cfg.Device), tenants: newSet(cfg.Tenant)}
+	return &TokenBuckets{now: now, devices: newSet(cfg.Device), tenants: newSet(cfg.Tenant), keys: newSet(cfg.Key)}
+}
+
+// AllowKey checks all three dimensions before spending any token. A throttled key
+// cannot spend its tenant's or another device's allowance.
+func (t *TokenBuckets) AllowKey(tenantID, deviceID, keyID string) (bool, time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	key, keyOK := t.keys.get(tenantID+"/"+keyID, now)
+	device, deviceOK := t.devices.get(tenantID+"/"+deviceID, now)
+	tenant, tenantOK := t.tenants.get(tenantID, now)
+	if !keyOK || !deviceOK || !tenantOK {
+		return false, refuseWait
+	}
+	if wait := max(key.wait(t.keys.cfg), device.wait(t.devices.cfg), tenant.wait(t.tenants.cfg)); wait > 0 {
+		return false, wait
+	}
+	key.tokens--
+	device.tokens--
+	tenant.tokens--
+	return true, 0
 }
 
 func (t *TokenBuckets) Allow(tenantID, deviceID string) (bool, time.Duration) {

@@ -22,8 +22,8 @@ type Recorded struct {
 	Intents   []string
 }
 
-// RecordEvent writes the inbox row, one intent per channel and its dispatch outbox row in
-// ONE tenant transaction. A redelivered event hits the inbox key and changes nothing.
+// RecordEvent writes inbox evidence and notification intents in one tenant transaction.
+// Critical notification-producing transitions are owned exclusively by EventBridge/SQS/Lambda.
 func RecordEvent(ctx context.Context, db TxStarter, ev AlertEvent, src SourceRef) (Recorded, error) {
 	var out Recorded
 	version, err := ev.Version()
@@ -39,6 +39,9 @@ func RecordEvent(ctx context.Context, db TxStarter, ev AlertEvent, src SourceRef
 		if tag.RowsAffected() == 0 {
 			out.Duplicate = true
 			return nil
+		}
+		if ev.Payload.Severity == "critical" && len(Channels(ev.EventType, ev.Payload.Severity)) > 0 {
+			return nil // Preserve inbox evidence; never dual-route critical alerts through RabbitMQ.
 		}
 		for _, channel := range Channels(ev.EventType, ev.Payload.Severity) {
 			id := IntentID(ev.TenantID, ev.Payload.EpisodeID, version, channel)
@@ -79,22 +82,18 @@ type DueRef struct {
 	Available time.Time
 }
 
-// ScanDue lists due outbox identifiers across tenants through the read-only scan policy.
+// ScanDue lists due outbox identifiers across tenants through the ID-only selector; each
+// intent is then read and locked inside its own tenant transaction (DispatchOne).
 func ScanDue(ctx context.Context, db TxStarter, limit int) ([]DueRef, error) {
-	var refs []DueRef
-	err := withDispatchScan(ctx, db, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT tenant_id::text, intent_id::text, available_at FROM dispatch_outbox
-			WHERE dispatched_at IS NULL AND available_at <= now() ORDER BY available_at LIMIT $1`, limit)
-		if err != nil {
-			return fmt.Errorf("scan due: %w", err)
-		}
-		refs, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (DueRef, error) {
+	refs, err := selectRefs(ctx, db, `SELECT tenant_id::text, intent_id::text, available_at FROM jobs_due_dispatch_refs($1)`, limit,
+		func(r pgx.CollectableRow) (DueRef, error) {
 			var d DueRef
 			return d, r.Scan(&d.TenantID, &d.IntentID, &d.Available)
 		})
-		return err
-	})
-	return refs, err
+	if err != nil {
+		return nil, fmt.Errorf("scan due: %w", err)
+	}
+	return refs, nil
 }
 
 // Receipt is the durable outcome notification-service reports for one intent.

@@ -7,6 +7,7 @@ type Principal struct {
 	Subject  string
 	TenantID string
 	Roles    []string
+	KeyID    string
 }
 
 func (p Principal) HasRole(role string) bool {
@@ -40,6 +41,7 @@ const (
 	ReasonDeviceDisabled      = "device_disabled"
 	ReasonIdempotencyConflict = "idempotency_conflict"
 	ReasonRateLimited         = "rate_limited"
+	ReasonEntitlementVolume   = "entitlement_volume_exceeded"
 )
 
 // Rejection is a reading that was refused. It is reported to the device and never stored

@@ -22,6 +22,7 @@ export interface TenantTxOptions {
   // Bounds how long any statement in the transaction waits for a row lock.
   lockTimeoutMs?: number;
   timeoutMs?: number;
+  statementTimeoutMs?: number;
 }
 
 // Every tenant-scoped query runs inside this helper. The tenant is set with
@@ -42,6 +43,8 @@ export async function withTenant<T>(
           const lockTimeout = `${options.lockTimeoutMs}ms`;
           await tx.$executeRaw`SELECT set_config('lock_timeout', ${lockTimeout}, true)`;
         }
+        const statementTimeout = `${options.statementTimeoutMs ?? 5000}ms`;
+        await tx.$executeRaw`SELECT set_config('statement_timeout', ${statementTimeout}, true)`;
         return work(tx);
       },
       { isolationLevel: options.isolationLevel, timeout: options.timeoutMs },

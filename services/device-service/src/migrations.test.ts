@@ -2,16 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { adminUrl, env } from "./testing/fixtures.js";
 
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 
-function prisma(args: string[], migrationUrl: string) {
+function prisma(args: string[], migrationUrl: string, migrationPath?: string) {
   return spawnSync("npx", ["prisma", ...args], {
     cwd: packageDir,
-    env: { ...process.env, INVENTORY_MIGRATION_URL: migrationUrl },
+    env: {
+      ...process.env,
+      INVENTORY_MIGRATION_URL: migrationUrl,
+      ...(migrationPath && { INVENTORY_MIGRATIONS_PATH: migrationPath }),
+    },
     encoding: "utf8",
   });
 }
@@ -56,7 +63,7 @@ test("D01: migrations build an empty database, re-apply cleanly and match the sc
       scratch,
       "SELECT count(*)::int AS n FROM pg_policies WHERE policyname = 'tenant_isolation'",
     );
-    assert.equal(policies[0].n, 9);
+    assert.equal(policies[0].n, 13);
     const versions = await admin(
       scratch,
       `SELECT table_name, data_type, is_nullable, column_default
@@ -87,6 +94,52 @@ test("D01: migrations build an empty database, re-apply cleanly and match the sc
     );
     assert.equal(cdcPolicies[0].n, 1);
   } finally {
+    await admin("postgres", `DROP DATABASE ${scratch} WITH (FORCE)`);
+  }
+});
+
+test("M11: existing inventory tenants upgrade into version-one control-plane projections", async () => {
+  const scratch = `greenguard_inventory_m11_${randomBytes(4).toString("hex")}`;
+  const url = new URL(env("INVENTORY_MIGRATION_URL"));
+  url.pathname = `/${scratch}`;
+  const oldMigrations = mkdtempSync(join(tmpdir(), "inventory-before-09a-"));
+  const source = join(packageDir, "prisma", "migrations");
+  for (const entry of readdirSync(source)) {
+    if (entry === "20260925110000_tenant_projection") continue;
+    cpSync(join(source, entry), join(oldMigrations, entry), {
+      recursive: true,
+    });
+  }
+  await admin(
+    "postgres",
+    `CREATE DATABASE ${scratch} OWNER inventory_migrator`,
+  );
+  try {
+    const before = prisma(["migrate", "deploy"], url.toString(), oldMigrations);
+    assert.equal(before.status, 0, before.stderr);
+    const tenantId = "49d2e2e6-3697-4297-bc89-691bf8d9321e";
+    await admin(
+      scratch,
+      `INSERT INTO tenants (tenant_id,name) VALUES ('${tenantId}', 'legacy farm')`,
+    );
+    const upgrade = prisma(["migrate", "deploy"], url.toString());
+    assert.equal(upgrade.status, 0, upgrade.stderr);
+    const rows = await admin(
+      scratch,
+      `SELECT name,state,home_region,version::text FROM tenants WHERE tenant_id='${tenantId}'`,
+    );
+    assert.deepEqual(rows, [
+      {
+        name: "legacy farm",
+        state: "active",
+        home_region: "local",
+        version: "1",
+      },
+    ]);
+    const replay = prisma(["migrate", "deploy"], url.toString());
+    assert.equal(replay.status, 0, replay.stderr);
+  } finally {
+    rmSync(oldMigrations, { recursive: true, force: true });
     await admin("postgres", `DROP DATABASE ${scratch} WITH (FORCE)`);
   }
 });

@@ -56,3 +56,35 @@ URLs exported; `make coverage` supplies them through Make. Full database and lis
 tests need an unrestricted local test environment. `make events-e2e` runs the live
 acceptance separately. [Validation evidence](../../evidence/STAGE_04B_VALIDATION.md)
 distinguishes executed checks from unverified integration and coverage gates.
+
+## Stage 07 binding readiness participant
+
+`binding.await` is a separate saga command consumed from
+`greenguard.saga.commands.v1`. The command receipt is tenant-scoped and durable
+in `saga_binding_requests`. It emits a `succeeded` result only after this
+service's own `device_bindings` row is active. An inventory binding event and
+any pending readiness receipts complete in one transaction, serialized with
+the command insert by a per-tenant/device advisory lock. The result publisher
+uses the stable result ID and marks delivery after Kafka confirms; a crash can
+redeliver it safely. A missing or disabled binding stays pending until the saga
+deadline/repair path resolves it, rather than inventing a business rejection.
+
+The opt-in worker requires `SAGA_BINDING_ENABLED=1` and `KAFKA_BROKERS`
+(group `telemetry-saga-binding-v1`, override `SAGA_BINDING_GROUP`). It finds
+tenants with unpublished results through the ID-only SECURITY DEFINER selector
+`saga_binding_result_tenants(after, limit)` (migration 000007), then publishes at
+most 10 results for each of at most 100 tenants per pass, round-robin, inside
+each tenant's RLS transaction. The retired `SAGA_BINDING_TENANT_IDS` is rejected
+at startup. The receipt table also needs a retention/archival
+policy tied to the saga's terminal state before production-scale operation;
+pending receipts are intentionally retained while an outcome is unknown.
+
+## Stage 09b machine credentials
+
+When `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN` are configured together,
+ingest accepts `gg_` API keys and short-lived OAuth client-credentials tokens.
+The control plane verifies each credential and supplies the tenant context.
+Device keys can write only their bound device, and the existing binding feed
+still checks whether that device is active. `INGEST_KEY_RATE` and
+`INGEST_KEY_BURST` set the per-key bucket; it is checked with device and tenant
+buckets before parsing a reading. A control-plane outage fails closed with 503.

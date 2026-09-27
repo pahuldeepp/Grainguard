@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { initTracing } from "@greenguard/otel";
-import { createTokenVerifier } from "@greenguard/tenant-auth";
+import { createTokenVerifierFromEnv } from "@greenguard/tenant-auth";
 import { createAlertsApp } from "./app.js";
 import { readConfig } from "./config.js";
 import { createDb } from "./db/client.js";
@@ -18,13 +19,12 @@ export async function start(env: NodeJS.ProcessEnv) {
     db,
     stopConsumer,
     consumerHealth,
-    verifier:
-      config.auth &&
-      createTokenVerifier({
-        issuer: config.auth.issuer,
-        audience: config.auth.audience,
-        keys: { jwksUrl: config.auth.jwksUrl },
-      }),
+    verifier: config.auth
+      ? createTokenVerifierFromEnv(
+          (name) => env[name],
+          (path) => readFileSync(path, "utf8"),
+        )
+      : undefined,
     tracing:
       config.otlpEndpoint === undefined
         ? undefined

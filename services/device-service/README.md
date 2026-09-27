@@ -1,5 +1,28 @@
 # services/device-service
 
+Stage 07 inventory provisioning uses this service's database and tenant RLS.
+`POST /v1/devices/provisioning` (admin, idempotency key required) creates a
+pending device linked to a physical `assetId`, site, and optional bin. Pending
+creation emits no `device.registered` event. The separate
+`npm run saga:worker -w @greenguard/device-service` process consumes
+`greenguard.saga.commands.v1`: `inventory.activate` verifies the pending
+device/asset pair and emits the existing valid `device.registered@1` active
+event; `inventory.deactivate` compensates only the saga that activated it and
+emits `device.status_changed@1` disabled. Command receipts, inventory changes,
+CDC events, and result outbox rows commit in one tenant transaction. The worker
+publishes results with stable IDs to `greenguard.saga.results.v1` before marking
+them published.
+
+The worker needs `INVENTORY_DATABASE_URL` and `KAFKA_BROKERS`; the consumer
+group defaults to `greenguard-inventory-saga-v1` (`INVENTORY_SAGA_GROUP`). It
+applies every tenant's command inside that tenant's RLS transaction. Results are
+discovered through the ID-only SECURITY DEFINER selector
+`inventory_saga_result_tenants(after, limit)`, which returns tenant IDs only.
+Each pass visits at most 100 tenants after a round-robin cursor and publishes at
+most 10 results per tenant. The retired `INVENTORY_SAGA_TENANT_IDS` is rejected
+at startup. `make inventory-saga-test` and
+`make inventory-saga-kafka-test` exercise live database and Kafka boundaries.
+
 Status: **Stages 02a and 02b implemented; Stage 06a-0 grain-lot placement added locally**: inventory data layer plus the authenticated, versioned HTTP API ([API reference](../../docs/API.md)).
 
 Technology: NestJS, Prisma 7 (`@prisma/adapter-pg`), PostgreSQL, PgBouncer.
@@ -33,3 +56,40 @@ npm run coverage -w services/device-service
 ```
 
 Schema changes: edit `prisma/schema.prisma`, add a new numbered folder under `prisma/migrations/` (generate the base with `prisma migrate diff`, then append RLS, grants and checks by hand). The D01 test fails if migrations and the schema drift apart.
+
+## Stage 10c import admission
+
+`POST /v1/internal/inventory/imports` admits one validated v1 change from the
+MySQL normalizer. This route is mounted only when the normal `AUTH_*` settings
+and all seven import settings are present:
+`IMPORT_SOURCE_ID`, `IMPORT_AUTH_ISSUER`, `IMPORT_AUTH_AUDIENCE`,
+`IMPORT_AUTH_JWKS_URL`, `IMPORT_AUTH_TENANT_CLAIM` (the signed token's
+tenant claim), `CONTROL_LOOKUP_URL`, and `CONTROL_LOOKUP_TOKEN`. The import
+JWT must use RS256 client credentials, contain `inventory:import`, and resolve
+through the tenant control plane's internal OAuth client lookup. The control
+plane binding supplies the authoritative tenant and service principal. The
+`tenant_id` in the normalized change is checked against that binding and
+cannot select another tenant. Human API tokens and machine import tokens cannot
+cross into each other's route family. Both remote endpoints require HTTPS;
+loopback HTTP is available for local tests. No mTLS is used in this slice.
+`IMPORT_SOURCE_ID` binds this service instance to one trusted Task1 source
+configuration; a request with another source ID is rejected before database
+work. The shared control-plane lookup token alone does not enable the route.
+
+The body is the normalizer's `NormalizedChange` serialized with snake-case
+field names, with `source_coordinate.offset` sent as a decimal string so
+signed-64-bit Kafka offsets stay exact in JavaScript. The service recomputes
+the normalizer's UUIDv5 entity and event IDs. The per-source-entity
+`inventory_import_state` row carries a transaction-scoped fence: equal
+coordinate and digest returns the original result, lower offsets are stale, and a
+changed generation/topic/partition or equal-coordinate digest conflict is
+rejected. Canonical inventory, existing outbox events, audit entries, and the
+fence commit together through the tenant-scoped `inventory_app` role.
+Site/bin deletes and bin relocation are rejected for quarantine; device
+deletion becomes a soft-deleted status. Device serial changes and
+saga-managed-device imports are rejected because the v1 event contracts cannot
+represent those transitions safely.
+
+Run `make db-migrate`, then `npm test -w services/device-service` with the
+repository's local `.env` loaded. The importer consumer, Kafka offset commits,
+DLQ/redrive and MySQL connector are separate Stage 10c tasks.

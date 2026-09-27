@@ -396,7 +396,14 @@ try {
     "node",
     ["dist/main.js"],
     "services/notification-service",
-    { NOTIFICATIONS_HTTP_PORT: "18096", NOTIFICATIONS_PROVIDER: "local" },
+    {
+      NOTIFICATIONS_HTTP_PORT: "18096",
+      NOTIFICATIONS_PROVIDER: "local",
+      // Machine API-key lookup is not part of this flow; an inherited token
+      // without CONTROL_PLANE_URL would abort startup.
+      CONTROL_PLANE_URL: "",
+      CONTROL_LOOKUP_TOKEN: "",
+    },
   );
   await until(
     "notifications health",

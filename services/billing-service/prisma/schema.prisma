@@ -1,0 +1,13 @@
+// SQL migrations own constraints, RLS, grants and indexes. Runtime uses typed raw
+// queries so those database invariants are not duplicated in generated models.
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+  runtime             = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}

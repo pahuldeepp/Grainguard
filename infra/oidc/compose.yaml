@@ -1,0 +1,48 @@
+# Opt-in: make oidc-up / oidc-down. Never part of make verify.
+name: greenguard-oidc
+services:
+  dex:
+    image: ghcr.io/dexidp/dex:v2.43.1@sha256:0881d3c9359b436d585b2061736ce271c100331e073be9178ef405ce5bf09557
+    command: ["dex", "serve", "/etc/dex/dex.yaml.tpl"]
+    environment:
+      OIDC_DEV_PASSWORD: ${OIDC_DEV_PASSWORD:?run make bootstrap to generate OIDC_DEV_PASSWORD}
+      OIDC_TOKEN_TTL: ${OIDC_TOKEN_TTL:-5m}
+    volumes:
+      - ./dex.yaml.tpl:/etc/dex/dex.yaml.tpl:ro
+    ports:
+      - "127.0.0.1:5556:5556"
+    mem_limit: 128m
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:5556/dex/.well-known/openid-configuration",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  dex-second:
+    image: ghcr.io/dexidp/dex:v2.43.1@sha256:0881d3c9359b436d585b2061736ce271c100331e073be9178ef405ce5bf09557
+    profiles: ["multi-issuer"]
+    command: ["dex", "serve", "/etc/dex/dex-second.yaml.tpl"]
+    environment:
+      OIDC_DEV_PASSWORD: ${OIDC_DEV_PASSWORD:?run make bootstrap to generate OIDC_DEV_PASSWORD}
+      OIDC_TOKEN_TTL: ${OIDC_TOKEN_TTL:-5m}
+    volumes:
+      - ./dex-second.yaml.tpl:/etc/dex/dex-second.yaml.tpl:ro
+    ports:
+      - "127.0.0.1:5557:5557"
+    mem_limit: 128m
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5557/dex/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

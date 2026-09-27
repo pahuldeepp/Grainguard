@@ -22,7 +22,6 @@ import {
 import {
   changeDeviceBinding,
   createBin,
-  createTenant,
   createSite,
   listDevices,
   lockDevice,
@@ -30,12 +29,15 @@ import {
   registerDevice,
   setDeviceStatus,
 } from "./repository.js";
+import { createTenant } from "../testing/fixtures.js";
+import { seedPlan } from "../testing/entitlements.js";
 
 let db: Db;
 let t: TenantFixture;
 before(async () => {
   db = pooledDb(8);
   t = await seedTenant(db);
+  await seedPlan(t.tenantId, { "devices.max": 1000 });
 });
 after(() => db.$disconnect());
 

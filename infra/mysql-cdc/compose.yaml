@@ -1,0 +1,28 @@
+# Opt-in Stage 10c source profile; not loaded by dev/verify/events-up.
+services:
+  mysql-cdc:
+    image: mysql:8.4.7@sha256:0426ec38c7a10aa45ba383887df7878f74ee70e2fd589c7b69207f3577901903
+    command:
+      - --server-id=18001
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_CDC_ROOT_PASSWORD:?Set a local generated root password}
+      MYSQL_DATABASE: partner_inventory
+      MYSQL_USER: partner_cdc
+      MYSQL_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
+    ports: ["127.0.0.1:53306:3306"]
+    volumes: [mysql-cdc-data:/var/lib/mysql]
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -u root -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+volumes:
+  mysql-cdc-data:

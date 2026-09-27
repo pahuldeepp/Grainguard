@@ -4,6 +4,7 @@ They run when RISK_DIRECT_URL and RISK_MIGRATION_URL are set (`set -a; . ./.env`
 Every test uses fresh random tenant IDs, so no cleanup (and no DELETE) is needed.
 """
 
+import json
 import os
 import unittest
 import uuid
@@ -253,6 +254,40 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         rows = sql(OWNER_URL, "SELECT source_offset, reason FROM quarantine_samples WHERE consumer_name = 'risk-live'"
                    " AND source_topic = %s AND slot = %s", (rec.topic, offset % 1000))
         self.assertEqual(rows, [(offset, "invalid_measurements")])
+
+    def copy_to(self, table, where, params, intruder):
+        """Insert tenant A's row into `table` again for `intruder`, keeping every identifier."""
+        row = sql(OWNER_URL, f"SELECT to_jsonb(t) FROM {table} t WHERE tenant_id = %s AND {where}",
+                  (self.tenant, *params), self.tenant)[0][0]
+        row["tenant_id"] = intruder
+        sql(OWNER_URL, f"INSERT INTO {table} SELECT * FROM jsonb_populate_record(NULL::{table}, %s::jsonb)",
+            (json.dumps(row),), intruder)
+
+    def test_same_ids_in_two_tenants_neither_collide_nor_leak(self):
+        self.seed()
+        self.apply(self.reading())
+        assessment_id, event_id = sql(OWNER_URL, "SELECT assessment_id, event_id FROM risk_assessments"
+                                      " WHERE tenant_id = %s", (self.tenant,), self.tenant)[0]
+        intruder = new_id()
+        self.seed(intruder)  # same device/bin/lot ids, now owned by the second tenant
+        self.copy_to("risk_assessments", "assessment_id = %s", (assessment_id,), intruder)
+        self.copy_to("outbox_events", "event_id = %s", (event_id,), intruder)
+        for tenant in (self.tenant, intruder):
+            with self.subTest(tenant=tenant):
+                self.assertEqual(sql(OWNER_URL, "SELECT DISTINCT tenant_id::text FROM risk_assessments"
+                                     " WHERE assessment_id = %s", (assessment_id,), tenant), [(tenant,)])
+                self.assertEqual(sql(OWNER_URL, "SELECT DISTINCT tenant_id::text FROM outbox_events"
+                                     " WHERE event_id = %s", (event_id,), tenant), [(tenant,)])
+
+    def test_every_unique_key_on_tenant_tables_is_tenant_scoped(self):
+        rows = sql(OWNER_URL, "SELECT c.conrelid::regclass::text || '.' || c.conname FROM pg_constraint c"
+                   " JOIN pg_class r ON r.oid = c.conrelid"
+                   " WHERE c.contype IN ('p', 'u') AND r.relnamespace = 'public'::regnamespace"
+                   " AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = r.oid AND a.attname = 'tenant_id')"
+                   " AND NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = r.oid"
+                   "   AND a.attname = 'tenant_id' AND a.attnum = ANY(c.conkey))"
+                   " ORDER BY 1")
+        self.assertEqual(rows, [])
 
     def test_connection_failures_are_transient_store_errors(self):
         broken = PgDatabase("postgresql://risk_app:wrong@127.0.0.1:1/greenguard_risk?connect_timeout=1")

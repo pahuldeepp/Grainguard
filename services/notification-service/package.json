@@ -9,10 +9,18 @@
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "npm run build && node dist/migrate.js",
-    "live": "npm run build && node --test --test-concurrency=1 \"dist/testing/*.live.js\""
+    "live": "npm run build && CONTACTS_CDC_LIVE=1 STAGE10B_KAFKA_LIVE=1 node --test --test-concurrency=1 \"dist/testing/*.live.js\" \"dist/*.live.test.js\"",
+    "live:rabbit": "npm run build && node --test --test-concurrency=1 \"dist/testing/*.live.js\"",
+    "contacts-projector": "node dist/contacts-projector-main.js"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1141.0",
+    "@aws-sdk/lib-dynamodb": "^3.1141.0",
+    "@greenguard/feature-flags": "0.1.0",
+    "@kafkajs/confluent-schema-registry": "^4.1.0",
     "amqplib": "2.0.1",
+    "kafkajs": "2.2.4",
+    "kafkajs-snappy": "1.1.0",
     "pg": "8.23.0"
   },
   "devDependencies": {

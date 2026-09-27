@@ -5,6 +5,7 @@ import { createTokenVerifier } from "@greenguard/tenant-auth";
 import { createApp } from "../app.js";
 import type { VersionRegistry } from "../api/versioning/index.js";
 import { pooledDb } from "./fixtures.js";
+import type { ImportVerifier } from "../import/auth.js";
 
 export interface ApiJson {
   [key: string]: unknown;
@@ -33,6 +34,8 @@ export async function startApi(
     now?: () => Date;
     ping?: () => Promise<void>;
     tracing?: Tracing;
+    importVerifier?: ImportVerifier;
+    importSourceId?: string;
   } = {},
 ) {
   const issuer = await createTestIssuer();
@@ -49,6 +52,8 @@ export async function startApi(
       versions: options.versions,
       now: options.now,
       tracing: options.tracing,
+      importVerifier: options.importVerifier,
+      importSourceId: options.importSourceId,
     },
   );
   await app.listen(0, "127.0.0.1");

@@ -183,7 +183,13 @@ for (const f of [
 ])
   if (!existsSync(f)) throw new Error(`Missing ${f}; run make coverage`);
 mkdirSync(".scannerwork", { recursive: true, mode: 0o777 });
-const scanExit = compose(["run", "--rm", "scanner"], false);
+const scannerArgs = ["run", "--rm", "scanner"];
+if (process.env.SONAR_DISABLE_SCM === "true")
+  scannerArgs.push(
+    "-Dsonar.scanner.skipJreProvisioning=true",
+    "-Dsonar.scm.disabled=true",
+  );
+const scanExit = compose(scannerArgs, false);
 const gateStatus = await api(
   "qualitygates/project_status",
   { projectKey: "grainguard" },

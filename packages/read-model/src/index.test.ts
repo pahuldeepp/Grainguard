@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import {
   getDevice,
+  getDevices,
   getFreshness,
   getLatestReading,
   getReading,
@@ -180,6 +181,12 @@ test(
         devices[0],
       );
       assert.equal(await getDevice(client, tenants[0], devices[1]), null);
+      assert.deepEqual(
+        (await getDevices(client, tenants[0], devices)).map(
+          (row) => row.device_id,
+        ),
+        [devices[0]],
+      );
       assert.equal(
         (await listDevicesBySite(client, tenants[0], site)).length,
         1,

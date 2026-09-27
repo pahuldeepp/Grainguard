@@ -39,6 +39,106 @@ func testSchemas(t *testing.T) schemas {
 func validEvent(t *testing.T) map[string]any {
 	return eventFixture(t, "telemetry-recorded.v1.valid.json")
 }
+
+func TestControlOutboxRoutesOnlyFromControlSource(t *testing.T) {
+	s := testSchemas(t)
+	for _, name := range []string{"membership-changed.v1.valid.json", "tenant-created.v1.valid.json"} {
+		event := eventFixture(t, filepath.Join("control-plane", name))
+		record, _, err := transform(Message{Topic: rawControl, Value: rawEvent(t, event)}, s)
+		requireReason(t, err, "")
+		if record.Topic != topicTenant || record.Headers[fieldTenant] != event[fieldTenant] {
+			t.Fatalf("%s was not routed as tenant-owned control event", name)
+		}
+		_, _, err = transform(Message{Topic: rawInventory, Value: rawEvent(t, event)}, s)
+		requireReason(t, err, reasonEnvelope)
+	}
+	membership := eventFixture(t, filepath.Join("control-plane", "membership-changed.v1.valid.json"))
+	membership[fieldPayload].(map[string]any)["state"] = "revoked"
+	_, _, invalid := transform(Message{Topic: rawControl, Value: rawEvent(t, membership)}, s)
+	requireReason(t, invalid, reasonSchema)
+	tenant := eventFixture(t, filepath.Join("control-plane", "tenant-created.v1.valid.json"))
+	tenant[fieldAggregate] = "22222222-2222-4222-8222-222222222222"
+	_, _, invalid = transform(Message{Topic: rawControl, Value: rawEvent(t, tenant)}, s)
+	requireReason(t, invalid, reasonSchema)
+	principal := eventFixture(t, filepath.Join("control-plane", "membership-changed.v1.valid.json"))
+	principal[fieldType] = typeServicePrincipalCreated
+	principal[fieldAggregateType] = "service_principal"
+	principal[fieldPayload] = map[string]any{
+		"tenant_id":         principal[fieldTenant],
+		"principal_id":      principal[fieldAggregate],
+		"principal_version": principal[fieldVersion],
+		"state":             "active",
+	}
+	record, _, invalid := transform(Message{Topic: rawControl, Value: rawEvent(t, principal)}, s)
+	requireReason(t, invalid, "")
+	if record.Topic != topicTenant {
+		t.Fatal("service principal did not route to tenant topic")
+	}
+	principal[fieldType] = typeServicePrincipalRevoked
+	_, _, invalid = transform(Message{Topic: rawControl, Value: rawEvent(t, principal)}, s)
+	requireReason(t, invalid, reasonSchema)
+}
+
+func TestStage09BillingAndFlagOutboxesRequireOwningSourceAndValidPayload(t *testing.T) {
+	s := testSchemas(t)
+	billing := eventFixture(t, filepath.Join("control-plane", "membership-changed.v1.valid.json"))
+	billing[fieldType] = typeEntitlementsChanged
+	billing[fieldAggregateType] = "entitlement"
+	billing[fieldAggregate] = billing[fieldTenant]
+	billing[fieldPayload] = map[string]any{
+		"tenant_id": billing[fieldTenant], "plan_key": "free", "plan_version": "1",
+		"limits": map[string]any{"devices.max": json.Number("10")}, "features": map[string]any{"alerts": true},
+		"source_version": billing[fieldVersion], "effective_at": billing[fieldOccurred],
+	}
+	record, _, invalid := transform(Message{Topic: rawBilling, Value: rawEvent(t, billing)}, s)
+	requireReason(t, invalid, "")
+	if record.Topic != topicBilling {
+		t.Fatalf("billing event went to %s", record.Topic)
+	}
+	_, _, invalid = transform(Message{Topic: rawControl, Value: rawEvent(t, billing)}, s)
+	requireReason(t, invalid, reasonEnvelope)
+	billing[fieldPayload].(map[string]any)["tenant_id"] = "1a0a0a0a-0000-4000-8000-00000000000a"
+	_, _, invalid = transform(Message{Topic: rawBilling, Value: rawEvent(t, billing)}, s)
+	requireReason(t, invalid, reasonSchema)
+
+	flag := eventFixture(t, filepath.Join("control-plane", "membership-changed.v1.valid.json"))
+	flag[fieldType] = typeFlagConfigurationChanged
+	flag[fieldAggregateType] = "flag_configuration"
+	flag[fieldPayload] = map[string]any{
+		"scope": "tenant", "config_version": flag[fieldVersion],
+		"flags":             map[string]any{"notifications.optional_sends": map[string]any{"value": false}},
+		"actor_identity_id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+	}
+	record, _, invalid = transform(Message{Topic: rawControl, Value: rawEvent(t, flag)}, s)
+	requireReason(t, invalid, "")
+	if record.Topic != topicPlatformConfig {
+		t.Fatalf("flag event went to %s", record.Topic)
+	}
+	_, _, invalid = transform(Message{Topic: rawBilling, Value: rawEvent(t, flag)}, s)
+	requireReason(t, invalid, reasonEnvelope)
+}
+
+func TestStage09IdentityConnectionOutboxRoutesAndValidates(t *testing.T) {
+	s := testSchemas(t)
+	event := eventFixture(t, filepath.Join("control-plane", "membership-changed.v1.valid.json"))
+	event[fieldType] = typeIdentityConnectionChanged
+	event[fieldAggregateType] = "identity_connection"
+	event[fieldAggregate] = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
+	event[fieldPayload] = map[string]any{
+		"connection_id": event[fieldAggregate], "connection_version": event[fieldVersion], "jit_enabled": true,
+	}
+	record, _, invalid := transform(Message{Topic: rawControl, Value: rawEvent(t, event)}, s)
+	requireReason(t, invalid, "")
+	if record.Topic != topicTenant {
+		t.Fatalf("identity connection went to %s", record.Topic)
+	}
+	_, _, invalid = transform(Message{Topic: rawInventory, Value: rawEvent(t, event)}, s)
+	requireReason(t, invalid, reasonEnvelope)
+	event[fieldPayload].(map[string]any)["connection_version"] = "1"
+	_, _, invalid = transform(Message{Topic: rawControl, Value: rawEvent(t, event)}, s)
+	requireReason(t, invalid, reasonSchema)
+}
+
 func rawEvent(t *testing.T, event map[string]any) []byte {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{fieldPayload: map[string]any{"op": "c", "source": map[string]any{"table": "outbox_events"}, "after": event}})

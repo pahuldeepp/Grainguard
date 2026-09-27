@@ -10,6 +10,22 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./oidc": {
+      "types": "./dist/oidc.d.ts",
+      "default": "./dist/oidc.js"
+    },
+    "./service-principals": {
+      "types": "./dist/service-principals.d.ts",
+      "default": "./dist/service-principals.js"
+    },
+    "./machine-control-plane": {
+      "types": "./dist/machine-control-plane.d.ts",
+      "default": "./dist/machine-control-plane.js"
+    },
+    "./issuers": {
+      "types": "./dist/issuers.d.ts",
+      "default": "./dist/issuers.js"
+    },
     "./testing": {
       "types": "./dist/testing/issuer.d.ts",
       "default": "./dist/testing/issuer.js"

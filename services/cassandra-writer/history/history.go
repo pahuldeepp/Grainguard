@@ -69,11 +69,12 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-
 func ValidID(id string) bool { return uuidPattern.MatchString(id) }
 
 const (
-	insertReading = `INSERT INTO readings_by_device_day (tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
-	selectDay     = `SELECT tenant_id, device_id, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ? AND observed_at >= ? AND observed_at <= ?`
-	upsertMark    = `INSERT INTO history_watermark (tenant_id, device_id, source_topic, source_partition, last_confirmed_offset, last_confirmed_observed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	selectMark    = `SELECT last_confirmed_offset, last_confirmed_observed_at FROM history_watermark WHERE tenant_id = ? AND device_id = ? AND source_topic = ? AND source_partition = ?`
-	day           = 24 * time.Hour
+	insertReading        = `INSERT INTO readings_by_device_day (tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
+	insertUnboundReading = `INSERT INTO readings_by_device_day (tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, temperature_c, relative_humidity_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
+	selectDay            = `SELECT tenant_id, device_id, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ? AND observed_at >= ? AND observed_at <= ?`
+	upsertMark           = `INSERT INTO history_watermark (tenant_id, device_id, source_topic, source_partition, last_confirmed_offset, last_confirmed_observed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	selectMark           = `SELECT last_confirmed_offset, last_confirmed_observed_at FROM history_watermark WHERE tenant_id = ? AND device_id = ? AND source_topic = ? AND source_partition = ?`
+	day                  = 24 * time.Hour
 )
 
 // Store writes and reads history through a Session.
@@ -94,6 +95,11 @@ func Day(t time.Time) time.Time { return t.UTC().Truncate(day) }
 func (s *Store) Write(ctx context.Context, r Reading) error {
 	if !ValidID(r.TenantID) {
 		return ErrInvalidTenant
+	}
+	if r.BinID == "" {
+		// A new unbound reading has no bin column. Omitting it avoids a null
+		// tombstone for every such telemetry event.
+		return s.Session.Exec(ctx, LocalQuorum, insertUnboundReading, r.TenantID, r.DeviceID, Day(r.ObservedAt), r.ObservedAt.UTC(), r.ReadingID, r.EventID, r.StreamVersion, r.ReceivedAt.UTC(), r.SiteID, r.TemperatureC, r.RelativeHumidityPercent, int(s.TTL.Seconds()))
 	}
 	return s.Session.Exec(ctx, LocalQuorum, insertReading, r.TenantID, r.DeviceID, Day(r.ObservedAt), r.ObservedAt.UTC(), r.ReadingID, r.EventID, r.StreamVersion, r.ReceivedAt.UTC(), r.SiteID, r.BinID, r.TemperatureC, r.RelativeHumidityPercent, int(s.TTL.Seconds()))
 }

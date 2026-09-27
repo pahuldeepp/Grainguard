@@ -51,11 +51,23 @@ class Shutdown implements OnApplicationShutdown {
     @Inject("TRACING") private readonly tracing: Tracing | null,
     @Inject("CONSUMER")
     private readonly consumer: { close?: () => Promise<void> },
+    @Inject(VERIFIER) private readonly verifier: Verifier | null,
   ) {}
   async onApplicationShutdown() {
-    await this.consumer.close?.();
-    await this.db.$disconnect();
-    await this.tracing?.shutdown();
+    const failures: unknown[] = [];
+    for (const close of [
+      () => this.consumer.close?.(),
+      () => this.db.$disconnect(),
+      () => this.tracing?.shutdown(),
+      () => this.verifier?.close?.(),
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length) throw failures[0];
   }
 }
 

@@ -4,6 +4,7 @@ import type { Broker, IncomingTask, Settlement } from "./broker.js";
 import {
   beginDelivery,
   finishDelivery,
+  expireDeliveryHold,
   isTerminal,
   type Outcome,
   type Plan,
@@ -21,6 +22,8 @@ import {
   ATTEMPT_HEADER,
   DEAD_EXCHANGE,
   DEAD_KEY,
+  FIRST_HELD_HEADER,
+  OPTIONAL_HOLD_ATTEMPT_HEADER,
   RECEIPT_KEY,
   RETRY_KEY,
 } from "./topology.js";
@@ -40,6 +43,8 @@ export interface Deps {
   providers: Semaphore;
   policy: Policy;
   metrics: Metrics;
+  /** Evaluated from a verified tenant ID; false holds optional work in the retry queue. */
+  optionalSendEnabled?: (tenantId: string) => Promise<boolean>;
 }
 
 export function backoffMs(policy: Policy, attempt: number): number {
@@ -96,7 +101,9 @@ export async function attemptReconcile(
         kind: "reconcile",
         providerRef: result.providerRef,
       };
-    // Not delivered: safe to send again under the same idempotency key.
+    if (result.kind === "unknown")
+      return { status: "unknown", kind: "reconcile", error: result.reason };
+    // Provider confirmed not delivered: safe to retry with the same key.
     return {
       status: "retry",
       kind: "reconcile",
@@ -127,18 +134,97 @@ export async function handleTask(
   incoming: IncomingTask,
 ): Promise<Settlement> {
   deps.metrics.observeLag(incoming.timestamp);
+  const task = parseWarningTask(deps, incoming);
+  if (!task) return "reject";
+  if (await holdIfOptionalSendingDisabled(deps, incoming, task)) return "ack";
+  return deliverTask(deps, incoming, task);
+}
+
+function parseWarningTask(
+  deps: Deps,
+  incoming: IncomingTask,
+): Task | undefined {
   let task: Task;
   try {
     task = parseTask(incoming.body, incoming.messageId);
   } catch (error) {
     if (!(error instanceof InvalidTaskError)) throw error;
     deps.metrics.inc("tasks_rejected");
-    return "reject";
+    return undefined;
   }
+  // Severity ownership is unconditional, including stale/forged RabbitMQ tasks.
+  // Reject before flag lookup, ledger claims or provider calls; critical is AWS-only.
+  if (task.severity !== "warning") {
+    deps.metrics.inc("tasks_rejected");
+    return undefined;
+  }
+  return task;
+}
+
+async function holdIfOptionalSendingDisabled(
+  deps: Deps,
+  incoming: IncomingTask,
+  task: Task,
+): Promise<boolean> {
+  if (!deps.optionalSendEnabled) {
+    deps.metrics.resetHeld();
+    return false;
+  }
+  let enabled = false;
+  try {
+    enabled = await deps.optionalSendEnabled(task.tenant_id);
+  } catch {
+    // Fail closed when the trusted flag source is unavailable.
+  }
+  if (enabled) {
+    deps.metrics.resetHeld();
+    return false;
+  }
+  const now = Date.now();
+  const priorHeld = Number(incoming.headers[FIRST_HELD_HEADER]);
+  const firstHeld =
+    Number.isFinite(priorHeld) && priorHeld >= 0 && priorHeld <= now
+      ? priorHeld
+      : now;
+  const priorAttempts = Number(
+    incoming.headers[OPTIONAL_HOLD_ATTEMPT_HEADER] ?? 0,
+  );
+  const attempt =
+    (Number.isSafeInteger(priorAttempts) && priorAttempts >= 0
+      ? priorAttempts
+      : 0) + 1;
+  const headers = {
+    ...incoming.headers,
+    [FIRST_HELD_HEADER]: firstHeld,
+    [OPTIONAL_HOLD_ATTEMPT_HEADER]: attempt,
+  };
+  deps.metrics.observeHeld(firstHeld, now);
+  deps.metrics.inc("optional_held");
+  if (attempt >= deps.policy.maxAttempts) {
+    if (await expireHold(deps, task, headers))
+      deps.metrics.inc("optional_held_parked");
+    return true;
+  }
+  await deps.broker.publish({
+    key: RETRY_KEY,
+    messageId: task.intent_id,
+    body: incoming.body,
+    headers,
+    expirationMs: deps.policy.maxBackoffMs,
+  });
+  return true;
+}
+
+async function deliverTask(
+  deps: Deps,
+  incoming: IncomingTask,
+  task: Task,
+): Promise<Settlement> {
   const plan = await beginDelivery(deps.pool, task);
   if (plan.action === "stale") return "ack";
   if (plan.action === "receipt") {
     await sendReceipt(deps, task, plan.outcome);
+    if (plan.park) await park(deps, task, incoming.headers);
     deps.metrics.inc("duplicates");
     return "ack";
   }
@@ -153,6 +239,29 @@ export async function handleTask(
   return "ack";
 }
 
+/** Persist known-not-sent hold exhaustion before broker follow-ups. Terminal
+ * last_error lets redelivery recover a lost park confirm even after flags enable. */
+async function expireHold(
+  deps: Deps,
+  task: Task,
+  headers: Record<string, unknown>,
+): Promise<boolean> {
+  const plan = await expireDeliveryHold(deps.pool, task);
+  if (plan.action === "stale") return false;
+  if (plan.action === "receipt") {
+    await sendReceipt(deps, task, plan.outcome);
+    if (plan.park) await park(deps, task, headers);
+    return plan.park === true;
+  }
+  if (plan.action === "reconcile") {
+    // A prior provider call may have succeeded. Never convert uncertainty to
+    // failed because an optional-send flag is disabled; operators reconcile it.
+    await park(deps, task, headers);
+    return true;
+  }
+  return false;
+}
+
 async function route(
   deps: Deps,
   incoming: IncomingTask,
@@ -163,28 +272,33 @@ async function route(
   if (isTerminal(status)) return sendReceipt(deps, task, status);
   if (status === "dead") {
     await sendReceipt(deps, task, "dead");
-    return park(deps, task);
+    return park(deps, task, incoming.headers);
   }
   const reconciles = plan.action === "reconcile" ? plan.reconciles + 1 : 0;
   if (status === "unknown" && reconciles >= deps.policy.maxReconciles) {
     // Still uncertain after bounded reconciliation: park for an operator, never mark failed.
     deps.metrics.inc("unknown_parked");
-    return park(deps, task);
+    return park(deps, task, incoming.headers);
   }
   const attempt = attemptOf(incoming) + 1;
   await deps.broker.publish({
     key: RETRY_KEY,
     messageId: task.intent_id,
     body: incoming.body,
-    headers: { [ATTEMPT_HEADER]: attempt },
+    headers: { ...incoming.headers, [ATTEMPT_HEADER]: attempt },
     expirationMs: backoffMs(deps.policy, attempt),
   });
 }
 
-function park(deps: Deps, task: Task): Promise<void> {
+function park(
+  deps: Deps,
+  task: Task,
+  headers?: Record<string, unknown>,
+): Promise<void> {
   return deps.broker.publish({
     exchange: DEAD_EXCHANGE,
     key: DEAD_KEY,
+    headers,
     messageId: task.intent_id,
     body: Buffer.from(JSON.stringify(task)),
   });

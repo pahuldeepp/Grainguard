@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,7 @@ type App struct {
 	Feed     *BindingFeed
 	Ping     func(context.Context) error
 	Verifier *Verifier
+	APIKeys  *APIKeyVerifier
 	Ingestor *Ingestor
 	Limiter  Limiter
 	Recorder *RejectionRecorder
@@ -123,17 +125,39 @@ func limitDevice(p Principal, pathDevice string) string {
 
 // admit authenticates and rate limits; it writes the response itself when it refuses.
 func (a App) admit(w http.ResponseWriter, r *http.Request) (Principal, string, bool) {
-	principal, err := a.Verifier.Verify(r.Header.Get("Authorization"))
+	deviceID := r.PathValue("deviceId")
+	var principal Principal
+	var err error
+	if a.APIKeys != nil && len(r.Header.Get("Authorization")) >= 10 &&
+		strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer gg_") {
+		principal, err = a.APIKeys.Verify(r.Context(), r.Header.Get("Authorization"), deviceID)
+	} else if a.APIKeys != nil && looksLikeM2M(r.Header.Get("Authorization")) {
+		principal, err = a.APIKeys.VerifyOAuth(r.Context(), r.Header.Get("Authorization")[7:])
+	} else {
+		principal, err = a.Verifier.Verify(r.Header.Get("Authorization"))
+	}
 	if err != nil {
 		writeAuthError(w, r, err)
 		return Principal{}, "", false
 	}
-	deviceID := r.PathValue("deviceId")
 	if !isUUID(deviceID) {
 		a.refuse(w, r, principal, deviceID, newRejection(ReasonInvalidField, http.StatusBadRequest, "device id must be a lowercase UUID"), nil)
 		return Principal{}, "", false
 	}
-	if allowed, wait := a.Limiter.Allow(principal.TenantID, limitDevice(principal, deviceID)); !allowed {
+	var allowed bool
+	var wait time.Duration
+	if principal.KeyID != "" {
+		if keyed, ok := a.Limiter.(interface {
+			AllowKey(string, string, string) (bool, time.Duration)
+		}); ok {
+			allowed, wait = keyed.AllowKey(principal.TenantID, limitDevice(principal, deviceID), principal.KeyID)
+		} else {
+			allowed, wait = a.Limiter.Allow(principal.TenantID, limitDevice(principal, deviceID))
+		}
+	} else {
+		allowed, wait = a.Limiter.Allow(principal.TenantID, limitDevice(principal, deviceID))
+	}
+	if !allowed {
 		a.Metrics.IncRejection(ReasonRateLimited)
 		seconds := max(1, int(math.Ceil(wait.Seconds())))
 		writeProblem(w, r, http.StatusTooManyRequests, ReasonRateLimited, "Too many readings; retry later.",
@@ -172,7 +196,7 @@ func (a App) ingest(w http.ResponseWriter, r *http.Request) {
 
 func (a App) refuse(w http.ResponseWriter, r *http.Request, p Principal, deviceID string, rejection *Rejection, body []byte) {
 	a.Recorder.Record(r.Context(), p.TenantID, deviceID, rejection, body)
-	if rejection.Reason == bindingFeedStale {
+	if rejection.Reason == bindingFeedStale || rejection.Reason == ReasonEntitlementVolume {
 		writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail, headerRetryAfter, authRetryAfter)
 		return
 	}

@@ -12,10 +12,20 @@ export const composeArgs = [
   "infra/kafka/compose.yaml",
 ];
 export const databases = ["inventory", "telemetry"];
+// Read-model notification outbox (ADR-0016). Registered like the others but kept out of
+// `databases`, whose smoke tests insert synthetic domain outbox rows.
+export const notificationConnectors = ["projection-notifications"];
+export const controlConnectors = ["control"];
+export const billingConnectors = ["billing"];
+export const contactConnectors = ["notification-contacts"];
 export const broker = "kafka:29092";
 export const connectURL = "http://127.0.0.1:58083";
 export const rawTopic = (database) => `greenguard.raw.${database}.outbox`;
-export const connectorName = (database) => `${database}-outbox`;
+export const connectorName = (database) =>
+  database === "projection-notifications" ||
+  database === "notification-contacts"
+    ? database
+    : `${database}-outbox`;
 
 export function compose(args, options = {}) {
   const result = spawnSync("docker", [...composeArgs, ...args], {
@@ -45,8 +55,10 @@ export function kafka(command, args) {
 }
 
 export function connectorConfig(database) {
+  const configName =
+    database === "notification-contacts" ? database : `${database}-outbox`;
   return JSON.parse(
-    readFileSync(`infra/kafka/connectors/${database}-outbox.json`, "utf8"),
+    readFileSync(`infra/kafka/connectors/${configName}.json`, "utf8"),
   );
 }
 

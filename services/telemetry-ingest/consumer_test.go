@@ -227,7 +227,7 @@ func TestBindingConsumerExistingApplyPathDuplicateStaleAndGap(t *testing.T) {
 	}{
 		{"duplicate", []step{{rows: 1}, {rows: 0}, {scan: setBool(true)}}, eventRegistered, 1, nil},
 		{"changed ID", []step{{rows: 1}, {rows: 0}, {scan: setBool(false)}}, eventRegistered, 1, nil},
-		{"stale", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(4)}}, eventStatusChanged, 3, nil},
+		{"stale", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(4)}, {rows: 0}}, eventStatusChanged, 3, nil},
 		{"gap", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}}, eventStatusChanged, 3, ErrVersionGap},
 		{"missing", []step{{rows: 1}, {rows: 1}, {err: pgx.ErrNoRows}}, eventStatusChanged, 2, ErrBindingMissing},
 	}

@@ -387,3 +387,10 @@ pins `confluent-kafka==2.13.2` for the Python search consumer and
 `services/search-indexer/requirements*.txt`. Cassandra uses the pinned Go
 driver in `services/cassandra-writer/go.mod`; the read package uses the pinned
 PostgreSQL driver in `packages/read-model/package.json`.
+
+## Current GreenGuard Stage 09 additions
+
+The feature-flag package pins `@openfeature/server-sdk@1.23.0` in
+`packages/feature-flags/package.json` and the root npm lockfile. This is a new
+rebuild dependency, not one of the 368 archived manifest entries; it supplies
+the OpenFeature evaluation API for tenant-scoped flags with safe defaults.

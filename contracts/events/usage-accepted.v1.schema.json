@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:usage-accepted:v1",
+  "title": "GreenGuard usage.accepted v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "aggregate_type",
+    "aggregate_id",
+    "aggregate_version",
+    "correlation_id",
+    "causation_id",
+    "traceparent",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "const": "usage.accepted"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "aggregate_type": {
+      "const": "usage_period"
+    },
+    "aggregate_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "aggregate_version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,18}$",
+      "maxLength": 19
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "meter": {
+          "enum": [
+            "accepted_readings",
+            "active_devices"
+          ]
+        },
+        "period_start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "quantity": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "total": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "maxLength": 19
+        },
+        "late": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "meter",
+        "period_start",
+        "quantity",
+        "total",
+        "version",
+        "late"
+      ]
+    }
+  }
+}
