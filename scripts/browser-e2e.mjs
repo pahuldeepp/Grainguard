@@ -1297,7 +1297,10 @@ async function scenarioLoading(alice) {
   const page = alice.page;
   await page.route("**/graphql", async (route) => {
     await delay(1500);
-    await route.continue();
+    // unroute() below can resolve a request that is still in this delay before this handler
+    // gets to it; Playwright then throws "Route is already handled!" on the redundant
+    // continue(), which would otherwise crash the whole harness process uncaught.
+    await route.continue().catch(() => undefined);
   });
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.fill("#device-search", `loading-${id}`);
