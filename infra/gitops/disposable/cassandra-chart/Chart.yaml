@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-cassandra
+description: Private, single-node disposable Cassandra and history schema bootstrap
+type: application
+version: 0.1.0

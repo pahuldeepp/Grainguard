@@ -1,0 +1,20 @@
+image: ""
+storageClassName: gp3
+storageSize: 20Gi
+adminSecretName: greenguard-opensearch-admin
+clientSecretName: greenguard-opensearch-clients
+tlsSecretName: greenguard-opensearch-tls
+caSecretName: greenguard-opensearch-ca
+mesh:
+  enabled: true
+  strictMtls: true
+resources:
+  requests: {cpu: 500m, memory: 1500Mi}
+  limits: {cpu: "2", memory: 3Gi}
+allowedClients:
+  - search-indexer
+  - read-api
+bootstrap:
+  enabled: false
+  image: ""
+  caSecretName: greenguard-opensearch-ca

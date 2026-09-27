@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-cassandra-bootstrap
+data:
+  configure.py: |
+    import os, re, shutil, pathlib, subprocess, ssl
+    source = pathlib.Path('/etc/cassandra')
+    target = pathlib.Path('/generated-config')
+    password = os.environ['CASSANDRA_KEYSTORE_PASSWORD']
+    if not re.fullmatch(r'[A-Za-z0-9_-]{16,128}', password):
+        raise SystemExit('Cassandra keystore password must be 16-128 safe characters')
+    ssl.create_default_context(cafile='/cql-tls/ca.crt')
+    subprocess.run(['keytool', '-list', '-keystore', '/cql-tls/server.p12', '-storetype', 'PKCS12', '-storepass', password], check=True, stdout=subprocess.DEVNULL)
+    shutil.copytree(source, target, dirs_exist_ok=True)
+    config = target / 'cassandra.yaml'
+    text = config.read_text()
+    for field, value in [('authenticator', 'PasswordAuthenticator'), ('authorizer', 'CassandraAuthorizer')]:
+        text, count = re.subn(r'(?m)^' + field + r':.*$', field + ': ' + value, text)
+        if count != 1: raise SystemExit('Cassandra base config missing ' + field)
+    block = ('client_encryption_options:\n'
+             '  enabled: true\n'
+             '  optional: false\n'
+             '  keystore: /cql-tls/server.p12\n'
+             '  keystore_password: ' + password + '\n'
+             '  store_type: PKCS12\n'
+             '  require_client_auth: false\n')
+    text, count = re.subn(r'(?ms)^client_encryption_options:\n.*?(?=^[^ #\n]|\Z)', lambda _: block, text)
+    if count != 1: raise SystemExit('Cassandra base config missing client encryption block')
+    config.write_text(text)
+  check-tls.py: |
+    import socket, ssl
+    context = ssl.create_default_context(cafile='/cql-tls/ca.crt')
+    with socket.create_connection(('127.0.0.1', 9042), timeout=4) as raw:
+        with context.wrap_socket(raw, server_hostname='greenguard-cassandra'):
+            pass
+  bootstrap.sh: |
+    #!/bin/sh
+    set -eu
+    export SSL_CERTFILE=/cql-tls/ca.crt SSL_VALIDATE=true
+    admin="$(cat /auth/admin-password)"
+    reader="$(cat /auth/reader-password)"
+    writer="$(cat /auth/writer-password)"
+    for value in "$admin" "$reader" "$writer"; do
+      case "$value" in *[!A-Za-z0-9_-]*|'') echo 'Cassandra credential contains unsupported characters' >&2; exit 1;; esac
+      if [ "${#value}" -lt 16 ]; then echo 'Cassandra credential is too short' >&2; exit 1; fi
+    done
+    python3 -c "import socket,ssl; c=ssl.create_default_context(cafile='/cql-tls/ca.crt'); c.wrap_socket(socket.create_connection(('greenguard-cassandra',9042),timeout=5),server_hostname='greenguard-cassandra').close()"
+    if cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'SELECT role FROM system_auth.roles LIMIT 1' >/dev/null 2>&1; then
+      current="$admin"
+    elif cqlsh --ssl -u cassandra -p cassandra greenguard-cassandra 9042 -e 'SELECT role FROM system_auth.roles LIMIT 1' >/dev/null 2>&1; then
+      current=cassandra
+    else
+      echo 'Cassandra administrator authentication failed' >&2
+      exit 1
+    fi
+    if [ "$current" = cassandra ]; then
+      cqlsh --ssl -u cassandra -p cassandra greenguard-cassandra 9042 -e "ALTER ROLE cassandra WITH PASSWORD = '$admin'" >/dev/null
+    fi
+    attempt=0
+    until cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'SELECT role FROM system_auth.roles LIMIT 1' >/dev/null 2>&1; do
+      attempt=$((attempt + 1))
+      if [ "$attempt" -ge 30 ]; then echo 'Cassandra admin password did not become usable' >&2; exit 1; fi
+      sleep 2
+    done
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e "CREATE ROLE IF NOT EXISTS gg_history_reader WITH PASSWORD = '$reader' AND LOGIN = true" >/dev/null
+    sleep 6
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e "ALTER ROLE gg_history_reader WITH PASSWORD = '$reader'" >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e "CREATE ROLE IF NOT EXISTS gg_history_writer WITH PASSWORD = '$writer' AND LOGIN = true" >/dev/null
+    sleep 6
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e "ALTER ROLE gg_history_writer WITH PASSWORD = '$writer'" >/dev/null
+  grants.sh: |
+    #!/bin/sh
+    set -eu
+    export SSL_CERTFILE=/cql-tls/ca.crt SSL_VALIDATE=true
+    admin="$(cat /auth/admin-password)"
+    python3 -c "import socket,ssl; c=ssl.create_default_context(cafile='/cql-tls/ca.crt'); c.wrap_socket(socket.create_connection(('greenguard-cassandra',9042),timeout=5),server_hostname='greenguard-cassandra').close()"
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON KEYSPACE greenguard_history TO gg_history_reader' >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT MODIFY ON KEYSPACE greenguard_history TO gg_history_writer' >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON KEYSPACE greenguard_history TO gg_history_writer' >/dev/null
+  activate.py: |
+    import json, os, pathlib, socket, ssl, subprocess, urllib.request
+    context_cql = ssl.create_default_context(cafile='/cql-tls/ca.crt')
+    with socket.create_connection(('greenguard-cassandra', 9042), timeout=5) as raw:
+        with context_cql.wrap_socket(raw, server_hostname='greenguard-cassandra'):
+            pass
+    cql_env = dict(os.environ, SSL_CERTFILE='/cql-tls/ca.crt', SSL_VALIDATE='true')
+    command = ['cqlsh', '--ssl', '-u', 'cassandra', '-p', 'cassandra', 'greenguard-cassandra', '9042', '-e', 'SELECT role FROM system_auth.roles LIMIT 1']
+    if subprocess.run(command, env=cql_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20).returncode == 0:
+        raise SystemExit('Cassandra default superuser password is still active')
+    command[5] = pathlib.Path('/auth/admin-password').read_text().strip()
+    if subprocess.run(command, env=cql_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20).returncode != 0:
+        raise SystemExit('Cassandra rotated administrator authentication failed')
+    root = pathlib.Path('/var/run/secrets/kubernetes.io/serviceaccount')
+    namespace = (root / 'namespace').read_text().strip()
+    token = (root / 'token').read_text().strip()
+    host = os.environ['KUBERNETES_SERVICE_HOST']
+    port = os.environ.get('KUBERNETES_SERVICE_PORT', '443')
+    url = f'https://{host}:{port}/api/v1/namespaces/{namespace}/pods/greenguard-cassandra-0'
+    context = ssl.create_default_context(cafile=str(root / 'ca.crt'))
+    headers = {'Authorization': 'Bearer ' + token}
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), context=context, timeout=10) as response:
+        pod = json.load(response)
+    labels = pod['metadata'].get('labels', {})
+    containers = pod['spec']['containers']
+    if labels.get('app') != 'greenguard-cassandra' or len(containers) != 1 or containers[0]['image'] != os.environ['CASSANDRA_EXPECTED_IMAGE']:
+        raise SystemExit('Cassandra pod identity or pinned image mismatch')
+    if labels.get('greenguard.io/cassandra-auth-ready') not in ('false', 'true'):
+        raise SystemExit('Cassandra pod missing auth gate label')
+    payload = json.dumps({'metadata': {'labels': {'greenguard.io/cassandra-auth-ready': 'true'}}}).encode()
+    headers['Content-Type'] = 'application/merge-patch+json'
+    with urllib.request.urlopen(urllib.request.Request(url, data=payload, headers=headers, method='PATCH'), context=context, timeout=10) as response:
+        updated = json.load(response)
+    if updated['metadata']['labels'].get('greenguard.io/cassandra-auth-ready') != 'true':
+        raise SystemExit('Cassandra client policy gate did not activate')

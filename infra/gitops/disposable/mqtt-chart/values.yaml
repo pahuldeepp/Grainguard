@@ -1,0 +1,12 @@
+image: ""
+credentialSecret: greenguard-mqtt-broker
+storageClassName: gp3
+storageSize: 5Gi
+workerNamespace: greenguard
+workerLabels:
+  app.kubernetes.io/name: hardware-service
+external:
+  enabled: false
+  hostname: ""
+  sourceCIDRs: []
+  nlbSubnetCIDRs: []

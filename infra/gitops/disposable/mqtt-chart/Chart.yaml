@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-mqtt
+description: Private, authenticated MQTT broker for disposable GreenGuard
+type: application
+version: 0.1.0

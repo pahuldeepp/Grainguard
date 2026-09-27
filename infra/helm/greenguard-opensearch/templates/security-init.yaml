@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: greenguard-opensearch-security-init}
+data:
+  security-init.sh: |
+    {{- .Files.Get "files/security-init.sh" | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: greenguard-opensearch-security-init}
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenguard-opensearch-security-init
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: greenguard-opensearch-security-init}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: greenguard-opensearch-security-init
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      containers:
+        - name: security-init
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/script/security-init.sh"]
+          env:
+            - {name: OPENSEARCH_ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-admin, key: password}}}
+            - {name: OPENSEARCH_WRITER_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: writer-password}}}
+            - {name: OPENSEARCH_READER_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: reader-password}}}
+          volumeMounts:
+            - {name: script, mountPath: /script, readOnly: true}
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: work, mountPath: /work}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 1024Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: script
+          configMap: {name: greenguard-opensearch-security-init, defaultMode: 0440}
+        - name: tls
+          secret:
+            secretName: greenguard-opensearch-tls
+            defaultMode: 0440
+            items: [{key: ca.crt, path: ca.crt}, {key: admin.crt, path: admin.crt}, {key: admin.key, path: admin.key}]
+        - name: work
+          emptyDir: {sizeLimit: 16Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: greenguard-opensearch-security-init}
+spec:
+  podSelector:
+    matchLabels: {app: greenguard-opensearch-security-init}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: greenguard-opensearch}
+      ports: [{protocol: TCP, port: 9200}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: istio-system}
+      ports: [{protocol: TCP, port: 15012}]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: greenguard-opensearch-security-init}
+spec:
+  selector:
+    matchLabels: {app: greenguard-opensearch}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: [cluster.local/ns/greenguard/sa/greenguard-opensearch-security-init]
+      to:
+        - operation:
+            ports: ["9200"]

@@ -1,0 +1,7 @@
+cassandraImage: ""
+migratorImage: ""
+authSecret: ""
+tlsSecret: ""
+apiServerCIDR: ""
+storageClassName: gp3
+storageSize: 20Gi

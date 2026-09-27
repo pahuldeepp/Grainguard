@@ -1,0 +1,220 @@
+{{- if not (regexMatch "^([a-zA-Z0-9./_-]+)@sha256:[a-f0-9]{64}$" .Values.image) }}
+{{- fail "OpenSearch image must be pinned by sha256 digest" }}
+{{- end }}
+{{- if not (regexMatch "^([a-zA-Z0-9./_-]+)@sha256:[a-f0-9]{64}$" .Values.bootstrap.image) }}
+{{- fail "OpenSearch TLS verifier/search-indexer image must be pinned by sha256 digest" }}
+{{- end }}
+{{- if or (not .Values.mesh.enabled) (not .Values.mesh.strictMtls) }}
+{{- fail "OpenSearch requires Istio STRICT mTLS" }}
+{{- end }}
+{{- if ne (.Values.adminSecretName | default "") "greenguard-opensearch-admin" }}
+{{- fail "OpenSearch admin Secret must be greenguard-opensearch-admin" }}
+{{- end }}
+{{- if ne (.Values.clientSecretName | default "") "greenguard-opensearch-clients" }}
+{{- fail "OpenSearch client Secret must be greenguard-opensearch-clients" }}
+{{- end }}
+{{- if ne (.Values.tlsSecretName | default "") "greenguard-opensearch-tls" }}
+{{- fail "OpenSearch TLS Secret must be greenguard-opensearch-tls" }}
+{{- end }}
+{{- if ne (.Values.caSecretName | default "") "greenguard-opensearch-ca" }}
+{{- fail "OpenSearch CA Secret must be greenguard-opensearch-ca" }}
+{{- end }}
+{{- if ne (.Values.storageClassName | default "") "gp3" }}
+{{- fail "OpenSearch storage must use disposable gp3 StorageClass" }}
+{{- end }}
+{{- if not (regexMatch "^([1-9]|[1-9][0-9]|100)Gi$" .Values.storageSize) }}
+{{- fail "OpenSearch storage must be between 1Gi and 100Gi" }}
+{{- end }}
+{{- if not (deepEqual .Values.allowedClients (list "search-indexer" "read-api")) }}
+{{- fail "OpenSearch clients must be exactly search-indexer and read-api" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: greenguard-opensearch
+  labels: {app: greenguard-opensearch}
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  selector: {app: greenguard-opensearch}
+  ports:
+    - {name: https, port: 9200, targetPort: 9200}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: greenguard-opensearch
+spec:
+  serviceName: greenguard-opensearch
+  replicas: 1
+  selector:
+    matchLabels: {app: greenguard-opensearch}
+  template:
+    metadata:
+      labels: {app: greenguard-opensearch}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      terminationGracePeriodSeconds: 120
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      initContainers:
+        - name: prepare-config
+          image: {{ .Values.bootstrap.image | quote }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              cmp /tls/ca.crt /ca/ca.crt
+              openssl verify -purpose sslserver -verify_hostname greenguard-opensearch.greenguard.svc.cluster.local -CAfile /ca/ca.crt /tls/node.crt
+              openssl verify -purpose sslclient -CAfile /ca/ca.crt /admin/admin.crt
+              openssl x509 -in /tls/node.crt -noout -checkend 86400
+              openssl x509 -in /admin/admin.crt -noout -checkend 86400
+              grep -q '^-----BEGIN PRIVATE KEY-----$' /tls/node.key
+              grep -q '^-----BEGIN PRIVATE KEY-----$' /admin/admin.key
+              test "$(openssl x509 -in /tls/node.crt -pubkey -noout | openssl sha256)" = "$(openssl pkey -in /tls/node.key -pubout | openssl sha256)"
+              test "$(openssl x509 -in /admin/admin.crt -pubkey -noout | openssl sha256)" = "$(openssl pkey -in /admin/admin.key -pubout | openssl sha256)"
+              node_dn="$(openssl x509 -in /tls/node.crt -subject -nameopt RFC2253 -noout | sed 's/^subject=//')"
+              admin_dn="$(openssl x509 -in /admin/admin.crt -subject -nameopt RFC2253 -noout | sed 's/^subject=//')"
+              test -n "$node_dn" && test -n "$admin_dn" && test "$node_dn" != "$admin_dn"
+              cat > /config/opensearch.yml <<EOF
+              cluster.name: greenguard-disposable
+              network.host: 0.0.0.0
+              discovery.type: single-node
+              node.store.allow_mmap: false
+              plugins.security.disabled: false
+              plugins.security.allow_unsafe_democertificates: false
+              plugins.security.allow_default_init_securityindex: false
+              plugins.security.ssl.transport.pemcert_filepath: certs/node.crt
+              plugins.security.ssl.transport.pemkey_filepath: certs/node.key
+              plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ca.crt
+              plugins.security.ssl.http.enabled: true
+              plugins.security.ssl.http.pemcert_filepath: certs/node.crt
+              plugins.security.ssl.http.pemkey_filepath: certs/node.key
+              plugins.security.ssl.http.pemtrustedcas_filepath: certs/ca.crt
+              plugins.security.authcz.admin_dn: ["$admin_dn"]
+              plugins.security.nodes_dn: ["$node_dn"]
+              EOF
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+            - {name: tls-node, mountPath: /tls, readOnly: true}
+            - {name: tls-admin, mountPath: /admin, readOnly: true}
+            - {name: ca, mountPath: /ca, readOnly: true}
+      containers:
+        - name: opensearch
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports: [{name: https, containerPort: 9200}]
+          env:
+            - {name: DISABLE_INSTALL_DEMO_CONFIG, value: "true"}
+            - {name: OPENSEARCH_ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-admin, key: password}}}
+            - {name: OPENSEARCH_JAVA_OPTS, value: "-Xms1024m -Xmx1024m"}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          startupProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-ec", "curl --fail --silent --show-error --resolve greenguard-opensearch.greenguard.svc.cluster.local:9200:127.0.0.1 --cacert /etc/opensearch-ca/ca.crt -u \"admin:$OPENSEARCH_ADMIN_PASSWORD\" 'https://greenguard-opensearch.greenguard.svc.cluster.local:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - {name: config, mountPath: /usr/share/opensearch/config/opensearch.yml, subPath: opensearch.yml}
+            - {name: data, mountPath: /usr/share/opensearch/data}
+            - {name: ca, mountPath: /etc/opensearch-ca, readOnly: true}
+            - {name: tls-node, mountPath: /usr/share/opensearch/config/certs, readOnly: true}
+      volumes:
+        - name: config
+          emptyDir: {}
+        - name: ca
+          secret:
+            secretName: greenguard-opensearch-ca
+            items: [{key: ca.crt, path: ca.crt}]
+        - name: tls-node
+          secret:
+            secretName: greenguard-opensearch-tls
+            defaultMode: 0440
+            items: [{key: ca.crt, path: ca.crt}, {key: node.crt, path: node.crt}, {key: node.key, path: node.key}]
+        - name: tls-admin
+          secret:
+            secretName: greenguard-opensearch-tls
+            defaultMode: 0440
+            items: [{key: admin.crt, path: admin.crt}, {key: admin.key, path: admin.key}]
+  volumeClaimTemplates:
+    - metadata: {name: data, labels: {app: greenguard-opensearch}}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: {{ .Values.storageSize | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: greenguard-opensearch}
+spec:
+  podSelector:
+    matchLabels: {app: greenguard-opensearch}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range .Values.allowedClients }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ . | quote }}
+        {{- end }}
+        - podSelector:
+            matchLabels: {app: greenguard-opensearch-security-init}
+        {{- if .Values.bootstrap.enabled }}
+        - podSelector:
+            matchLabels: {app: greenguard-opensearch-bootstrap}
+        {{- end }}
+      ports: [{protocol: TCP, port: 9200}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: istio-system}
+      ports: [{protocol: TCP, port: 15012}]
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata: {name: greenguard-opensearch}
+spec:
+  selector:
+    matchLabels: {app: greenguard-opensearch}
+  mtls: {mode: STRICT}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: greenguard-opensearch}
+spec:
+  selector:
+    matchLabels: {app: greenguard-opensearch}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/greenguard/sa/search-indexer
+              - cluster.local/ns/greenguard/sa/read-api
+      to:
+        - operation:
+            ports: ["9200"]
