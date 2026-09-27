@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "prisma generate && tsc",
-    "typecheck": "prisma generate && tsc --noEmit",
+    "build": "npm run build -w @greenguard/membership-client && prisma generate && tsc",
+    "typecheck": "npm run build -w @greenguard/membership-client && prisma generate && tsc --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 dist/src/*.test.js dist/catalog/*.test.js",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --reporter lcov --reporter text node --test --test-concurrency=1 dist/src/*.test.js dist/catalog/*.test.js",
     "migrate": "prisma migrate deploy",

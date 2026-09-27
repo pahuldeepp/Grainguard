@@ -1,0 +1,251 @@
+ConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+read-api request failed NoHostAvailableError: All host(s) tried for query failed. First host tried, 127.0.0.1:59042: Error: connect ECONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:307:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:526:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:212:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:513:5)
+    at async Client._execute (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:1000:5)
+    at async CassandraHistory.list (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/backends.js:31:28)
+    at async Bulkhead.run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/bulkhead.js:32:20)
+    at async ReadCache.loadWithLock (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/cache.js:193:27)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/read-api/dist/app.js:94:15 {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+
+[exit code=0 signal=null]

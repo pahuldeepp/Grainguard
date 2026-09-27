@@ -1,0 +1,236 @@
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/rabbitmq/compose.yaml up -d --wait rabbitmq
+time="2026-09-25T12:18:41-05:00" level=warning msg="Found orphan containers (greenguard-dev-cassandra-1, greenguard-dev-mosquitto-1, greenguard-dev-elasticsearch-1, greenguard-dev-connect-1, greenguard-dev-schema-registry-1, greenguard-dev-kafka-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-rabbitmq-1 Running 
+ Container greenguard-dev-rabbitmq-1 Waiting 
+ Container greenguard-dev-rabbitmq-1 Healthy 
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+cd services/jobs-worker && RABBITMQ_LIVE=1 RABBITMQ_RESTART_CMD='docker compose --env-file /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/.env -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/compose/compose.yaml -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/rabbitmq/compose.yaml restart rabbitmq >/dev/null 2>&1 && docker compose --env-file /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/.env -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/compose/compose.yaml -f /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/rabbitmq/compose.yaml up -d --wait rabbitmq >/dev/null 2>&1' go test -count=1 -race -run 'Live' -v .
+=== RUN   TestKafkaAlertIntakeLive
+    kafka_live_test.go:18: set JOBS_KAFKA_LIVE=1 with Kafka and jobs Postgres running
+--- SKIP: TestKafkaAlertIntakeLive (0.00s)
+=== RUN   TestLiveDispatchSurvivesBrokerRestartWithStableIDs
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="broker nacked the publish"
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:45 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: dial tcp 127.0.0.1:55672: connect: connection refused"
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: dial tcp 127.0.0.1:55672: connect: connection refused"
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: dial tcp 127.0.0.1:55672: connect: connection refused"
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: dial tcp 127.0.0.1:55672: connect: connection refused"
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:46 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:47 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:48 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+2026/09/25 12:18:49 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=5f7593cf-5c18-5eff-a26f-e8c8c096957e error="connect to broker: Exception (501) Reason: \"EOF\""
+    rabbit_live_test.go:99: missing=0 of 120
+    rabbit_live_test.go:99: duplicate-copies=0
+    rabbit_live_test.go:100: intents=120 published=146 retried=645 (deduplicated by intent id downstream)
+--- PASS: TestLiveDispatchSurvivesBrokerRestartWithStableIDs (6.65s)
+=== RUN   TestLiveDeliveryLimitDeadLettersAndReplayPreservesID
+    rabbit_live_test.go:174: deliveries before dead-lettering=6, replay kept message id e149aca5-a34c-45e5-b526-89d9689e4717
+--- PASS: TestLiveDeliveryLimitDeadLettersAndReplayPreservesID (0.15s)
+=== RUN   TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent
+2026/09/25 12:18:51 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=192cb70d-5f10-582f-a021-f97341938792 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/25 12:18:51 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=496e23d8-3b1a-5cc9-8314-dd56e84ed80b error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+2026/09/25 12:18:51 WARN dead intent not copied to DLQ; it remains dead in Postgres and redrivable intent_id=25f2c1cd-3055-5763-9c9d-d6990aaadd63 error="connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused connection refused "
+    rabbit_live_test.go:254: dead intent 192cb70d-5f10-582f-a021-f97341938792: DLQ record -> dlq-replay -> redriven to pending with the same id (replayed 1 DLQ messages
+        )
+--- PASS: TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent (0.08s)
+PASS
+ok  	greenguard.local/jobs-worker	8.298s
+npm run live -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 live
+> npm run build && node --test --test-concurrency=1 "dist/testing/*.live.js"
+
+
+> @greenguard/notification-service@0.1.0 build
+> tsc
+
+✔ consumer crash before ack redelivers and records ONE delivery (160.758417ms)
+✔ provider timeout leaves unknown, then the retry queue drives reconciliation (128.70625ms)
+✔ transient failures dead-letter after max attempts; replay keeps the intent id (220.819584ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 570.910583

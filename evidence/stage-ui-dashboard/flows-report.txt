@@ -1,0 +1,19 @@
+PASS detail opens in same page (heading)
+PASS scroll position restored after Back to alerts - before 220 after 220
+PASS focus returns to the row link - alert-link-00000002-1111-4111-8111-111111111111
+PASS browser back returns to the list
+PASS confirmation announced in polite live region
+PASS Next open alert offered
+PASS Back to alerts offered
+PASS Next open alert opens another alert
+PASS filter reflected in the URL - http://localhost:5199/alerts?state=acknowledged
+TAB ORDER: ["Skip to content","GreenGuard","Overview","Provisioning","Devices","Alerts","Sign out","Open (5+)Acknowledged (5+)Re","Critical · Bin 00000100-1111"]
+PASS focus ring visible - solid 2px
+PASS no horizontal scroll at zoom200 on /alerts - overflow 0
+PASS no horizontal scroll at zoom200 on /provisioning - overflow 0
+PASS no horizontal scroll at zoom200 on /devices/d1 - overflow 0
+PASS no horizontal scroll at zoom400 on /alerts - overflow 0
+PASS no horizontal scroll at zoom400 on /provisioning - overflow 0
+PASS no horizontal scroll at zoom400 on /devices/d1 - overflow 0
+PASS reduced motion removes transitions - 0s
+PASS offline banner shown

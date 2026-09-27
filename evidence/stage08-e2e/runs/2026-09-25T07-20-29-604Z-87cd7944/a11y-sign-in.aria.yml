@@ -1,0 +1,4 @@
+- main:
+  - heading "GreenGuard" [level=1]
+  - paragraph: Sign in to access your workspace.
+  - button "Sign in"

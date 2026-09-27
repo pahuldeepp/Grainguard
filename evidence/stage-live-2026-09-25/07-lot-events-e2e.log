@@ -1,0 +1,228 @@
+docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait --build
+ Image greenguard-dev-pgbouncer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 708B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 363B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 35B done
+#5 DONE 0.0s
+
+#6 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#6 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 0.0s done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S pgbouncer && adduser -S -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:67a86cce2f087206a1d0ddb45193ffc7cdc2e64786df66d8982ae8947263fb12 done
+#9 exporting config sha256:1a1ab07edcd6156ea206a62c61f56b2a603099a1cfbfebd23d52795a36c12d6d done
+#9 exporting attestation manifest sha256:a7240069779e0dd2879b784771059b46d1618de12c692b70477de7f9dbfa8e21
+#9 exporting attestation manifest sha256:a7240069779e0dd2879b784771059b46d1618de12c692b70477de7f9dbfa8e21 0.0s done
+#9 exporting manifest list sha256:2e2e094e7156e27fbf75563aaa7a823852d4fbd9e17f83f8163bcaefec712fa5 done
+#9 naming to docker.io/library/greenguard-dev-pgbouncer:latest done
+#9 unpacking to docker.io/library/greenguard-dev-pgbouncer:latest done
+#9 DONE 0.1s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.1s
+ Image greenguard-dev-pgbouncer Built 
+time="2026-09-25T20:03:36-05:00" level=warning msg="Found orphan containers (greenguard-dev-minio-1, greenguard-dev-dynamodb-local-1, greenguard-dev-opensearch-1, greenguard-dev-cassandra-1, greenguard-dev-mosquitto-1, greenguard-dev-elasticsearch-1, greenguard-dev-rabbitmq-1, greenguard-dev-connect-1, greenguard-dev-schema-registry-1, greenguard-dev-kafka-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-postgres-1 Running 
+ Container greenguard-dev-pgbouncer-1 Running 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-pgbouncer-1 Waiting 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-pgbouncer-1 Healthy 
+ Container greenguard-dev-postgres-1 Healthy 
+docker compose --env-file .env -f infra/compose/compose.yaml exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
+npm run migrate -w services/device-service
+
+> @greenguard/device-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_inventory", schema "public" at "127.0.0.1:55432"
+
+15 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/workflow-alerts
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55432"
+
+2 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/tenant-control-plane
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:55432"
+
+15 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w @greenguard/billing-service
+
+> @greenguard/billing-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_billing", schema "public" at "127.0.0.1:55432"
+
+7 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+cd services/telemetry-ingest && go run ./cmd/migrate
+/Library/Developer/CommandLineTools/usr/bin/make projection-migrate
+cd services/projection-builder && go run ./cmd/migrate
+/Library/Developer/CommandLineTools/usr/bin/make risk-migrate
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m risk_engine.migrate
+risk migrations applied: none (up to date)
+/Library/Developer/CommandLineTools/usr/bin/make jobs-migrate
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+/Library/Developer/CommandLineTools/usr/bin/make saga-migrate
+cd services/saga-orchestrator && go run ./cmd/migrate
+/Library/Developer/CommandLineTools/usr/bin/make hardware-migrate
+cd services/hardware-service && go run ./cmd/migrate
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml up -d --wait kafka
+time="2026-09-25T20:03:46-05:00" level=warning msg="Found orphan containers (greenguard-dev-minio-1, greenguard-dev-dynamodb-local-1, greenguard-dev-opensearch-1, greenguard-dev-cassandra-1, greenguard-dev-elasticsearch-1, greenguard-dev-rabbitmq-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-kafka-1 Running 
+ Container greenguard-dev-kafka-1 Waiting 
+ Container greenguard-dev-kafka-1 Healthy 
+node scripts/kafka-topics.mjs
+greenguard.raw.inventory.outbox: 1 partitions, RF1, delete
+greenguard.raw.control.outbox: 1 partitions, RF1, delete
+greenguard.raw.billing.outbox: 1 partitions, RF1, delete
+greenguard.raw.telemetry.outbox: 1 partitions, RF1, delete
+greenguard.raw.risk.outbox: 1 partitions, RF1, delete
+greenguard.raw.alerts.outbox: 1 partitions, RF1, delete
+greenguard.raw.projection.notifications: 1 partitions, RF1, delete
+greenguard.inventory.device.v1: 6 partitions, RF1, delete
+greenguard.inventory.tenant.v1: 6 partitions, RF1, delete
+greenguard.inventory.tenant.dlq.v1: 6 partitions, RF1, delete
+greenguard.billing.lifecycle.v1: 6 partitions, RF1, delete
+greenguard.billing.entitlements.dlq.v1: 6 partitions, RF1, delete
+greenguard.platform.config.v1: 6 partitions, RF1, delete
+greenguard.inventory.facility.v1: 6 partitions, RF1, delete
+greenguard.inventory.lot.v1: 6 partitions, RF1, delete
+greenguard.telemetry.recorded.v1: 6 partitions, RF1, delete
+greenguard.risk.assessment.v1: 6 partitions, RF1, delete
+greenguard.risk.assessment_invalidated.v1: 6 partitions, RF1, delete
+greenguard.alerts.lifecycle.v1: 6 partitions, RF1, delete
+greenguard.projection.notification.v1: 6 partitions, RF1, delete
+greenguard.saga.commands.v1: 6 partitions, RF1, delete
+greenguard.saga.results.v1: 6 partitions, RF1, delete
+greenguard.saga.results.dlq.v1: 6 partitions, RF1, delete
+greenguard.saga.commands.dlq.v1: 6 partitions, RF1, delete
+greenguard.quarantine.v1: 1 partitions, RF1, delete
+greenguard.connect.configs: 1 partitions, RF1, compact
+greenguard.connect.offsets: 1 partitions, RF1, compact
+greenguard.connect.status: 1 partitions, RF1, compact
+_schemas: 1 partitions, RF1, compact
+__debezium-heartbeat.greenguard_inventory: 1 partitions, RF1, compact
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml up -d --wait schema-registry connect
+time="2026-09-25T20:05:08-05:00" level=warning msg="Found orphan containers (greenguard-dev-minio-1, greenguard-dev-dynamodb-local-1, greenguard-dev-opensearch-1, greenguard-dev-cassandra-1, greenguard-dev-elasticsearch-1, greenguard-dev-rabbitmq-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-schema-registry-1 Running 
+ Container greenguard-dev-connect-1 Running 
+ Container greenguard-dev-postgres-1 Running 
+ Container greenguard-dev-kafka-1 Running 
+ Container greenguard-dev-kafka-1 Waiting 
+ Container greenguard-dev-kafka-1 Healthy 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-kafka-1 Waiting 
+ Container greenguard-dev-schema-registry-1 Waiting 
+ Container greenguard-dev-schema-registry-1 Healthy 
+ Container greenguard-dev-kafka-1 Healthy 
+ Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-kafka-1 Waiting 
+ Container greenguard-dev-schema-registry-1 Waiting 
+ Container greenguard-dev-connect-1 Waiting 
+ Container greenguard-dev-kafka-1 Healthy 
+ Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-connect-1 Healthy 
+ Container greenguard-dev-schema-registry-1 Healthy 
+node scripts/kafka-connect.mjs
+inventory-outbox: connector and task RUNNING
+telemetry-outbox: connector and task RUNNING
+projection-notifications: connector and task RUNNING
+control-outbox: connector and task RUNNING
+billing-outbox: connector and task RUNNING
+npm run build -w services/device-service
+
+> @greenguard/device-service@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/device-service@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 55ms
+
+node scripts/lot-events-e2e.mjs
+PASS: placement transaction → inventory outbox → Debezium → transformer → dedicated lot topic, versions 1 and 2

@@ -1,0 +1,30 @@
+docker compose --env-file .env -f infra/oidc/compose.yaml up -d --wait
+ Container greenguard-oidc-dex-1 Running 
+ Container greenguard-oidc-dex-1 Waiting 
+ Container greenguard-oidc-dex-1 Healthy 
+npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/tenant-auth && tsc
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/tenant-auth && tsc
+> @greenguard/read-model@0.1.0 build
+> tsc
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+set -a; . ./.env; set +a; node scripts/oidc-browser.mjs
+PASS alice: browser used code + PKCE S256 with state and nonce :: response_type=code method=S256
+PASS alice: dashboard GraphQL call authenticated :: BFF HTTP 200
+PASS alice: token not in localStorage/sessionStorage :: storage keys: 0
+PASS alice: browser token reads own tenant only :: own=0a0a0a0a-1111-4000-8000-00000000000a other=null
+PASS sign-out returns to the sign-in screen :: sign-in visible=true
+PASS bob: browser used code + PKCE S256 with state and nonce :: response_type=code method=S256
+PASS bob: dashboard GraphQL call authenticated :: BFF HTTP 200
+PASS bob: token not in localStorage/sessionStorage :: storage keys: 0
+PASS bob: browser token reads own tenant only :: own=0b0b0b0b-1111-4000-8000-00000000000b other=null
+PASS reload drops the in-memory session (sign-in required) :: sign-in visible=true
+PASS forged callback state rejected by the client :: alert="No matching state found in storage"
+ALL BROWSER OIDC CHECKS PASSED

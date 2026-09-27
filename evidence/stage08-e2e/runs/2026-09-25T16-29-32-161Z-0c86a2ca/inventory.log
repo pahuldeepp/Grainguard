@@ -1,0 +1,11 @@
+(node:45001) TimeoutNegativeWarning: -1790353836119 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":"ERROR","timestamp":"2026-09-25T16:33:48.659Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":47,"size":10}
+{"level":"ERROR","timestamp":"2026-09-25T16:33:48.672Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":48,"size":10}
+{"level":"ERROR","timestamp":"2026-09-25T16:33:48.678Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":49,"size":10}
+{"level":"ERROR","timestamp":"2026-09-25T16:33:48.688Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":50,"size":10}
+{"level":"ERROR","timestamp":"2026-09-25T16:33:48.701Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":51,"size":10}
+{"level":"ERROR","timestamp":"2026-09-25T16:33:54.044Z","logger":"kafkajs","message":"[Connection] Response LeaveGroup(key: 13, version: 3)","broker":"127.0.0.1:59092","clientId":"inventory-saga-worker","error":"The coordinator is not aware of this member","correlationId":52,"size":78}
+
+[exit code=0 signal=null]

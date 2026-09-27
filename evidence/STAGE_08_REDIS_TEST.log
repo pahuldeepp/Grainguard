@@ -1,0 +1,78 @@
+docker compose -f infra/redis/compose.yaml up -d --wait redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6
+ Container greenguard-redis-redis-node-2-1 Running 
+ Container greenguard-redis-redis-node-3-1 Running 
+ Container greenguard-redis-redis-node-4-1 Running 
+ Container greenguard-redis-redis-node-5-1 Running 
+ Container greenguard-redis-redis-node-6-1 Running 
+ Container greenguard-redis-redis-node-1-1 Running 
+ Container greenguard-redis-redis-node-4-1 Waiting 
+ Container greenguard-redis-redis-node-5-1 Waiting 
+ Container greenguard-redis-redis-node-6-1 Waiting 
+ Container greenguard-redis-redis-node-1-1 Waiting 
+ Container greenguard-redis-redis-node-2-1 Waiting 
+ Container greenguard-redis-redis-node-3-1 Waiting 
+ Container greenguard-redis-redis-node-2-1 Healthy 
+ Container greenguard-redis-redis-node-6-1 Healthy 
+ Container greenguard-redis-redis-node-3-1 Healthy 
+ Container greenguard-redis-redis-node-5-1 Healthy 
+ Container greenguard-redis-redis-node-1-1 Healthy 
+ Container greenguard-redis-redis-node-4-1 Healthy 
+docker compose -f infra/redis/compose.yaml up redis-cluster-init
+ Container greenguard-redis-redis-node-6-1 Running 
+ Container greenguard-redis-redis-node-1-1 Running 
+ Container greenguard-redis-redis-node-2-1 Running 
+ Container greenguard-redis-redis-node-3-1 Running 
+ Container greenguard-redis-redis-node-4-1 Running 
+ Container greenguard-redis-redis-node-5-1 Running 
+Attaching to redis-cluster-init-1
+ Container greenguard-redis-redis-node-2-1 Waiting 
+ Container greenguard-redis-redis-node-3-1 Waiting 
+ Container greenguard-redis-redis-node-4-1 Waiting 
+ Container greenguard-redis-redis-node-5-1 Waiting 
+ Container greenguard-redis-redis-node-6-1 Waiting 
+ Container greenguard-redis-redis-node-1-1 Waiting 
+ Container greenguard-redis-redis-node-5-1 Healthy 
+ Container greenguard-redis-redis-node-1-1 Healthy 
+ Container greenguard-redis-redis-node-6-1 Healthy 
+ Container greenguard-redis-redis-node-4-1 Healthy 
+ Container greenguard-redis-redis-node-2-1 Healthy 
+ Container greenguard-redis-redis-node-3-1 Healthy 
+ Container greenguard-redis-redis-cluster-init-1 Starting 
+ Container greenguard-redis-redis-cluster-init-1 Started 
+[Kredis-cluster-init-1 exited with code 0
+npm run build -w @greenguard/read-api
+
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/tenant-auth && tsc
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+node scripts/redis-test.mjs
+PASS two-tenant isolation {"tenantAHit":true,"craftedEntryServedToB":false,"mismatches":2,"tenantBGenerationAfterAInvalidation":null}
+PASS 200 concurrent cold requests {"backendLoads":1,"allSameValue":true,"elapsedMs":138,"lockWaitTimeouts":0}
+PASS lock expiry mid-load {"backendLoads":3,"fillRejected":2,"fills":1,"cachedVersion":1,"cacheEvents":{"hit":18,"miss":20,"load":3,"fill":1,"fill_rejected":2,"timeout":0,"error":0,"fallback":0,"bypass":0,"lock_acquired":3,"lock_wait_timeout":0,"oversize":0,"mismatch":0,"invalidation":0}}
+PASS write-then-read freshness and TTL {"servedBeforeInvalidation":"checkpoint-1","servedAfterInvalidation":"checkpoint-2","stalenessWithoutInvalidationMs":523,"boundMs":600,"initialPttlMs":503}
+PASS eviction under maxmemory {"writtenMB":240,"evictedKeys":965,"wrongValues":0,"cacheEvents":{"hit":37,"miss":1335,"load":1335,"fill":1335,"fill_rejected":0,"timeout":0,"error":0,"fallback":0,"bypass":0,"lock_acquired":1335,"lock_wait_timeout":0,"oversize":0,"mismatch":0,"invalidation":0},"usedMemory":["31.32M","31.29M","31.75M","31.26M","31.83M","31.56M"]}
+PASS primary kill and replica promotion {"victim":"redis-node-3","requests":28755,"failedRequests":0,"maxRequestMs":51,"redisTimeouts":40,"redisErrors":0,"fallbacks":40,"breakerBypasses":7313,"clusterOkAfterFailover":true,"victimRejoinedAsHealthyTopology":true,"hitsAfterFailover":6027,"fallbacksAfterFailover":0}
+PASS docker pause of a primary (partition) {"victim":"redis-node-4","requests":20899,"failedRequests":0,"maxRequestMs":51,"redisTimeouts":60,"fallbacks":60,"breakerBypasses":10605}
+ Container greenguard-redis-redis-node-1-1 Restarting 
+ Container greenguard-redis-redis-node-3-1 Restarting 
+ Container greenguard-redis-redis-node-4-1 Restarting 
+ Container greenguard-redis-redis-node-2-1 Restarting 
+ Container greenguard-redis-redis-node-6-1 Restarting 
+ Container greenguard-redis-redis-node-5-1 Restarting 
+ Container greenguard-redis-redis-node-1-1 Started 
+ Container greenguard-redis-redis-node-3-1 Started 
+ Container greenguard-redis-redis-node-6-1 Started 
+ Container greenguard-redis-redis-node-5-1 Started 
+ Container greenguard-redis-redis-node-4-1 Started 
+ Container greenguard-redis-redis-node-2-1 Started 
+PASS full cluster restart (cold cache) {"requests":39945,"failedRequests":0,"maxRequestMs":27,"redisErrors":20,"redisTimeouts":0,"fallbacks":20,"topologyHealthyAfterRestart":true,"hitRatioAfterRestart":0.991}
+
+8/8 scenarios passed

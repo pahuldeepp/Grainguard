@@ -1,0 +1,13 @@
+(node:87047) TimeoutNegativeWarning: -1790358071269 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+CDC revocation reached both replicas in 723 ms
+✔ committed revoke reaches two verifiers through CDC and Kafka (5973.906292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6230.710041

@@ -1,0 +1,55 @@
+docker compose --env-file .env -f infra/oidc/compose.yaml up -d --wait
+ Container greenguard-oidc-dex-1 Running 
+ Container greenguard-oidc-dex-1 Waiting 
+ Container greenguard-oidc-dex-1 Healthy 
+npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/tenant-auth && tsc
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/tenant-auth && tsc
+> @greenguard/read-model@0.1.0 build
+> tsc
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+set -a; . ./.env; set +a; node scripts/oidc-live.mjs
+PASS authorization code + PKCE login (state and nonce validated) :: alice, victor (tenant A) and bob (tenant B)
+PASS BFF valid Dex token accepted (alice, tenant A) :: HTTP 200 device=0a0a0a0a-1111-4000-8000-00000000000a
+PASS Read API valid Dex token accepted :: HTTP 200 tenant=0a0a0a0a-0000-4000-8000-00000000000a
+PASS BFF tenant A cannot read tenant B device :: HTTP 200 device=null
+PASS Read API tenant A cannot read tenant B device :: HTTP 200 data=null
+PASS tenant B reads only tenant B :: own=0b0b0b0b-1111-4000-8000-00000000000b crossHTTP=200
+PASS viewer cannot run a mutation :: HTTP 200 error=insufficient_role
+[services/bff/dist/main.js] BFF upstream request failed [TypeError: fetch failed] {
+  [cause]: Error: connect ECONNREFUSED 127.0.0.1:4199
+      at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+    errno: -61,
+    code: 'ECONNREFUSED',
+    syscall: 'connect',
+    address: '127.0.0.1',
+    port: 4199
+  }
+}
+PASS operator passes the role gate (saga stub unreachable) :: error=upstream_unavailable
+PASS reject wrong audience (real Dex token for greenguard-cli) :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject wrong signature (payload re-signed by attacker, Dex kid) :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject tampered payload with original signature :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject wrong issuer (forged iss) :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject alg=none :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject HS256 signed with the Dex public key :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject unknown kid (bounded refresh, then 401) :: BFF 401 invalid_token; Read API 401 invalid_token
+PASS reject missing token :: BFF 401 missing_token; Read API 401 missing_token
+PASS genuine Dex signature but unexpected issuer rejected :: 401 invalid_token
+PASS unknown kid refresh is bounded by the cooldown :: 5 unknown-kid verifications -> invalid_token,invalid_token,invalid_token,invalid_token,invalid_token; JWKS fetches=2 (1 initial + exactly 1 kid-miss refresh; the rest fall inside the 2000ms cooldown)
+PASS JWKS down: cached key still verifies inside the stale window :: HTTP 200 at +251ms
+PASS JWKS down: kid miss inside the cooldown does not hit the key server :: HTTP 401 invalid_token
+PASS JWKS down: kid miss needs the key server -> 503 :: HTTP 503 auth_unavailable
+PASS JWKS down past the bounded window -> 503 auth_unavailable :: BFF 503 auth_unavailable; Read API 503 auth_unavailable at +21518ms (window 20000ms)
+PASS key rotation: new-key token accepted after JWKS refresh :: old kid a58e1f46 -> new kid eb0fad3e; HTTP 200
+PASS key rotation: token signed by the removed key rejected :: HTTP 401 invalid_token
+PASS expired Dex token rejected :: BFF 401 expired_token; Read API 401 expired_token
+PASS refresh-token renewal restores access :: HTTP 200
+ALL OIDC CHECKS PASSED

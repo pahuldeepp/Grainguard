@@ -1,0 +1,85 @@
+cd services/cassandra-writer && KAFKA_BROKERS=127.0.0.1:59092 CASSANDRA_HOSTS=127.0.0.1:59042 CASSANDRA_LIVE=1 KAFKA_CASSANDRA_LIVE=1 KAFKA_CASSANDRA_FAULT_LIVE=1 KAFKA_CASSANDRA_RESILIENCE_LIVE=1 go test -count=1 -race -timeout 20m -run 'Live' -v .
+=== RUN   TestLiveCassandraNodeOutageCatchUp
+    outage_live_test.go:82: outage/catch-up passed: group=cassandra-outage-a97e23b2-2b62-4d8f-abee-a61a0879e414 held=4859 committed=4860 row=98fb69e6-32a7-4d5a-803c-23ba66eef99a
+--- PASS: TestLiveCassandraNodeOutageCatchUp (15.69s)
+=== RUN   TestLiveKafkaCassandraCrashReplay
+    recovery_live_test.go:94: crash/replay passed: group=cassandra-recovery-329da42f-d252-4c02-9871-cfba02d7089f source=4860,4861 committed=4862 row=6076deaa-53d8-4f6c-b2d6-36478037f08f watermark=4860
+--- PASS: TestLiveKafkaCassandraCrashReplay (45.15s)
+=== RUN   TestLiveWriterSurvivesCassandraOutages
+2026/09/25 19:43:38 WARN cassandra unavailable; holding offset attempt=0 retry_in=159.485991ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:39 WARN cassandra unavailable; holding offset attempt=1 retry_in=373.281883ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:39 WARN cassandra unavailable; holding offset attempt=2 retry_in=790.603767ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:40 WARN cassandra unavailable; holding offset attempt=3 retry_in=1.035364617s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:41 WARN cassandra unavailable; holding offset attempt=4 retry_in=3.140521289s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:44 WARN cassandra unavailable; holding offset attempt=5 retry_in=2.92170233s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:47 WARN cassandra unavailable; holding offset attempt=6 retry_in=4.537914547s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:51 WARN cassandra unavailable; holding offset attempt=7 retry_in=2.925799235s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:54 WARN cassandra unavailable; holding offset attempt=8 retry_in=3.094445977s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:43:57 WARN cassandra unavailable; holding offset attempt=9 retry_in=3.498638749s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:01 WARN cassandra unavailable; holding offset attempt=10 retry_in=3.126903447s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:04 WARN cassandra unavailable; holding offset attempt=11 retry_in=3.696052645s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:08 WARN cassandra unavailable; holding offset attempt=12 retry_in=3.171931094s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+    resilience_live_test.go:166: held 30s outage: degraded=1 outage_seconds=30 retries=0
+2026/09/25 19:44:11 WARN cassandra unavailable; holding offset attempt=13 retry_in=3.347328712s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:44:14 WARN cassandra unavailable; holding offset attempt=14 retry_in=4.964295086s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:44:19 WARN cassandra unavailable; holding offset attempt=15 retry_in=2.907652228s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:44:22 INFO cassandra available again outage=43.8534s
+    resilience_live_test.go:169: startup-while-down passed: offsets 4862..4864
+2026/09/25 19:44:26 WARN cassandra unavailable; holding offset attempt=0 retry_in=101.865993ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:27 WARN cassandra unavailable; holding offset attempt=1 retry_in=336.024804ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:28 WARN cassandra unavailable; holding offset attempt=2 retry_in=591.821686ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:29 WARN cassandra unavailable; holding offset attempt=3 retry_in=814.286586ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:31 WARN cassandra unavailable; holding offset attempt=4 retry_in=3.012455874s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:34 WARN cassandra unavailable; holding offset attempt=5 retry_in=4.036589266s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:39 WARN cassandra unavailable; holding offset attempt=6 retry_in=4.834716677s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:44 WARN cassandra unavailable; holding offset attempt=7 retry_in=4.344141212s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:49 WARN cassandra unavailable; holding offset attempt=8 retry_in=3.866633817s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:54 WARN cassandra unavailable; holding offset attempt=9 retry_in=4.313998356s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:44:59 WARN cassandra unavailable; holding offset attempt=10 retry_in=2.67212302s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:02 WARN cassandra unavailable; holding offset attempt=11 retry_in=4.629472988s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:07 WARN cassandra unavailable; holding offset attempt=12 retry_in=3.742792102s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:12 WARN cassandra unavailable; holding offset attempt=13 retry_in=3.142660967s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:15 WARN cassandra unavailable; holding offset attempt=14 retry_in=3.430043807s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:19 WARN cassandra unavailable; holding offset attempt=15 retry_in=4.496273086s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:24 WARN cassandra unavailable; holding offset attempt=16 retry_in=4.474984594s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:30 WARN cassandra unavailable; holding offset attempt=17 retry_in=4.51499448s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:35 WARN cassandra unavailable; holding offset attempt=18 retry_in=2.919701462s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:38 WARN cassandra unavailable; holding offset attempt=19 retry_in=4.810001824s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:44 WARN cassandra unavailable; holding offset attempt=20 retry_in=3.496735695s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:48 WARN cassandra unavailable; holding offset attempt=21 retry_in=4.163402615s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:52 WARN cassandra unavailable; holding offset attempt=22 retry_in=4.508171235s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:45:58 WARN cassandra unavailable; holding offset attempt=23 retry_in=4.199201361s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:02 WARN cassandra unavailable; holding offset attempt=24 retry_in=4.16596052s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:07 WARN cassandra unavailable; holding offset attempt=25 retry_in=3.845435094s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:12 WARN cassandra unavailable; holding offset attempt=26 retry_in=4.911811922s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:17 WARN cassandra unavailable; holding offset attempt=27 retry_in=3.209801066s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:21 WARN cassandra unavailable; holding offset attempt=28 retry_in=2.893133095s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:24 WARN cassandra unavailable; holding offset attempt=29 retry_in=3.303257823s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:28 WARN cassandra unavailable; holding offset attempt=30 retry_in=2.699453088s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 19:46:32 WARN cassandra unavailable; holding offset attempt=31 retry_in=4.299435933s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+    resilience_live_test.go:173: held 2m10s outage: degraded=1 outage_seconds=130 retries=64
+2026/09/25 19:46:37 WARN cassandra unavailable; holding offset attempt=32 retry_in=2.902331819s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:46:40 WARN cassandra unavailable; holding offset attempt=33 retry_in=4.812603772s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:46:46 WARN cassandra unavailable; holding offset attempt=34 retry_in=3.665978915s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 19:46:49 INFO cassandra available again outage=2m22.88635s
+    resilience_live_test.go:176: long outage passed: 2m10s, offsets 4865..4869, outages=2 sessions_opened=2
+--- PASS: TestLiveWriterSurvivesCassandraOutages (195.06s)
+PASS
+ok  	greenguard.local/cassandra-writer	257.360s
+/Library/Developer/CommandLineTools/usr/bin/make cassandra-up
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/cassandra/compose.yaml up -d --wait cassandra
+time="2026-09-25T19:46:51-05:00" level=warning msg="Found orphan containers (greenguard-dev-opensearch-1, greenguard-dev-mosquitto-1, greenguard-dev-elasticsearch-1, greenguard-dev-rabbitmq-1, greenguard-dev-connect-1, greenguard-dev-schema-registry-1, greenguard-dev-kafka-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-cassandra-1 Running 
+ Container greenguard-dev-cassandra-1 Waiting 
+ Container greenguard-dev-cassandra-1 Healthy 
+cd services/cassandra-writer && go run ./cmd/migrate
+2026/09/25 19:46:52 INFO history schema applied keyspace=greenguard_history replication_factor=1
+cd services/cassandra-writer && CASSANDRA_HOSTS=127.0.0.1:59042 CASSANDRA_LIVE=1 go test -count=1 -race -run 'Live' -v ./history
+=== RUN   TestLiveHistoryReplayAndTenantIsolation
+--- PASS: TestLiveHistoryReplayAndTenantIsolation (0.06s)
+=== RUN   TestLiveHistoryAcceptsUnboundBin
+--- PASS: TestLiveHistoryAcceptsUnboundBin (0.04s)
+=== RUN   TestLiveHistoryShortTTLExpires
+--- PASS: TestLiveHistoryShortTTLExpires (2.59s)
+PASS
+ok  	greenguard.local/cassandra-writer/history	4.052s

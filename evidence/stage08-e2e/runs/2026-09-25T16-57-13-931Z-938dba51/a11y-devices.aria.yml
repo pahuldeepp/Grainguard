@@ -1,0 +1,42 @@
+- button "Sign out"
+- main:
+  - navigation:
+    - link "G GreenGuard":
+      - /url: /
+    - link "Provisioning":
+      - /url: /provisioning
+    - link "Devices":
+      - /url: /devices
+    - link "Alerts":
+      - /url: /alerts
+    - text: LOCAL DEVELOPMENT
+  - paragraph: FROM THE GROUND UP
+  - heading "Better grain care. A solid foundation." [level=1]
+  - paragraph: One platform for grain storage, telemetry and intelligent alerts. Your new workspace starts here.
+  - region "Service status":
+    - heading "Service status" [level=2]
+    - button "Hide technical details" [pressed]
+    - article:
+      - text: ▦
+      - status: Unavailable
+      - heading "Device service" [level=3]
+      - paragraph: TypeScript · NestJS · PostgreSQL
+      - text: Readiness includes a live database query.
+    - article:
+      - text: ↗
+      - status: Unavailable
+      - heading "Telemetry ingestion" [level=3]
+      - paragraph: Go · PostgreSQL
+      - text: Readiness includes a live database query.
+  - region "Find a device":
+    - heading "Find a device" [level=2]
+    - text: Device name, ID, or serial number
+    - textbox "Device name, ID, or serial number"
+    - button "Search" [disabled]
+    - paragraph: Enter a device name, ID, or serial number to search your workspace.
+  - paragraph: YOUR WORKSPACE
+  - heading "Keep your grain in view." [level=2]
+  - paragraph: Track sensors, review readings and respond to alerts from one place.
+  - link "Browse devices":
+    - /url: /devices
+  - text: GreenGuardGrain storage monitoring

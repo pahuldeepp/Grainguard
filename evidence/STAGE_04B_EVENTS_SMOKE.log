@@ -1,0 +1,8 @@
+node scripts/events-smoke.mjs
+R1 inventory: both tenants delivered by initial snapshot under forced RLS
+R1 telemetry: both tenants delivered by initial snapshot under forced RLS
+E01 inventory: commit delivered within 30s; rollback absent throughout observation
+E01 telemetry: commit delivered within 30s; rollback absent throughout observation
+E02 inventory: all 3 outage commits delivered at least once
+E02 telemetry: all 3 outage commits delivered at least once
+PASS: raw CDC E01, R1 snapshot and E02 Connect outage (full E03–E05 deferred)
