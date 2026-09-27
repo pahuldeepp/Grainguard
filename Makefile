@@ -1,4 +1,4 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate dev verify check-plan build smoke observability-up observability-down observability-validate observability-test-rules
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke observability-up observability-down observability-validate observability-test-rules
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
@@ -12,7 +12,7 @@ db-down:
 	$(COMPOSE) down
 db-logs:
 	$(COMPOSE) logs --tail=100 postgres pgbouncer
-db-migrate: db-up
+db-migrate: db-up build-otel
 	npm run migrate -w services/device-service
 	npm run migrate -w services/workflow-alerts
 	cd services/telemetry-ingest && go run ./cmd/migrate
@@ -20,6 +20,8 @@ db-migrate: db-up
 	$(MAKE) risk-migrate
 	$(MAKE) jobs-migrate
 	$(MAKE) saga-migrate
+build-otel:
+	npm run build -w @greenguard/otel
 build:
 	npm run build
 	mkdir -p build
