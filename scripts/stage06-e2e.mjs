@@ -572,8 +572,8 @@ try {
           [s.tenant],
         )
       )[0].n,
-      3,
-      "one alert-open transition must create exactly three channel intents",
+      2,
+      "one alert-open transition must create exactly two channel intents (email and sms)",
     );
   }
   assert.equal(
