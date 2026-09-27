@@ -42,7 +42,7 @@ func TestConfigReadsEveryOverride(t *testing.T) {
 	if cfg.OTLPEndpoint != "http://collector:4318" || cfg.SampleRatio != 0.25 {
 		t.Fatalf("tracing: %q %v", cfg.OTLPEndpoint, cfg.SampleRatio)
 	}
-	want := LimitConfig{Device: BucketConfig{Rate: 2, Burst: 50}, Tenant: BucketConfig{Rate: 500, Burst: 9000}, MaxEntries: DefaultLimitConfig().MaxEntries}
+	want := LimitConfig{Device: BucketConfig{Rate: 2, Burst: 50}, Tenant: BucketConfig{Rate: 500, Burst: 9000}, Key: DefaultLimitConfig().Key, MaxEntries: DefaultLimitConfig().MaxEntries}
 	if cfg.Limits != want || cfg.Policy.MaxAge != 24*time.Hour || cfg.Policy.MaxFutureSkew != 30*time.Second {
 		t.Fatalf("limits/policy: %+v %+v", cfg.Limits, cfg.Policy)
 	}

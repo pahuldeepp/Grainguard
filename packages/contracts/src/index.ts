@@ -63,6 +63,22 @@ const SCHEMA_FILES: Record<string, string> = {
   "alert.acknowledged@1": "alert-lifecycle.v1.schema.json",
   "alert.escalated@1": "alert-lifecycle.v1.schema.json",
   "alert.resolved@1": "alert-lifecycle.v1.schema.json",
+  // Stage 08 (ADR-0016): committed read-model changes for cache invalidation.
+  "projection.notification@1": "projection-notification.v1.schema.json",
+  // Stage 09a (ADR-0017): tenant-control-plane organization and membership events.
+  "tenant.created@1": "tenant-created.v1.schema.json",
+  "membership.changed@1": "membership-changed.v1.schema.json",
+  "identity_connection.changed@1": "identity-connection-changed.v1.schema.json",
+  "service_principal.created@1": "service-principal-changed.v1.schema.json",
+  "service_principal.rotated@1": "service-principal-changed.v1.schema.json",
+  "service_principal.revoked@1": "service-principal-changed.v1.schema.json",
+  "subscription.changed@1": "subscription-changed.v1.schema.json",
+  "entitlements.changed@1": "entitlements-changed.v1.schema.json",
+  "usage.accepted@1": "usage-accepted.v1.schema.json",
+  "billing.reconciliation_required@1":
+    "billing-reconciliation-required.v1.schema.json",
+  "billing.command_requested@1": "billing-command-requested.v1.schema.json",
+  "flag.configuration_changed@1": "flag-configuration-changed.v1.schema.json",
 };
 
 const MAX_BIGINT = 9223372036854775807n;
@@ -107,6 +123,21 @@ function payloadFields(event: DomainEvent): [string, string] {
   }
   if (event.aggregate_type === "alert_episode") {
     return ["episode_id", "episode_version"];
+  }
+  if (event.aggregate_type === "projection_notification") {
+    return ["resource_id", "source_version"];
+  }
+  if (event.aggregate_type === "organization") {
+    return ["tenant_id", "organization_version"];
+  }
+  if (event.aggregate_type === "membership") {
+    return ["membership_id", "membership_version"];
+  }
+  if (event.aggregate_type === "identity_connection") {
+    return ["connection_id", "connection_version"];
+  }
+  if (event.aggregate_type === "service_principal") {
+    return ["principal_id", "principal_version"];
   }
   if (event.aggregate_type === "site" || event.aggregate_type === "bin") {
     return [`${event.aggregate_type}_id`, `${event.aggregate_type}_version`];
@@ -210,12 +241,91 @@ function lotErrors(event: DomainEvent, errors: string[]): void {
   }
 }
 
-function identityErrors(event: DomainEvent, errors: string[]): void {
+function notificationErrors(event: DomainEvent, errors: string[]): void {
+  if (event.payload["source_event_id"] !== event.causation_id) {
+    errors.push("payload.source_event_id must equal causation_id");
+  }
+  if (event.payload["scope"] === "epoch") {
+    if (
+      event.payload["source_event_type"] !== "projection.promoted" ||
+      event.payload["purpose"] !== "promotion_changed" ||
+      event.tenant_id !== "00000000-0000-4000-8000-000000000001"
+    ) {
+      errors.push(
+        "epoch notification must be a promotion for the infrastructure tenant",
+      );
+    }
+    return;
+  }
+  if (
+    event.payload["purpose"] === "promotion_changed" ||
+    event.payload["source_event_type"] === "projection.promoted"
+  ) {
+    errors.push("promotion notification must use global epoch scope");
+  }
+  const telemetry = event.payload["source_event_type"] === "telemetry.recorded";
+  if ((event.payload["scope"] === "device") !== telemetry) {
+    errors.push("payload.scope must be device exactly for telemetry changes");
+  }
+}
+
+function commonIdentityErrors(event: DomainEvent, errors: string[]): void {
   for (const field of ID_FIELDS) {
     if (event[field] === NIL_UUID) {
       errors.push(`${field} must not be the all-zero UUID`);
     }
   }
+  if (BigInt(event.aggregate_version) > MAX_BIGINT)
+    errors.push("aggregate_version exceeds 9223372036854775807");
+}
+
+function subscriptionIdentityErrors(event: DomainEvent, errors: string[]) {
+  if (event.payload["version"] !== event.aggregate_version)
+    errors.push("payload.version must equal aggregate_version");
+}
+
+function flagIdentityErrors(event: DomainEvent, errors: string[]) {
+  if (event.payload["config_version"] !== event.aggregate_version)
+    errors.push("payload.config_version must equal aggregate_version");
+  if (
+    (event.payload["scope"] === "global") !==
+    (event.tenant_id === "00000000-0000-4000-8000-000000000001")
+  )
+    errors.push("flag scope and tenant_id mismatch");
+}
+
+function entitlementIdentityErrors(event: DomainEvent, errors: string[]) {
+  if (
+    event.payload["tenant_id"] !== event.tenant_id ||
+    event.aggregate_id !== event.tenant_id
+  )
+    errors.push("entitlement tenant identity mismatch");
+  if (event.payload["source_version"] !== event.aggregate_version)
+    errors.push("payload.source_version must equal aggregate_version");
+}
+
+function usageIdentityErrors(event: DomainEvent, errors: string[]) {
+  if (
+    event.payload["tenant_id"] !== event.tenant_id ||
+    event.payload["version"] !== event.aggregate_version
+  )
+    errors.push("usage identity or version mismatch");
+}
+
+function billingIdentityErrors(event: DomainEvent, errors: string[]) {
+  const field =
+    event.event_type === "billing.command_requested"
+      ? "command_id"
+      : "finding_id";
+  if (
+    event.payload[field] !== event.aggregate_id ||
+    (event.payload["tenant_id"] &&
+      event.payload["tenant_id"] !== event.tenant_id)
+  )
+    errors.push("billing aggregate identity mismatch");
+}
+
+function aggregateIdentityErrors(event: DomainEvent, errors: string[]) {
   const [identityField, versionField] = payloadFields(event);
   const payloadVersion = event.payload[versionField] as string;
   for (const [name, value] of [
@@ -237,9 +347,59 @@ function identityErrors(event: DomainEvent, errors: string[]): void {
   }
 }
 
+function identityErrors(event: DomainEvent, errors: string[]): void {
+  commonIdentityErrors(event, errors);
+  switch (event.event_type) {
+    case "subscription.changed":
+      subscriptionIdentityErrors(event, errors);
+      return;
+    case "flag.configuration_changed":
+      flagIdentityErrors(event, errors);
+      return;
+    case "entitlements.changed":
+      entitlementIdentityErrors(event, errors);
+      return;
+    case "usage.accepted":
+      usageIdentityErrors(event, errors);
+      return;
+    case "billing.reconciliation_required":
+    case "billing.command_requested":
+      billingIdentityErrors(event, errors);
+      return;
+    default:
+      aggregateIdentityErrors(event, errors);
+  }
+}
+
+function controlPlaneErrors(event: DomainEvent, errors: string[]): void {
+  if (event.aggregate_type === "service_principal") {
+    if (event.payload["tenant_id"] !== event.tenant_id)
+      errors.push("payload.tenant_id must equal tenant_id");
+    if (
+      (event.event_type === "service_principal.revoked") !==
+      (event.payload["state"] === "revoked")
+    )
+      errors.push("service principal state must match event type");
+  }
+  if (
+    event.aggregate_type === "organization" &&
+    event.aggregate_id !== event.tenant_id
+  ) {
+    errors.push("aggregate_id must equal tenant_id for organizations");
+  }
+  const revoked = event.payload["state"] === "revoked";
+  if (
+    event.aggregate_type === "membership" &&
+    revoked !== (event.payload["action"] === "revoked")
+  ) {
+    errors.push("payload.action must be revoked exactly when state is revoked");
+  }
+}
+
 function semanticErrors(event: DomainEvent): string[] {
   const errors: string[] = [];
   identityErrors(event, errors);
+  controlPlaneErrors(event, errors);
   if (event.event_type === "risk.assessed") {
     riskErrors(event, errors);
   }
@@ -251,6 +411,9 @@ function semanticErrors(event: DomainEvent): string[] {
   }
   if (event.aggregate_type === "alert_episode") {
     alertErrors(event, errors);
+  }
+  if (event.aggregate_type === "projection_notification") {
+    notificationErrors(event, errors);
   }
   if (/^00-0{32}-/.test(event.traceparent)) {
     errors.push("traceparent trace-id must not be all zeros");

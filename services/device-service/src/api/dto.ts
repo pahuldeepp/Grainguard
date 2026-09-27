@@ -85,6 +85,16 @@ export function parseRegister(body: unknown): RegisterDeviceInput {
   };
 }
 
+export function parseRegisterPending(body: unknown) {
+  const fields = object(body, ["serialNumber", "siteId", "binId", "assetId"]);
+  return {
+    serialNumber: text(fields.serialNumber, "serialNumber", 128),
+    siteId: uuid(fields.siteId, "siteId"),
+    binId: nullableUuid(fields.binId, "binId"),
+    assetId: uuid(fields.assetId, "assetId"),
+  };
+}
+
 export function parseBinding(body: unknown) {
   const fields = object(body, ["siteId", "binId"]);
   return {

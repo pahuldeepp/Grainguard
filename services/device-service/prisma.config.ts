@@ -4,6 +4,6 @@ import { defineConfig } from "prisma/config";
 // never through PgBouncer. Runtime code uses INVENTORY_DATABASE_URL instead.
 export default defineConfig({
   schema: "prisma/schema.prisma",
-  migrations: { path: "prisma/migrations" },
+  migrations: { path: process.env.INVENTORY_MIGRATIONS_PATH ?? "prisma/migrations" },
   datasource: { url: process.env.INVENTORY_MIGRATION_URL ?? "" },
 });

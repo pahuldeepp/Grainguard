@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from typing import Any
 
 ALIAS = os.getenv("SEARCH_ALIAS", "greenguard-inventory")
 TOPICS = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+CHECKPOINT_FIELDS = {"event_type", "schema_version", "source_time", "source_position", "raw_position", "partitions"}
 MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "tenant_id": {"type": "keyword"}, "resource_type": {"type": "keyword"},
     "resource_id": {"type": "keyword"}, "name": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
@@ -199,6 +201,22 @@ class Record:
     value: bytes
 
 
+def validate_checkpoint(event: dict[str, Any], record: Record) -> None:
+    if (record.topic != TOPICS[0] or set(event) != CHECKPOINT_FIELDS or
+        type(event.get("schema_version")) is not int or event["schema_version"] != 1 or
+        type(event.get("partitions")) is not int or event["partitions"] != 6 or
+        not isinstance(event.get("raw_position"), int) or isinstance(event.get("raw_position"), bool) or
+        event["raw_position"] < 0 or not isinstance(event.get("source_position"), str) or
+        not event["source_position"].isdigit() or int(event["source_position"]) < 1 or
+        not isinstance(event.get("source_time"), str)):
+        raise ValueError("invalid binding feed checkpoint")
+    try:
+        if datetime.fromisoformat(event["source_time"].replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError("checkpoint time has no timezone")
+    except ValueError as exc:
+        raise ValueError("invalid binding feed checkpoint") from exc
+
+
 class Indexer:
     def __init__(self, elastic: Elastic, index: str, quarantine_path: str):
         self.elastic, self.index, self.quarantine_path = elastic, index, quarantine_path
@@ -214,6 +232,11 @@ class Indexer:
 
     def _prepare_action(self, record: Record) -> dict[str, Any] | None:
         event = json.loads(record.value)
+        if isinstance(event, dict) and event.get("event_type") == "binding.feed_checkpoint":
+            # CDC places this internal progress marker on every device-topic
+            # partition for the binding feed. It is not a searchable device.
+            validate_checkpoint(event, record)
+            return None
         action = action_for(event, self.index)
         old = self.elastic.document(self.index, action["meta"]["_id"])
         action["incoming"] = dict(action["document"])

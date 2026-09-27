@@ -18,6 +18,7 @@ import {
   VersionConflictError,
 } from "./errors.js";
 import { GRAIN_TYPE, placementTime } from "./lot-validation.js";
+import { assertDeviceCapacity } from "./entitlements.js";
 
 export interface CommandContext {
   tenantId: string;
@@ -36,6 +37,10 @@ export interface RegisterDeviceInput {
   binId?: string | null;
 }
 
+export interface RegisterPendingDeviceInput extends RegisterDeviceInput {
+  assetId: string;
+}
+
 export interface DeviceChanged {
   deviceId: string;
   bindingVersion: string;
@@ -46,7 +51,93 @@ export interface DeviceRegistered extends DeviceChanged {
   status: DeviceStatus;
 }
 
-interface EventSpec {
+export interface PendingDeviceRegistered {
+  deviceId: string;
+  assetId: string;
+  status: "provisioning";
+}
+
+// A pending device is inventory-only. No device.registered event is emitted
+// until the saga activates it, so existing telemetry consumers only see valid
+// active/disabled/deleted lifecycle states.
+export async function registerPendingDevice(
+  db: Db,
+  ctx: CommandContext,
+  input: RegisterPendingDeviceInput,
+): Promise<PendingDeviceRegistered> {
+  const request = {
+    serial_number: input.serialNumber,
+    site_id: input.siteId,
+    bin_id: input.binId ?? null,
+    asset_id: input.assetId,
+  };
+  const key = {
+    tenantId: ctx.tenantId,
+    commandType: "device.register_pending",
+    idempotencyKey: ctx.idempotencyKey,
+  };
+  try {
+    return await withTenant(db, ctx.tenantId, async (tx) => {
+      const lockKey = `${ctx.tenantId}:device.register_pending:${ctx.idempotencyKey}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      const receipt = await tx.commandReceipt.findUnique({
+        where: { tenantId_commandType_idempotencyKey: key },
+      });
+      if (receipt) {
+        if (!isDeepStrictEqual(receipt.normalizedRequest, request))
+          throw new IdempotencyConflictError();
+        return receipt.responseBody as unknown as PendingDeviceRegistered;
+      }
+      await assertDeviceCapacity(tx, ctx.tenantId);
+      const deviceId = randomUUID();
+      const commandId = randomUUID();
+      await tx.device.create({
+        data: {
+          tenantId: ctx.tenantId,
+          deviceId,
+          assetId: input.assetId,
+          siteId: input.siteId,
+          binId: input.binId ?? null,
+          serialNumber: input.serialNumber,
+          status: "provisioning",
+        },
+      });
+      const response: PendingDeviceRegistered = {
+        deviceId,
+        assetId: input.assetId,
+        status: "provisioning",
+      };
+      await tx.auditEvent.createMany({
+        data: {
+          auditId: randomUUID(),
+          tenantId: ctx.tenantId,
+          actorType: ctx.actorType,
+          actorId: ctx.actorId,
+          action: "device.register_pending",
+          resourceType: "device",
+          resourceId: deviceId,
+          commandId,
+          outcome: "succeeded",
+          occurredAt: new Date(),
+        },
+      });
+      await tx.commandReceipt.createMany({
+        data: {
+          ...key,
+          commandId,
+          normalizedRequest: request,
+          responseBody: { ...response },
+          acceptedAt: new Date(),
+        },
+      });
+      return response;
+    });
+  } catch (error) {
+    throw mapWriteError(error);
+  }
+}
+
+export interface EventSpec {
   commandId: string;
   eventType: string;
   aggregateType: "device" | "site" | "bin" | "bin_occupancy";
@@ -68,7 +159,11 @@ function mapWriteError(error: unknown): unknown {
 }
 
 // Domain change, outbox event and audit record commit in the caller's transaction.
-async function appendEvent(tx: Tx, ctx: CommandContext, spec: EventSpec) {
+export async function appendEvent(
+  tx: Tx,
+  ctx: CommandContext,
+  spec: EventSpec,
+) {
   const eventId = randomUUID();
   const occurredAt = new Date();
   await tx.outboxEvent.createMany({
@@ -110,12 +205,6 @@ async function appendEvent(tx: Tx, ctx: CommandContext, spec: EventSpec) {
     ],
   });
   return eventId;
-}
-
-export async function createTenant(db: Db, tenantId: string, name: string) {
-  await withTenant(db, tenantId, (tx) =>
-    tx.tenant.create({ data: { tenantId, name } }),
-  );
 }
 
 interface FacilityCreated {
@@ -444,6 +533,7 @@ export async function registerDevice(
           throw new IdempotencyConflictError();
         return receipt.responseBody as unknown as DeviceRegistered;
       }
+      await assertDeviceCapacity(tx, ctx.tenantId);
       const deviceId = randomUUID();
       const commandId = randomUUID();
       await tx.device.create({
@@ -512,6 +602,7 @@ export async function changeDeviceBinding(
           tenantId: ctx.tenantId,
           deviceId: input.deviceId,
           bindingVersion: expected,
+          status: { not: "provisioning" },
         },
         data: {
           siteId: input.siteId,
@@ -528,9 +619,13 @@ export async function changeDeviceBinding(
               deviceId: input.deviceId,
             },
           },
-          select: { bindingVersion: true },
+          select: { bindingVersion: true, status: true },
         });
         if (!current) throw new DeviceNotFoundError();
+        if (current.status === "provisioning")
+          throw new InvalidInputError(
+            "pending device binding is fixed until provisioning completes",
+          );
         throw new VersionConflictError(current.bindingVersion.toString());
       }
       const eventId = await appendEvent(tx, ctx, {
@@ -564,18 +659,47 @@ export async function lockDevice(
   tenantId: string,
   deviceId: string,
   noWait = false,
-): Promise<{ bindingVersion: bigint; status: string } | undefined> {
+): Promise<
+  | {
+      bindingVersion: bigint;
+      status: string;
+      assetId: string | null;
+      activeSagaId: string | null;
+    }
+  | undefined
+> {
   const rows = noWait
-    ? await tx.$queryRaw<{ binding_version: bigint; status: string }[]>`
-        SELECT binding_version, status FROM devices
+    ? await tx.$queryRaw<
+        {
+          binding_version: bigint;
+          status: string;
+          asset_id: string | null;
+          active_saga_id: string | null;
+        }[]
+      >`
+        SELECT binding_version, status, asset_id, active_saga_id FROM devices
         WHERE tenant_id = ${tenantId}::uuid AND device_id = ${deviceId}::uuid
         FOR UPDATE NOWAIT`
-    : await tx.$queryRaw<{ binding_version: bigint; status: string }[]>`
-        SELECT binding_version, status FROM devices
+    : await tx.$queryRaw<
+        {
+          binding_version: bigint;
+          status: string;
+          asset_id: string | null;
+          active_saga_id: string | null;
+        }[]
+      >`
+        SELECT binding_version, status, asset_id, active_saga_id FROM devices
         WHERE tenant_id = ${tenantId}::uuid AND device_id = ${deviceId}::uuid
         FOR UPDATE`;
   const row = rows[0];
-  return row && { bindingVersion: row.binding_version, status: row.status };
+  return (
+    row && {
+      bindingVersion: row.binding_version,
+      status: row.status,
+      assetId: row.asset_id ?? null,
+      activeSagaId: row.active_saga_id ?? null,
+    }
+  );
 }
 
 export const DEFAULT_LOCK_TIMEOUT_MS = 2000;
@@ -597,6 +721,10 @@ export async function setDeviceStatus(
         input.noWait,
       );
       if (!locked) throw new DeviceNotFoundError();
+      if (locked.status === "provisioning" || locked.assetId !== null)
+        throw new InvalidInputError(
+          "saga-managed device status must change through provisioning workflow",
+        );
       const next = locked.bindingVersion + 1n;
       await tx.device.update({
         where: {

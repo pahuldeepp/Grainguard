@@ -1,0 +1,16 @@
+{
+  "name": "@greenguard/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build -w @greenguard/membership-client && tsc",
+    "typecheck": "npm run build -w @greenguard/membership-client && tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@greenguard/tenant-auth": "0.1.0",
+    "@greenguard/membership-client": "0.1.0"
+  }
+}

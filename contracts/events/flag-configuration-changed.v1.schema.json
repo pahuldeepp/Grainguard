@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:flag-configuration-changed:v1",
+  "title": "GreenGuard flag.configuration_changed v1",
+  "description": "Full replacement snapshot for one scope. Producer writes configuration, audit and outbox in one transaction. Consumer applies only increasing versions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "aggregate_type",
+    "aggregate_id",
+    "aggregate_version",
+    "correlation_id",
+    "causation_id",
+    "traceparent",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": { "const": "flag.configuration_changed" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_type": { "const": "flag_configuration" },
+    "aggregate_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_version": { "$ref": "#/$defs/version" },
+    "correlation_id": { "$ref": "#/$defs/uuid" },
+    "causation_id": { "$ref": "#/$defs/uuid" },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "config_version", "flags", "actor_identity_id"],
+      "properties": {
+        "scope": { "enum": ["global", "tenant"] },
+        "config_version": { "$ref": "#/$defs/version" },
+        "flags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "oneOf": [
+                  { "type": "boolean" },
+                  { "type": "string" },
+                  { "type": "number" }
+                ]
+              },
+              "rolloutPercent": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          }
+        },
+        "actor_identity_id": { "$ref": "#/$defs/uuid" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": { "scope": { "const": "global" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "const": "00000000-0000-4000-8000-000000000001" }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": { "scope": { "const": "tenant" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": { "tenant_id": { "$ref": "#/$defs/uuid" } }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "version": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
+  }
+}

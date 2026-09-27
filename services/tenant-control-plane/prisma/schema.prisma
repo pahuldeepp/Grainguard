@@ -1,0 +1,16 @@
+// tenant-control-plane owns greenguard_control. The tables, row-level security policies,
+// partial unique indexes, grants and CHECK constraints live in the hand-written SQL
+// migrations (prisma/migrations); runtime code uses the generated client with typed
+// raw SQL ($queryRaw) inside withTenant, so no model mapping is duplicated here.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+  runtime             = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}

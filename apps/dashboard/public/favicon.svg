@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="GreenGuard">
+  <rect width="512" height="512" rx="112" fill="#0B5D36"/>
+  <path d="M256 84 402 138v112c0 90-58 150-146 182-88-32-146-92-146-182V138z" fill="#fff"/>
+  <g fill="#0B5D36">
+    <path d="M250 392V196h12v196z"/>
+    <ellipse cx="256" cy="172" rx="12" ry="28"/>
+    <ellipse cx="228" cy="222" rx="12" ry="26" transform="rotate(-32 228 222)"/>
+    <ellipse cx="284" cy="222" rx="12" ry="26" transform="rotate(32 284 222)"/>
+    <ellipse cx="228" cy="262" rx="12" ry="26" transform="rotate(-32 228 262)"/>
+    <ellipse cx="284" cy="262" rx="12" ry="26" transform="rotate(32 284 262)"/>
+    <ellipse cx="228" cy="302" rx="12" ry="26" transform="rotate(-32 228 302)"/>
+    <ellipse cx="284" cy="302" rx="12" ry="26" transform="rotate(32 284 302)"/>
+    <ellipse cx="228" cy="342" rx="12" ry="26" transform="rotate(-32 228 342)"/>
+    <ellipse cx="284" cy="342" rx="12" ry="26" transform="rotate(32 284 342)"/>
+  </g>
+</svg>

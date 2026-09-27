@@ -17,6 +17,8 @@ type ingestConfig struct {
 	SampleRatio         float64
 	Limits              LimitConfig
 	Policy              QualityPolicy
+	APIKeyEndpoint      string
+	APIKeyLookupToken   string
 }
 
 var loopbackHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
@@ -27,6 +29,15 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 		return ingestConfig{}, err
 	}
 	cfg := ingestConfig{Auth: auth, Limits: DefaultLimitConfig(), SampleRatio: 1}
+	cfg.APIKeyEndpoint, cfg.APIKeyLookupToken = getenv("CONTROL_PLANE_URL"), getenv("CONTROL_LOOKUP_TOKEN")
+	if (cfg.APIKeyEndpoint == "") != (cfg.APIKeyLookupToken == "") {
+		return ingestConfig{}, errors.New("CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together")
+	}
+	if cfg.APIKeyEndpoint != "" {
+		if _, err := NewAPIKeyVerifier(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken); err != nil {
+			return ingestConfig{}, err
+		}
+	}
 	if cfg.OTLPEndpoint, err = loadOTLPEndpoint(getenv); err != nil {
 		return ingestConfig{}, err
 	}
@@ -88,6 +99,7 @@ func loadLimits(getenv func(string) string, limits *LimitConfig) error {
 	}{
 		{"INGEST_DEVICE_RATE", &limits.Device.Rate, 0, false}, {"INGEST_DEVICE_BURST", &limits.Device.Burst, 1, true},
 		{"INGEST_TENANT_RATE", &limits.Tenant.Rate, 0, false}, {"INGEST_TENANT_BURST", &limits.Tenant.Burst, 1, true},
+		{"INGEST_KEY_RATE", &limits.Key.Rate, 0, false}, {"INGEST_KEY_BURST", &limits.Key.Burst, 1, true},
 	}
 	for _, target := range targets {
 		value, err := envFloat(getenv, target.key, *target.into, target.low, 1e9, target.inclusive)

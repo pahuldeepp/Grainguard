@@ -44,6 +44,13 @@ func RedriveDead(ctx context.Context, db TxStarter, opts RedriveOptions) ([]Dead
 }
 
 func listDead(ctx context.Context, db TxStarter, opts RedriveOptions) ([]DeadRef, error) {
+	if opts.TenantID == "" {
+		refs, err := selectRefs(ctx, db, `SELECT tenant_id::text, intent_id::text FROM jobs_dead_intent_refs($1)`, opts.Limit, scanDeadRef)
+		if err != nil {
+			return nil, fmt.Errorf("list dead intents: %w", err)
+		}
+		return refs, nil
+	}
 	var refs []DeadRef
 	query := func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT tenant_id::text, intent_id::text FROM notification_intents
@@ -51,16 +58,15 @@ func listDead(ctx context.Context, db TxStarter, opts RedriveOptions) ([]DeadRef
 		if err != nil {
 			return fmt.Errorf("list dead intents: %w", err)
 		}
-		refs, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (DeadRef, error) {
-			var d DeadRef
-			return d, r.Scan(&d.TenantID, &d.IntentID)
-		})
+		refs, err = pgx.CollectRows(rows, scanDeadRef)
 		return err
 	}
-	if opts.TenantID != "" {
-		return refs, WithTenant(ctx, db, opts.TenantID, query)
-	}
-	return refs, inTx(ctx, db, "app.scope", "redrive-scan", query)
+	return refs, WithTenant(ctx, db, opts.TenantID, query)
+}
+
+func scanDeadRef(r pgx.CollectableRow) (DeadRef, error) {
+	var d DeadRef
+	return d, r.Scan(&d.TenantID, &d.IntentID)
 }
 
 // RedriveOne is the only dead -> pending transition. In one tenant transaction it records

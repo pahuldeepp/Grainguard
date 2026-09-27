@@ -2,6 +2,8 @@ import type { Pool, PoolClient } from "pg";
 import type { Channel, Task } from "./task.js";
 import { withTenant } from "./tenant.js";
 
+export const OPTIONAL_HOLD_EXPIRED = "optional notification hold exhausted";
+
 export const TERMINAL = ["sent", "failed", "suppressed"] as const;
 export type Terminal = (typeof TERMINAL)[number];
 export type Status =
@@ -13,7 +15,7 @@ export function isTerminal(status: string): status is Terminal {
 
 /** What the worker must do next after the begin transaction commits. */
 export type Plan =
-  | { action: "receipt"; outcome: Terminal }
+  | { action: "receipt"; outcome: Terminal; park?: boolean }
   | { action: "stale" }
   | { action: "send"; attempt: number }
   | { action: "reconcile"; attempt: number; reconciles: number };
@@ -23,9 +25,13 @@ interface Row {
   attempts: number;
   reconciles: number;
   delivery_generation: number;
+  last_error?: string | null;
 }
 
 const SEVERITY_RANK: Record<string, number> = { warning: 1, critical: 2 };
+
+type Preparation =
+  Exclude<Plan, { action: "send" }> | { action: "ready"; attempt: number };
 
 async function lockDelivery(client: PoolClient, task: Task): Promise<Row> {
   await client.query(
@@ -41,7 +47,7 @@ async function lockDelivery(client: PoolClient, task: Task): Promise<Row> {
     ],
   );
   const { rows } = await client.query<Row>(
-    `SELECT status, attempts, reconciles, delivery_generation FROM deliveries
+    `SELECT status, attempts, reconciles, delivery_generation, last_error FROM deliveries
      WHERE tenant_id = $1 AND intent_id = $2 FOR UPDATE`,
     [task.tenant_id, task.intent_id],
   );
@@ -89,51 +95,82 @@ async function addAttempt(
   return rows[0].n;
 }
 
-/**
- * Short locked transaction before any provider call: creates the delivery row once, applies
- * tenant preferences, and records an in_progress attempt so a crash during the provider
- * call is later treated as an uncertain outcome to reconcile, never as a silent failure.
- */
+async function prepareDelivery(
+  client: PoolClient,
+  task: Task,
+): Promise<Preparation> {
+  let row = await lockDelivery(client, task);
+  if (task.delivery_generation < row.delivery_generation)
+    return { action: "stale" };
+  if (task.delivery_generation > row.delivery_generation) {
+    if (row.status === "sent") return { action: "receipt", outcome: "sent" };
+    await client.query(
+      `UPDATE deliveries SET delivery_generation = $3, status = 'received', attempts = 0,
+         reconciles = 0, provider_ref = NULL, last_error = NULL, terminal_at = NULL, updated_at = now()
+       WHERE tenant_id = $1 AND intent_id = $2`,
+      [task.tenant_id, task.intent_id, task.delivery_generation],
+    );
+    row = {
+      status: "received",
+      attempts: 0,
+      reconciles: 0,
+      delivery_generation: task.delivery_generation,
+    };
+  }
+  if (isTerminal(row.status))
+    return {
+      action: "receipt",
+      outcome: row.status,
+      ...(row.status === "failed" && row.last_error === OPTIONAL_HOLD_EXPIRED
+        ? { park: true }
+        : {}),
+    };
+  if (row.status === "in_progress" || row.status === "unknown")
+    return {
+      action: "reconcile",
+      attempt: row.attempts,
+      reconciles: row.reconciles,
+    };
+  if (!(await allowedByPreference(client, task))) {
+    await setStatus(client, task, "suppressed", null, "tenant preference");
+    await addAttempt(client, task, "preference", "suppressed", null);
+    return { action: "receipt", outcome: "suppressed" };
+  }
+  return { action: "ready", attempt: row.attempts + 1 };
+}
+
+/** Short tenant transaction claims an attempt before any provider call. */
 export async function beginDelivery(pool: Pool, task: Task): Promise<Plan> {
   return withTenant(pool, task.tenant_id, async (client) => {
-    let row = await lockDelivery(client, task);
-    if (task.delivery_generation < row.delivery_generation)
-      return { action: "stale" };
-    if (task.delivery_generation > row.delivery_generation) {
-      if (row.status === "sent") return { action: "receipt", outcome: "sent" };
-      await client.query(
-        `UPDATE deliveries SET delivery_generation = $3, status = 'received', attempts = 0,
-           reconciles = 0, provider_ref = NULL, last_error = NULL, terminal_at = NULL, updated_at = now()
-         WHERE tenant_id = $1 AND intent_id = $2`,
-        [task.tenant_id, task.intent_id, task.delivery_generation],
-      );
-      row = {
-        status: "received",
-        attempts: 0,
-        reconciles: 0,
-        delivery_generation: task.delivery_generation,
-      };
-    }
-    if (isTerminal(row.status))
-      return { action: "receipt", outcome: row.status };
-    if (row.status === "in_progress" || row.status === "unknown")
-      return {
-        action: "reconcile",
-        attempt: row.attempts,
-        reconciles: row.reconciles,
-      };
-    if (!(await allowedByPreference(client, task))) {
-      await setStatus(client, task, "suppressed", null, "tenant preference");
-      await addAttempt(client, task, "preference", "suppressed", null);
-      return { action: "receipt", outcome: "suppressed" };
-    }
+    const prepared = await prepareDelivery(client, task);
+    if (prepared.action !== "ready") return prepared;
     await client.query(
       `UPDATE deliveries SET status = 'in_progress', attempts = attempts + 1, updated_at = now()
        WHERE tenant_id = $1 AND intent_id = $2`,
       [task.tenant_id, task.intent_id],
     );
     await addAttempt(client, task, "send", "started", null);
-    return { action: "send", attempt: row.attempts + 1 };
+    return { action: "send", attempt: prepared.attempt };
+  });
+}
+
+/** Atomically fail a delivery held before any provider send began. */
+export async function expireDeliveryHold(
+  pool: Pool,
+  task: Task,
+): Promise<Plan> {
+  return withTenant(pool, task.tenant_id, async (client) => {
+    const prepared = await prepareDelivery(client, task);
+    if (prepared.action !== "ready") return prepared;
+    await setStatus(client, task, "failed", null, OPTIONAL_HOLD_EXPIRED);
+    await addAttempt(
+      client,
+      task,
+      "hold_expired",
+      "failed",
+      OPTIONAL_HOLD_EXPIRED,
+    );
+    return { action: "receipt", outcome: "failed", park: true };
   });
 }
 

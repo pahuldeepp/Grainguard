@@ -8,9 +8,57 @@ Every pull request, main push, or manual CI run executes locked dependency insta
 
 GitHub returned HTTP 403 when querying branch protection: this account needs GitHub Pro (or a public repository) to protect this private branch. The repository remains private. Required merge checks cannot currently be enforced by GitHub branch protection; the workflow still blocks image publication on failed quality checks. No paid upgrade was performed.
 
-Only a successful **main push** can publish dashboard, device-service and telemetry-ingest images to private GHCR packages. Image tags are the full commit SHA; local release deployment resolves them to immutable digests and stores those digests for rollback; builds include SBOM and provenance attestations. PR code has read-only GitHub permissions and no production/registry credentials. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
+Only a successful **main push** can publish dashboard, gateway, BFF, Read API, workflow-alerts, device-service and telemetry-ingest images to private GHCR packages. Image tags are the full commit SHA; local release deployment resolves them to immutable digests and stores those digests for rollback; builds include SBOM and provenance attestations. PR code has read-only GitHub permissions and no production/registry credentials. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
 
 The SonarQube scope includes the implemented dashboard, TypeScript services/packages, Go services, and Python search indexer. CI/deployment scripts are linted; workflow YAML is also validated locally with actionlint. SonarQube does not generate coverage: Vitest V8 and c8 generate LCOV, Go produces native profiles, and coverage.py generates Cobertura XML for Python. Source paths are normalized for the scanner's container workspace. Untested entry points remain included.
+
+## Stage 08 live integration jobs
+
+`redis-integration`, `oidc-integration`, `oidc-browser-integration`, and
+`stage08-integration` run in separate runners with read-only permissions,
+pinned actions, and unconditional cleanup. Like `events-integration`, they run
+on each CI trigger and are dependencies of image publication. The full Stage
+08 job builds the gateway, BFF, Read API, and workflow-alerts runtime images,
+starts Kafka, MQTT, PostgreSQL, Cassandra, Elasticsearch, Redis Cluster, Dex,
+and a local search-indexer environment, then runs `make browser-e2e`.
+It uploads browser screenshots and the report even when the gate fails. The
+live profiles remain opt-in locally and outside `make verify`. Browser jobs
+install only Chromium from the lockfile's Playwright version.
+
+Run locally after `make bootstrap` (Docker required):
+
+```sh
+make redis-up
+make redis-test
+make redis-down
+
+# Shared prerequisites for either OIDC suite:
+make db-up projection-migrate cassandra-up search-up
+make oidc-up
+make oidc-test
+make oidc-down
+
+# Browser suite, independently:
+npx --no-install playwright install --with-deps chromium
+make oidc-up
+make oidc-browser-test
+make oidc-down
+make search-down cassandra-down db-down
+
+# Full gateway/browser suite, independently after bootstrap:
+make events-up
+docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait mosquitto
+make cassandra-up search-up redis-up oidc-up
+python3 -m venv .local/search-venv
+.local/search-venv/bin/pip install -r services/search-indexer/requirements.txt
+make browser-e2e
+make oidc-down redis-down search-down cassandra-down events-down db-down
+```
+
+Run the corresponding cleanup commands even after a failing test. The Read API
+now generates LCOV with c8 alongside the BFF; coverage normalization, SonarQube
+source/test scope, and CI artifact checks/uploads include its report. Existing
+shared test inclusion/exclusion globs apply to both services.
 
 ## Local SonarQube
 
@@ -42,7 +90,7 @@ make deploy REVISION=<40-character-successful-main-commit>
 make rollback                        # Restore previous successful local release
 ```
 
-Local staging is http://127.0.0.1:5174. Its database volume is independent from the development database; only the dashboard is exposed, on localhost. The dashboard proxies both backend APIs over the Compose network. `make staging` is a development integration environment and does not claim a release passed SonarQube.
+Local staging is http://127.0.0.1:5174. Its database volume is independent from the development database; only the dashboard is exposed, on localhost. The dashboard proxies device and telemetry APIs and GraphQL through the gateway over the Compose network. This staging smoke profile uses placeholder gateway identity and private upstream URLs until real services are configured; `stage08-integration` supplies the functional gateway/browser proof. `make staging` does not claim a release passed SonarQube.
 
 Release deployment requires a successful CI run including image publication for the specified main commit. Authenticate Docker to private GHCR using a minimally scoped credential with package read access (through password-stdin), and use the signed-in GitHub CLI to verify release status. No registry credential is embedded in the project. The deployment command runs locally; GitHub-hosted runners cannot deploy to your laptop. No self-hosted runner or public tunnel is installed.
 

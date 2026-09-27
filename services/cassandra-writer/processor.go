@@ -53,20 +53,39 @@ type Processor struct {
 	Written, Quarantined, Retries, Lag atomic.Uint64
 	LastWritten                        atomic.Int64
 	Pending                            atomic.Int64
+	// Connect, when set, must succeed before consuming; it is retried with
+	// backoff so a worker that starts while Cassandra is down waits.
+	Connect    func() error
+	MaxBackoff time.Duration
+	Jitter     func(int64) int64
+	Degraded   atomic.Bool
+	Outages    atomic.Uint64
+	// OutageStarted is the Unix-nano start of the current outage, or zero.
+	OutageStarted atomic.Int64
 }
 
+// Run consumes until shutdown or a genuinely unrecoverable error. A Cassandra
+// outage never ends it: the same record is retried with backoff and its offset
+// stays uncommitted, so nothing is skipped or lost.
 func (p *Processor) Run(ctx context.Context) error {
-	p.Ready.Store(true)
 	defer p.Ready.Store(false)
+	if p.Connect != nil {
+		if err := p.until(ctx, func(context.Context) error { return p.Connect() }); err != nil {
+			return err
+		}
+	}
+	p.Ready.Store(true)
 	for {
 		m, err := p.Source.Next(ctx)
 		if err != nil {
 			return err
 		}
-		work, cancel := context.WithTimeout(ctx, p.ProcessTimeout)
 		p.Pending.Store(1)
-		err = p.process(work, m)
-		cancel()
+		err = p.until(ctx, func(ctx context.Context) error {
+			work, cancel := context.WithTimeout(ctx, p.ProcessTimeout)
+			defer cancel()
+			return p.process(work, m)
+		})
 		if err != nil {
 			return fmt.Errorf("stopping without commit at %s/%d@%d: %w", m.Topic, m.Partition, m.Offset, err)
 		}

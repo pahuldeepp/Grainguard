@@ -28,9 +28,14 @@ const TABLES = [
   "bins",
   "command_receipts",
   "devices",
+  "entitlement_feed_health",
   "grain_lots",
+  "inventory_import_state",
+  "inventory_saga_receipts",
+  "inventory_saga_result_outbox",
   "outbox_events",
   "sites",
+  "tenant_entitlements",
   "tenants",
 ];
 

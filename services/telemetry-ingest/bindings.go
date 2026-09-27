@@ -154,9 +154,10 @@ func ApplyInventoryEvent(ctx context.Context, db TxStarter, data []byte) (Bindin
 	outcome := BindingApplied
 	err = WithTenant(ctx, db, event.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
-			`INSERT INTO consumer_inbox (consumer_name, tenant_id, event_id, event)
-			 VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT DO NOTHING`,
-			bindingConsumer, event.TenantID, event.EventID, string(event.raw))
+			`WITH lock AS (SELECT pg_advisory_xact_lock(hashtextextended($2::text || ':' || $5::text, 0)))
+			 INSERT INTO consumer_inbox (consumer_name, tenant_id, event_id, event)
+			 SELECT $1, $2::uuid, $3::uuid, $4::jsonb FROM lock ON CONFLICT DO NOTHING`,
+			bindingConsumer, event.TenantID, event.EventID, string(event.raw), event.DeviceID)
 		if err != nil {
 			return fmt.Errorf("record receipt: %w", err)
 		}
@@ -165,7 +166,10 @@ func ApplyInventoryEvent(ctx context.Context, db TxStarter, data []byte) (Bindin
 			return err
 		}
 		outcome, err = applyBinding(ctx, tx, event)
-		return err
+		if err != nil {
+			return err
+		}
+		return completeReadyBindingAwaits(ctx, tx, event.TenantID, event.DeviceID)
 	})
 	if err != nil {
 		return "", err

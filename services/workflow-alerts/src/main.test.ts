@@ -67,3 +67,34 @@ test("consumer crash removes readiness and shutdown closes consumer before datab
   }
   assert.deepEqual(calls, ["consumer", "database"]);
 });
+
+test("shutdown closes the verifier even if an earlier cleanup fails", async () => {
+  const calls: string[] = [];
+  const app = await createAlertsApp({
+    db: {
+      $queryRaw: async () => [{ one: 1 }],
+      $disconnect: async () => {
+        calls.push("database");
+      },
+    } as unknown as Db,
+    verifier: {
+      verify: async () => {
+        throw new Error("unused");
+      },
+      close: () => {
+        calls.push("verifier");
+      },
+    },
+    stopConsumer: {
+      close: async () => {
+        calls.push("consumer");
+        throw new Error("consumer failed");
+      },
+    },
+  });
+  await app.listen(0, "127.0.0.1");
+  // Nest logs a shutdown-hook error and resolves close(); the remaining
+  // cleanup hooks must still run.
+  await app.close();
+  assert.deepEqual(calls, ["consumer", "database", "verifier"]);
+});

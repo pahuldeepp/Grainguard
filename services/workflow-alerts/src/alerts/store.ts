@@ -63,7 +63,7 @@ export async function ensureRule(tx: Tx, rule: AlertRule): Promise<AlertRule> {
   await tx.$executeRaw`
     INSERT INTO alert_rules (tenant_id, rule_id, rule_key, resource_kind, open_score, clear_score, escalation_timeout_seconds)
     VALUES (${rule.tenantId}::uuid, ${rule.ruleId}::uuid, ${rule.ruleKey}, 'bin', ${rule.openScore}, ${rule.clearScore}, ${rule.escalationTimeoutSeconds})
-    ON CONFLICT (tenant_id, rule_key) DO NOTHING`;
+    ON CONFLICT DO NOTHING`;
   return findRule(tx, rule.tenantId, rule.ruleId) as Promise<AlertRule>;
 }
 

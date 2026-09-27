@@ -69,6 +69,79 @@ test("the JWKS URL must be https, or loopback http for local development", () =>
   assert.throws(() => withUrl("not a url"));
 });
 
+test("import service authentication is all-or-nothing and requires secure endpoints", () => {
+  const importEnv = {
+    IMPORT_SOURCE_ID: "partner-main",
+    IMPORT_AUTH_ISSUER: "https://idp.example",
+    IMPORT_AUTH_AUDIENCE: "greenguard-import",
+    IMPORT_AUTH_JWKS_URL: "https://idp.example/jwks",
+    IMPORT_AUTH_TENANT_CLAIM: "gg_tenant",
+    CONTROL_LOOKUP_URL: "https://control.example",
+    CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+  };
+  assert.equal(
+    readConfig({ ...base, ...importEnv }).importAuth?.tenantClaim,
+    "gg_tenant",
+  );
+  assert.equal(
+    readConfig({ ...base, ...importEnv }).importAuth?.sourceId,
+    "partner-main",
+  );
+  assert.equal(
+    readConfig({ ...base, CONTROL_LOOKUP_TOKEN: "x".repeat(32) }).importAuth,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      readConfig({ ...base, CONTROL_LOOKUP_URL: "https://control.example" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, ...importEnv, IMPORT_SOURCE_ID: "" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      readConfig({ ...base, ...importEnv, IMPORT_SOURCE_ID: "invalid source" }),
+    /IMPORT_SOURCE_ID is invalid/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, IMPORT_AUTH_ISSUER: "https://idp.example" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, ...importEnv, CONTROL_LOOKUP_TOKEN: "short" }),
+    /at least 32 bytes/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        CONTROL_LOOKUP_URL: "http://control.example",
+      }),
+    /must use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        IMPORT_AUTH_JWKS_URL: "http://idp.example/jwks",
+      }),
+    /must use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        CONTROL_LOOKUP_URL: "https://user:secret@control.example",
+      }),
+    /cannot contain credentials/,
+  );
+});
+
 test("tracing is enabled only by a collector endpoint and validates its settings", () => {
   assert.equal(readConfig(base).otel, undefined);
   assert.deepEqual(

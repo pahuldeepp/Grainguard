@@ -27,7 +27,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     tenant_id: randomUUID(),
     channel: "email",
     transition: "alert.opened",
-    severity: "critical",
+    severity: "warning",
     alert_id: randomUUID(),
     episode_id: randomUUID(),
     transition_version: 1,

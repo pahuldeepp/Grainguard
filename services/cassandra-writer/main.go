@@ -21,15 +21,9 @@ import (
 
 type app struct {
 	processor *Processor
+	session   *history.Reconnecting
 	ping      func(context.Context) error
 	close     func()
-}
-
-// cassandra is the production session surface used by buildApp.
-type cassandra interface {
-	history.Session
-	Ping(context.Context) error
-	Close()
 }
 
 var (
@@ -37,7 +31,7 @@ var (
 	runService    = run
 	listen        = net.Listen
 	newApp        = buildApp
-	openCassandra = func(c history.Config) (cassandra, error) { return history.Open(c) }
+	openCassandra = func(c history.Config) (history.Conn, error) { return history.Open(c) }
 )
 
 func buildApp(getenv func(string) string) (*app, error) {
@@ -65,20 +59,17 @@ func buildApp(getenv func(string) string) (*app, error) {
 	if err != nil {
 		return nil, err
 	}
-	session, err := openCassandra(cfg)
-	if err != nil {
-		shutdownTracing(provider)
-		return nil, err
-	}
+	// The session is opened lazily and re-created after outages, so a worker
+	// that starts while Cassandra is down waits instead of exiting.
+	session := &history.Reconnecting{Open: func() (history.Conn, error) { return openCassandra(cfg) }}
 	kafka, err := newKafka(strings.Split(brokers, ","), consumerGroup)
 	if err != nil {
-		session.Close()
 		shutdownTracing(provider)
 		return nil, err
 	}
 	store := &history.Store{Session: session, TTL: ttl}
-	p := &Processor{Tracer: provider.Tracer(consumerGroup), Source: kafka, Sink: kafka, Schema: schema, Store: store, Transient: history.Transient, Rejected: history.Rejected, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 30 * time.Second}
-	return &app{processor: p,
+	p := &Processor{Tracer: provider.Tracer(consumerGroup), Source: kafka, Sink: kafka, Schema: schema, Store: store, Transient: history.Transient, Rejected: history.Rejected, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 30 * time.Second, Connect: session.Connect}
+	return &app{processor: p, session: session,
 		ping:  func(ctx context.Context) error { return errors.Join(session.Ping(ctx), kafka.Ping(ctx)) },
 		close: func() { kafka.Close(); session.Close(); shutdownTracing(provider) }}, nil
 }
@@ -97,6 +88,22 @@ func (a *app) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = fmt.Fprintf(w, "history_written_total %d\nhistory_quarantined_total %d\nhistory_retries_total %d\nhistory_pending_records %d\nhistory_lag_records %d\nhistory_last_written_age_seconds %g\n",
 		p.Written.Load(), p.Quarantined.Load(), p.Retries.Load(), p.Pending.Load(), p.Lag.Load(), age)
+	_, _ = fmt.Fprintf(w, "history_cassandra_degraded %d\nhistory_cassandra_outage_seconds %g\nhistory_cassandra_outages_total %d\nhistory_cassandra_sessions_opened_total %d\n",
+		boolGauge(p.Degraded.Load()), p.outageSeconds(), p.Outages.Load(), a.sessionsOpened())
+}
+
+func (a *app) sessionsOpened() uint64 {
+	if a.session == nil {
+		return 0
+	}
+	return a.session.Reconnects.Load()
+}
+
+func boolGauge(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func run(ctx context.Context, getenv func(string) string) error {

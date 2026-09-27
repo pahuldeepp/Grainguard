@@ -13,9 +13,19 @@ for (const workspace of [
   "packages/tenant-auth",
   "packages/contracts",
   "packages/read-model",
+  "packages/feature-flags",
+  "packages/entitlements",
+  "packages/audit",
+  "services/bff",
+  "services/gateway",
+  "services/read-api",
   "services/device-service",
   "services/workflow-alerts",
   "services/notification-service",
+  "services/tenant-control-plane",
+  "services/billing-service",
+  "packages/membership-client",
+  "packages/kafka-runtime",
 ]) {
   const filename = `${workspace}/coverage/lcov.info`;
   const normalized = readFileSync(filename, "utf8").replace(
@@ -154,6 +164,24 @@ writeFileSync(
     "services/cassandra-writer/",
   ),
 );
+run(
+  "go",
+  [
+    "test",
+    "-race",
+    "-coverpkg=./...",
+    "-coverprofile=../../coverage/cache-invalidator.raw.out",
+    "./...",
+  ],
+  "services/cache-invalidator",
+);
+writeFileSync(
+  "coverage/cache-invalidator.out",
+  readFileSync("coverage/cache-invalidator.raw.out", "utf8").replaceAll(
+    "greenguard.local/cache-invalidator/",
+    "services/cache-invalidator/",
+  ),
+);
 run("python3", ["-m", "venv", ".local/search-venv"]);
 run(".local/search-venv/bin/pip", [
   "install",
@@ -257,6 +285,24 @@ writeFileSync(
   readFileSync("coverage/saga-orchestrator.raw.out", "utf8").replaceAll(
     "greenguard.local/saga-orchestrator/",
     "services/saga-orchestrator/",
+  ),
+);
+run(
+  "go",
+  [
+    "test",
+    "-race",
+    "-coverpkg=./...",
+    "-coverprofile=../../coverage/hardware-service.raw.out",
+    "./...",
+  ],
+  "services/hardware-service",
+);
+writeFileSync(
+  "coverage/hardware-service.out",
+  readFileSync("coverage/hardware-service.raw.out", "utf8").replaceAll(
+    "greenguard.local/hardware-service/",
+    "services/hardware-service/",
   ),
 );
 console.log("Coverage reports ready for SonarQube.");

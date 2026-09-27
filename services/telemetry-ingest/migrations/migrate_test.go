@@ -65,7 +65,7 @@ func TestUpBuildsAnEmptyDatabaseAndIsRepeatable(t *testing.T) {
 		        (SELECT count(*) FROM pg_policies WHERE policyname = 'cdc_outbox_snapshot')`).Scan(&policies, &tables, &cdcPolicies); err != nil {
 		t.Fatal(err)
 	}
-	if policies != 8 || tables != 8 || cdcPolicies != 1 {
+	if policies != 11 || tables != 12 || cdcPolicies != 1 {
 		t.Fatalf("tenant policies %d, forced-RLS tables %d, CDC policies %d", policies, tables, cdcPolicies)
 	}
 }

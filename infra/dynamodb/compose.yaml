@@ -1,0 +1,8 @@
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab
+    command: -jar DynamoDBLocal.jar -sharedDb -inMemory
+    working_dir: /home/dynamodblocal
+    ports:
+      - "127.0.0.1:28000:8000"
+    mem_limit: 768m

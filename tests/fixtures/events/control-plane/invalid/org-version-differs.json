@@ -1,0 +1,20 @@
+{
+  "event_id": "5d7c1e3a-2f4b-5a6c-9d8e-1f2a3b4c5d6e",
+  "schema_version": 1,
+  "occurred_at": "2026-09-25T10:00:00.000000Z",
+  "tenant_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+  "correlation_id": "6e8d2f4b-3a5c-4b7d-8e9f-2a3b4c5d6e7f",
+  "causation_id": "7f9e3a5c-4b6d-4c8e-9fa0-3b4c5d6e7f80",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "event_type": "tenant.created",
+  "aggregate_type": "organization",
+  "aggregate_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+  "aggregate_version": "1",
+  "payload": {
+    "tenant_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+    "organization_version": "2",
+    "name": "Tenant A farms",
+    "state": "active",
+    "home_region": "local"
+  }
+}

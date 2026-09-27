@@ -109,3 +109,31 @@ amendments were applied on 2026-09-24:
 
 This accepted deployment-wide contract supersedes those clauses and extends
 ADR-0008's service-local codec decision to all canonical producers and consumers.
+
+## Stage 10d exception: notification contact CDC
+
+On 2026-09-25, the Stage 10d decision explicitly approved a narrowly scoped
+exception for the PostgreSQL `notification_contacts` table feed. This topic is
+not a canonical domain-event envelope: Debezium is its producer, and the isolated
+DynamoDB contact projector is its consumer. The topic uses Schema Registry's
+Avro wire framing because both endpoints must share the exact versioned table-row
+contract and because the projector cannot safely guess the source schema.
+
+The immutable producer contracts are
+[`notification-contacts-cdc.v1.avsc`](../../contracts/events/notification-contacts-cdc.v1.avsc)
+and
+[`notification-contacts-heartbeat.v2.avsc`](../../contracts/events/notification-contacts-heartbeat.v2.avsc).
+`scripts/kafka-connect.mjs` sets each subject to `BACKWARD`, registers the checked-in
+Avro schema before the connector starts its snapshot, checks compatibility against
+the latest version, and compares the converter-registered latest schema to the
+artifact after the connector reaches `RUNNING`. CI exercises this through the event
+integration job. The contact consumer requires Avro decoding at runtime and still
+performs semantic validation of tenant/key, schema marker, operation, contacts and
+exact decimal version before projection. It writes no PII to logs.
+
+This exception does not change the plain-JSON/no-runtime-Registry rule for the
+canonical outbox topics, event transformer or other consumers. Contact and
+heartbeat topics contain tenant contact data or source metadata; production ACLs
+must allow only the Debezium workload to publish, the DynamoDB projector to read,
+and the audited recovery role to inspect the restricted DLQ. The contact topic is
+compacted for tenant-state replay; the DLQ has a bounded seven-day retention.

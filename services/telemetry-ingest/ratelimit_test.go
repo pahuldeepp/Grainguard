@@ -191,7 +191,7 @@ func TestUnusableLimitConfigurationFallsBackToTheDefaults(t *testing.T) {
 			t.Errorf("%s: not replaced by defaults: %+v", name, got)
 		}
 	}
-	custom := LimitConfig{Device: BucketConfig{Rate: 2, Burst: 4}, Tenant: BucketConfig{Rate: 3, Burst: 9}, MaxEntries: 7}
+	custom := LimitConfig{Device: BucketConfig{Rate: 2, Burst: 4}, Tenant: BucketConfig{Rate: 3, Burst: 9}, Key: BucketConfig{Rate: 2, Burst: 4}, MaxEntries: 7}
 	if normalizeLimits(custom) != custom {
 		t.Fatal("a valid configuration must be kept as it is")
 	}

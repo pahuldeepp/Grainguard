@@ -13,6 +13,12 @@ export interface Principal {
   tenantId: string;
   roles: Role[];
   expiresAt: Date;
+  principalType?: "service";
+  scopes?: string[];
+  keyId?: string;
+  deviceId?: string;
+  email?: string;
+  emailVerified?: boolean;
 }
 
 export type AuthErrorCode =
@@ -49,6 +55,10 @@ export interface VerifierOptions {
     | { getKey: JWTVerifyGetKey };
   clockToleranceSec?: number;
   now?: () => Date;
+  // ADR-0014: when set, the IdP token proves identity only and this maps the
+  // verified payload to GreenGuard claims (tenant_id, roles). Return undefined
+  // for an identity with no membership.
+  mapIdentity?: (payload: JWTPayload) => JWTPayload | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -106,6 +116,8 @@ function toPrincipal(payload: JWTPayload): Principal {
     tenantId,
     roles: [...new Set(roles as Role[])],
     expiresAt: new Date(Number(payload.exp) * 1000),
+    email: typeof payload.email === "string" ? payload.email : undefined,
+    emailVerified: payload.email_verified === true,
   };
 }
 
@@ -146,13 +158,27 @@ export function createTokenVerifier(options: VerifierOptions): {
             : "invalid_token",
         );
       }
-      return toPrincipal(payload);
+      const claims = options.mapIdentity
+        ? options.mapIdentity(payload)
+        : payload;
+      if (!claims) throw new AuthError(401, "invalid_claims");
+      return toPrincipal(claims);
     },
   };
 }
 
 export function requireRole(principal: Principal, ...allowed: Role[]): void {
-  if (!principal.roles.some((role) => allowed.includes(role))) {
+  if (
+    principal.principalType === "service" ||
+    !principal.roles.some((role) => allowed.includes(role))
+  ) {
     throw new AuthError(403, "insufficient_role");
   }
 }
+
+export {
+  createTokenVerifierFromEnv,
+  membershipMapper,
+  parseMemberships,
+  type Membership,
+} from "./oidc.js";

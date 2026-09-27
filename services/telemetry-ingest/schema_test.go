@@ -10,7 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-var tenantTables = []string{"audit_events", "consumer_inbox", "device_bindings", "device_streams", "ingest_receipts", "ingest_rejection_samples", "outbox_events", "readings"}
+var tenantTables = []string{"audit_events", "consumer_inbox", "device_bindings", "device_streams", "ingest_receipts", "ingest_rejection_samples", "outbox_events", "readings", "saga_binding_requests"}
+
+// Every forced-RLS table in the schema. entitlement_feed_health has no tenant column
+// (ADR-0022), so it is deliberately absent from tenantTables.
+var catalogTables = []string{"audit_events", "consumer_inbox", "device_bindings", "device_streams", "entitlement_feed_health", "ingest_quota_usage", "ingest_receipts", "ingest_rejection_samples", "outbox_events", "readings", "saga_binding_requests", "tenant_entitlements"}
 
 func sqlState(err error) string {
 	var pgErr *pgconn.PgError
@@ -50,11 +54,11 @@ func TestD02RuntimeRoleCannotBypassRLSAndOwnsNothing(t *testing.T) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	if len(names) != len(tenantTables) {
+	if len(names) != len(catalogTables) {
 		t.Fatalf("tables: %v", names)
 	}
 	for i := range names {
-		if names[i] != tenantTables[i] {
+		if names[i] != catalogTables[i] {
 			t.Fatalf("tables: %v", names)
 		}
 	}

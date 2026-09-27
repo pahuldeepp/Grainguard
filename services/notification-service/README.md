@@ -1,9 +1,10 @@
 # services/notification-service
 
 Status: **Stage 06d implemented locally** (RabbitMQ task consumer, provider adapter
-interface, delivery ledger, tenant preferences). Real email/SMS/push/webhook providers and
-templates are Stage 10.
-
+interface, delivery ledger, tenant preferences). It serves only `/healthz` and `/metrics`;
+critical alerts are delivered by the separate AWS Lambda path and never enter this service.
+The warning/non-critical server worker resolves contacts through the authenticated tenant
+control-plane API backed by PostgreSQL. No live provider credentials are required for local tests.
 Stages: 06, 10.
 
 Technology: Node/TypeScript (plain Node, `pg` 8.23.0, `amqplib` 2.0.1). NestJS was not
@@ -13,7 +14,12 @@ needed: the service has no HTTP API beyond `/healthz` and `/metrics`.
 
 Manual-ack consumer on `notifications.tasks`, prefetch = `NOTIFICATIONS_MAX_IN_FLIGHT`.
 
-1. Validate the task; `messageId` must equal `intent_id`. Poison → nack without requeue →
+The critical serverless path is isolated from this worker. It reads the CDC-maintained
+DynamoDB contact projection and delivers directly through SES/SNS; this service exposes no
+critical dispatch endpoint and has no fallback responsibility.
+1. Validate the task; `messageId` must equal `intent_id`. This worker accepts only
+   exact `warning` severity; critical or unknown severity is rejected before flag
+   lookup, database claims, or provider calls. Poison → nack without requeue →
    `notifications.dlq`.
 2. **Begin** (short locked tenant transaction, `ledger.ts`): insert the `deliveries` row once
    (`UNIQUE (intent_id)`), lock it `FOR UPDATE`, apply `notification_preferences`, record an
@@ -43,8 +49,11 @@ in the DLQ for an operator. It is never marked failed or retried without a limit
 
 `ProviderAdapter { send(request, signal); reconcile(key, signal) }`. `LocalTestAdapter`
 records deliveries in memory and sends nothing (default, `NOTIFICATIONS_PROVIDER=local`).
-`UnconfiguredAdapter` stands in for email/SMS/push until Stage 10 and reports a transient
-error, so such tasks are retried and dead-lettered, never lost.
+`UnconfiguredAdapter` reports a transient error, so such tasks are retried and
+dead-lettered. `NOTIFICATIONS_PROVIDER=live` selects SendGrid email and Twilio SMS
+through `createProviderSelector`, resolving trusted contacts from the authenticated
+HTTPS control-plane API. The live selector owns warning email/SMS only; push is
+deferred. Runtime tests inject the resolver/fetch boundary and never call providers.
 
 ## Tables (`migrations/`, forward-only, applied by `make db-migrate`)
 
@@ -58,4 +67,5 @@ composite tenant foreign key, `notifications_app` has no DELETE grant.
 ```bash
 npm test -w services/notification-service      # unit + live Postgres tests
 make rabbitmq-test                             # includes src/testing/rabbit.live.ts
+npm run live -w services/notification-service  # RabbitMQ + root Kafka/DynamoDB/CDC live suites
 ```

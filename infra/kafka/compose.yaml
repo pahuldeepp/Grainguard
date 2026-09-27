@@ -1,5 +1,30 @@
 # Opt-in overlay: never loaded by make dev / verify / smoke.
 services:
+  hardware-worker:
+    image: ${IMAGE_PREFIX:-grainguard}/hardware-worker:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/hardware-service/Dockerfile
+    environment:
+      HARDWARE_DATABASE_URL: postgresql://hardware_app:${HARDWARE_DB_PASSWORD:?Run make bootstrap}@pgbouncer:6432/greenguard_hardware
+      KAFKA_BROKERS: kafka:29092
+      MQTT_BROKER_URL: tcp://mosquitto:1883
+    depends_on:
+      postgres: {condition: service_healthy}
+      pgbouncer: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      mosquitto: {condition: service_started}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    restart: unless-stopped
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    ports: ["127.0.0.1:51883:1883"]
+    volumes:
+      - ../mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    restart: unless-stopped
   kafka:
     # apache/kafka:3.9.1; index digest, pulled and verified locally.
     image: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
@@ -54,8 +79,10 @@ services:
       retries: 30
       start_period: 20s
   connect:
-    # quay.io/debezium/connect:3.2.0.Final; index digest, pulled and verified locally.
-    image: quay.io/debezium/connect@sha256:b79f70f10a4aa97445f61e1c7b6cc8f484018f59d9a90cabc8135d3ae70ad90b
+    image: ${IMAGE_PREFIX:-grainguard}/debezium-connect-avro:3.2.0-local
+    build:
+      context: ../..
+      dockerfile: infra/kafka/Dockerfile.connect
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
@@ -75,7 +102,8 @@ services:
       CONNECT_TOPIC_CREATION_ENABLE: "false"
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
-      CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN: CDC_DB_PASSWORD
+      CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN: CDC_DB_PASSWORD|SCHEMA_REGISTRY_URL
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       CONNECT_PRODUCER_ACKS: all
       OFFSET_FLUSH_INTERVAL_MS: 1000
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
@@ -87,4 +115,5 @@ services:
       retries: 30
       start_period: 20s
 volumes:
+  mosquitto-data:
   kafka-data:

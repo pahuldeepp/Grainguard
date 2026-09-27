@@ -1,0 +1,5 @@
+# EventBridge alert bridge
+
+The bridge consumes canonical alert lifecycle events from Kafka and emits the unchanged event to EventBridge for the lifecycle mirror. Critical `alert.opened`, `alert.escalated`, and `alert.resolved` transitions additionally receive the `alert.critical.serverless` marker. This routing is unconditional. Warning/non-critical notifications never receive the critical marker and remain on RabbitMQ. `jobs-worker` applies the same unconditional rule: it retains inbox evidence for critical transitions but creates no RabbitMQ notification intents.
+
+Run unit tests with `make serverless-bridge-test`. Deployment needs Kafka access, `EVENT_BUS_NAME`, `BRIDGE_QUARANTINE_QUEUE_URL`, and an IAM task role limited to `events:PutEvents` on the configured bus and `sqs:SendMessage` on the quarantine queue. Use approved Kafka security settings; never put credentials in command-line arguments or logs. EventBridge and SQS are at-least-once. The direct AWS delivery Lambda uses stable per-channel UUIDv5 IDs plus conditional DynamoDB claims and never falls back to RabbitMQ after an AWS failure.

@@ -103,10 +103,15 @@ func reading(e map[string]any) (history.Reading, bool) {
 	if err != nil || version < 1 || errObserved != nil || errReceived != nil || r.DeviceID != str(e, fieldAggregate) {
 		return r, false
 	}
-	for _, id := range []string{r.TenantID, r.EventID, r.DeviceID, r.ReadingID, r.SiteID, r.BinID} {
+	for _, id := range []string{r.TenantID, r.EventID, r.DeviceID, r.ReadingID, r.SiteID} {
 		if !history.ValidID(id) {
 			return r, false
 		}
+	}
+	// The canonical telemetry contract permits an unbound device. An absent
+	// bin is represented by a null CQL column, not a rejected reading.
+	if r.BinID != "" && !history.ValidID(r.BinID) {
+		return r, false
 	}
 	r.StreamVersion, r.ObservedAt, r.ReceivedAt = version, observed, received
 	measurements, _ := p["measurements"].(map[string]any)

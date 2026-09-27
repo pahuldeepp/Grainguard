@@ -12,6 +12,8 @@ export const RETRY_KEY = "retry";
 export const RECEIPT_KEY = "receipt";
 export const DEAD_KEY = "notifications.dead";
 export const ATTEMPT_HEADER = "x-attempt";
+export const OPTIONAL_HOLD_ATTEMPT_HEADER = "x-optional-hold-attempt";
+export const FIRST_HELD_HEADER = "x-first-held-at-ms";
 export const DELIVERY_LIMIT = 5;
 
 const QUORUM = { "x-queue-type": "quorum" };

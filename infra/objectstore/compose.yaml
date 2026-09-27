@@ -1,0 +1,25 @@
+# Opt-in local S3-compatible store for the Stage 09e audit-export live test.
+# Never loaded by make dev / verify / smoke. Local proof only: no TLS, throwaway
+# credentials from the ignored .env (make bootstrap). Production uses real S3.
+services:
+  minio:
+    # MinIO RELEASE.2026-09-22T19-25-18Z built by Chainguard. The upstream
+    # minio/minio Docker Hub and quay.io images are no longer publicly pullable
+    # (verified 2026-09-25); this index digest was pulled and checked locally.
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECTSTORE_ROOT_USER:?Run make bootstrap}
+      MINIO_ROOT_PASSWORD: ${OBJECTSTORE_ROOT_PASSWORD:?Run make bootstrap}
+      # SSE-S3 (AES256) needs a KMS key in MinIO; this is the local stand-in for AWS-managed keys.
+      MINIO_KMS_SECRET_KEY: ${OBJECTSTORE_KMS_SECRET_KEY:?Run make bootstrap}
+    ports:
+      - "127.0.0.1:59000:9000"
+    volumes:
+      - objectstore-data:/data
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+volumes:
+  objectstore-data:

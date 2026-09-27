@@ -499,7 +499,8 @@ Every row below is **proposed**, except the telemetry schema and fixture already
 | `greenguard.notifications.delivery.v1` | Notifications: `delivery.requested`, `delivery.provider_accepted`, `delivery.confirmed`, `delivery.failed` | Delivery; alert escalation, audit, preferences UI |
 | `greenguard.integrations.lifecycle.v1` | Integration: `import.started`, `import.completed`, `import.failed`, `external_binding.changed` | Import run or external binding; views and operators |
 | `greenguard.platform.config.v1` | Configuration control plane: `flag.configuration_changed`, `cell.placement_changed` | Config/placement record; authorized local cache refreshers; restricted ACL |
-| `greenguard.commands.results.v1` | Participant owners: `command.completed`, `command.rejected` | Command result keyed by tenant/command ID; requester/saga; owner/topic ACL and origin allowlist enforced |
+| `greenguard.saga.commands.v1` | Saga: `asset.reserve`, `asset.configure`, `inventory.activate`, `binding.await`, `inventory.deactivate`, `asset.release` | Command keyed by tenant/saga ID; participant owners, with command ID and saga version/fence in the envelope |
+| `greenguard.saga.results.v1` | Participant owners: definitive `succeeded` or `rejected` step result | Result keyed by tenant/saga ID; saga checks command ID, step, version and fence; owner/topic ACL and origin allowlist required |
 | `greenguard.quarantine.v1` | Transport: invalid event bytes and source coordinates/error/attempt/schema metadata | Source coordinate; operator tooling only; tenant present only if verified |
 
 Each event schema defines payload, owner, key, authorization classification, causal IDs, deterministic replay behavior and retention before its producer is implemented. Search and read models do not originate alternative inventory/alert truth. Audit rows are written locally with mutations; a separately authorized audit exporter assembles them without publishing credentials or unrestricted personal data on general topics.
@@ -507,6 +508,8 @@ Each event schema defines payload, owner, key, authorization classification, cau
 Raw CDC topics retain `greenguard.raw.inventory.outbox` and `greenguard.raw.telemetry.outbox`; add `greenguard.raw.<owner>.outbox` only for an introduced database owner. One scoped connector/slot per owned database in the first profile; shard expansion supplies explicit mappings. Capture outbox insert records, not every internal table by default. Transformer routes against an allowlist and preserves identity/version/trace. Initial single raw partitions are a learning profile, not the final scale topology.
 
 Commands are requests to one owner, while events report committed facts. Introduce `command_id`, `command_type`, `tenant_id`, `target_id`, `expected_version`, `deadline`, `idempotency_key`, correlation/causation/trace and validated payload in a separately versioned command envelope. Do not call the command a successfully completed event.
+
+Stage 07's initial provisioning command stream is `greenguard.saga.commands.v1` with a corresponding `greenguard.saga.results.v1` result stream. These are workflow transport contracts; asset lifecycle facts remain separate on `greenguard.assets.provisioning.v1`. Each command has a stable `(tenant_id, command_id)` across transport retries, and each result names that command and its step/version/fence.
 
 | Command topic / target owner | Commands | Durable completion evidence |
 |---|---|---|

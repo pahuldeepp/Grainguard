@@ -16,6 +16,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0
 	greenguard.local/go-common v0.0.0
 	greenguard.local/go-migrations v0.0.0
+	greenguard.local/kafka-transport v0.0.0
 )
 
 require (
@@ -48,3 +49,5 @@ require (
 replace greenguard.local/go-migrations => ../../packages/go-migrations
 
 replace greenguard.local/go-common => ../../packages/go-common
+
+replace greenguard.local/kafka-transport => ../../packages/kafka-transport

@@ -36,6 +36,7 @@ func TestDisposablePromotionAndPostSwapEvent(t *testing.T) {
 	mustOK(t, public.Apply(ctx, first, mustEventMap(t, first.Value)))
 	shadow := rebuildAndCompareShadow(t, ctx, c, producer, pool, schema)
 	mustOK(t, PromoteReadViews(ctx, admin, schema, CanonicalPromotionVerifier(producer, testProcessor(t))))
+	assertPromotionOutbox(t, ctx, admin, 1)
 	second := produceAt0(t, ctx, producer, dbEvent(t, tenant, device, 2))[0]
 	parsed := mustEventMap(t, second.Value)
 	mustOK(t, shadow.Apply(ctx, second, parsed))
@@ -54,6 +55,7 @@ func TestDisposablePromotionAndPostSwapEvent(t *testing.T) {
 	shadow2 := rebuildAndCompareShadow(t, ctx, c, producer, pool, schema)
 	assertLaggingPromotionRejected(t, ctx, pool, admin, producer, schema, second)
 	mustOK(t, PromoteReadViews(ctx, admin, schema, CanonicalPromotionVerifier(producer, testProcessor(t))))
+	assertPromotionOutbox(t, ctx, admin, 2)
 	useClusterDialer(t, c)
 	writer, err := newKafka(c.ListenAddrs(), "greenguard.projection-builder."+schema)
 	mustOK(t, err)
@@ -64,6 +66,17 @@ func TestDisposablePromotionAndPostSwapEvent(t *testing.T) {
 	mustOK(t, err)
 	mustOK(t, follower.process(ctx, next))
 	assertPostSwapRoute(t, ctx, admin, schema, tenant, device, mustEventMap(t, third.Value))
+}
+
+func assertPromotionOutbox(t *testing.T, ctx context.Context, admin *pgxpool.Pool, want int) {
+	t.Helper()
+	var got int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM public.outbox_events WHERE tenant_id=$1 AND payload->>'scope'='epoch'`, infrastructureTenant).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("promotion epoch outbox rows=%d want=%d", got, want)
+	}
 }
 
 // rebuildAndCompareShadow replays all tenants into schema, compares it and

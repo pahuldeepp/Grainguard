@@ -1,0 +1,28 @@
+{
+  "name": "greenguard-mysql-inventory-v1",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "mysql-cdc",
+    "database.port": "3306",
+    "database.user": "partner_cdc",
+    "database.password": "${env:CDC_DB_PASSWORD}",
+    "database.server.id": "18002",
+    "database.include.list": "partner_inventory",
+    "table.include.list": "partner_inventory.inventory_sites,partner_inventory.inventory_bins,partner_inventory.inventory_devices",
+    "topic.prefix": "legacy",
+    "snapshot.mode": "initial",
+    "include.schema.changes": "false",
+    "tombstones.on.delete": "false",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
+    "schema.history.internal.kafka.topic": "greenguard.mysql-cdc.schema-history",
+    "schema.history.internal.store.only.captured.tables.ddl": "true",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.topics.prefix": "__debezium-heartbeat",
+    "errors.tolerance": "none"
+  }
+}

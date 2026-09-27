@@ -26,10 +26,11 @@ func WithTenant(ctx context.Context, db TxStarter, tenantID string, fn func(cont
 	return inTx(ctx, db, "app.tenant_id", tenantID, fn)
 }
 
-// withDispatchScan opens the read-only cross-tenant scan context used only to list due
-// outbox identifiers (see the dispatch_scan policy in migration 000001).
-func withDispatchScan(ctx context.Context, db TxStarter, fn func(context.Context, pgx.Tx) error) error {
-	return inTx(ctx, db, "app.scope", "dispatch-scan", fn)
+// withoutTenant runs fn in a transaction with no tenant context. RLS then hides every tenant
+// row; it is used only to call the ID-only selectors (migration 000005) and to write the
+// non-tenant quarantine table.
+func withoutTenant(ctx context.Context, db TxStarter, fn func(context.Context, pgx.Tx) error) error {
+	return inTx(ctx, db, "", "", fn)
 }
 
 func inTx(ctx context.Context, db TxStarter, key, value string, fn func(context.Context, pgx.Tx) error) error {
@@ -43,7 +44,7 @@ func inTx(ctx context.Context, db TxStarter, key, value string, fn func(context.
 			panic(r)
 		}
 	}()
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", key, value); err != nil {
+	if err := setContext(ctx, tx, key, value); err != nil {
 		return errors.Join(fmt.Errorf("set context: %w", err), rollback(tx))
 	}
 	if err := fn(ctx, tx); err != nil {
@@ -59,4 +60,29 @@ func rollback(tx pgx.Tx) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), rollbackTimeout)
 	defer cancel()
 	return tx.Rollback(ctx)
+}
+
+func setContext(ctx context.Context, tx pgx.Tx, key, value string) error {
+	if key == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", key, value)
+	return err
+}
+
+// selectorMax mirrors the 1..1000 clamp inside the migration 000005 selectors.
+const selectorMax = 1000
+
+// selectRefs calls one ID-only selector with no tenant context and scans its rows.
+func selectRefs[T any](ctx context.Context, db TxStarter, sql string, limit int, scan func(pgx.CollectableRow) (T, error)) ([]T, error) {
+	var refs []T
+	err := withoutTenant(ctx, db, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, sql, min(max(limit, 1), selectorMax))
+		if err != nil {
+			return err
+		}
+		refs, err = pgx.CollectRows(rows, scan)
+		return err
+	})
+	return refs, err
 }

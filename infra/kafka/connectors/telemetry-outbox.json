@@ -25,5 +25,6 @@
   "transforms": "rawTopic",
   "transforms.rawTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
   "transforms.rawTopic.regex": "^greenguard_telemetry\\.public\\.outbox_events$",
-  "transforms.rawTopic.replacement": "greenguard.raw.telemetry.outbox"
+  "transforms.rawTopic.replacement": "greenguard.raw.telemetry.outbox",
+  "message.prefix.exclude.list": ".*"
 }

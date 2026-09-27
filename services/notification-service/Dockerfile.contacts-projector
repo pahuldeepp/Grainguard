@@ -1,0 +1,21 @@
+FROM node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
+WORKDIR /app
+COPY package*.json ./
+COPY services/notification-service/package.json services/notification-service/package.json
+COPY packages/feature-flags/package.json packages/feature-flags/package.json
+RUN npm ci
+COPY packages/feature-flags packages/feature-flags
+COPY services/notification-service services/notification-service
+RUN npm run build --workspace @greenguard/feature-flags \
+  && npm run build --workspace @greenguard/notification-service \
+  && npm prune --omit=dev
+
+FROM node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+ENV NODE_ENV=production CONTACTS_PROJECTOR_HTTP_HOST=0.0.0.0 CONTACTS_PROJECTOR_HTTP_PORT=8097
+WORKDIR /app
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/packages/feature-flags ./packages/feature-flags
+COPY --from=build --chown=node:node /app/services/notification-service ./services/notification-service
+USER node
+EXPOSE 8097
+CMD ["node", "services/notification-service/dist/contacts-projector-main.js"]

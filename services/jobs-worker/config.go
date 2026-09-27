@@ -36,6 +36,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 	if b := getenv("KAFKA_BROKERS"); b != "" {
 		c.KafkaBrokers = strings.Split(b, ",")
 	}
+
 	var err error
 	ints := []struct {
 		key  string

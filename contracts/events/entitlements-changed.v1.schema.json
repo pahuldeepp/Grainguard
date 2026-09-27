@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:entitlements-changed:v1",
+  "title": "GreenGuard entitlements.changed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "occurred_at", "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version", "correlation_id", "causation_id", "traceparent", "payload"],
+  "properties": {
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": { "const": "entitlements.changed" },
+    "schema_version": { "const": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "tenant_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_type": { "const": "entitlement" },
+    "aggregate_id": { "$ref": "#/$defs/uuid" },
+    "aggregate_version": { "$ref": "#/$defs/version" },
+    "correlation_id": { "$ref": "#/$defs/uuid" },
+    "causation_id": { "$ref": "#/$defs/uuid" },
+    "traceparent": { "type": "string", "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "plan_key", "plan_version", "limits", "features", "source_version", "effective_at"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/uuid" },
+        "plan_key": { "enum": ["free", "standard", "enterprise"] },
+        "plan_version": { "$ref": "#/$defs/version" },
+        "limits": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "features": { "type": "object", "additionalProperties": { "type": "boolean" } },
+        "source_version": { "$ref": "#/$defs/version" },
+        "effective_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "version": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$", "maxLength": 19 }
+  }
+}
