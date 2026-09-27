@@ -1,0 +1,44 @@
+{
+  "names": [
+    "greenguard-stage12-backup-source-48576",
+    "greenguard-stage12-backup-target-48576"
+  ],
+  "volumes": [
+    "1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380",
+    "c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc"
+  ],
+  "checks": [
+    {
+      "kind": "container",
+      "name": "greenguard-stage12-backup-source-48576",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: No such container: greenguard-stage12-backup-source-48576\n"
+    },
+    {
+      "kind": "container",
+      "name": "greenguard-stage12-backup-target-48576",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: No such container: greenguard-stage12-backup-target-48576\n"
+    },
+    {
+      "kind": "volume",
+      "name": "1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: get 1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380: no such volume\n"
+    },
+    {
+      "kind": "volume",
+      "name": "c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: get c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc: no such volume\n"
+    }
+  ],
+  "inventory": "",
+  "inventoryExit": 0,
+  "temporaryDumpDirectories": [],
+  "verifierCorrection": "Initial harness matched No such case-sensitively; volume diagnostic is lowercase no such volume. Read-only reinspection uses case-insensitive matching."
+}

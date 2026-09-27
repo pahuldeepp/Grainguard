@@ -1,0 +1,28 @@
+{{- if .Values.mesh.authorization.enabled }}
+{{- if not .Values.mesh.enabled }}
+{{- fail "mesh.authorization.enabled requires mesh.enabled=true" }}
+{{- end }}
+{{- if not .Values.mesh.strictMtls }}
+{{- fail "mesh.authorization.enabled requires mesh.strictMtls=true" }}
+{{- end }}
+{{- if not .Values.mesh.authorization.allowedPrincipals }}
+{{- fail "mesh.authorization.allowedPrincipals must list trusted service accounts" }}
+{{- end }}
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "greenguard-service.fullname" . }}
+  labels:
+    {{- include "greenguard-service.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-service.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              {{- toYaml .Values.mesh.authorization.allowedPrincipals | nindent 14 }}
+{{- end }}

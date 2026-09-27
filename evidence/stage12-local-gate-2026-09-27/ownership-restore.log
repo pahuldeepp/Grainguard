@@ -1,0 +1,8 @@
+CREATE ROLE
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE POLICY
+GRANT
+INSERT 0 3
+Restore rehearsal passed: tenant counts and RLS isolation match; restore elapsed 3 seconds.

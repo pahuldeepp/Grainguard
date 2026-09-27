@@ -1,0 +1,18 @@
+{{- if .Values.mesh.strictMtls }}
+{{- if not .Values.mesh.enabled }}
+{{- fail "mesh.strictMtls requires mesh.enabled=true" }}
+{{- end }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ include "greenguard-dashboard.fullname" . | quote }}
+  labels:
+    {{- include "greenguard-dashboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-dashboard.name" . | quote }}
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  mtls:
+    mode: STRICT
+{{- end }}

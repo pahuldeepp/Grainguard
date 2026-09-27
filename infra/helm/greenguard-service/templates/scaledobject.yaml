@@ -1,0 +1,26 @@
+{{- if .Values.autoscaling.keda.enabled }}
+{{- if .Values.autoscaling.hpa.enabled }}
+{{- fail "enable only one of autoscaling.keda or autoscaling.hpa" }}
+{{- end }}
+{{- if lt (len .Values.autoscaling.keda.triggers) 1 }}
+{{- fail "autoscaling.keda requires at least one scaler trigger" }}
+{{- end }}
+{{- if or (lt (int .Values.autoscaling.keda.minReplicaCount) 0) (ge (int .Values.autoscaling.keda.minReplicaCount) (int .Values.autoscaling.keda.maxReplicaCount)) }}
+{{- fail "KEDA requires minReplicaCount < maxReplicaCount" }}
+{{- end }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "greenguard-service.fullname" . }}
+  labels:
+    {{- include "greenguard-service.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "greenguard-service.fullname" . }}
+  pollingInterval: {{ .Values.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.autoscaling.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.autoscaling.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.autoscaling.keda.maxReplicaCount }}
+  triggers:
+    {{- toYaml .Values.autoscaling.keda.triggers | nindent 4 }}
+{{- end }}

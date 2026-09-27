@@ -1,0 +1,8 @@
+=== RUN   TestBindingConsumerRetryAndCommitFrontier
+--- PASS: TestBindingConsumerRetryAndCommitFrontier (0.01s)
+=== RUN   TestBindingConsumerExhaustionAndPermanentFailuresNeverCommit
+--- PASS: TestBindingConsumerExhaustionAndPermanentFailuresNeverCommit (0.04s)
+=== RUN   TestBindingConsumerRetryCancellationAndClassification
+--- PASS: TestBindingConsumerRetryCancellationAndClassification (0.01s)
+PASS
+ok  	greenguard.local/telemetry-ingest	1.559s

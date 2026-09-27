@@ -1,0 +1,44 @@
+[
+  {
+    "name": "telemetry-race",
+    "directory": "services/telemetry-ingest",
+    "environment": {
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOSUMDB": "off"
+    },
+    "command": [
+      "go",
+      "test",
+      "-race",
+      ".",
+      "-run",
+      "TestBindingConsumer(RetryAndCommitFrontier|ExhaustionAndPermanentFailuresNeverCommit|RetryCancellationAndClassification)$",
+      "-count=1",
+      "-v"
+    ],
+    "exit": 0,
+    "output": "=== RUN   TestBindingConsumerRetryAndCommitFrontier\n--- PASS: TestBindingConsumerRetryAndCommitFrontier (0.01s)\n=== RUN   TestBindingConsumerExhaustionAndPermanentFailuresNeverCommit\n--- PASS: TestBindingConsumerExhaustionAndPermanentFailuresNeverCommit (0.04s)\n=== RUN   TestBindingConsumerRetryCancellationAndClassification\n--- PASS: TestBindingConsumerRetryCancellationAndClassification (0.01s)\nPASS\nok  \tgreenguard.local/telemetry-ingest\t1.559s\n"
+  },
+  {
+    "name": "hardware-race",
+    "directory": "services/hardware-service",
+    "environment": {
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOSUMDB": "off"
+    },
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "./cmd/worker",
+      "-run",
+      "Test(RunRequiresDatabaseAndBroker|RunWorkers|MaintainMQTTConnection|SubscribeAck|MQTTSubscription)",
+      "-count=1",
+      "-v"
+    ],
+    "exit": 0,
+    "output": "=== RUN   TestRunRequiresDatabaseAndBroker\n--- PASS: TestRunRequiresDatabaseAndBroker (0.00s)\n=== RUN   TestRunWorkersWaitsForShutdownBeforeReturning\n--- PASS: TestRunWorkersWaitsForShutdownBeforeReturning (0.00s)\n=== RUN   TestMaintainMQTTConnectionReconnectsOnRequestAndStops\n--- PASS: TestMaintainMQTTConnectionReconnectsOnRequestAndStops (0.00s)\n=== RUN   TestRunWorkersCancelsSiblingsAfterError\n--- PASS: TestRunWorkersCancelsSiblingsAfterError (0.00s)\n=== RUN   TestRunWorkersPreservesWorkerErrorWhenParentCancels\n--- PASS: TestRunWorkersPreservesWorkerErrorWhenParentCancels (0.00s)\n=== RUN   TestRunWorkersRejectsUnexpectedExit\n--- PASS: TestRunWorkersRejectsUnexpectedExit (0.00s)\n=== RUN   TestSubscribeAckRetriesUntilSubscriptionSucceeds\n--- PASS: TestSubscribeAckRetriesUntilSubscriptionSucceeds (0.00s)\n=== RUN   TestSubscribeAckWaitsForConnectionAndStopsOnCancellation\n--- PASS: TestSubscribeAckWaitsForConnectionAndStopsOnCancellation (0.01s)\n=== RUN   TestMQTTSubscriptionGrantedChecksBrokerRefusals\n--- PASS: TestMQTTSubscriptionGrantedChecksBrokerRefusals (0.00s)\nPASS\nok  \tgreenguard.local/hardware-service/cmd/worker\t1.380s\n"
+  }
+]

@@ -1,8 +1,21 @@
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
+import { createServer } from "node:net";
 import pg from "pg";
 process.loadEnvFile(".env");
 const children = [];
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address();
+  await new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  return port;
+}
 function launch(cmd, args, env) {
   const child = spawn(cmd, args, {
     env: { ...process.env, ...env },
@@ -38,25 +51,43 @@ async function check(url, service, status = 200) {
   });
 }
 try {
-  launch("./build/telemetry-ingest", [], { HTTP_ADDR: "127.0.0.1:18080" });
-  launch("node", ["services/device-service/dist/main.js"], { PORT: "13001" });
+  const [
+    telemetryReadyPort,
+    telemetryUnavailablePort,
+    deviceReadyPort,
+    deviceUnavailablePort,
+  ] = await Promise.all(Array.from({ length: 4 }, freePort));
+  const url = (port, path) => `http://127.0.0.1:${port}${path}`;
+  launch("./build/telemetry-ingest", [], {
+    HTTP_ADDR: `127.0.0.1:${telemetryReadyPort}`,
+  });
   launch("node", ["services/device-service/dist/main.js"], {
-    PORT: "13002",
+    PORT: String(deviceReadyPort),
+  });
+  launch("node", ["services/device-service/dist/main.js"], {
+    PORT: String(deviceUnavailablePort),
     INVENTORY_DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/invalid",
   });
   launch("./build/telemetry-ingest", [], {
-    HTTP_ADDR: "127.0.0.1:18081",
+    HTTP_ADDR: `127.0.0.1:${telemetryUnavailablePort}`,
     TELEMETRY_DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/invalid",
   });
   await Promise.all(
-    [18080, 18081, 13001, 13002].map((p) =>
-      wait(`http://127.0.0.1:${p}/healthz`),
-    ),
+    [
+      telemetryReadyPort,
+      telemetryUnavailablePort,
+      deviceReadyPort,
+      deviceUnavailablePort,
+    ].map((port) => wait(url(port, "/healthz"))),
   );
-  await check("http://127.0.0.1:18080/readyz", "telemetry-ingest");
-  await check("http://127.0.0.1:13001/readyz", "device-service");
-  await check("http://127.0.0.1:18081/readyz", "telemetry-ingest", 503);
-  await check("http://127.0.0.1:13002/readyz", "device-service", 503);
+  await check(url(telemetryReadyPort, "/readyz"), "telemetry-ingest");
+  await check(url(deviceReadyPort, "/readyz"), "device-service");
+  await check(
+    url(telemetryUnavailablePort, "/readyz"),
+    "telemetry-ingest",
+    503,
+  );
+  await check(url(deviceUnavailablePort, "/readyz"), "device-service", 503);
   for (const [key, other] of [
     ["INVENTORY_DIRECT_URL", "greenguard_telemetry"],
     ["TELEMETRY_DIRECT_URL", "greenguard_inventory"],

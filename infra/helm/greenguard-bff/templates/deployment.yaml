@@ -1,0 +1,122 @@
+{{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" .Values.image) -}}
+{{- fail "image must be an immutable OCI reference ending in @sha256:<64 lowercase hex characters>" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled (not .Values.mesh.enabled) -}}
+{{- fail "Prometheus Envoy metrics scraping requires mesh.enabled=true" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled .Values.observability.prometheus.mergeMetrics (ne (int .Values.observability.prometheus.scrapePort) 15020) -}}
+{{- fail "merged Istio metrics require scrapePort=15020" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled (not .Values.observability.prometheus.mergeMetrics) (ne (int .Values.observability.prometheus.scrapePort) 15090) -}}
+{{- fail "Envoy-only Istio metrics require mergeMetrics=false and scrapePort=15090" -}}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "greenguard-bff.fullname" . }}
+  labels:
+    {{- include "greenguard-bff.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-bff.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "greenguard-bff.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        sidecar.istio.io/inject: {{ .Values.mesh.enabled | quote }}
+        {{- if .Values.mesh.revision }}
+        istio.io/rev: {{ .Values.mesh.revision | quote }}
+        {{- end }}
+      {{- if .Values.observability.prometheus.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /stats/prometheus
+        prometheus.io/port: {{ .Values.observability.prometheus.scrapePort | quote }}
+        prometheus.istio.io/merge-metrics: {{ .Values.observability.prometheus.mergeMetrics | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "greenguard-bff.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.scheduling.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.scheduling.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bff
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.containerPort }}
+              protocol: TCP
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

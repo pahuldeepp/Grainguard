@@ -1,0 +1,11 @@
+test_failure_after_source_removes_only_created_source_id (__main__.RestoreCleanupOwnership.test_failure_after_source_removes_only_created_source_id) ... ok
+test_missing_image_removes_no_container (__main__.RestoreCleanupOwnership.test_missing_image_removes_no_container) ... ok
+test_readiness_failure_removes_created_source_id (__main__.RestoreCleanupOwnership.test_readiness_failure_removes_created_source_id) ... ok
+test_source_name_collision_preserves_existing_container (__main__.RestoreCleanupOwnership.test_source_name_collision_preserves_existing_container) ... ok
+test_success_removes_both_created_ids_and_volumes (__main__.RestoreCleanupOwnership.test_success_removes_both_created_ids_and_volumes) ... ok
+test_target_name_collision_preserves_existing_container (__main__.RestoreCleanupOwnership.test_target_name_collision_preserves_existing_container) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 2.959s
+
+OK

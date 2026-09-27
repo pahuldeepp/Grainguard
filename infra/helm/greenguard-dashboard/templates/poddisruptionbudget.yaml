@@ -1,0 +1,17 @@
+{{- if .Values.pdb.enabled }}
+{{- if ge (int .Values.pdb.minAvailable) (int .Values.replicaCount) }}
+{{- fail "pdb.minAvailable must be less than replicaCount so voluntary disruption can make progress" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "greenguard-dashboard.fullname" . | quote }}
+  labels:
+    {{- include "greenguard-dashboard.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-dashboard.name" . | quote }}
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end }}

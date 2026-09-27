@@ -1,0 +1,36 @@
+[
+  {
+    "name": "cached-image",
+    "command": [
+      "docker",
+      "image",
+      "inspect",
+      "postgres:16-alpine",
+      "--format",
+      "{{.Id}}"
+    ],
+    "exit": 0,
+    "output": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea\n"
+  },
+  {
+    "name": "restore",
+    "command": [
+      "bash",
+      "scripts/stage12-postgres-restore.sh"
+    ],
+    "exit": 0,
+    "output": "CREATE ROLE\nCREATE TABLE\nALTER TABLE\nALTER TABLE\nCREATE POLICY\nGRANT\nINSERT 0 3\nRestore rehearsal passed: tenant counts and RLS isolation match; restore elapsed 5 seconds.\n"
+  },
+  {
+    "name": "restore-cleanup-initial",
+    "command": "read-only docker container/volume inspect for rehearsal-owned names; docker ps -a --filter name=greenguard-stage12-backup --format {{.Names}}",
+    "exit": 1,
+    "output": "{\n  \"names\": [\n    \"greenguard-stage12-backup-source-48576\",\n    \"greenguard-stage12-backup-target-48576\"\n  ],\n  \"volumes\": [\n    \"1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380\",\n    \"c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc\"\n  ],\n  \"checks\": [\n    {\n      \"kind\": \"container\",\n      \"name\": \"greenguard-stage12-backup-source-48576\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: greenguard-stage12-backup-source-48576\\n\"\n    },\n    {\n      \"kind\": \"container\",\n      \"name\": \"greenguard-stage12-backup-target-48576\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: greenguard-stage12-backup-target-48576\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"name\": \"1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380\",\n      \"inspectExit\": 1,\n      \"absent\": false,\n      \"output\": \"[]\\nError response from daemon: get 1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380: no such volume\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"name\": \"c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc\",\n      \"inspectExit\": 1,\n      \"absent\": false,\n      \"output\": \"[]\\nError response from daemon: get c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc: no such volume\\n\"\n    }\n  ],\n  \"inventory\": \"\",\n  \"inventoryExit\": 0\n}\n"
+  },
+  {
+    "name": "restore-cleanup",
+    "command": "read-only docker container/volume inspect for captured owned names; inventory work/stage12-restore.*",
+    "exit": 0,
+    "output": "{\n  \"names\": [\n    \"greenguard-stage12-backup-source-48576\",\n    \"greenguard-stage12-backup-target-48576\"\n  ],\n  \"volumes\": [\n    \"1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380\",\n    \"c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc\"\n  ],\n  \"checks\": [\n    {\n      \"kind\": \"container\",\n      \"name\": \"greenguard-stage12-backup-source-48576\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: greenguard-stage12-backup-source-48576\\n\"\n    },\n    {\n      \"kind\": \"container\",\n      \"name\": \"greenguard-stage12-backup-target-48576\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: greenguard-stage12-backup-target-48576\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"name\": \"1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: get 1c0f6e2d4541d1bb19cd9265770c36065e3b345944a32cea290c964cc1c2d380: no such volume\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"name\": \"c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: get c6c6d298598383967b9945eb0e3f4b1deb5ac70a0a03af9539308b1add2519fc: no such volume\\n\"\n    }\n  ],\n  \"inventory\": \"\",\n  \"inventoryExit\": 0,\n  \"temporaryDumpDirectories\": [],\n  \"verifierCorrection\": \"Initial harness matched No such case-sensitively; volume diagnostic is lowercase no such volume. Read-only reinspection uses case-insensitive matching.\"\n}\n"
+  }
+]

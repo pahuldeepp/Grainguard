@@ -1,0 +1,16 @@
+nameOverride: telemetry-ingest
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: greenguard-dashboard }
+service:
+  port: 8080
+  containerPort: 8080
+container:
+  name: telemetry-ingest
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

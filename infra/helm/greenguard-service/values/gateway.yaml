@@ -1,0 +1,27 @@
+nameOverride: gateway
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  ingressSources:
+    - namespace: istio-system
+      selector: { app: istio-ingressgateway }
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: greenguard-dashboard }
+  egressServices:
+    - name: read-api
+      namespace: greenguard
+      release: read-api
+      port: 4001
+    - name: saga-orchestrator
+      namespace: greenguard
+      release: saga-api
+      port: 8092
+service:
+  port: 4002
+  containerPort: 4002
+container:
+  name: gateway
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

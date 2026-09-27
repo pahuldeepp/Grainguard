@@ -1,0 +1,19 @@
+{{- if .Values.rollouts.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ printf "%s-success-rate" (include "greenguard-dashboard.fullname" .) | trunc 63 | trimSuffix "-" | quote }}
+  labels:
+    {{- include "greenguard-dashboard.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: canary-success-rate
+      interval: {{ .Values.rollouts.analysis.interval | quote }}
+      count: {{ .Values.rollouts.analysis.count }}
+      failureLimit: {{ .Values.rollouts.analysis.failureLimit }}
+      successCondition: {{ printf "result[0] >= %v" .Values.rollouts.analysis.successRateThreshold | quote }}
+      provider:
+        prometheus:
+          address: {{ .Values.rollouts.analysis.prometheusAddress | quote }}
+          query: {{ .Values.rollouts.analysis.successRateQuery | quote }}
+{{- end }}

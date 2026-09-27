@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["image", "replicaCount", "terminationGracePeriodSeconds", "autoscaling", "pdb", "service", "container", "volumes", "probes", "resources", "scheduling", "networkPolicy", "mesh", "observability"],
+  "properties": {
+    "image": { "type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$" },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "replicaCount": { "type": "integer", "minimum": 1 },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1, "maximum": 600 },
+    "autoscaling": {
+      "type": "object",
+      "required": ["hpa", "keda"],
+      "properties": {
+        "hpa": {
+          "type": "object",
+          "required": ["enabled", "minReplicas", "maxReplicas", "cpuAverageUtilization"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 2 },
+            "cpuAverageUtilization": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "memoryAverageUtilization": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "type": "null" }] }
+          }
+        },
+        "keda": {
+          "type": "object",
+          "required": ["enabled", "minReplicaCount", "maxReplicaCount", "pollingInterval", "cooldownPeriod", "triggers"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicaCount": { "type": "integer", "minimum": 0 },
+            "maxReplicaCount": { "type": "integer", "minimum": 1 },
+            "pollingInterval": { "type": "integer", "minimum": 1 },
+            "cooldownPeriod": { "type": "integer", "minimum": 0 },
+            "triggers": { "type": "array", "items": { "type": "object", "required": ["type", "metadata"], "properties": { "type": { "type": "string", "minLength": 1 }, "metadata": { "type": "object", "minProperties": 1 }, "authenticationRef": { "type": "object" } } } }
+          }
+        }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "required": ["enabled", "minAvailable"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["enabled", "port", "containerPort"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "container": {
+      "type": "object",
+      "required": ["name", "env", "envFrom", "command", "args", "volumeMounts"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "env": { "type": "array", "items": { "type": "object" } },
+        "envFrom": { "type": "array", "items": { "type": "object" } },
+        "command": { "type": "array", "items": { "type": "string" } },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "volumeMounts": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "volumes": { "type": "array", "items": { "type": "object" } },
+    "probes": {
+      "type": "object",
+      "required": ["startup", "readiness", "liveness"],
+      "properties": {
+        "startup": { "$ref": "#/definitions/probe" },
+        "readiness": { "$ref": "#/definitions/probe" },
+        "liveness": { "$ref": "#/definitions/probe" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": { "type": "object", "required": ["cpu", "memory"] },
+        "limits": { "type": "object", "required": ["cpu", "memory"] }
+      }
+    },
+    "scheduling": {
+      "type": "object",
+      "required": ["nodeSelector", "affinity", "tolerations", "topologySpreadConstraints", "priorityClassName"],
+      "properties": {
+        "nodeSelector": { "type": "object" },
+        "affinity": { "type": "object" },
+        "tolerations": { "type": "array", "items": { "type": "object" } },
+        "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } },
+        "priorityClassName": { "type": "string" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "required": ["enabled", "ingressEnabled", "ingressSources", "egressServices", "egressCIDRs"],
+      "properties": {
+        "enabled": { "type": "boolean", "const": true },
+        "ingressEnabled": { "type": "boolean" },
+        "ingressSources": { "type": "array", "items": { "type": "object", "required": ["namespace", "selector"], "properties": { "namespace": { "type": "string", "minLength": 1 }, "selector": { "type": "object", "minProperties": 1 } } } },
+        "egressServices": { "type": "array", "items": { "$ref": "#/definitions/egressService" } },
+        "egressCIDRs": { "type": "array", "items": { "$ref": "#/definitions/egressCidr" } }
+      }
+    },
+    "mesh": {
+      "type": "object",
+      "required": ["enabled", "revision", "strictMtls", "authorization", "controlPlaneNamespace", "controlPlaneSelector", "controlPlanePort"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "revision": { "type": "string" },
+        "strictMtls": { "type": "boolean" },
+        "authorization": {
+          "type": "object",
+          "required": ["enabled", "allowedPrincipals"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "allowedPrincipals": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "controlPlaneNamespace": { "type": "string", "minLength": 1 },
+        "controlPlaneSelector": { "type": "object", "minProperties": 1 },
+        "controlPlanePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "required": ["collector", "prometheus"],
+      "properties": {
+        "collector": {
+          "type": "object",
+          "required": ["enabled", "namespace", "selector", "otlpPort"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespace": { "type": "string", "minLength": 1 },
+            "selector": { "type": "object", "minProperties": 1 },
+            "otlpPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "prometheus": {
+          "type": "object",
+          "required": ["enabled", "namespace", "selector", "mergeMetrics", "scrapePort"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespace": { "type": "string", "minLength": 1 },
+            "selector": { "type": "object", "minProperties": 1 },
+            "mergeMetrics": { "type": "boolean" },
+            "scrapePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "probe": {
+      "type": "object",
+      "required": ["enabled", "path", "periodSeconds"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["http", "tcp"] },
+        "path": { "type": "string", "pattern": "^/" },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "egressService": {
+      "type": "object",
+      "required": ["name", "namespace", "release", "port"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string" },
+        "release": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "egressCidr": {
+      "type": "object",
+      "required": ["cidr", "port"],
+      "properties": {
+        "cidr": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    }
+  }
+}

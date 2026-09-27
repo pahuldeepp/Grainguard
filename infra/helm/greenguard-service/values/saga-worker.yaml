@@ -1,0 +1,29 @@
+nameOverride: saga-orchestrator
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb:
+  enabled: false
+service:
+  enabled: false
+  port: 80
+  containerPort: 8092
+container:
+  name: saga-worker
+  command: ["/saga-worker"]
+  envFrom:
+    - secretRef:
+        name: saga-worker-config
+networkPolicy:
+  ingressSources: []
+probes:
+  startup: { enabled: false, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
+  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+scheduling:
+  nodeSelector:
+    greenguard.io/workload-class: compute
+  tolerations:
+    - key: greenguard.io/workload-class
+      operator: Equal
+      value: compute
+      effect: NoSchedule

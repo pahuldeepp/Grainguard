@@ -1,0 +1,35 @@
+PASS dashboard: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS bff: peak app requests 2500.0m CPU / 2560.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS service-default: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS cache-invalidator: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS cdc-transformer: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS device-service: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS eventbridge-bridge: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS gateway: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS hardware-service-worker: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS projection-builder: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS read-api: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS risk-engine: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS saga-api: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS saga-worker: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS telemetry-ingest: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS workflow-alerts: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS Terraform static node inputs/wiring: {"general_node_min_size":2,"general_node_desired_size":3,"general_node_max_size":6,"compute_node_max_size":4}; compute min/desired=0 (not Terraform validation/plan)
+PASS supported-keda: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+PASS rejection request exceeds limit: fixture/app: cpu requires 0 < request <= limit <= proposed cap 2000
+PASS rejection memory cap: fixture/app: memory requires 0 < request <= limit <= proposed cap 4096
+PASS rejection resource cap: fixture/app: cpu requires 0 < request <= limit <= proposed cap 2000
+PASS rejection fixed replica cap: fixture: replicas must be an integer in 0..10
+PASS rejection HPA cap: fixture: scaling maximum must be an integer in 1..10
+PASS rejection KEDA cap: fixture: scaling maximum must be an integer in 1..10
+PASS rejection HCL default "4.5": compute_node_max_size: default must be a complete unambiguous integer literal
+PASS rejection HCL default "4e2": compute_node_max_size: default must be a complete unambiguous integer literal
+PASS rejection HCL default "4 + 10": compute_node_max_size: default must be a complete unambiguous integer literal
+PASS rejection HCL default "4\n    + 10": compute_node_max_size: unsupported HCL attribute continuation
+PASS rejection HCL commented default #: compute_node_max_size: default must be a complete unambiguous integer literal
+PASS rejection HCL commented default //: compute_node_max_size: default must be a complete unambiguous integer literal
+PASS rejection HCL commented variable block: compute_node_max_size: exactly one active top-level variable block required
+PASS rejection node cap: compute_node_max_size must be an integer in 1..4
+PASS rejection node ordering: general node inputs require min <= desired <= max
+PASS rejection budget alert ordering: budget thresholds require 0 < warning < escalation < limit <= 1
+PASS local governance; budget amount/contacts and cloud billing alerts require operator evidence

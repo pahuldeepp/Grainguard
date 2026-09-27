@@ -1,0 +1,12 @@
+✔ WAL requires both configured slots, including a partially missing stack (1.385375ms)
+✔ only the explicit empty-stack flag permits no slots (0.32375ms)
+✔ WAL retains configuration and retention failure checks (0.480333ms)
+✔ checkpoint reset requires exact confirmation and targets telemetry only (0.137292ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.816333

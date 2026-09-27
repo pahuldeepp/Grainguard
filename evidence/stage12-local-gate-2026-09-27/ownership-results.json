@@ -1,0 +1,73 @@
+[
+  {
+    "name": "ownership-regression",
+    "command": [
+      "python3",
+      "scripts/stage12-postgres-restore.test.py"
+    ],
+    "exit": 0,
+    "output": "test_failure_after_source_removes_only_created_source_id (__main__.RestoreCleanupOwnership.test_failure_after_source_removes_only_created_source_id) ... ok\ntest_missing_image_removes_no_container (__main__.RestoreCleanupOwnership.test_missing_image_removes_no_container) ... ok\ntest_readiness_failure_removes_created_source_id (__main__.RestoreCleanupOwnership.test_readiness_failure_removes_created_source_id) ... ok\ntest_source_name_collision_preserves_existing_container (__main__.RestoreCleanupOwnership.test_source_name_collision_preserves_existing_container) ... ok\ntest_success_removes_both_created_ids_and_volumes (__main__.RestoreCleanupOwnership.test_success_removes_both_created_ids_and_volumes) ... ok\ntest_target_name_collision_preserves_existing_container (__main__.RestoreCleanupOwnership.test_target_name_collision_preserves_existing_container) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 2.959s\n\nOK\n"
+  },
+  {
+    "name": "ownership-shell-syntax",
+    "command": [
+      "bash",
+      "-n",
+      "scripts/stage12-postgres-restore.sh"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "name": "ownership-cached-image",
+    "command": [
+      "docker",
+      "image",
+      "inspect",
+      "postgres:16-alpine",
+      "--format",
+      "{{.Id}}"
+    ],
+    "exit": 0,
+    "output": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea\n"
+  },
+  {
+    "name": "ownership-restore",
+    "command": [
+      "bash",
+      "scripts/stage12-postgres-restore.sh"
+    ],
+    "exit": 0,
+    "output": "CREATE ROLE\nCREATE TABLE\nALTER TABLE\nALTER TABLE\nCREATE POLICY\nGRANT\nINSERT 0 3\nRestore rehearsal passed: tenant counts and RLS isolation match; restore elapsed 3 seconds.\n"
+  },
+  {
+    "name": "ownership-restore-cleanup",
+    "command": "read-only docker container/volume inspect for observed rehearsal IDs; docker ps inventory; temporary dump-directory inventory",
+    "exit": 0,
+    "output": "{\n  \"names\": [\n    \"greenguard-stage12-backup-source-61816\",\n    \"greenguard-stage12-backup-target-61816\"\n  ],\n  \"containerIds\": [\n    \"b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5\",\n    \"eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0\"\n  ],\n  \"volumes\": [\n    \"5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919\",\n    \"7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9\"\n  ],\n  \"checks\": [\n    {\n      \"kind\": \"container\",\n      \"id\": \"b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5\\n\"\n    },\n    {\n      \"kind\": \"container\",\n      \"id\": \"eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: No such container: eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"id\": \"5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: get 5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919: no such volume\\n\"\n    },\n    {\n      \"kind\": \"volume\",\n      \"id\": \"7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9\",\n      \"inspectExit\": 1,\n      \"absent\": true,\n      \"output\": \"[]\\nError response from daemon: get 7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9: no such volume\\n\"\n    }\n  ],\n  \"containerInventory\": \"\",\n  \"inventoryExit\": 0,\n  \"temporaryDumpDirectories\": []\n}\n"
+  },
+  {
+    "name": "ownership-plan-final",
+    "command": [
+      "python3",
+      "scripts/check_plan.py"
+    ],
+    "exit": 0,
+    "output": "Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.\nThis check validates planning files only. Run make verify and make smoke for application checks.\n"
+  },
+  {
+    "name": "ownership-diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "scripts/stage12-postgres-restore.sh",
+      "scripts/stage12-postgres-restore.test.py",
+      "docs/STAGE_12_PLAN.md",
+      "evidence/STAGE_12_LOCAL_GATE.md"
+    ],
+    "exit": 0,
+    "output": ""
+  }
+]

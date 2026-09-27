@@ -1,0 +1,16 @@
+aws_region      = "<aws-region>"
+environment     = "staging"
+cluster_name    = "greenguard-staging-cell-1"
+kubernetes_version = "<supported-eks-version>"
+availability_zones = ["<region-az-a>", "<region-az-b>", "<region-az-c>"]
+cluster_admin_role_arn = "arn:aws:iam::<account-id>:role/<operator-role>"
+
+# Keep public endpoint access off by default. If a VPN/bastion CIDR is approved,
+# explicitly enable it and supply only that narrow CIDR.
+cluster_endpoint_public_access = false
+cluster_endpoint_public_access_cidrs = []
+
+# Optional: set both ARNs to provision the EventBridge bridge's Pod Identity.
+# Permissions are limited to PutEvents on this bus and SendMessage on this queue.
+# eventbridge_event_bus_arn = "arn:aws:events:<region>:<account-id>:event-bus/<name>"
+# bridge_quarantine_queue_arn = "arn:aws:sqs:<region>:<account-id>:<queue-name>"

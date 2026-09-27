@@ -1,0 +1,1 @@
+All dashboard and runtime Dockerfiles map to CI image builds and Terraform ECR repositories.

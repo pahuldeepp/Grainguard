@@ -1,0 +1,21 @@
+{{- if .Values.pdb.enabled }}
+{{- $minimumReplicas := int .Values.replicaCount }}
+{{- if .Values.autoscaling.enabled }}
+{{- $minimumReplicas = int .Values.autoscaling.minReplicas }}
+{{- end }}
+{{- if ge (int .Values.pdb.minAvailable) $minimumReplicas }}
+{{- fail "pdb.minAvailable must be less than the workload minimum replica count so voluntary disruption can make progress" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "greenguard-bff.fullname" . }}
+  labels:
+    {{- include "greenguard-bff.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-bff.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

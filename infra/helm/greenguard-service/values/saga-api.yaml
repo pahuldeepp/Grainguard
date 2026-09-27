@@ -1,0 +1,43 @@
+nameOverride: saga-orchestrator
+replicaCount: 2
+terminationGracePeriodSeconds: 30
+autoscaling:
+  hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, cpuAverageUtilization: 70 }
+service:
+  enabled: true
+  port: 8092
+  containerPort: 8092
+container:
+  name: saga-api
+  command: ["/saga-api"]
+  env:
+    - name: SAGA_API_ADDR
+      value: "0.0.0.0:8092"
+    - name: SAGA_API_TLS_CERT_FILE
+      value: /var/run/secrets/saga-api/tls/tls.crt
+    - name: SAGA_API_TLS_KEY_FILE
+      value: /var/run/secrets/saga-api/tls/tls.key
+    - name: SAGA_API_TLS_CLIENT_CA_FILE
+      value: /var/run/secrets/saga-api/tls/ca.crt
+  envFrom:
+    - secretRef:
+        name: saga-api-config
+  volumeMounts:
+    - name: saga-api-mtls
+      mountPath: /var/run/secrets/saga-api/tls
+      readOnly: true
+volumes:
+  - name: saga-api-mtls
+    secret:
+      secretName: saga-api-mtls
+      defaultMode: 288
+probes:
+  startup: { enabled: true, type: tcp, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, type: tcp, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, type: tcp, path: /healthz, periodSeconds: 10 }
+networkPolicy:
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway }
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: greenguard }

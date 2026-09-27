@@ -1,0 +1,41 @@
+[
+  {
+    "name": "image-inventory",
+    "command": [
+      "bash",
+      "scripts/check-image-inventory.sh"
+    ],
+    "exit": 0,
+    "output": "All dashboard and runtime Dockerfiles map to CI image builds and Terraform ECR repositories.\n"
+  },
+  {
+    "name": "kyverno-blocker",
+    "command": [
+      "bash",
+      "scripts/kyverno-validate.sh"
+    ],
+    "exit": 127,
+    "output": "Kyverno CLI is required; install and verify it separately before running admission policy tests.\n"
+  },
+  {
+    "name": "falco-blocker",
+    "command": [
+      "bash",
+      "scripts/falco-validate.sh"
+    ],
+    "exit": 127,
+    "output": "Falco is required; install and verify it separately before validating or running runtime rules.\n"
+  },
+  {
+    "name": "additional-shell-syntax",
+    "command": [
+      "bash",
+      "-n",
+      "scripts/check-image-inventory.sh",
+      "scripts/kyverno-validate.sh",
+      "scripts/falco-validate.sh"
+    ],
+    "exit": 0,
+    "output": ""
+  }
+]

@@ -10,6 +10,86 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  secret-scan:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan current tree and history for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  dependency-and-iac-scan:
+    name: Dependency and IaC vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Scan dependency manifests and IaC for high and critical findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: tests/security/fixtures
+          cache: "false"
+      - name: Prove the IaC scanner rejects an intentionally insecure pod
+        run: bash scripts/check-trivy-fixture.sh
+
+  terraform-validate:
+    name: Terraform format and validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install pinned Terraform CLI
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Validate state bootstrap root
+        run: |
+          terraform -chdir=infra/terraform/bootstrap-state init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/bootstrap-state validate
+      - name: Validate AWS platform root
+        run: |
+          terraform -chdir=infra/terraform/platform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/platform validate
+
+  image-inventory:
+    name: Image and registry inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify Dockerfile, CI matrix and ECR repository inventory
+        run: bash scripts/check-image-inventory.sh
+
   quality:
     name: Required quality gate
     runs-on: ubuntu-latest
@@ -32,8 +112,18 @@ jobs:
             services/projection-builder/go.sum
             services/jobs-worker/go.sum
             services/saga-orchestrator/go.sum
+            services/hardware-service/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            infra/cdk/requirements.txt
+            services/eventbridge-bridge/requirements.txt
       - run: make bootstrap
       - run: make verify
+      - name: Test and synthesize optional critical-alert AWS profile
+        run: make stage10b-serverless-test cdk-synth
       - name: Prove read-role tenant isolation against PostgreSQL
         run: READ_MODEL_LIVE=1 node --env-file=.env --test packages/read-model/dist/index.test.js
       - run: npm audit --audit-level=high
@@ -41,6 +131,12 @@ jobs:
       - run: make smoke
       - name: Build and verify container staging
         run: make staging
+      - name: Release disposable staging images before SonarQube
+        run: |
+          make staging-down
+          make db-down
+          docker image prune -af
+          df -h .
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
       - name: Analyze coverage and enforce SonarQube gate
@@ -57,11 +153,20 @@ jobs:
             coverage/go-migrations.out \
             coverage/jobs-worker.out \
             coverage/saga-orchestrator.out \
+            coverage/hardware-service.out \
             coverage/sonar-quality-gate.json \
             apps/dashboard/coverage/lcov.info \
+            services/bff/coverage/lcov.info \
+            services/read-api/coverage/lcov.info \
             services/device-service/coverage/lcov.info \
             services/workflow-alerts/coverage/lcov.info \
             services/notification-service/coverage/lcov.info \
+            services/tenant-control-plane/coverage/lcov.info \
+            services/billing-service/coverage/lcov.info \
+            packages/membership-client/coverage/lcov.info \
+            packages/feature-flags/coverage/lcov.info \
+            packages/entitlements/coverage/lcov.info \
+            packages/audit/coverage/lcov.info \
             packages/read-model/coverage/lcov.info \
             services/search-indexer/coverage.xml \
             services/risk-engine/coverage.xml; do
@@ -82,11 +187,20 @@ jobs:
             coverage/go-migrations.out
             coverage/sonar-quality-gate.json
             apps/dashboard/coverage/lcov.info
+            services/bff/coverage/lcov.info
+            services/read-api/coverage/lcov.info
             services/device-service/coverage/lcov.info
             services/workflow-alerts/coverage/lcov.info
             services/notification-service/coverage/lcov.info
+            services/tenant-control-plane/coverage/lcov.info
+            services/billing-service/coverage/lcov.info
+            packages/membership-client/coverage/lcov.info
+            packages/feature-flags/coverage/lcov.info
+            packages/entitlements/coverage/lcov.info
+            packages/audit/coverage/lcov.info
             coverage/jobs-worker.out
             coverage/saga-orchestrator.out
+            coverage/hardware-service.out
             packages/read-model/coverage/lcov.info
             services/search-indexer/coverage.xml
             services/risk-engine/coverage.xml
@@ -102,11 +216,21 @@ jobs:
     name: Publish verified images
     needs:
       [
+        secret-scan,
+        dependency-and-iac-scan,
+        terraform-validate,
+        image-inventory,
         quality,
         events-integration,
+        redis-integration,
+        oidc-integration,
+        oidc-browser-integration,
         history-integration,
         search-integration,
         stage06-integration,
+        stage07-integration,
+        stage08-integration,
+        mysql-cdc-integration,
       ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -114,6 +238,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
@@ -124,8 +249,28 @@ jobs:
             dockerfile: services/device-service/Dockerfile
           - service: telemetry-ingest
             dockerfile: services/telemetry-ingest/Dockerfile
+          - service: gateway
+            dockerfile: services/gateway/Dockerfile
+          - service: bff
+            dockerfile: services/bff/Dockerfile
+          - service: read-api
+            dockerfile: services/read-api/Dockerfile
+          - service: workflow-alerts
+            dockerfile: services/workflow-alerts/Dockerfile
           - service: cdc-transformer
             dockerfile: services/cdc-transformer/Dockerfile
+          - service: projection-builder
+            dockerfile: services/projection-builder/Dockerfile
+          - service: cache-invalidator
+            dockerfile: services/cache-invalidator/Dockerfile
+          - service: risk-engine
+            dockerfile: services/risk-engine/Dockerfile
+          - service: hardware-service
+            dockerfile: services/hardware-service/Dockerfile
+          - service: eventbridge-bridge
+            dockerfile: services/eventbridge-bridge/Dockerfile
+          - service: saga-orchestrator
+            dockerfile: services/saga-orchestrator/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -140,6 +285,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build immutable commit images
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -152,6 +298,223 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
+      - name: Scan published image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/pahuldeepp/grainguard/${{ matrix.service }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the exact image digest
+        env:
+          IMAGE: ghcr.io/pahuldeepp/grainguard/${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_IDENTITY: https://github.com/pahuldeepp/Grainguard/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign verify \
+            --certificate-identity "${EXPECTED_IDENTITY}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}"
+
+  mysql-cdc-integration:
+    name: MySQL snapshot and CDC integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: labs/mysql-cdc/requirements.txt
+      - run: make bootstrap
+      - run: make mysql-cdc-test
+      - name: Stop opt-in source and event stack
+        if: always()
+        run: |
+          if test -f .env && test -f .local/mysql-cdc.env; then
+            docker compose --env-file .env --env-file .local/mysql-cdc.env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml -f infra/mysql-cdc/compose.yaml stop mysql-cdc connect schema-registry kafka
+          fi
+          make db-down
+
+  redis-integration:
+    name: Redis cache and failover integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/telemetry-ingest/go.mod
+          cache-dependency-path: |
+            services/telemetry-ingest/go.sum
+            services/projection-builder/go.sum
+            services/hardware-service/go.sum
+            services/cassandra-writer/go.sum
+      - run: make bootstrap
+      - run: make redis-up
+      - run: make redis-test
+      - name: Stop Redis infrastructure
+        if: always()
+        run: make redis-down
+
+  oidc-integration:
+    name: OIDC authentication integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/telemetry-ingest/go.mod
+          cache-dependency-path: |
+            services/telemetry-ingest/go.sum
+            services/projection-builder/go.sum
+            services/hardware-service/go.sum
+            services/cassandra-writer/go.sum
+      - run: make bootstrap
+      - run: make db-up projection-migrate cassandra-up search-up
+      - run: make oidc-up
+      - run: make oidc-test
+      - name: Stop OIDC infrastructure
+        if: always()
+        run: |
+          make oidc-down
+          make search-down
+          make cassandra-down
+          make db-down
+
+  oidc-browser-integration:
+    name: OIDC Chromium browser integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/telemetry-ingest/go.mod
+          cache-dependency-path: |
+            services/telemetry-ingest/go.sum
+            services/projection-builder/go.sum
+            services/hardware-service/go.sum
+            services/cassandra-writer/go.sum
+      - run: make bootstrap
+      - name: Install locked Playwright Chromium and system dependencies
+        run: npx --no-install playwright install --with-deps chromium
+      - run: make db-up projection-migrate cassandra-up search-up
+      - run: make oidc-up
+      - run: make oidc-browser-test
+      - name: Stop browser OIDC infrastructure
+        if: always()
+        run: |
+          make oidc-down
+          make search-down
+          make cassandra-down
+          make db-down
+
+  stage08-integration:
+    name: Gateway and dashboard end-to-end integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/saga-orchestrator/go.mod
+          cache-dependency-path: |
+            services/saga-orchestrator/go.sum
+            services/hardware-service/go.sum
+            services/telemetry-ingest/go.sum
+            services/cdc-transformer/go.sum
+            services/projection-builder/go.sum
+            services/cassandra-writer/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/search-indexer/requirements.txt
+      - run: make bootstrap
+      - name: Build Stage 08 runtime images from clean checkout
+        run: |
+          docker build -f services/gateway/Dockerfile -t "greenguard-ci-gateway:${GITHUB_SHA}" .
+          docker build -f services/bff/Dockerfile -t "greenguard-ci-bff:${GITHUB_SHA}" .
+          docker build -f services/read-api/Dockerfile -t "greenguard-ci-read-api:${GITHUB_SHA}" .
+          docker build -f services/workflow-alerts/Dockerfile -t "greenguard-ci-alerts:${GITHUB_SHA}" .
+          docker build -f services/saga-orchestrator/Dockerfile -t "greenguard-ci-saga:${GITHUB_SHA}" .
+      - name: Install locked Chromium
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Start event, history, search, cache, MQTT, and OIDC services
+        run: |
+          make events-up
+          docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait mosquitto
+          make cassandra-up search-up redis-up oidc-up
+          python3 -m venv .local/search-venv
+          .local/search-venv/bin/pip install -r services/search-indexer/requirements.txt
+      - name: Run real browser through the gateway
+        run: make browser-e2e
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: stage08-browser-${{ github.sha }}
+          path: evidence/stage08-e2e/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop Stage 08 services
+        if: always()
+        run: |
+          make oidc-down || true
+          make redis-down || true
+          make search-down || true
+          make cassandra-down || true
+          make events-down || true
+          make db-down || true
 
   events-integration:
     name: Event backbone integration
@@ -270,3 +633,34 @@ jobs:
         run: |
           make rabbitmq-down
           make events-down
+
+  stage07-integration:
+    name: Saga and physical sensor integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/saga-orchestrator/go.mod
+          cache-dependency-path: |
+            services/saga-orchestrator/go.sum
+            services/hardware-service/go.sum
+            services/telemetry-ingest/go.sum
+            services/cdc-transformer/go.sum
+      - run: make bootstrap
+      - run: make stage07-e2e
+      - name: Stop Stage 07 infrastructure
+        if: always()
+        run: |
+          docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml stop mosquitto
+          make events-down
+          make db-down

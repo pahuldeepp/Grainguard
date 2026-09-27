@@ -1,0 +1,61 @@
+[
+  {
+    "name": "plan-initial",
+    "command": [
+      "python3",
+      "scripts/check_plan.py"
+    ],
+    "exit": 0,
+    "output": "Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.\nThis check validates planning files only. Run make verify and make smoke for application checks.\n"
+  },
+  {
+    "name": "helm",
+    "command": [
+      "bash",
+      "scripts/helm-validate.sh"
+    ],
+    "exit": 0,
+    "output": "==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-service\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\nExpected autoscaler rejection: kind (autoscaler target kind/version drifted)\nExpected autoscaler rejection: apiVersion (autoscaler target kind/version drifted)\nExpected autoscaler rejection: kind (autoscaler target kind/version drifted)\nExpected autoscaler rejection: apiVersion (autoscaler target kind/version drifted)\nExpected autoscaler rejection: metricType (HPA CPU Resource/Utilization metric drifted)\nExpected autoscaler rejection: metricName (HPA CPU Resource/Utilization metric drifted)\nExpected autoscaler rejection: metricTarget (HPA CPU Resource/Utilization metric drifted)\nExpected scheduling rejection: selector (worker must select compute nodes)\nExpected scheduling rejection: toleration (worker must tolerate the compute NoSchedule taint)\nExpected scheduling rejection: topology (zone spread fields drifted)\nExpected scheduling rejection: priority (configured priority class drifted)\nExpected scheduling rejection: grace (shutdown grace drifted)\n==> Linting infra/helm/greenguard-dashboard\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\n==> Linting infra/helm/greenguard-bff\n[INFO] Chart.yaml: icon is recommended\n\n1 chart(s) linted, 0 chart(s) failed\nDashboard, BFF, ten HTTP runtime profiles and three worker profiles linted; digest rejection, hardened defaults, optional mesh/OTel policy, HPA, KEDA, Argo Rollouts canary analysis, Saga mTLS references, worker isolation, ports/probes, ingress selectors, structured per-profile replica ownership/PDB/grace, scaling boundaries, and scheduling drift rejection checks passed.\n"
+  },
+  {
+    "name": "governance",
+    "command": [
+      "ruby",
+      "scripts/resource-governance-check.rb",
+      "--self-test"
+    ],
+    "exit": 0,
+    "output": "PASS dashboard: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS bff: peak app requests 2500.0m CPU / 2560.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS service-default: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS cache-invalidator: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS cdc-transformer: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS device-service: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS eventbridge-bridge: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS gateway: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS hardware-service-worker: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS projection-builder: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS read-api: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS risk-engine: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS saga-api: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS saga-worker: peak app requests 100.0m CPU / 128.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS telemetry-ingest: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS workflow-alerts: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS Terraform static node inputs/wiring: {\"general_node_min_size\":2,\"general_node_desired_size\":3,\"general_node_max_size\":6,\"compute_node_max_size\":4}; compute min/desired=0 (not Terraform validation/plan)\nPASS supported-keda: peak app requests 1000.0m CPU / 1280.0Mi memory (excludes sidecars injected at admission, surge and init overlap)\nPASS rejection request exceeds limit: fixture/app: cpu requires 0 < request <= limit <= proposed cap 2000\nPASS rejection memory cap: fixture/app: memory requires 0 < request <= limit <= proposed cap 4096\nPASS rejection resource cap: fixture/app: cpu requires 0 < request <= limit <= proposed cap 2000\nPASS rejection fixed replica cap: fixture: replicas must be an integer in 0..10\nPASS rejection HPA cap: fixture: scaling maximum must be an integer in 1..10\nPASS rejection KEDA cap: fixture: scaling maximum must be an integer in 1..10\nPASS rejection HCL default \"4.5\": compute_node_max_size: default must be a complete unambiguous integer literal\nPASS rejection HCL default \"4e2\": compute_node_max_size: default must be a complete unambiguous integer literal\nPASS rejection HCL default \"4 + 10\": compute_node_max_size: default must be a complete unambiguous integer literal\nPASS rejection HCL default \"4\\n    + 10\": compute_node_max_size: unsupported HCL attribute continuation\nPASS rejection HCL commented default #: compute_node_max_size: default must be a complete unambiguous integer literal\nPASS rejection HCL commented default //: compute_node_max_size: default must be a complete unambiguous integer literal\nPASS rejection HCL commented variable block: compute_node_max_size: exactly one active top-level variable block required\nPASS rejection node cap: compute_node_max_size must be an integer in 1..4\nPASS rejection node ordering: general node inputs require min <= desired <= max\nPASS rejection budget alert ordering: budget thresholds require 0 < warning < escalation < limit <= 1\nPASS local governance; budget amount/contacts and cloud billing alerts require operator evidence\n"
+  },
+  {
+    "name": "shell-syntax",
+    "command": [
+      "bash",
+      "-n",
+      "scripts/stage12-postgres-restore.sh",
+      "scripts/helm-validate.sh"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "name": "ruby-syntax",
+    "command": [
+      "ruby",
+      "-c",
+      "scripts/resource-governance-check.rb"
+    ],
+    "exit": 0,
+    "output": "Syntax OK\n"
+  },
+  {
+    "name": "recovery-unit",
+    "command": [
+      "node",
+      "--test",
+      "scripts/recovery.test.mjs"
+    ],
+    "exit": 0,
+    "output": "\u2714 WAL requires both configured slots, including a partially missing stack (1.385375ms)\n\u2714 only the explicit empty-stack flag permits no slots (0.32375ms)\n\u2714 WAL retains configuration and retention failure checks (0.480333ms)\n\u2714 checkpoint reset requires exact confirmation and targets telemetry only (0.137292ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 38.816333\n"
+  }
+]

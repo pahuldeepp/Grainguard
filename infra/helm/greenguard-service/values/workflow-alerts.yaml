@@ -1,0 +1,16 @@
+nameOverride: workflow-alerts
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: greenguard }
+service:
+  port: 3004
+  containerPort: 3004
+container:
+  name: workflow-alerts
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

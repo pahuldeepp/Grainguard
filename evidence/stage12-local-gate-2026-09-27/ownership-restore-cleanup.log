@@ -1,0 +1,47 @@
+{
+  "names": [
+    "greenguard-stage12-backup-source-61816",
+    "greenguard-stage12-backup-target-61816"
+  ],
+  "containerIds": [
+    "b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5",
+    "eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0"
+  ],
+  "volumes": [
+    "5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919",
+    "7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9"
+  ],
+  "checks": [
+    {
+      "kind": "container",
+      "id": "b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: No such container: b48758b0b2f42bc507963dae2e6f495478f806439f638381ca44984352d25da5\n"
+    },
+    {
+      "kind": "container",
+      "id": "eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: No such container: eadfa3b3c1f86a88df8d7075c9fb5b45541ecaf5def8d1b2404ca43b8d3ecbf0\n"
+    },
+    {
+      "kind": "volume",
+      "id": "5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: get 5ae10fba49ee23d57d7e02aaee90f56d3fd1a476ef32d677f499d2af8a2ba919: no such volume\n"
+    },
+    {
+      "kind": "volume",
+      "id": "7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9",
+      "inspectExit": 1,
+      "absent": true,
+      "output": "[]\nError response from daemon: get 7f042a851052dd921b480d533f950c4e920fad56a821c17619d0dc23486178f9: no such volume\n"
+    }
+  ],
+  "containerInventory": "",
+  "inventoryExit": 0,
+  "temporaryDumpDirectories": []
+}

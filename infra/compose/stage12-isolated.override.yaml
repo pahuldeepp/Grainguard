@@ -1,0 +1,5 @@
+services:
+  postgres:
+    ports: !override ["127.0.0.1:55433:5432"]
+  pgbouncer:
+    ports: !override ["127.0.0.1:56433:6432"]

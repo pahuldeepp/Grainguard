@@ -1,0 +1,99 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.14kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 128B done
+#3 DONE 0.0s
+
+#4 [build  1/11] FROM docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+#4 resolve docker.io/library/node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 32.34kB 0.0s done
+#5 DONE 0.0s
+
+#6 [build  7/11] RUN npm ci --ignore-scripts
+#6 CACHED
+
+#7 [build  3/11] COPY package.json package-lock.json ./
+#7 CACHED
+
+#8 [build  4/11] COPY packages/tenant-auth/package.json packages/tenant-auth/package.json
+#8 CACHED
+
+#9 [build  6/11] COPY services/bff/package.json services/bff/package.json
+#9 CACHED
+
+#10 [build  8/11] COPY packages/tenant-auth packages/tenant-auth
+#10 CACHED
+
+#11 [build  2/11] WORKDIR /app
+#11 CACHED
+
+#12 [build  5/11] COPY packages/membership-client/package.json packages/membership-client/package.json
+#12 CACHED
+
+#13 [build  9/11] COPY packages/membership-client packages/membership-client
+#13 CACHED
+
+#14 [build 10/11] COPY services/bff services/bff
+#14 DONE 0.1s
+
+#15 [build 11/11] RUN npm run build -w @greenguard/bff && npm prune --omit=dev
+#15 0.616
+#15 0.616 > @greenguard/bff@0.1.0 build
+#15 0.616 > npm run build -w @greenguard/membership-client && tsc
+#15 0.616
+#15 0.696
+#15 0.696 > @greenguard/membership-client@0.1.0 build
+#15 0.696 > npm run build:deps && tsc
+#15 0.696
+#15 0.816
+#15 0.816 > @greenguard/membership-client@0.1.0 build:deps
+#15 0.816 > npm run build -w @greenguard/tenant-auth
+#15 0.816
+#15 0.914
+#15 0.914 > @greenguard/tenant-auth@0.1.0 build
+#15 0.914 > tsc
+#15 0.914
+#15 8.560
+#15 8.560 removed 143 packages, and audited 169 packages in 5s
+#15 8.560
+#15 8.560 42 packages are looking for funding
+#15 8.560   run `npm fund` for details
+#15 8.560
+#15 8.560 found 0 vulnerabilities
+#15 8.561 npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+#15 8.561 npm warn install-scripts   @apollo/protobufjs@1.2.8 (postinstall: node scripts/postinstall)
+#15 8.561 npm warn install-scripts
+#15 8.561 npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+#15 DONE 8.6s
+
+#16 [stage-1 3/6] COPY --from=build --chown=node:node /app/node_modules ./node_modules
+#16 CACHED
+
+#17 [stage-1 4/6] COPY --from=build --chown=node:node /app/packages/tenant-auth ./packages/tenant-auth
+#17 CACHED
+
+#18 [stage-1 5/6] COPY --from=build --chown=node:node /app/packages/membership-client ./packages/membership-client
+#18 CACHED
+
+#19 [stage-1 6/6] COPY --from=build --chown=node:node /app/services/bff ./services/bff
+#19 DONE 0.1s
+
+#20 exporting to image
+#20 exporting layers 0.1s done
+#20 exporting manifest sha256:28bef5b2e54cce0a953150d423cd40920394eb0c69c07788a79bfb54fecd9991 done
+#20 exporting config sha256:8292d6d4dcfbbeea5ad64f45b3cdd581c9beea53c2c51142087aedbd970acc08 done
+#20 exporting attestation manifest sha256:142bbcf607935d571f75eb0463fd0e7ef4ef9e10dd473a47d97ce8587a0ce2c7 done
+#20 exporting manifest list sha256:63bd463297070cc9b727679df0839f0b6d4687735ba294199d40c0d664acf647 done
+#20 naming to docker.io/library/greenguard-bff:stage12-local done
+#20 unpacking to docker.io/library/greenguard-bff:stage12-local 0.1s done
+#20 DONE 0.2s
