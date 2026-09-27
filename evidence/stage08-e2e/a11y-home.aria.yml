@@ -1,0 +1,33 @@
+- button "Sign out"
+- main:
+  - navigation:
+    - link "G GreenGuard":
+      - /url: /
+    - link "Provisioning":
+      - /url: /provisioning
+    - link "Devices":
+      - /url: /devices
+    - text: LOCAL DEVELOPMENT
+  - paragraph: FROM THE GROUND UP
+  - heading "Better grain care. A solid foundation." [level=1]
+  - paragraph: One platform for grain storage, telemetry and intelligent alerts. Your new workspace starts here.
+  - region "Foundation status":
+    - heading "Foundation status" [level=2]
+    - button "Hide technical details" [pressed]
+    - article:
+      - text: ▦
+      - status: Unavailable
+      - heading "Device service" [level=3]
+      - paragraph: TypeScript · NestJS · PostgreSQL
+      - text: Readiness includes a live database query.
+    - article:
+      - text: ↗
+      - status: Unavailable
+      - heading "Telemetry ingestion" [level=3]
+      - paragraph: Go · PostgreSQL
+      - text: Readiness includes a live database query.
+  - paragraph: Open provisioning to register and track a physical sensor.
+  - paragraph: NEXT MILESTONE · 02 / 14
+  - heading "Give your grain a home." [level=2]
+  - paragraph: Tenant isolation, sites, storage bins and devices — the domain model comes next.
+  - text: Planned Stage 01 · Workspace foundationLocal setup · Capacity targets remain unverified

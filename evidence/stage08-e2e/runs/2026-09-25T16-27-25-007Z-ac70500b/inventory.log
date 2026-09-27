@@ -1,0 +1,14 @@
+(node:43559) TimeoutNegativeWarning: -1790353701702 is a negative number.
+Timeout duration was set to 1.
+    at new Timeout (node:internal/timers:233:17)
+    at setTimeout (node:timers:125:19)
+    at RequestQueue.scheduleCheckPendingRequests (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/kafkajs/src/network/requestQueue/index.js:317:37)
+    at RequestQueue.checkPendingRequests (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/kafkajs/src/network/requestQueue/index.js:297:10)
+    at RequestQueue.fulfillRequest (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/kafkajs/src/network/requestQueue/index.js:206:10)
+    at Connection.processData (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/kafkajs/src/network/connection.js:529:25)
+    at Socket.onData (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/kafkajs/src/network/connection.js:184:14)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:568:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:519:3)
+
+[exit code=0 signal=null]

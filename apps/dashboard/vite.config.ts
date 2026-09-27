@@ -50,8 +50,13 @@ export default defineConfig({
         target: "http://127.0.0.1:8080",
         rewrite: (path) => path.replace(/^\/api\/telemetry/, ""),
       },
-      "/graphql": { target: "http://127.0.0.1:4002", ws: true },
-      "/api/v1/subscription-ticket": { target: "http://127.0.0.1:4002" },
+      "/graphql": {
+        target: process.env.VITE_GRAPHQL_BFF_URL ?? "http://127.0.0.1:4002",
+        ws: true,
+      },
+      "/api/v1/subscription-ticket": {
+        target: process.env.VITE_GRAPHQL_BFF_URL ?? "http://127.0.0.1:4002",
+      },
     },
   },
 });

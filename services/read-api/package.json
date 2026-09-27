@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @greenguard/read-model -w @greenguard/membership-client && tsc",
-    "typecheck": "npm run build -w @greenguard/read-model -w @greenguard/membership-client && tsc --noEmit",
+    "build": "npm run build -w @greenguard/read-model -w @greenguard/kafka-runtime -w @greenguard/entitlements -w @greenguard/membership-client && tsc",
+    "typecheck": "npm run build -w @greenguard/read-model -w @greenguard/kafka-runtime -w @greenguard/entitlements -w @greenguard/membership-client && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "entitlements:projector": "npm run build && node dist/entitlements/projector.js"

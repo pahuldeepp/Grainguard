@@ -37,6 +37,7 @@ function startDashboard() {
       VITE_OIDC_AUTHORITY: ISSUER,
       VITE_OIDC_CLIENT_ID: "greenguard-dashboard",
       VITE_OIDC_AUDIENCE: "greenguard-dashboard",
+      VITE_GRAPHQL_BFF_URL: process.env.OIDC_BFF_URL,
     },
     stdio: "ignore",
     detached: true,

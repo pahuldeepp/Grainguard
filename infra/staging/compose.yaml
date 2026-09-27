@@ -26,6 +26,14 @@ services:
       HARDWARE_MIGRATOR_PASSWORD: ${HARDWARE_MIGRATOR_PASSWORD:?Run make bootstrap}
       CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD:?Run make bootstrap}
       CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
+      # Every role password the shared init script reads with \getenv must be passed here,
+      # or the init script fails and the container exits (code 3).
+      BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?Run make bootstrap}
+      BILLING_MIGRATOR_PASSWORD: ${BILLING_MIGRATOR_PASSWORD:?Run make bootstrap}
+      CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
+      INVENTORY_PROJECTOR_PASSWORD: ${INVENTORY_PROJECTOR_PASSWORD:?Run make bootstrap}
+      READ_ENTITLEMENT_PROJECTOR_PASSWORD: ${READ_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
+      TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD: ${TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro

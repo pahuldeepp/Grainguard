@@ -1,0 +1,118 @@
+### npm run lint
+PASS
+### npm run typecheck
+FAIL
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+npm error Lifecycle script `typecheck` failed with error:
+npm error code 2
+npm error path /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error workspace @greenguard/device-service@0.1.0
+npm error location /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error command failed
+npm error command sh -c npm run build:deps && prisma generate && tsc --noEmit
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+### npm test
+FAIL
+npm error workspace @greenguard/device-service@0.1.0
+npm error location /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error command failed
+npm error command sh -c npm run build:deps && prisma generate && tsc
+npm error Lifecycle script `test` failed with error:
+npm error code 2
+npm error path /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error workspace @greenguard/device-service@0.1.0
+npm error location /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error command failed
+npm error command sh -c npm run build && node --test "dist/**/*.test.js"
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+### cd packages/kafka-transport && test -z "$(gofmt -l .)"
+PASS
+### cd packages/kafka-transport && go vet ./...
+PASS
+### cd packages/kafka-transport && go test -race ./...
+PASS
+### cd packages/go-common && test -z "$(gofmt -l .)"
+PASS
+### cd packages/go-common && go vet ./...
+PASS
+### cd packages/go-common && go test -race ./...
+PASS
+### cd packages/go-migrations && test -z "$(gofmt -l .)"
+PASS
+### cd packages/go-migrations && go vet ./...
+PASS
+### cd packages/go-migrations && go test -race ./...
+PASS
+### cd services/telemetry-ingest && test -z "$(gofmt -l .)"
+PASS
+### cd services/telemetry-ingest && go vet ./...
+PASS
+### cd services/telemetry-ingest && go test -race ./...
+PASS
+### cd services/cdc-transformer && test -z "$(gofmt -l .)"
+PASS
+### cd services/cdc-transformer && go vet ./...
+PASS
+### cd services/cdc-transformer && go test -race ./...
+PASS
+### cd services/cache-invalidator && test -z "$(gofmt -l .)"
+PASS
+### cd services/cache-invalidator && go vet ./...
+PASS
+### cd services/cache-invalidator && go test -race ./...
+PASS
+### cd services/projection-builder && test -z "$(gofmt -l .)"
+PASS
+### cd services/projection-builder && go vet ./...
+PASS
+### cd services/projection-builder && go test -race ./...
+PASS
+### cd services/cassandra-writer && test -z "$(gofmt -l .)"
+PASS
+### cd services/cassandra-writer && go vet ./...
+PASS
+### cd services/cassandra-writer && go test -race ./...
+PASS
+### cd services/jobs-worker && test -z "$(gofmt -l .)"
+PASS
+### cd services/jobs-worker && go vet ./...
+PASS
+### cd services/jobs-worker && go test -race ./...
+PASS
+### cd services/saga-orchestrator && test -z "$(gofmt -l .)"
+PASS
+### cd services/saga-orchestrator && go vet ./...
+PASS
+### make saga-test
+PASS
+### cd services/hardware-service && test -z "$(gofmt -l .)"
+PASS
+### cd services/hardware-service && go vet ./...
+PASS
+### cd services/hardware-service && go test -race ./...
+PASS
+### make build
+FAIL
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error path /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error workspace @greenguard/device-service@0.1.0
+npm error location /Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/device-service
+npm error command failed
+npm error command sh -c npm run build:deps && prisma generate && tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+make: *** [build] Error 2

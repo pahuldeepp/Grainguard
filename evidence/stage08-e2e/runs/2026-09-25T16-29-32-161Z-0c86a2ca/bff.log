@@ -1,0 +1,5 @@
+BFF upstream request failed [DOMException [TimeoutError]: The operation was aborted due to timeout]
+BFF upstream request failed [DOMException [TimeoutError]: The operation was aborted due to timeout]
+BFF upstream request failed [DOMException [TimeoutError]: The operation was aborted due to timeout]
+
+[exit code=null signal=SIGTERM]

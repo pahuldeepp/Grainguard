@@ -1,0 +1,6 @@
+(node:66843) TimeoutNegativeWarning: -1790356838361 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Stage07d trace 3f5fa2978917db2f3cf0f4fd0d7be00d on 4 commands, 4 results, 1 activation event: PASS
+Stage07d compensation trace 19ca74964477731581dde11881e81747 on 4 commands, 4 results: PASS
+Stage07 two-tenant active + MQTT ack + coordinator restart + duplicate result + inventory rejection/asset release: PASS

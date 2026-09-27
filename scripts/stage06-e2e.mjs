@@ -303,7 +303,10 @@ async function feed(s) {
       source_message_id: `e2e-${randomUUID()}`,
       observed_at: observed,
       received_at: observed,
-      measurements: { temperature_c: 38, relative_humidity_percent: 85 },
+      // Wheat policy: 25 points per metric at warning level, 50 at critical, alert at 50,
+      // critical from 75. Stage 10d routes critical alerts through the serverless path,
+      // so this RabbitMQ delivery E2E must drive a warning-severity alert (30 C, 70 % = 50).
+      measurements: { temperature_c: 30, relative_humidity_percent: 70 },
     },
   );
   await send("greenguard.inventory.device.v1", registered);
@@ -569,8 +572,8 @@ try {
           [s.tenant],
         )
       )[0].n,
-      3,
-      "one alert-open transition must create exactly three channel intents",
+      2,
+      "one alert-open transition must create exactly two channel intents (email and sms)",
     );
   }
   assert.equal(

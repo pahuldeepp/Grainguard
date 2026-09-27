@@ -1,0 +1,5 @@
+node scripts/wal-check.mjs
+inventory: cap_bytes=2147483648 warn_bytes=1073741824
+{"database":"inventory","slot":"greenguard_inventory_outbox","active":true,"wal_status":"reserved","retained_bytes":"6712"}
+telemetry: cap_bytes=2147483648 warn_bytes=1073741824
+{"database":"telemetry","slot":"greenguard_telemetry_outbox","active":true,"wal_status":"reserved","retained_bytes":"20798936"}

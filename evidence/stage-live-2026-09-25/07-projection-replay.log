@@ -1,0 +1,12 @@
+node --env-file=.env scripts/projection-replay-test.mjs
+=== RUN   TestGlobalVersionedReplayFromZero
+--- PASS: TestGlobalVersionedReplayFromZero (0.47s)
+=== RUN   TestLiveVersionedReplay
+    replay_db_test.go:253: PASS versioned replay: command rebuild/compare, isolated tenant, durable versioned state, public untouched
+--- PASS: TestLiveVersionedReplay (0.52s)
+=== RUN   TestLiveDatabaseReplayResume
+    replay_db_test.go:375: PASS real Kafka + scratch PostgreSQL: captured pre-fixture frontier; effect-commit crash; resume and repeat once-in-effect; foreign tenant excluded; shadow semantic comparison clean
+    replay_db_test.go:376: source fixture events remain in canonical topic; shadow database and its data are removed by test cleanup
+--- PASS: TestLiveDatabaseReplayResume (0.89s)
+PASS
+ok  	greenguard.local/projection-builder	3.507s

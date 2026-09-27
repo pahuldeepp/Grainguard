@@ -1,0 +1,22 @@
+Stage06 host binaries built
+Transformer healthy
+(node:38930) TimeoutNegativeWarning: -1790383745787 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant d9232c2d-1a80-42c3-9755-f5e41d84552a
+Alert episode committed for tenant d9232c2d-1a80-42c3-9755-f5e41d84552a
+Jobs intent committed for tenant d9232c2d-1a80-42c3-9755-f5e41d84552a
+Notification sent for tenant d9232c2d-1a80-42c3-9755-f5e41d84552a
+Risk assessment committed for tenant f0312d0c-b80f-4492-8c1a-a03c9f0f0452
+Alert episode committed for tenant f0312d0c-b80f-4492-8c1a-a03c9f0f0452
+Jobs intent committed for tenant f0312d0c-b80f-4492-8c1a-a03c9f0f0452
+Notification sent for tenant f0312d0c-b80f-4492-8c1a-a03c9f0f0452
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay

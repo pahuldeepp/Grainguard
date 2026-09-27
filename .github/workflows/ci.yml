@@ -13,7 +13,9 @@ jobs:
   quality:
     name: Required quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # make verify, coverage, smoke and the staging build alone take about 35 minutes on this
+    # runner; SonarQube analysis after that needs real headroom, not just the minutes left over.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -56,6 +58,15 @@ jobs:
           make staging-down
           make db-down
           docker image prune -af
+          # SonarQube's embedded Elasticsearch refuses to allocate shards above the 90 % disk
+          # watermark and then stops itself (run 36303038336 had 6.3 % free). Image pruning alone
+          # leaves the staging build cache and the runner's preinstalled SDKs. Only SDKs outside
+          # the runner-managed toolcache that no step of this job uses are removed (.NET, Android,
+          # GHC); /opt/hostedtoolcache is left untouched, including the setup-* toolcaches the
+          # remaining steps' post actions use.
+          df -h .
+          docker builder prune -af
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h .
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
@@ -370,7 +381,7 @@ jobs:
       - name: Start event, history, search, cache, MQTT, and OIDC services
         run: |
           make events-up
-          docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait mosquitto
+          docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml up -d --wait mosquitto
           make cassandra-up search-up redis-up oidc-up
           python3 -m venv .local/search-venv
           .local/search-venv/bin/pip install -r services/search-indexer/requirements.txt

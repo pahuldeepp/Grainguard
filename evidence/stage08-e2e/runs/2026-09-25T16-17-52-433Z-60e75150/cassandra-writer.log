@@ -1,0 +1,10 @@
+2026/09/25 11:19:46 WARN cassandra unavailable; holding offset attempt=0 retry_in=884.990944ms error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:19:47 WARN cassandra unavailable; holding offset attempt=1 retry_in=1.101723571s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:19:48 WARN cassandra unavailable; holding offset attempt=2 retry_in=2.80334008s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:19:51 WARN cassandra unavailable; holding offset attempt=3 retry_in=4.229984517s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:19:55 WARN cassandra unavailable; holding offset attempt=4 retry_in=11.087372246s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:20:06 WARN cassandra unavailable; holding offset attempt=5 retry_in=15.284523491s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 11:20:21 WARN cassandra unavailable; holding offset attempt=6 retry_in=28.782472381s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: EOF"
+2026/09/25 11:20:50 INFO cassandra available again outage=1m4.227396s
+
+[exit code=0 signal=null]

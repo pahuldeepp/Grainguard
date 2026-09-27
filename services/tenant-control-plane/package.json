@@ -11,7 +11,7 @@
     "migrate": "prisma migrate deploy",
     "seed": "node dist/seed-cli.js",
     "audit:worker": "node dist/audit/worker.js",
-    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/feature-flags -w @greenguard/membership-client -w @greenguard/audit",
+    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-runtime -w @greenguard/feature-flags -w @greenguard/entitlements -w @greenguard/membership-client -w @greenguard/audit",
     "entitlements:projector": "npm run build && node dist/entitlements/projector.js"
   },
   "dependencies": {

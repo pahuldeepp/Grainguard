@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run build -w @greenguard/feature-flags && tsc",
+    "typecheck": "npm run build -w @greenguard/feature-flags && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "npm run build && node dist/migrate.js",

@@ -1,0 +1,11 @@
+python3 scripts/check_plan.py
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-review-package.md: ../../docs/API.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-review-package.md: ../../docs/adr/0002-concurrency-control.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-review-package.md: ../../docs/API.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-review-package.md: ../../docs/adr/0003-api-versioning.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-fix-review-package.md: ../../docs/API.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-fix-review-package.md: ../../docs/adr/0002-concurrency-control.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-fix-review-package.md: ../../docs/API.md
+Broken local link in .superpowers/sdd/2026-09-26-stage-10c-mysql-import-cdc/task-2-fix-review-package.md: ../../docs/adr/0003-api-versioning.md
+make: *** [check-plan] Error 1
+exit=2

@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run build -w @greenguard/kafka-runtime && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "heartbeat": "npm run build && node dist/heartbeat.js"

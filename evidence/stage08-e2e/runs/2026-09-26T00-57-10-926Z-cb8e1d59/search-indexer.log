@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 387, in <module>
+    main()
+    ~~~~^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 381, in main
+    consume(elastic, args.version, args.group, args.bootstrap, args.quarantine, args.offset_reset)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 356, in consume
+    indexer.process([record])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 320, in process
+    action = self._prepare_action(record)
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 252, in _prepare_action
+    self._check_predecessor(event, old, action, record)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/services/search-indexer/search_indexer.py", line 262, in _check_predecessor
+    raise RuntimeError(f"missing device predecessor at {record.topic}/{record.partition}@{record.offset}")
+RuntimeError: missing device predecessor at greenguard.inventory.device.v1/2@7326
+
+[exit code=1 signal=null]

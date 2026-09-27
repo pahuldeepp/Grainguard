@@ -1,0 +1,61 @@
+- button "Sign out"
+- main:
+  - navigation:
+    - link "G GreenGuard":
+      - /url: /
+    - link "Provisioning":
+      - /url: /provisioning
+    - link "Devices":
+      - /url: /devices
+    - link "Alerts":
+      - /url: /alerts
+    - text: LOCAL DEVELOPMENT
+  - paragraph: FROM THE GROUND UP
+  - heading "Better grain care. A solid foundation." [level=1]
+  - paragraph: One platform for grain storage, telemetry and intelligent alerts. Your new workspace starts here.
+  - region "Service status":
+    - heading "Service status" [level=2]
+    - button "Hide technical details" [pressed]
+    - article:
+      - text: ▦
+      - status: Unavailable
+      - heading "Device service" [level=3]
+      - paragraph: TypeScript · NestJS · PostgreSQL
+      - text: Readiness includes a live database query.
+    - article:
+      - text: ↗
+      - status: Unavailable
+      - heading "Telemetry ingestion" [level=3]
+      - paragraph: Go · PostgreSQL
+      - text: Readiness includes a live database query.
+  - region "Sensor provisioning":
+    - heading "Sensor provisioning" [level=2]
+    - text: Stage 08 · live workflow Device ID
+    - textbox "Device ID"
+    - text: Physical sensor asset ID
+    - textbox "Physical sensor asset ID"
+    - button "Start provisioning"
+    - text: Track provisioning ID
+    - textbox "Track provisioning ID": 4700d591-4dba-4d18-939a-879ffcb7a4a6
+    - paragraph:
+      - strong: "State:"
+      - text: compensated
+    - paragraph:
+      - strong: "Device:"
+      - text: 97f74f33-816b-4f2f-9557-6c1ef5713961 ·
+      - strong: "Sensor:"
+      - text: 6c96d90c-61ca-4180-9cb1-9ce75cf404ac
+    - heading "History" [level=3]
+    - list:
+      - listitem: provisioning.requested · 2026-09-25T12:07:01.098267-05:00 · trace_origin=generated
+      - listitem: deadline.compensate · 2026-09-25T12:07:03.925145-05:00 · reserving result not received before deadline
+      - listitem: deadline.expired · 2026-09-25T12:07:08.93698-05:00 · compensation result unconfirmed
+      - listitem: "operator.replay · 2026-09-25T12:07:11.465676-05:00 · browser e2e: hardware worker restored"
+      - listitem: late_result.reconciled · 2026-09-25T12:07:11.572602-05:00 · asset.reserve succeeded after cancellation
+      - listitem: asset.released · 2026-09-25T12:07:11.580844-05:00
+  - paragraph: YOUR WORKSPACE
+  - heading "Keep your grain in view." [level=2]
+  - paragraph: Track sensors, review readings and respond to alerts from one place.
+  - link "Browse devices":
+    - /url: /devices
+  - text: GreenGuardGrain storage monitoring
