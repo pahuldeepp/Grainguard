@@ -13,7 +13,9 @@ jobs:
   quality:
     name: Required quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # make verify, coverage, smoke and the staging build alone take about 35 minutes on this
+    # runner; SonarQube analysis after that needs real headroom, not just the minutes left over.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
