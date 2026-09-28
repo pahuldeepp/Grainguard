@@ -1,5 +1,37 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { Link, NavLink, Route, Routes } from "react-router";
 import { checkHealth } from "./health";
+import { ProvisioningApi, type AccessTokenProvider } from "./provisioning";
+import { ReadApi } from "./read-api";
+import { AlertsApi } from "./alerts-api";
+import { type DashboardState, uiActions } from "./dashboard-state";
+import { AlertSummary } from "./AlertSummary";
+import { useOnline } from "./online";
+import { Banner, Glyph, Loading, NavIcon, PageHeader } from "./ui";
+
+// Routes load on demand; Provisioning alone pulls in react-hook-form and zod.
+const Provisioning = lazy(() =>
+  import("./ProvisioningPanel").then((m) => ({ default: m.Provisioning })),
+);
+const AlertsView = lazy(() =>
+  import("./AlertsView").then((m) => ({ default: m.AlertsView })),
+);
+const DeviceSearch = lazy(() =>
+  import("./ReadViews").then((m) => ({ default: m.DeviceSearch })),
+);
+const DeviceCurrent = lazy(() =>
+  import("./ReadViews").then((m) => ({ default: m.DeviceCurrent })),
+);
+const DeviceHistory = lazy(() =>
+  import("./ReadViews").then((m) => ({ default: m.DeviceHistory })),
+);
+const DeviceRollups = lazy(() =>
+  import("./ReadViews").then((m) => ({ default: m.DeviceRollups })),
+);
+const BinReadings = lazy(() =>
+  import("./BinReadings").then((m) => ({ default: m.BinReadings })),
+);
 const services = [
   {
     name: "Device service",
@@ -14,6 +46,10 @@ const services = [
     stack: "Go · PostgreSQL",
   },
 ];
+function statusGlyph(ready: boolean | null) {
+  if (ready === null) return "notice";
+  return ready ? "ok" : "critical";
+}
 function statusStyle(ready: boolean | null) {
   if (ready === null) return "";
   return ready ? "ready" : "offline";
@@ -22,12 +58,92 @@ function statusText(ready: boolean | null) {
   if (ready === null) return "Checking…";
   return ready ? "Ready" : "Unavailable";
 }
-export function App() {
+const navItems = [
+  { to: "/", label: "Overview", icon: "overview", end: true },
+  { to: "/provisioning", label: "Provisioning", icon: "provisioning" },
+  { to: "/devices", label: "Devices", icon: "devices" },
+  { to: "/alerts", label: "Alerts", icon: "alerts" },
+] as const;
+
+function Overview({
+  health,
+  alertsApi,
+  sessionId,
+}: Readonly<{
+  health: (boolean | null)[];
+  alertsApi: AlertsApi | null;
+  sessionId?: string;
+}>) {
+  const dispatch = useDispatch();
+  const showTechnicalDetails = useSelector(
+    (state: DashboardState) => state.ui.showTechnicalDetails,
+  );
+  return (
+    <>
+      <PageHeader id="overview-title" title="Overview" />
+      <AlertSummary api={alertsApi} sessionId={sessionId} />
+      <section className="section" aria-labelledby="status-title">
+        <div className="section-head">
+          <h2 id="status-title">Service status</h2>
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={() => dispatch(uiActions.toggleTechnicalDetails())}
+            aria-pressed={showTechnicalDetails}
+          >
+            Technical details
+          </button>
+        </div>
+        <ul className="rows">
+          {services.map((s, i) => (
+            <li key={s.service} className="service-row">
+              <div>
+                <h3>{s.name}</h3>
+                {showTechnicalDetails && (
+                  <p className="meta">
+                    {s.stack}. Readiness includes a live database query.
+                  </p>
+                )}
+              </div>
+              <output className={`status ${statusStyle(health[i])}`}>
+                <Glyph name={statusGlyph(health[i])} />
+                {statusText(health[i])}
+              </output>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
+  );
+}
+
+export function App({
+  getAccessToken,
+  sessionId,
+  onSignOut,
+}: {
+  getAccessToken?: AccessTokenProvider;
+  sessionId?: string;
+  onSignOut?: () => void;
+} = {}) {
+  const provisioning = useMemo(
+    () => (getAccessToken ? new ProvisioningApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const readApi = useMemo(
+    () => (getAccessToken ? new ReadApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const alertsApi = useMemo(
+    () => (getAccessToken ? new AlertsApi(getAccessToken) : null),
+    [getAccessToken],
+  );
   const [health, setHealth] = useState<(boolean | null)[]>([null, null]);
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
     const update = async () => {
+      if (document.hidden) return;
       const results = await Promise.all(
         services.map((s) =>
           checkHealth(
@@ -39,70 +155,133 @@ export function App() {
       );
       if (active) setHealth(results);
     };
+    const onVisible = () => {
+      if (!document.hidden) void update();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     void update();
     const timer = setInterval(() => void update(), 5000);
     return () => {
       active = false;
       controller.abort();
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
+  const online = useOnline();
+  const down = services.filter((_, i) => health[i] === false);
   return (
-    <main>
-      <nav>
-        <a href="/" className="brand">
-          <span className="mark">G</span> GreenGuard
-        </a>
-        <span className="badge">LOCAL DEVELOPMENT</span>
-      </nav>
-      <header>
-        <p className="eyebrow">FROM THE GROUND UP</p>
-        <h1>
-          Better grain care.
-          <br />
-          <span>A solid foundation.</span>
-        </h1>
-        <p className="intro">
-          One platform for grain storage, telemetry and intelligent alerts. Your
-          new workspace starts here.
-        </p>
+    <>
+      <a className="skip" href="#main">
+        Skip to content
+      </a>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <Link to="/" className="brand">
+            <svg
+              className="brand-mark"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M12 2.5 21 7v2H3V7z" fill="currentColor" />
+              <path
+                d="M4.5 10.5h15v10h-15zM4.5 14.2h15m-15 3.3h15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinejoin="round"
+              />
+            </svg>
+            GreenGuard
+          </Link>
+          <nav className="nav" aria-label="Primary">
+            <ul>
+              {navItems.map((item) => (
+                <li key={item.to}>
+                  <NavLink to={item.to} end={"end" in item ? item.end : false}>
+                    <NavIcon name={item.icon} />
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          {onSignOut && (
+            <button type="button" className="btn btn-quiet" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
+        </div>
       </header>
-      <section aria-labelledby="status-title">
-        <div className="section-heading">
-          <h2 id="status-title">Foundation status</h2>
-          <span>Live checks · every 5 seconds</span>
+      <main id="main" className="page" tabIndex={-1}>
+        <div role="status" className="banner-slot">
+          {!online && (
+            <Banner kind="offline">
+              Offline. Data on screen may be out of date, and acknowledgements
+              cannot be sent until you reconnect.
+            </Banner>
+          )}
+          {online && down.length > 0 && (
+            <Banner kind="warning">
+              {down.map((s) => s.name).join(" and ")}{" "}
+              {down.length === 1 ? "is" : "are"} unavailable. Readings and
+              provisioning can fail until {down.length === 1 ? "it" : "they"}{" "}
+              recover{down.length === 1 ? "s" : ""}.
+            </Banner>
+          )}
         </div>
-        <div className="grid">
-          {services.map((s, i) => (
-            <article key={s.service}>
-              <div className="card-heading">
-                <span className="icon">{i === 0 ? "▦" : "↗"}</span>
-                <output className={`status ${statusStyle(health[i])}`}>
-                  {statusText(health[i])}
-                </output>
-              </div>
-              <h3>{s.name}</h3>
-              <p>{s.stack}</p>
-              <small>Readiness includes a live database query.</small>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className="next">
-        <div>
-          <p className="eyebrow">NEXT MILESTONE · 02 / 14</p>
-          <h2>Give your grain a home.</h2>
-          <p>
-            Tenant isolation, sites, storage bins and devices — the domain model
-            comes next.
-          </p>
-        </div>
-        <span className="outline">Planned</span>
-      </section>
-      <footer>
-        <span>Stage 01 · Workspace foundation</span>
-        <span>Local setup · Capacity targets remain unverified</span>
-      </footer>
-    </main>
+        <Suspense fallback={<Loading label="Loading…" rows={3} />}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <Overview
+                  health={health}
+                  alertsApi={alertsApi}
+                  sessionId={sessionId}
+                />
+              }
+            />
+            <Route
+              path="/provisioning"
+              element={
+                <Provisioning api={provisioning} sessionId={sessionId} />
+              }
+            />
+            <Route
+              path="/devices"
+              element={<DeviceSearch api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/alerts"
+              element={
+                <AlertsView
+                  api={alertsApi}
+                  provisioningApi={provisioning}
+                  sessionId={sessionId}
+                />
+              }
+            />
+            <Route
+              path="/devices/:deviceId"
+              element={<DeviceCurrent api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/devices/:deviceId/history"
+              element={<DeviceHistory api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/devices/:deviceId/rollups"
+              element={<DeviceRollups api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/bins/:binId"
+              element={<BinReadings api={readApi} sessionId={sessionId} />}
+            />
+          </Routes>
+        </Suspense>
+      </main>
+    </>
   );
 }
