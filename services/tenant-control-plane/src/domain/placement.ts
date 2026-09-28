@@ -50,6 +50,46 @@ const moveDto = (row: MoveRow): PlacementMove => ({
   state: row.state,
   receipts: row.receipts,
 });
+/** Every operational tenant store must independently acknowledge a cutover.
+ * Control/billing are central and are intentionally excluded. Keep in sync with
+ * infra/gitops/disposable/owner-migration-inventory.json. */
+const SHARDED_MOVE_OWNERS = [
+  "telemetry",
+  "projection",
+  "jobs",
+  "saga",
+  "hardware",
+  "inventory",
+  "alerts",
+  "risk",
+  "notifications",
+] as const;
+/** Structural roster check only; this does not authenticate receipt provenance.
+ * It is safe only behind the trusted in-process migration controller. */
+export function hasExactShardedOwnerReceiptSet(
+  receipt: Record<string, unknown>,
+): boolean {
+  const ownerReceipts = receipt.ownerReceipts;
+  if (
+    !ownerReceipts ||
+    typeof ownerReceipts !== "object" ||
+    Array.isArray(ownerReceipts)
+  )
+    return false;
+  const owners = ownerReceipts as Record<string, unknown>;
+  return (
+    Object.keys(owners).length === SHARDED_MOVE_OWNERS.length &&
+    SHARDED_MOVE_OWNERS.every((owner) => {
+      const value = owners[owner];
+      return (
+        !!value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        (value as Record<string, unknown>).owner === owner
+      );
+    })
+  );
+}
 function input(expectedEpoch: string, shardId: string, operationId: string) {
   try {
     placementEpoch(expectedEpoch);
@@ -250,6 +290,16 @@ export async function compareAndSetPlacement(
       org.shard_id !== pending.source_shard_id
     )
       throw new PlacementConflictError("placement changed");
+    // Report the drain blocker before checking migration evidence, while keeping
+    // the database trigger as the final race-safe guard on the ownership update.
+    await tx.$executeRaw`DELETE FROM placement_read_leases WHERE tenant_id=${tenantId}::uuid AND expires_at<=clock_timestamp()`;
+    const [{ count: activeReadLeases }] = await tx.$queryRaw<
+      { count: bigint }[]
+    >`SELECT count(*) FROM placement_read_leases WHERE tenant_id=${tenantId}::uuid`;
+    if (activeReadLeases > 0n)
+      throw new PlacementConflictError(
+        "placement read leases must drain before changing ownership",
+      );
     requireReceipts(pending, [
       "source_fenced",
       "target_prepared",
@@ -387,7 +437,18 @@ function requireReceipts(row: MoveRow, keys: string[]) {
     if (!value || typeof value !== "object" || Array.isArray(value))
       return false;
     const receipt = value as Record<string, unknown>;
-    return evidenceMatches(key, receipt);
+    if (!evidenceMatches(key, receipt)) return false;
+    // A Risk-only receipt used to be sufficient to switch global placement even
+    // though eight other tenant databases could still be on the old shard. Require
+    // a complete, operation-bound receipt from every sharded owner at each
+    // irreversible/rollback boundary. Missing, extra, or malformed owners fail
+    // closed; owner adapters must not be inferred from a shared DB receipt.
+    if (!hasExactShardedOwnerReceiptSet(receipt)) return false;
+    const owners = receipt.ownerReceipts as Record<string, unknown>;
+    return SHARDED_MOVE_OWNERS.every((owner) => {
+      const ownerReceipt = owners[owner];
+      return evidenceMatches(key, ownerReceipt as Record<string, unknown>);
+    });
   };
   if (keys.some((key) => !valid(key, row.receipts[key])))
     throw new PlacementConflictError(
@@ -395,9 +456,11 @@ function requireReceipts(row: MoveRow, keys: string[]) {
     );
 }
 
-/** The internal move controller stores operation-bound evidence produced by owner
- * adapters after querying committed database state. Callers cannot submit a boolean
- * success marker; cutover requires typed identities, epochs, and matching digests. */
+/** Internal-only ledger mutation; no HTTP route exposes it. The trusted migration
+ * controller must pass direct owner-adapter results after querying committed owner
+ * DB state. This function validates structure/identity, not adapter provenance, so
+ * it must never be wired to user-supplied JSON. No all-owner adapters currently
+ * exist; the live mover therefore cannot create a complete receipt envelope. */
 export async function recordPlacementMoveReceipt(
   db: Db,
   tenantId: string,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Isolated, single-owner tenant move acceptance. Uses fresh PostgreSQL scratch
-// resources and never reads .env or connects to a shared database.
+// Isolated Risk-owner move safety exercise. It proves the owner-local fence and
+// copy, then expects control-plane cutover to fail closed because eight other
+// owner adapters do not yet exist. This is not multi-owner migration acceptance.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -429,58 +430,38 @@ try {
       /read leases must drain/,
     );
     await leases.releaseReadLease(control, tenantId, lease.leaseId);
-    await placement.compareAndSetPlacement(
-      control,
-      tenantId,
-      "1",
-      "s2",
-      operationId,
+    await assert.rejects(
+      placement.compareAndSetPlacement(
+        control,
+        tenantId,
+        "1",
+        "s2",
+        operationId,
+      ),
+      /operation-bound placement evidence is missing or invalid/,
     );
-    const activationProof = await activateRiskMoveTarget(
-      adminTarget,
-      tenantId,
-      operationId,
-      sourceIdentity,
-      targetIdentity,
-      await placement.resolveTenant(control, tenantId),
-    );
-    const activated = await adminTarget.query(
-      `SELECT shard_id,shard_incarnation::text AS incarnation,placement_epoch::text AS epoch,state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1`,
-      [tenantId],
-    );
-    assert.deepEqual(activated.rows[0], {
-      shard_id: "s2",
-      incarnation: targetIdentity.incarnation,
-      epoch: "2",
-      state: "active",
-    });
-    await placement.recordPlacementMoveReceipt(
+    const unchangedRoute = await placement.resolveTenant(control, tenantId);
+    assert.equal(unchangedRoute.shardId, "s1");
+    assert.equal(unchangedRoute.placementEpoch, "1");
+    assert.equal(unchangedRoute.state, "quiescing");
+    const unchangedMove = await placement.placementMove(
       control,
       tenantId,
       operationId,
-      "target_activated",
-      activationProof,
     );
-    await placement.finishPlacementMove(
-      control,
-      tenantId,
-      operationId,
-      "completed",
-    );
-    const newRoute = await placement.resolveTenant(control, tenantId);
-    assert.equal(newRoute.shardId, "s2");
-    assert.equal(newRoute.placementEpoch, "2");
-    const movedRead = await connectScoped(target, tenantId, targetIdentity);
+    assert.equal(unchangedMove.state, "quiescing");
+
+    const targetRead = await connectScoped(target, tenantId, targetIdentity);
     try {
-      const moved = await movedRead.query(
+      const copied = await targetRead.query(
         "SELECT device_id::text FROM device_bindings WHERE tenant_id=$1",
         [tenantId],
       );
-      assert.deepEqual(moved.rows, [{ device_id: deviceId }]);
-      await movedRead.query("COMMIT");
+      assert.deepEqual(copied.rows, [{ device_id: deviceId }]);
+      await targetRead.query("COMMIT");
     } finally {
-      await movedRead.query("ROLLBACK").catch(() => {});
-      movedRead.release();
+      await targetRead.query("ROLLBACK").catch(() => {});
+      targetRead.release();
     }
     const stale = await connectScoped(source, tenantId, sourceIdentity);
     try {
@@ -516,7 +497,7 @@ try {
       unrelatedRead.release();
     }
     console.log(
-      `Local tenant move passed: operation=${operationId} tables=${copy.tableCount} rows=${copy.rowCount} sha256=${copy.sourceSha256}; lease drained, source writer fenced, placement epoch 1→2, unrelated tenant preserved.`,
+      `Risk-owner safety exercise passed: operation=${operationId} tables=${copy.tableCount} rows=${copy.rowCount} sha256=${copy.sourceSha256}; lease drain and source fence verified, copied data and unrelated tenant preserved, and cutover correctly refused with tenant still on s1/epoch 1 because all nine owner adapters are not implemented. This is not multi-owner move acceptance.`,
     );
   } finally {
     await Promise.all([

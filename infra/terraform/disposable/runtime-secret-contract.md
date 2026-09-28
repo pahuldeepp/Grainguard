@@ -2,8 +2,14 @@
 
 `runtime_secret_values` is a sensitive map of approved Kubernetes Secret names to
 nonempty string maps. Supply real upstream credentials and valid TLS/CA material.
-`secret_names` approves the AWS containers. Values enter Terraform state: use an
-approved encrypted backend and protect plans/state as credentials.
+`secret_names` approves the AWS containers. Today, values flow into
+`aws_secretsmanager_secret_version.secret_string` and Terraform plans/state.
+Terraform's `sensitive` flag redacts normal CLI display; it does not remove
+values from plans or state. This conflicts with the no-secret-values-in-state
+deployment requirement. The default readiness gate must remain closed until
+secret materialization is refactored to keep values out of Terraform state and
+plans. An encrypted backend is still required for all other state, but is not
+a substitute for this requirement.
 
 Terraform derives the two central runtime database URLs and 38 migration URLs
 from actual RDS addresses and bootstrap role passwords. The migration inventory

@@ -6,10 +6,11 @@
   telemetry-ingest and device-service health/unavailable behavior, role
   privileges, and cross-database denial. It does **not** run the full stack or
   a user journey: [smoke log](stage12-local-final/make-smoke.log).
-- The isolated tenant-move harness passed all 14 control-plane placement
-  tests and a Risk-owner move: lease drain, source writer fence, epoch 1→2,
-  copied row/digest verification, and unrelated-tenant preservation. This is
-  one owner only: [move log](stage12-local-final/tenant-move-local-final.log).
+- The isolated tenant-move safety harness passed all 15 control-plane tests,
+  verifies the Risk owner's source fence/copy, read-lease drain, and unrelated
+  tenant preservation, then confirms cutover remains blocked at `s1`/epoch 1
+  because the other eight owner adapters are missing. Its zero exit is not a
+  completed tenant move: [safety log](stage12-local-final/tenant-move-risk-only-gate.log).
 - The shared `db-migrate` target now includes `notification-service`. Its
   optional-hold migration accepts both the current `hold` value and historical
   `hold_expired` rows; a scratch-database regression covers preservation.
@@ -33,7 +34,6 @@
 
 ## Full verification status
 
-- A fresh `make verify` attempt did **not** pass. The default Compose ports
 - Full `make verify` and `make smoke` passed against a newly created disposable
   Compose project and database, then the harness removed only that project and
   its volume. The full gate includes migrations, the 97-test Risk suite,
@@ -52,14 +52,25 @@
 - Terraform is not installed in this checkout's command environment, so
   Terraform format/validate/plan were not rerun here. No Terraform plan/apply,
   AWS API call, or production change was performed.
+- The disposable Terraform root writes generated/supplied secret material
+  through `aws_secretsmanager_secret_version` and Helm release inputs. Terraform
+  `sensitive` only redacts normal CLI output; it does not omit values from
+  plans/state. The readiness gate now names this as a blocker, and the secret
+  materialization path must be redesigned before a real apply under the
+  no-secret-values-in-state requirement.
 
 ## Remaining work and limits
 
-- Tenant moves are still Risk-only. Eight other sharded database owners do
-  not have owner-specific copy/prepare/fence/verify/activate adapters and
-  receipts. Generic table discovery is not sufficient: partitioned projection
-  history, worker queues/outboxes/checkpoints, and external effects need
-  explicit handling before all-owner movement is safe.
+- Tenant move cutover now requires an exact nine-owner receipt roster at the
+  placement gates, and a regression proves a missing owner blocks CAS. This is
+  only a structural completeness check: the receipt payload is not
+  authenticated, there is no all-owner coordinator, and only the Risk owner has
+  a local adapter/harness. Eight owner-specific copy/prepare/fence/verify/
+  activate adapters and authentic receipts remain. Generic table discovery is
+  not sufficient: partitioned projection history, worker queues/outboxes/
+  checkpoints, and external effects need explicit handling before all-owner
+  movement is safe. The Risk-only harness now verifies the new owner gate
+  rejects cutover; it is not an all-owner migration acceptance.
 - Stage 12 AWS apply remains correctly blocked by the Terraform readiness
   gate. The root is a partial foundation; managed data-plane services,
   populated secrets, real migrations and service health, immutable application

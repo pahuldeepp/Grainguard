@@ -65,6 +65,30 @@ async function prepared(tenantId: string, op: string) {
     );
 }
 async function receipt(tenantId: string, operationId: string, phase: string) {
+  const base = await singleOwnerReceipt(tenantId, operationId, phase);
+  const owners = [
+    "telemetry",
+    "projection",
+    "jobs",
+    "saga",
+    "hardware",
+    "inventory",
+    "alerts",
+    "risk",
+    "notifications",
+  ];
+  return {
+    ...base,
+    ownerReceipts: Object.fromEntries(
+      owners.map((owner) => [owner, { ...base, owner }]),
+    ),
+  };
+}
+async function singleOwnerReceipt(
+  tenantId: string,
+  operationId: string,
+  phase: string,
+) {
   const move = await placementMove(db, tenantId, operationId);
   const common = {
     tenantId,
@@ -451,6 +475,23 @@ test("empty or negative receipts never permit ownership switch or runtime reacti
       [tenantId],
     ),
     /matching durable move/,
+  );
+  assert.equal((await resolveTenant(db, tenantId)).state, "quiescing");
+  assert.equal((await placementMove(db, tenantId, op)).state, "quiescing");
+});
+test("placement CAS refuses a move with one missing operational owner receipt", async () => {
+  const { tenantId, target } = await organization();
+  const op = randomUUID();
+  await beginPlacementMove(db, tenantId, "1", target, op);
+  for (const key of ["source_fenced", "target_prepared", "copy_verified"]) {
+    const evidence = await receipt(tenantId, op, key);
+    if (key === "source_fenced")
+      delete (evidence.ownerReceipts as Record<string, unknown>).notifications;
+    await recordPlacementMoveReceipt(db, tenantId, op, key, evidence);
+  }
+  await assert.rejects(
+    compareAndSetPlacement(db, tenantId, "1", target, op),
+    PlacementConflictError,
   );
   assert.equal((await resolveTenant(db, tenantId)).state, "quiescing");
   assert.equal((await placementMove(db, tenantId, op)).state, "quiescing");
