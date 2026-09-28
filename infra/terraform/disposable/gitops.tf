@@ -428,6 +428,7 @@ resource "terraform_data" "deployed_workload_acceptance" {
     release = {
       gitops_revision             = var.gitops_revision
       deployment_image_digests    = var.deployment_image_digests
+      migration_image_digests     = var.migration_image_digests
       migration_gate_image_digest = var.migration_gate_image_digest
       migration_sql_image_digest  = var.migration_sql_image_digest
     }

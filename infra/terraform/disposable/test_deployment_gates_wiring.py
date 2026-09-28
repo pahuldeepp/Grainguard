@@ -49,6 +49,7 @@ class DeploymentGateWiringTests(unittest.TestCase):
         self.assertIn("run-deployed-workloads.py", gate)
         self.assertIn("GG_DISPOSABLE_ACCEPTANCE_TIMEOUT_SECONDS", gate)
         self.assertIn("migration_gate_image_digest", gate)
+        self.assertIn("migration_image_digests", gate)
         self.assertIn("migration_sql_image_digest", gate)
         self.assertNotIn("on_failure", gate)
 
