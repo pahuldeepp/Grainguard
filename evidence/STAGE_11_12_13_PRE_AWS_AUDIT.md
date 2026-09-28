@@ -241,3 +241,13 @@ Read API, dashboard, and shared membership/entitlements/flags/audit workspace
 source have now been scoped into commits. Remaining dirty modules and a clean
 checkout build still need review. The latest combined Helm, Argo application
 tree, data-plane and `git diff --check` checks pass on the current tree.
+
+A later fresh `git archive HEAD` passed offline `npm ci --ignore-scripts`
+and `npm run typecheck --workspaces` across all 19 workspaces after the
+mobile, dashboard, Read API, tenant control plane, billing, OIDC, shared
+packages, read model and event contracts were committed. Go modules also
+build from an archived checkout; five previously failing module test runs
+needed event schema files that have since been committed. A clean all-service
+test with its Compose database environment and clean deploy build is still
+unproved. The worktree retains substantial other Stage 11–13 changes, so a
+fresh archive typecheck alone does not establish deployability.
