@@ -141,6 +141,7 @@ jobs:
           ruby infra/gitops/disposable/check-rds-bootstrap.rb
           ruby infra/gitops/disposable/check-owner-migrations.rb
           ruby infra/gitops/disposable/check-network-peers.rb
+          ruby infra/gitops/disposable/check-kafka-runtime.rb
           ruby infra/gitops/disposable/check-auxiliary-peers.rb
           ruby infra/gitops/disposable/check-data-plane.rb
           ruby infra/gitops/disposable/test-data-plane-applications.rb

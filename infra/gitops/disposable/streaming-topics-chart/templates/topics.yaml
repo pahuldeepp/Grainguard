@@ -1,0 +1,81 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "topic bootstrap image must be immutable" }}{{ end }}
+{{- $topics := .Files.Get "files/topics.tsv" }}
+{{- if not $topics }}{{ fail "topic inventory missing" }}{{ end }}
+{{- $revision := sha256sum (printf "%s\n%s" .Values.image $topics) | trunc 12 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-topics-{{ $revision }}
+data:
+  topics.tsv: |
+{{ $topics | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenguard-topics-{{ $revision }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1200
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: kafka-topics
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              set -eu
+              broker=kafka.greenguard.svc.cluster.local:29092
+              bin=/opt/kafka/bin
+              : "${KAFKA_SASL_JAAS_CONFIG:?Kafka admin JAAS is required}"
+              test -s /etc/greenguard/kafka/ca.crt
+              umask 077
+              printf 'security.protocol=SASL_SSL\nsasl.mechanism=PLAIN\nsasl.jaas.config=%s\nssl.truststore.type=PEM\nssl.truststore.location=/etc/greenguard/kafka/ca.crt\n' "$KAFKA_SASL_JAAS_CONFIG" > /tmp/kafka-client.properties
+              while IFS='|' read -r name partitions cleanup retention; do
+                test -n "$name" || continue
+                "$bin/kafka-topics.sh" --bootstrap-server "$broker" --command-config /tmp/kafka-client.properties --create --if-not-exists --topic "$name" --partitions "$partitions" --replication-factor 1 --config "cleanup.policy=$cleanup" --config min.insync.replicas=1
+                configs="cleanup.policy=$cleanup,min.insync.replicas=1"
+                if [ "$retention" != '-' ]; then configs="$configs,retention.ms=$retention"; fi
+                "$bin/kafka-configs.sh" --bootstrap-server "$broker" --command-config /tmp/kafka-client.properties --alter --entity-type topics --entity-name "$name" --add-config "$configs"
+                description="$("$bin/kafka-topics.sh" --bootstrap-server "$broker" --command-config /tmp/kafka-client.properties --describe --topic "$name")"
+                printf '%s\n' "$description" | grep -Eq "PartitionCount:[[:space:]]*$partitions([[:space:]]|$)"
+                printf '%s\n' "$description" | grep -Eq 'ReplicationFactor:[[:space:]]*1([[:space:]]|$)'
+                printf '%s\n' "$description" | grep -Fq "cleanup.policy=$cleanup"
+                if [ "$retention" != '-' ]; then printf '%s\n' "$description" | grep -Fq "retention.ms=$retention"; fi
+                printf 'topic %s ready\n' "$name"
+              done < /topics/topics.tsv
+          env:
+            - name: KAFKA_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef: {name: greenguard-kafka-admin-auth, key: KAFKA_SASL_JAAS_CONFIG}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: topics, mountPath: /topics, readOnly: true}
+            - {name: kafka-ca, mountPath: /etc/greenguard/kafka, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: topics
+          configMap: {name: greenguard-topics-{{ $revision }}}
+        - name: kafka-ca
+          secret:
+            secretName: greenguard-kafka-ca
+            defaultMode: 0440
+            items:
+              - {key: ca.crt, path: ca.crt}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

@@ -7,8 +7,8 @@
 {{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "data plane requires an HTTPS Git repository" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "data plane requires a cell" }}{{ end }}
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($data.rdsHost | default "")) }}{{ fail "data plane requires an RDS endpoint DNS name" }}{{ end }}
-{{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" }}
-{{- if ne (len $images) (len $names) }}{{ fail "data plane requires exactly three image digests" }}{{ end }}
+{{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration" }}
+{{- if ne (len $images) (len $names) }}{{ fail "data plane requires exactly four image digests" }}{{ end }}
 {{- range $names }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $images . | default "")) }}{{ fail (printf "data plane image %s must be an immutable OCI digest" .) }}{{ end }}
 {{- end }}
@@ -20,7 +20,8 @@
 {{- $apps := list
   (dict "name" "kafka-topics" "chart" "streaming-topics-chart" "wave" "12" "values" (dict "image" (index $images "kafka-topics")))
   (dict "name" "pgbouncer" "chart" "pgbouncer-chart" "wave" "22" "values" (dict "image" (index $images "pgbouncer") "rdsHost" $data.rdsHost "authSecret" (index $secrets "pgbouncerAuth") "caSecret" (index $secrets "rdsCa")))
-  (dict "name" "kafka-connect" "chart" "kafka-connect-chart" "wave" "23" "values" (dict "image" (index $images "kafka-connect") "credentialSecret" (index $secrets "cdcCredentials") "caSecret" (index $secrets "rdsCa")))
+  (dict "name" "kafka-connect" "chart" "kafka-connect-chart" "wave" "23" "values" (dict "image" (index $images "kafka-connect") "credentialSecret" (index $secrets "cdcCredentials") "caSecret" (index $secrets "rdsCa") "kafkaCaSecret" "greenguard-kafka-ca" "kafkaCredentialSecret" "greenguard-kafka-connect-auth"))
+  (dict "name" "connector-registration" "chart" "connector-registration" "wave" "24" "values" (dict "image" (index $images "connector-registration") "rdsHost" $data.rdsHost))
 }}
 {{- range $index, $app := $apps }}
 {{- if gt $index 0 }}

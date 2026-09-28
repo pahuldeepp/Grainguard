@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-topics
+description: Exact disposable Kafka topic inventory before Connect
+type: application
+version: 0.1.0

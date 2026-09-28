@@ -1,6 +1,8 @@
 {{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "Connect image must be a published immutable OCI digest" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.credentialSecret) }}{{ fail "credentialSecret must be a Kubernetes Secret name" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.caSecret) }}{{ fail "caSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.kafkaCaSecret) }}{{ fail "kafkaCaSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.kafkaCredentialSecret) }}{{ fail "kafkaCredentialSecret must be a Kubernetes Secret name" }}{{ end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -38,6 +40,14 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - {name: BOOTSTRAP_SERVERS, value: kafka.greenguard.svc.cluster.local:29092}
+            - {name: CONNECT_SECURITY_PROTOCOL, value: SASL_SSL}
+            - {name: CONNECT_SASL_MECHANISM, value: PLAIN}
+            - name: CONNECT_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.kafkaCredentialSecret | quote }}, key: KAFKA_SASL_JAAS_CONFIG}
+            - {name: CONNECT_SSL_TRUSTSTORE_TYPE, value: PEM}
+            - {name: CONNECT_SSL_TRUSTSTORE_LOCATION, value: /etc/greenguard/kafka/ca.crt}
+            - {name: CONNECT_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, value: HTTPS}
             - {name: GROUP_ID, value: greenguard-connect}
             - {name: CONFIG_STORAGE_TOPIC, value: greenguard.connect.configs}
             - {name: OFFSET_STORAGE_TOPIC, value: greenguard.connect.offsets}
@@ -50,8 +60,11 @@ spec:
             - {name: CONNECT_TOPIC_CREATION_ENABLE, value: "false"}
             - {name: CONNECT_CONFIG_PROVIDERS, value: env}
             - {name: CONNECT_CONFIG_PROVIDERS_ENV_CLASS, value: org.apache.kafka.common.config.provider.EnvVarConfigProvider}
-            - {name: CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN, value: "CDC_DB_PASSWORD|SCHEMA_REGISTRY_URL"}
-            - {name: SCHEMA_REGISTRY_URL, value: http://schema-registry.greenguard.svc.cluster.local:8081}
+            - {name: CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN, value: "CDC_DB_PASSWORD|SCHEMA_REGISTRY_URL|SCHEMA_REGISTRY_BASIC_USER_INFO"}
+            - {name: SCHEMA_REGISTRY_URL, value: https://schema-registry.greenguard.svc.cluster.local:8081}
+            - name: SCHEMA_REGISTRY_BASIC_USER_INFO
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.kafkaCredentialSecret | quote }}, key: SCHEMA_REGISTRY_BASIC_USER_INFO}
             - {name: CONNECT_PRODUCER_ACKS, value: all}
             - {name: OFFSET_FLUSH_INTERVAL_MS, value: "1000"}
             - {name: HEAP_OPTS, value: "-Xms256m -Xmx768m"}
@@ -79,9 +92,31 @@ spec:
             capabilities: {drop: ["ALL"]}
           volumeMounts:
             - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+            - {name: kafka-ca, mountPath: /etc/greenguard/kafka, readOnly: true}
       volumes:
         - name: rds-ca
           secret:
             secretName: {{ .Values.caSecret | quote }}
             items:
               - {key: ca.pem, path: ca.pem}
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.kafkaCaSecret | quote }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+              - {key: registry-ca.crt, path: registry-ca.crt}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: connect-registration-ingress
+spec:
+  podSelector:
+    matchLabels: {app: connect}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: connector-registration}
+      ports:
+        - {protocol: TCP, port: 8083}

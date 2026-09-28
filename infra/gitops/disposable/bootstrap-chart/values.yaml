@@ -1,0 +1,21 @@
+cell: ""
+repositoryUrl: ""
+revision: ""
+releases: []
+observabilityImages: {}
+dataPlane:
+  enabled: false
+  rdsHost: ""
+  images: {}
+  secrets: {}
+searchPlane:
+  enabled: false
+  image: ""
+  bootstrapImage: ""
+cassandraPlane:
+  enabled: false
+  image: ""
+  migratorImage: ""
+  authSecret: ""
+  tlsSecret: ""
+  apiServerCIDR: ""

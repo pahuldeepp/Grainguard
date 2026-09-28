@@ -30,4 +30,4 @@ Dir.mktmpdir('greenguard-images-') do |dir|
     abort "#{case_name}: rejected manifest created output" if system('ruby', resolver, manifest, rejected, out: File::NULL, err: File::NULL) || File.exist?(rejected)
   end
 end
-puts 'Image resolver: valid 14-image/15-release mapping and four reject cases passed.'
+puts "Image resolver: valid #{images.length}-image/#{contract.fetch('releases').length}-release mapping and four reject cases passed."

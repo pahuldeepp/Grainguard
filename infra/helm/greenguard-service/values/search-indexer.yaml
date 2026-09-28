@@ -1,0 +1,41 @@
+nameOverride: search-indexer
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+service:
+  enabled: false
+container:
+  name: search-indexer
+  command: ["/bin/sh", "-ec"]
+  args:
+    - 'exec python /app/search_indexer.py consume --version "${SEARCH_INDEX_VERSION:?}" --bootstrap "${KAFKA_BOOTSTRAP_SERVERS:?}" --quarantine /tmp/search-quarantine.jsonl'
+  envFrom:
+    - secretRef:
+        name: search-indexer-config
+  env:
+    - { name: OPENSEARCH_CA_FILE, value: /etc/opensearch-ca/ca.crt }
+    - { name: OPENSEARCH_USERNAME, value: greenguard_writer }
+    - { name: OPENSEARCH_PASSWORD, valueFrom: { secretKeyRef: { name: greenguard-opensearch-clients, key: writer-password } } }
+  volumeMounts:
+    - { name: quarantine, mountPath: /tmp }
+    - { name: opensearch-ca, mountPath: /etc/opensearch-ca, readOnly: true }
+volumes:
+  - name: quarantine
+    persistentVolumeClaim:
+      claimName: search-indexer-quarantine
+  - name: opensearch-ca
+    secret:
+      secretName: greenguard-opensearch-ca
+      items: [{ key: ca.crt, path: ca.crt }]
+probes:
+  startup: { enabled: false, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
+  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+scheduling:
+  nodeSelector: { greenguard.io/workload-class: compute }
+  tolerations:
+    - { key: greenguard.io/workload-class, operator: Equal, value: compute, effect: NoSchedule }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: greenguard-opensearch }, port: 9200 }

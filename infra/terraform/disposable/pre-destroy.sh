@@ -66,6 +66,39 @@ if aws eks describe-cluster --name "$GG_CLUSTER" >/dev/null 2>"$cluster_error"; 
       echo "pre-destroy: Kubernetes identity cannot delete Argo Applications" >&2
       exit 1
     fi
+  fi
+fi
+
+# Exercise every final inventory read before mutating either owner. A denied
+# global or regional listing must stop while the cell is still intact.
+"$(dirname "$0")/check-teardown.sh" --preflight "$GG_REGION" "$GG_ENVIRONMENT" "$GG_CLUSTER" "$GG_ACCOUNT" "${GG_MASTER_SECRET_ARN:-}" "$pv_inventory"
+
+# Simulate the AWS deletes this hook performs. This catches missing identity
+# policy permissions before the first CloudFormation or Kubernetes mutation.
+# AWS Organizations controls and resource policies are still enforced by the
+# actual delete calls, so a later denial remains a resumable failure.
+caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
+if [[ "$caller_arn" =~ ^arn:([^:]+):sts::([0-9]{12}):assumed-role/([^/]+)/ ]]; then
+  principal_arn="arn:${BASH_REMATCH[1]}:iam::${BASH_REMATCH[2]}:role/${BASH_REMATCH[3]}"
+elif [[ "$caller_arn" =~ ^arn:[^:]+:iam::[0-9]{12}:(role|user)/ ]]; then
+  principal_arn="$caller_arn"
+else
+  echo "pre-destroy: cannot resolve an IAM principal for delete permission preflight" >&2
+  exit 1
+fi
+denied="$(aws iam simulate-principal-policy --policy-source-arn "$principal_arn" \
+  --action-names cloudformation:DeleteStack logs:DeleteLogGroup \
+  --resource-arns '*' --query 'EvaluationResults[?EvalDecision!=`allowed`].EvalActionName' --output text)" || {
+  echo "pre-destroy: AWS delete permission simulation failed" >&2
+  exit 1
+}
+if [ -n "$denied" ] && [ "$denied" != None ]; then
+  echo "pre-destroy: AWS delete permissions denied: $denied" >&2
+  exit 1
+fi
+
+if [ "$cluster_present" = true ]; then
+  if [ "$argo_present" = true ]; then
     log "deleting this cell's Argo Applications before other resources"
     k delete applications.argoproj.io --all-namespaces -l "greenguard.io/cell=$GG_CLUSTER" --wait=true --timeout=10m
     # An unlabeled Application targeting GreenGuard could recreate claims.
@@ -82,6 +115,12 @@ for app in json.load(sys.stdin).get("items", []):
   fi
 elif grep -q 'ResourceNotFoundException' "$cluster_error"; then
   log "cluster $GG_CLUSTER not found; skipping Kubernetes cleanup"
+  # A failed apply before EKS has no Kubernetes PVs to capture. Persist an
+  # empty inventory so the final check can distinguish this case from a lost
+  # inventory after a cluster existed. Preserve any IDs from an earlier run.
+  if [ ! -e "$pv_inventory" ]; then
+    : >"$pv_inventory"
+  fi
 else
   cat "$cluster_error" >&2
   exit 1

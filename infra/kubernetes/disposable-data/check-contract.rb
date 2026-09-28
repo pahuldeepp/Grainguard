@@ -4,7 +4,7 @@
 require 'yaml'
 
 root = __dir__
-docs = Dir[File.join(root, '*.yaml')].flat_map do |file|
+docs = Dir[File.join(root, '**', '*.yaml')].flat_map do |file|
   YAML.load_stream(File.read(file)).compact
 end
 abort 'no disposable data manifests found' if docs.empty?
@@ -63,17 +63,38 @@ abort 'RabbitMQ credentials must come from Secret' unless
   %w[RABBITMQ_DEFAULT_USER RABBITMQ_DEFAULT_PASS RABBITMQ_ERLANG_COOKIE].all? { |key| secret_keys.include?(key) }
 
 kafka = find.call('StatefulSet', 'kafka')
-kafka_env = kafka.dig('spec', 'template', 'spec', 'containers', 0, 'env').to_h { |env| [env['name'], env['value']] }
+kafka_container = kafka.dig('spec', 'template', 'spec', 'containers', 0)
+kafka_env = kafka_container.fetch('env').to_h { |env| [env['name'], env['value']] }
 abort 'Kafka must disable topic auto-creation and advertise the stable pod DNS name' unless
   kafka_env['KAFKA_AUTO_CREATE_TOPICS_ENABLE'] == 'false' &&
   kafka_env['KAFKA_ADVERTISED_LISTENERS'] ==
     'INTERNAL://kafka-0.kafka-headless.greenguard.svc.cluster.local:29092'
+abort 'Kafka listeners must require PLAIN over TLS with default-deny KRaft ACLs' unless
+  kafka_env['KAFKA_LISTENER_SECURITY_PROTOCOL_MAP'] == 'INTERNAL:SASL_SSL,CONTROLLER:SASL_SSL' &&
+  kafka_env['KAFKA_SASL_ENABLED_MECHANISMS'] == 'PLAIN' &&
+  kafka_env['KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL'] == 'PLAIN' &&
+  kafka_env['KAFKA_AUTHORIZER_CLASS_NAME'] == 'org.apache.kafka.metadata.authorizer.StandardAuthorizer' &&
+  kafka_env['KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND'] == 'false' &&
+  kafka_env['KAFKA_SUPER_USERS'] == 'User:broker;User:admin' &&
+  kafka_env['KAFKA_SSL_KEYSTORE_TYPE'] == 'PKCS12' &&
+  kafka_container.fetch('env').any? { |entry| entry['name'] == 'KAFKA_LISTENER_NAME_INTERNAL_PLAIN_SASL_JAAS_CONFIG' &&
+    entry.dig('valueFrom', 'secretKeyRef', 'name') == 'greenguard-kafka-auth' } &&
+  kafka_container.fetch('env').any? { |entry| entry['name'] == 'KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG' &&
+    entry.dig('valueFrom', 'secretKeyRef', 'name') == 'greenguard-kafka-auth' }
 registry = find.call('Deployment', 'schema-registry')
 registry_container = registry.dig('spec', 'template', 'spec', 'containers', 0)
 abort 'schema registry must be private, pinned and probed' unless
   registry_container['image'].match?(/@sha256:[0-9a-f]{64}\z/) &&
   %w[startupProbe readinessProbe livenessProbe resources].all? { |key| registry_container.key?(key) } &&
   find.call('Service', 'schema-registry').dig('spec', 'type') == 'ClusterIP'
+registry_env = registry_container.fetch('env').to_h { |env| [env['name'], env['value']] }
+abort 'Schema Registry must require HTTPS/BASIC and authenticated TLS Kafka' unless
+  registry_env['SCHEMA_REGISTRY_LISTENERS'] == 'https://0.0.0.0:8081' &&
+  registry_env['SCHEMA_REGISTRY_AUTHENTICATION_METHOD'] == 'BASIC' &&
+  registry_env['SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL'] == 'SASL_SSL' &&
+  registry_env['SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM'] == 'PLAIN' &&
+  registry_container.fetch('env').any? { |entry| entry['name'] == 'SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG' &&
+    entry.dig('valueFrom', 'secretKeyRef', 'name') == 'greenguard-kafka-auth' }
 {
   'rabbitmq' => [5672], 'redis' => [6379, 16379],
   'kafka' => [29092, 9093], 'schema-registry' => [8081]
@@ -96,7 +117,7 @@ abort 'schema registry must be private, pinned and probed' unless
 end
 
 if ARGV.include?('--ready')
-  abort 'not ready: Kafka and Schema Registry lack client authentication and TLS; Redis and RabbitMQ require proven mesh mTLS and live client credentials'
+  abort 'not ready: Kafka ACL bootstrap and live Kafka/Registry TLS authentication remain unproven; Redis and RabbitMQ require proven mesh mTLS and live client credentials'
 end
 
 puts "disposable data contract: #{docs.length} Kubernetes objects checked"

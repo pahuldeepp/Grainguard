@@ -36,8 +36,11 @@ probes:
   readiness: { enabled: true, type: tcp, path: /readyz, periodSeconds: 5 }
   liveness: { enabled: true, type: tcp, path: /healthz, periodSeconds: 10 }
 networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
   ingressSources:
     - namespace: greenguard
       selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway }
     - namespace: greenguard
-      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: greenguard }
+      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff }

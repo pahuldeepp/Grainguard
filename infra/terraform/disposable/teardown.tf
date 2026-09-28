@@ -1,3 +1,22 @@
+# Record the cell identity before the first network resource is created. Root
+# outputs are written only after a successful apply, so a failed early apply
+# must still leave an account-bound scope for verified recovery.
+resource "terraform_data" "cell_scope" {
+  input = {
+    region       = var.aws_region
+    environment  = var.environment
+    cluster_name = var.cluster_name
+    account_id   = var.target_account_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.environment != "prod"
+      error_message = "The disposable root cannot manage a prod environment."
+    }
+  }
+}
+
 # Makes `terraform destroy` remove the AWS resources this state cannot see
 # before it deletes the cluster and network they depend on:
 #   - the CDK serverless stack for this environment (non-prod stacks use DESTROY);
@@ -31,6 +50,12 @@ resource "terraform_data" "pre_destroy_cleanup" {
     aws_eks_access_policy_association.cluster_admin,
     aws_route.private_nat,
     aws_route_table_association.private,
+    helm_release.argocd,
+    helm_release.gitops_bootstrap,
+    helm_release.istio_ingressgateway,
+    helm_release.aws_load_balancer_controller,
+    helm_release.keda,
+    helm_release.argo_rollouts,
   ]
 
   provisioner "local-exec" {

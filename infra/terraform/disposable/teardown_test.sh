@@ -12,7 +12,11 @@ cat >"$work/aws" <<'EOF'
 #!/usr/bin/env bash
 echo "aws $*" >>"$STUB_DIR/calls"
 case "$1 $2" in
-  "sts get-caller-identity") cat "$STUB_DIR/account" 2>/dev/null || echo 123456789012 ;;
+  "sts get-caller-identity")
+    if [[ "$*" == *"--query Arn"* ]]; then echo 'arn:aws:sts::123456789012:assumed-role/greenguard-operator/test'
+    else cat "$STUB_DIR/account" 2>/dev/null || echo 123456789012; fi ;;
+  "iam simulate-principal-policy")
+    if [ -f "$STUB_DIR/delete_denied" ]; then echo cloudformation:DeleteStack; fi ;;
   "cloudformation describe-stacks") [ -f "$STUB_DIR/stack" ] && { cat "$STUB_DIR/stack"; exit 0; }
     echo "An error occurred (ValidationError): Stack with id x does not exist" >&2; exit 254 ;;
   "cloudformation delete-stack") rm -f "$STUB_DIR/stack" ;;
@@ -77,7 +81,9 @@ case "$1 $2" in
     if [ -f "$STUB_DIR/master_secret" ]; then cat "$STUB_DIR/master_secret"; else
       echo "An error occurred (ResourceNotFoundException)" >&2; exit 254
     fi ;;
-  "kms describe-key") echo PendingDeletion ;;
+  "kms describe-key")
+    if [ -f "$STUB_DIR/kms_error" ]; then echo 'AccessDenied: KMS inventory unavailable' >&2; exit 254; fi
+    echo PendingDeletion ;;
 esac
 exit 0
 EOF
@@ -197,6 +203,12 @@ echo vol-1234abcd >"$GG_PV_INVENTORY_FILE"
 run_pre || fail "missing cluster with saved PV inventory should preserve the IDs"
 grep -Fxq vol-1234abcd "$GG_PV_INVENTORY_FILE" && ok "retry after EKS deletion retains exact EBS PV IDs"
 
+setup absent-cluster-empty-pv-inventory
+rm "$GG_PV_INVENTORY_FILE"
+run_pre || fail "absent EKS should establish an empty PV inventory"
+[ -f "$GG_PV_INVENTORY_FILE" ] && [ ! -s "$GG_PV_INVENTORY_FILE" ] &&
+  ok "pre-EKS cleanup records an empty PV inventory"
+
 setup preserved-pv-after-pvc-deletion
 touch "$STUB_DIR/cluster"
 echo vol-1234abcd >"$GG_PV_INVENTORY_FILE"
@@ -221,6 +233,17 @@ setup wrong-account
 echo 999999999999 >"$STUB_DIR/account"
 if run_pre; then fail "wrong account is refused"; fi
 grep -q "expected 123456789012" "$STUB_DIR/out" && ! grep -q "delete-stack\|kubectl" "$STUB_DIR/calls" && ok "a different AWS account is refused before any deletion"
+
+setup inventory-preflight-denied
+touch "$STUB_DIR/stack" "$STUB_DIR/edge_inventory_error"
+if run_pre; then fail "inventory permission failure must stop before mutations"; fi
+! grep -q 'cloudformation delete-stack\|logs delete-log-group' "$STUB_DIR/calls" && ok "inventory permission denial stops before AWS cleanup"
+
+setup delete-preflight-denied
+touch "$STUB_DIR/stack" "$STUB_DIR/delete_denied"
+if run_pre; then fail "delete permission failure must stop before mutations"; fi
+grep -q 'AWS delete permissions denied' "$STUB_DIR/out" &&
+  ! grep -q 'cloudformation delete-stack\|logs delete-log-group' "$STUB_DIR/calls" && ok "delete permission denial stops before AWS cleanup"
 
 setup unreachable-cluster
 touch "$STUB_DIR/cluster" "$STUB_DIR/stack" "$STUB_DIR/api_unreachable"
@@ -334,6 +357,14 @@ touch "$STUB_DIR/tagging_error"
 if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "tagging API failure must fail the inventory"; fi
 grep -q "AccessDenied" "$STUB_DIR/out" && ok "tagging API failure cannot pass as an empty inventory"
 
+setup inventory-kms-denied
+echo 'arn:aws:kms:us-east-1:123456789012:key/test' >"$STUB_DIR/tagged"
+touch "$STUB_DIR/kms_error" "$STUB_DIR/stack"
+if run_pre; then fail "KMS inventory denial must stop before cleanup"; fi
+grep -q 'KMS key inventory failed' "$STUB_DIR/out" &&
+  ! grep -q 'cloudformation delete-stack\|logs delete-log-group' "$STUB_DIR/calls" &&
+  ok "KMS inventory denial stops before AWS cleanup"
+
 setup wrapper-clean
 GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1 || fail "verified destroy wrapper succeeds on empty inventory"
 grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
@@ -349,6 +380,14 @@ grep -q '^terraform show -json$' "$STUB_DIR/calls" &&
   grep -q 'kubectl .*delete pvc --all' "$STUB_DIR/calls" &&
   grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
   ok "partial apply recovers EKS scope and pre-cleans before destroy"
+
+setup wrapper-partial-before-eks
+touch "$STUB_DIR/identity_error"
+rm "$GG_PV_INVENTORY_FILE"
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"terraform_data.cell_scope","mode":"managed","values":{"input":{"region":"us-east-1","environment":"sandbox","cluster_name":"greenguard-sandbox-cell-1","account_id":"123456789012"}}},{"address":"aws_vpc.cell","mode":"managed","values":{"tags":{"Name":"greenguard-sandbox-cell-1-vpc"},"tags_all":{"Project":"GreenGuard","Environment":"sandbox"}}}]}}}' >"$STUB_DIR/show_state"
+GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1 || fail "partial apply before EKS should recover saved scope"
+grep -q '^terraform destroy$' "$STUB_DIR/calls" && [ -f "$GG_PV_INVENTORY_FILE" ] &&
+  ! grep -q 'kubectl ' "$STUB_DIR/calls" && ok "pre-EKS partial apply uses saved cell scope"
 
 setup wrapper-pre-cleanup-fails
 touch "$STUB_DIR/cluster" "$STUB_DIR/api_unreachable"
@@ -418,4 +457,4 @@ grep -q 'Terraform state outputs unavailable' "$STUB_DIR/out" &&
   ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper fails closed on state output read error"
 
 echo "teardown tests: $pass passed"
-[ "$pass" -eq 40 ]
+[ "$pass" -eq 44 ]

@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "order": [
     {"name": "aws-load-balancer-controller", "namespace": "kube-system", "chart": "aws-load-balancer-controller", "version": "1.14.0", "requires": ["EKS Pod Identity association", "controller webhook port 9443 reachable", "clusterName, region and vpcId from Terraform output"]},
-    {"name": "istio-base", "namespace": "istio-system", "chart": "base", "version": null, "requires": ["pinned chart source and checksum"]},
-    {"name": "istiod", "namespace": "istio-system", "chart": "istiod", "version": null, "requires": ["istio-base CRDs healthy", "pinned chart source and checksum"]},
-    {"name": "istio-ingressgateway", "namespace": "istio-system", "chart": "gateway", "version": null, "requires": ["istiod healthy", "Service port 80 to pod port 8080", "readiness port 15021", "pinned chart source and checksum"]},
-    {"name": "keda", "namespace": "keda", "chart": "keda", "version": null, "requires": ["CRDs and metrics API healthy", "pinned chart source and checksum"]},
-    {"name": "argo-rollouts", "namespace": "argo-rollouts", "chart": "argo-rollouts", "version": null, "requires": ["CRDs and controller healthy", "pinned chart source and checksum"]},
-    {"name": "argocd", "namespace": "argocd", "chart": "argo-cd", "version": null, "requires": ["EKS API reachable", "pinned chart source and checksum", "application tree and immutable image digests"]}
+    {"name": "istio-base", "namespace": "istio-system", "chart": "base", "version": "1.30.5", "requires": ["chart integrity verification"]},
+    {"name": "istiod", "namespace": "istio-system", "chart": "istiod", "version": "1.30.5", "requires": ["istio-base CRDs healthy", "chart integrity verification"]},
+    {"name": "istio-ingressgateway", "namespace": "istio-system", "chart": "gateway", "version": "1.30.5", "requires": ["istiod healthy", "Service port 80 to pod port 8080", "readiness port 15021", "chart integrity verification"]},
+    {"name": "keda", "namespace": "keda", "chart": "keda", "version": "2.21.0", "requires": ["CRDs and metrics API healthy", "chart integrity verification"]},
+    {"name": "argo-rollouts", "namespace": "argo-rollouts", "chart": "argo-rollouts", "version": "2.43.2", "requires": ["CRDs and controller healthy", "chart integrity verification"]},
+    {"name": "argocd", "namespace": "argocd", "chart": "argo-cd", "version": "10.9.2", "requires": ["EKS API reachable", "chart integrity verification", "application tree and immutable image digests"]}
   ]
 }

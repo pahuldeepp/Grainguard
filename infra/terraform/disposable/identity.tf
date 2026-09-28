@@ -88,6 +88,11 @@ output "oidc_public_configuration" {
   }
 }
 
+output "cognito_user_pool_id" {
+  description = "Public pool identifier for account-guarded operator user invitation and first-admin enrollment."
+  value       = aws_cognito_user_pool.cell.id
+}
+
 output "mobile_deployment_config" {
   description = "Write `terraform output -json mobile_deployment_config > apps/mobile/shell/deployment.local.json`, then run the mobile configure script before an iPhone build. Public endpoints and client ID only."
   value = {

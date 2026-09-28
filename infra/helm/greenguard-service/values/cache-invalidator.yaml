@@ -8,3 +8,7 @@ probes:
   startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
   readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
   liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }

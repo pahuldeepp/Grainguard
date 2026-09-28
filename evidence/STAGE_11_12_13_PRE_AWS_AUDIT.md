@@ -155,3 +155,34 @@ wrapper has stub-tested inventory, but no AWS teardown has been run. The MQTT
 chart's hardware worker selector was corrected to the release's actual
 name/instance and its render checker passes. No AWS apply, destroy, web
 journey, or physical-iPhone journey has occurred.
+
+## Kafka and teardown continuation (offline only)
+
+The disposable broker now renders SASL/PLAIN over TLS with KRaft default-deny
+authorization and an ACL bootstrap candidate; Schema Registry renders HTTPS
+with Basic authentication. Runtime Go, KafkaJS and Python clients have
+fail-closed TLS/SASL configuration under `KAFKA_REQUIRE_TLS=true`; local
+plaintext remains available only when no security settings are requested.
+Terraform's disposable release values mount a CA-only Secret and set the
+security protocol; the Secret preflight requires per-release Kafka usernames,
+passwords and matching broker JAAS pairs. NetworkPolicy checks now cover 30
+data links, including membership-cache Kafka/Redis traffic.
+
+The Connect worker mounts both RDS and Kafka trust roots, uses Kafka
+SASL_SSL/PLAIN, and receives a scoped JAAS Secret. The topic bootstrap uses
+an authenticated private client properties file. The connector-registration
+Application is now a wave-24 child with four digest-pinned data-plane image
+inputs; its bounded Job injects verified RDS TLS and, for the Avro contacts
+connector, Registry HTTPS Basic credentials and CA trust. The six connector
+registration tests and data-plane Argo/chart checks pass. These are render
+and local parser checks, not broker/connector execution proof. Registry/ACL
+startup ordering, live topic/subject creation, task health, and source-to-topic
+flow remain open.
+
+The disposable destroy wrapper now recovers the cell identity from state when
+an apply stops before EKS, records an empty PV inventory when the cluster is
+confirmed absent, and preflights inventory/KMS read permissions before
+cleanup. The offline teardown suite passes 44 stubbed cases. Raw `terraform
+destroy` still cannot guarantee the requested post-destroy AWS inventory;
+`destroy-verified.sh` is the only verified operator sequence. No real AWS
+plan/apply/destroy or physical-iPhone test has run.

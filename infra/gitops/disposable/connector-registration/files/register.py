@@ -54,6 +54,13 @@ def load_configs(host):
         config["database.hostname"] = host
         config["database.sslmode"] = "verify-full"
         config["database.sslrootcert"] = "/rds-ca/ca.pem"
+        if name == "notification-contacts":
+            if config.get("value.converter") != "io.confluent.connect.avro.AvroConverter" or config.get("value.converter.schema.registry.url") != "${env:SCHEMA_REGISTRY_URL}":
+                raise ValueError("notification-contacts: secure Registry converter contract drifted")
+            config["value.converter.basic.auth.credentials.source"] = "USER_INFO"
+            config["value.converter.basic.auth.user.info"] = "${env:SCHEMA_REGISTRY_BASIC_USER_INFO}"
+            config["value.converter.schema.registry.ssl.truststore.type"] = "PEM"
+            config["value.converter.schema.registry.ssl.truststore.location"] = "/etc/greenguard/kafka/registry-ca.crt"
         configs[name] = config
     return configs
 

@@ -1,3 +1,5 @@
 image: ""
 credentialSecret: greenguard-cdc-credentials
 caSecret: greenguard-rds-ca
+kafkaCaSecret: greenguard-kafka-ca
+kafkaCredentialSecret: greenguard-kafka-connect-auth

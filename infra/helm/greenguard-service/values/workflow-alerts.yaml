@@ -2,9 +2,14 @@ nameOverride: workflow-alerts
 autoscaling:
   hpa: { enabled: true }
 networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
   ingressSources:
     - namespace: greenguard
-      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: greenguard }
+      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff }
+  egressServices:
+    - { name: tenant-control-plane, namespace: greenguard, release: tenant-control-plane, port: 3010 }
 service:
   port: 3004
   containerPort: 3004

@@ -1,0 +1,32 @@
+{{- $data := .Values.dataPlane | default dict }}
+{{- if ($data.enabled | default false) }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "revision must be an exact Git commit SHA" }}{{ end }}
+{{- if not (hasPrefix "https://" .Values.repositoryUrl) }}{{ fail "repositoryUrl must use HTTPS" }}{{ end }}
+{{- if not .Values.cell }}{{ fail "cell is required" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-schema-registry
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "13"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/kubernetes/disposable-data/registry
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

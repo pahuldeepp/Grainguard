@@ -1,0 +1,40 @@
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "revision must be an exact Git commit SHA" }}{{ end }}
+{{- if not (hasPrefix "https://" .Values.repositoryUrl) }}{{ fail "repositoryUrl must use HTTPS" }}{{ end }}
+{{- if not .Values.cell }}{{ fail "cell is required" }}{{ end }}
+{{- $required := list "otel-collector" "prometheus" "grafana" "tempo" "loki" }}
+{{- if ne (len .Values.observabilityImages) (len $required) }}{{ fail "observability requires exactly five image digests" }}{{ end }}
+{{- range $required }}
+{{- $image := index $.Values.observabilityImages . }}
+{{- if not $image }}{{ fail (printf "%s image digest is missing" .) }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" $image) }}{{ fail (printf "%s image digest is mutable or invalid" .) }}{{ end }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-observability
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/observability-chart
+    helm:
+      valuesObject:
+        images:
+{{ toYaml .Values.observabilityImages | indent 10 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

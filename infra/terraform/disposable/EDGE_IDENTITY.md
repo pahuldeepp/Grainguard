@@ -38,7 +38,12 @@ authorization code grant. Cognito user credentials and GreenGuard tenant
 memberships are **not** stored in Terraform state. An invited, verified user
 must be mapped to a tenant through GreenGuard's trusted membership store
 before tenant APIs will authorize them. A user pool alone does not create a
-usable tenant account. See [Cognito callback URI rules](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-client-apps.html).
+usable tenant account. The account-guarded `enroll-first-admin.sh` verifies
+the invited user's status and email in the Terraform-owned pool before it
+calls the control-plane first-admin enrollment CLI. It requires a private
+operator database connection and never stores credentials in Terraform.
+See [the enrollment runbook](../../../docs/runbooks/disposable-cognito-first-admin.md)
+and [Cognito callback URI rules](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-client-apps.html).
 
 The following Terraform outputs are public deployment configuration:
 

@@ -61,11 +61,12 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    `disposable_cell_identity` Terraform state output, runs `pre-destroy.sh`
    before `terraform destroy`, then checks the AWS inventory. It exits nonzero
    if any step fails. If an apply stopped before root outputs were saved, it
-   can recover the identity from the exact EKS resource ARN and tags in the
-   partial state. If neither identity source exists, it refuses cleanup so
-   the operator can inspect the state first. Optional
+   recovers the identity from `terraform_data.cell_scope` in the partial
+   state. Terraform records that scope before creating the VPC, including
+   for failures before EKS exists. Older partial states can recover from the
+   exact EKS ARN and tags. Optional
    arguments are accepted only when they match that saved identity exactly.
-   If neither the output nor a verified EKS resource identity is available,
+   If neither the output nor a verified state identity is available,
    the wrapper refuses to destroy; inspect and recover the state before
    cleanup. Raw `terraform destroy` runs its
    pre-destroy cleanup only if Terraform recorded that hook during apply; a
@@ -77,7 +78,11 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    wrapper for a single verified operator command, or run the inventory
    explicitly after raw `terraform destroy`.
 
-   Verified destroy first runs `pre-destroy.sh` while the cluster
+   Verified destroy first checks the final AWS inventory read permissions and
+   simulates the hook's CloudFormation and log deletion permissions before any
+   mutation. IAM simulation cannot prove permissions controlled by service
+   control policies, resource policies, or changed credentials; actual calls
+   still fail closed. It then runs `pre-destroy.sh` while the cluster
    still exists: it deletes the `GreenGuardServerless-<environment>` CDK stack,
    its two Lambda log groups, Kubernetes ingresses, `LoadBalancer` services
    disposable data StatefulSets and PVCs, then waits until

@@ -27,6 +27,11 @@ class RegistrationTest(unittest.TestCase):
             self.assertEqual(config["database.hostname"], "db.example.com")
             self.assertEqual(config["database.sslmode"], "verify-full")
             self.assertEqual(config["database.sslrootcert"], "/rds-ca/ca.pem")
+        contacts = configs["notification-contacts"]
+        self.assertEqual(contacts["value.converter.basic.auth.credentials.source"], "USER_INFO")
+        self.assertEqual(contacts["value.converter.basic.auth.user.info"], "${env:SCHEMA_REGISTRY_BASIC_USER_INFO}")
+        self.assertEqual(contacts["value.converter.schema.registry.ssl.truststore.type"], "PEM")
+        self.assertEqual(contacts["value.converter.schema.registry.ssl.truststore.location"], "/etc/greenguard/kafka/registry-ca.crt")
 
     def test_bad_host_rejected(self):
         with self.assertRaises(ValueError):

@@ -1,0 +1,4 @@
+image: ""
+rdsHost: ""
+authSecret: greenguard-pgbouncer-auth
+caSecret: greenguard-rds-ca

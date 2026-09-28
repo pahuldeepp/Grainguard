@@ -1,0 +1,88 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "ACL bootstrap image must be immutable" }}{{ end }}
+{{- $acls := .Files.Get "files/acls.tsv" }}
+{{- if not $acls }}{{ fail "Kafka ACL inventory missing" }}{{ end }}
+{{- $revision := sha256sum (printf "%s\n%s" .Values.image $acls) | trunc 12 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-acls-{{ $revision }}
+data:
+  acls.tsv: |
+{{ $acls | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenguard-acls-{{ $revision }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1200
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: kafka-acls
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              set -eu
+              : "${KAFKA_SASL_JAAS_CONFIG:?Kafka admin JAAS is required}"
+              test -s /etc/greenguard/kafka/ca.crt
+              umask 077
+              printf 'security.protocol=SASL_SSL\nsasl.mechanism=PLAIN\nsasl.jaas.config=%s\nssl.truststore.type=PEM\nssl.truststore.location=/etc/greenguard/kafka/ca.crt\n' "$KAFKA_SASL_JAAS_CONFIG" > /tmp/kafka-client.properties
+              while IFS='|' read -r principal kind pattern names operations; do
+                case "$principal" in ''|'#'*) continue ;; esac
+                old_ifs=$IFS
+                IFS=,
+                set -- $names
+                IFS=$old_ifs
+                for name do
+                  IFS=,
+                  set -- $operations
+                  IFS=$old_ifs
+                  for operation do
+                    case "$kind" in
+                      topic) set -- --topic "$name" --resource-pattern-type "$pattern" ;;
+                      group) set -- --group "$name" --resource-pattern-type "$pattern" ;;
+                      cluster) set -- --cluster ;;
+                      *) exit 1 ;;
+                    esac
+                    /opt/kafka/bin/kafka-acls.sh --bootstrap-server kafka.greenguard.svc.cluster.local:29092 --command-config /tmp/kafka-client.properties --add --allow-principal "User:$principal" --operation "$operation" "$@"
+                  done
+                done
+                printf 'ACL principal %s configured\n' "$principal"
+              done < /acls/acls.tsv
+          env:
+            - name: KAFKA_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef: {name: greenguard-kafka-admin-auth, key: KAFKA_SASL_JAAS_CONFIG}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: acls, mountPath: /acls, readOnly: true}
+            - {name: kafka-ca, mountPath: /etc/greenguard/kafka, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: acls
+          configMap: {name: greenguard-acls-{{ $revision }}}
+        - name: kafka-ca
+          secret:
+            secretName: greenguard-kafka-ca
+            defaultMode: 0440
+            items:
+              - {key: ca.crt, path: ca.crt}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

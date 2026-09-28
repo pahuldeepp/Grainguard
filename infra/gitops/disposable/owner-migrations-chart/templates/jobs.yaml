@@ -1,0 +1,79 @@
+{{- $owners := list
+  (dict "name" "telemetry" "image" .Values.telemetryImage "secret" "telemetry-migrator-config" "key" "TELEMETRY_MIGRATION_URL")
+  (dict "name" "projection" "image" .Values.projectionImage "secret" "projection-migrator-config" "key" "PROJECTION_MIGRATION_URL")
+  (dict "name" "jobs" "image" .Values.jobsImage "secret" "jobs-migrator-config" "key" "JOBS_MIGRATION_URL")
+  (dict "name" "saga" "image" .Values.sagaImage "secret" "saga-migrator-config" "key" "SAGA_MIGRATION_URL")
+  (dict "name" "hardware" "image" .Values.hardwareImage "secret" "hardware-migrator-config" "key" "HARDWARE_MIGRATION_URL")
+  (dict "name" "inventory" "image" .Values.inventoryImage "secret" "inventory-migrator-config" "key" "INVENTORY_MIGRATION_URL" "node" true)
+  (dict "name" "alerts" "image" .Values.alertsImage "secret" "alerts-migrator-config" "key" "ALERTS_MIGRATION_URL" "node" true)
+  (dict "name" "control" "image" .Values.controlImage "secret" "control-migrator-config" "key" "CONTROL_MIGRATION_URL" "node" true)
+  (dict "name" "billing" "image" .Values.billingImage "secret" "billing-migrator-config" "key" "BILLING_MIGRATION_URL" "node" true)
+  (dict "name" "risk" "image" .Values.riskImage "secret" "risk-migrator-config" "key" "RISK_MIGRATION_URL" "python" true)
+  (dict "name" "notifications" "image" .Values.notificationsImage "secret" "notifications-migrator-config" "key" "NOTIFICATIONS_MIGRATION_URL" "node" true)
+}}
+{{- range $owner := $owners }}
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" $owner.image) }}{{ fail (printf "%s migration image must be an immutable OCI digest" $owner.name) }}{{ end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenguard-{{ $owner.name }}-migrate-{{ sha256sum $owner.image | trunc 12 }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ if $owner.node }}1000{{ else if $owner.python }}10001{{ else }}65532{{ end }}
+        runAsGroup: {{ if $owner.node }}1000{{ else if $owner.python }}10001{{ else }}65532{{ end }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ $owner.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GG_RDS
+              value: "1"
+{{- if $owner.node }}
+            - name: HOME
+              value: /tmp
+{{- end }}
+            - name: {{ $owner.key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $owner.secret }}
+                  key: {{ $owner.key }}
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: ca
+              mountPath: /rds-ca
+              readOnly: true
+{{- if $owner.node }}
+            - name: tmp
+              mountPath: /tmp
+{{- end }}
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ $.Values.caSecret | quote }}
+{{- if $owner.node }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+{{- end }}
+{{- end }}

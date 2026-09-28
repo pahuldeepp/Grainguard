@@ -4,10 +4,14 @@ Run `ruby infra/terraform/disposable/lifecycle-audit.rb --ready` from the reposi
 
 The owned foundation includes VPC, NAT/EIP, EKS and nodes, RDS, disposable Secrets Manager containers, ECR, Cognito, private ALB, CloudFront and WAF. CDK and Kubernetes-owned resources need separate cleanup before the network disappears. KMS deletion is scheduled with a seven-day AWS waiting period; the inventory must distinguish `PendingDeletion` from an active key.
 
-Current blockers:
+The verified wrapper now records a cell scope before VPC creation and can
+recover a pre-EKS partial apply from state. It preflights inventory reads and
+simulates its AWS delete permissions before cleanup. Keep the state and the
+saved PV inventory until post-destroy inventory passes.
 
-1. A failed apply before EKS exists can leave billable VPC/NAT/RDS resources. `destroy-verified.sh` currently rejects partial state without one exact EKS cluster and therefore cannot drive this recovery. Persist a cell scope before billable creation and derive the account and resource names from state, rather than trusting typed arguments.
-2. Pre-destroy only verifies Kubernetes reachability and some delete permissions. It can mutate CloudFormation/Kubernetes resources before discovering missing permissions to list the final AWS inventory or to remove all provider-owned resources. Add a complete non-mutating preflight and retain a resumable scope.
-3. Native `terraform destroy` has no guaranteed post-destroy hook. The verified wrapper runs `check-teardown.sh`, but the user's raw `terraform destroy` requirement cannot truthfully be called verified. Make the wrapper the documented operator entry point or use an external orchestrator for the final inventory. Preserve the fail-closed distinction.
+Remaining limitations:
+
+1. Terraform provider deletion permissions cannot be completely proven without attempting each delete. The wrapper checks inventory reads and simulates the out-of-state AWS deletes; an actual denial remains a resumable failure with local state intact.
+2. Native `terraform destroy` has no guaranteed post-destroy hook. The documented operator entry point is `./destroy-verified.sh`, which runs the final inventory after Terraform exits. Raw `terraform destroy` cannot truthfully be called verified.
 
 Even after these source checks pass, live AWS destroy and final inventory are required. This checker does not claim that all billable resource classes can be found or that AWS eventual consistency has settled.

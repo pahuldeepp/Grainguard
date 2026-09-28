@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  namespace: greenguard
+spec:
+  type: ClusterIP
+  selector: {app: schema-registry}
+  ports:
+    - {name: https, port: 8081, targetPort: 8081}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  namespace: greenguard
+  labels: {app: schema-registry, greenguard.io/lifecycle: disposable}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: schema-registry}
+  template:
+    metadata:
+      labels: {app: schema-registry, greenguard.io/lifecycle: disposable}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      nodeSelector:
+        greenguard.io/workload-class: general
+      containers:
+        - name: schema-registry
+          image: confluentinc/cp-schema-registry@sha256:c02aa3d6409caea9ee707c7dfc98990460f7ee5e9c5535942a3279d8264fe0d1
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: SCHEMA_REGISTRY_HOST_NAME, value: schema-registry}
+            - {name: SCHEMA_REGISTRY_LISTENERS, value: "https://0.0.0.0:8081"}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS, value: "SASL_SSL://kafka.greenguard.svc.cluster.local:29092"}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL, value: SASL_SSL}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM, value: PLAIN}
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG
+              valueFrom: {secretKeyRef: {name: greenguard-kafka-auth, key: registry-kafka-jaas}}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_LOCATION, value: /etc/greenguard/registry/kafka.truststore.p12}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_TYPE, value: PKCS12}
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: {secretKeyRef: {name: greenguard-kafka-auth, key: truststore-password}}
+            - {name: SCHEMA_REGISTRY_SSL_KEYSTORE_LOCATION, value: /etc/greenguard/registry/registry.keystore.p12}
+            - {name: SCHEMA_REGISTRY_SSL_KEYSTORE_TYPE, value: PKCS12}
+            - name: SCHEMA_REGISTRY_SSL_KEYSTORE_PASSWORD
+              valueFrom: {secretKeyRef: {name: greenguard-kafka-auth, key: registry-keystore-password}}
+            - name: SCHEMA_REGISTRY_SSL_KEY_PASSWORD
+              valueFrom: {secretKeyRef: {name: greenguard-kafka-auth, key: registry-key-password}}
+            - {name: SCHEMA_REGISTRY_AUTHENTICATION_METHOD, value: BASIC}
+            - {name: SCHEMA_REGISTRY_AUTHENTICATION_ROLES, value: registry-user}
+            - {name: SCHEMA_REGISTRY_AUTHENTICATION_REALM, value: SchemaRegistry-Props}
+            - {name: SCHEMA_REGISTRY_OPTS, value: "-Djava.security.auth.login.config=/etc/greenguard/registry/registry-jaas.conf"}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: SCHEMA_REGISTRY_HEAP_OPTS, value: "-Xms128m -Xmx384m"}
+          ports:
+            - {name: https, containerPort: 8081}
+          startupProbe:
+            tcpSocket: {port: 8081}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: {port: 8081}
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: {port: 8081}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: registry-auth, mountPath: /etc/greenguard/registry, readOnly: true}
+      volumes:
+        - name: registry-auth
+          secret:
+            secretName: greenguard-kafka-auth
+            defaultMode: 0440
+            items:
+              - {key: registry.keystore.p12, path: registry.keystore.p12}
+              - {key: kafka.truststore.p12, path: kafka.truststore.p12}
+              - {key: registry-jaas.conf, path: registry-jaas.conf}
+              - {key: registry-users.properties, path: registry-users.properties}

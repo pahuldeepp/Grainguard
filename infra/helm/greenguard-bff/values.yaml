@@ -17,6 +17,10 @@ service:
   containerPort: 4000
 env: []
 envFrom: []
+volumeMounts: []
+volumes: []
+kafka:
+  caSecretName: ""
 resources:
   requests:
     cpu: 250m
@@ -37,6 +41,11 @@ networkPolicy:
   ingressNamespace: istio-system
   ingressSelector:
     app: istio-ingressgateway
+  additionalIngressSources:
+    - namespace: greenguard
+      selector:
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/instance: gateway
   egressServices:
     - name: read-api
       namespace: greenguard
@@ -50,6 +59,13 @@ networkPolicy:
       namespace: greenguard
       release: saga-api
       port: 8092
+    - name: tenant-control-plane
+      namespace: greenguard
+      release: tenant-control-plane
+      port: 3010
+  egressPods:
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
 mesh:
   enabled: false
   revision: ""

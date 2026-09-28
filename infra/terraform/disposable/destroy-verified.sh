@@ -69,30 +69,58 @@ else
     echo "destroy-verified: invalid Terraform state identity; refusing partial-state recovery" >&2
     exit 1
   fi
-  # A failed apply can leave EKS and Helm releases in state before Terraform
-  # has written root outputs or the late pre-destroy hook. Recover scope only
-  # from the exact EKS resource ARN and its Terraform-applied environment tag.
-  # Earlier partial states with no cluster have no Kubernetes owners to clean;
-  # keep refusing automatic deletion rather than trusting typed identifiers.
+  # Root outputs do not exist until apply completes. The scope resource is a
+  # prerequisite of the VPC, so even a pre-EKS partial apply has a saved cell
+  # identity. Older partial states can still recover from the exact EKS ARN.
   "$terraform_bin" show -json | python3 -c '
 import json, re, sys
 try:
     state = json.load(sys.stdin)
     resources = state["values"]["root_module"]["resources"]
+    scopes = [r["values"].get("input") for r in resources
+              if r.get("address") == "terraform_data.cell_scope"
+              and r.get("mode") == "managed"]
+    if len(scopes) > 1:
+        raise ValueError("multiple saved cell scopes")
     clusters = [r["values"] for r in resources
                 if r.get("address") == "aws_eks_cluster.cell"
                 and r.get("mode") == "managed"]
-    if len(clusters) != 1:
-        raise ValueError("expected exactly one EKS cluster in partial state")
-    cluster = clusters[0]
-    arn = cluster["arn"]
-    match = re.fullmatch(r"arn:aws[a-z-]*:eks:([a-z]{2}-[a-z]+-[0-9]+):([0-9]{12}):cluster/([A-Za-z0-9][A-Za-z0-9_-]{0,99})", arn)
-    if not match or cluster.get("name") != match.group(3):
-        raise ValueError("EKS cluster ARN/name mismatch")
-    region, account, name = match.groups()
-    environment = cluster["tags_all"]["Environment"]
-    if not re.fullmatch(r"[a-z][a-z0-9-]{1,15}", environment) or cluster["tags_all"].get("Project") != "GreenGuard":
-        raise ValueError("EKS cell tags are missing or invalid")
+    if len(clusters) > 1:
+        raise ValueError("multiple EKS clusters in partial state")
+    if scopes:
+        scope = scopes[0]
+        if not isinstance(scope, dict):
+            raise ValueError("invalid saved cell scope")
+        region, environment, name, account = (scope.get(k) for k in
+            ("region", "environment", "cluster_name", "account_id"))
+        if (not isinstance(region, str) or not re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]+", region)
+            or not isinstance(environment, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,15}", environment)
+            or not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", name)
+            or not isinstance(account, str) or not re.fullmatch(r"[0-9]{12}", account)):
+            raise ValueError("invalid saved cell scope fields")
+    elif clusters:
+        cluster = clusters[0]
+        match = re.fullmatch(r"arn:aws[a-z-]*:eks:([a-z]{2}-[a-z]+-[0-9]+):([0-9]{12}):cluster/([A-Za-z0-9][A-Za-z0-9_-]{0,99})", cluster["arn"])
+        if not match or cluster.get("name") != match.group(3):
+            raise ValueError("EKS cluster ARN/name mismatch")
+        region, account, name = match.groups()
+        environment = cluster["tags_all"]["Environment"]
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,15}", environment) or cluster["tags_all"].get("Project") != "GreenGuard":
+            raise ValueError("EKS cell tags are missing or invalid")
+    else:
+        raise ValueError("no saved cell scope or EKS identity")
+    if clusters:
+        cluster = clusters[0]
+        expected = f"arn:aws:eks:{region}:{account}:cluster/{name}"
+        if cluster.get("arn") != expected or cluster.get("name") != name:
+            raise ValueError("EKS identity differs from saved cell scope")
+        if cluster.get("tags_all", {}).get("Environment") != environment or cluster.get("tags_all", {}).get("Project") != "GreenGuard":
+            raise ValueError("EKS tags differ from saved cell scope")
+    vpcs = [r["values"] for r in resources if r.get("address") == "aws_vpc.cell" and r.get("mode") == "managed"]
+    if len(vpcs) > 1 or (vpcs and (vpcs[0].get("tags_all", {}).get("Environment") != environment
+        or vpcs[0].get("tags_all", {}).get("Project") != "GreenGuard"
+        or vpcs[0].get("tags", {}).get("Name") != f"{name}-vpc")):
+        raise ValueError("VPC tags differ from saved cell scope")
     secrets = [r["values"] for r in resources
                if r.get("address") == "aws_db_instance.postgres" and r.get("mode") == "managed"]
     if len(secrets) > 1:
@@ -134,6 +162,7 @@ fi
 # destroy provisioner alone can strand controller-owned LBs and EBS volumes.
 # The hook verifies AWS account and Kubernetes access before any deletion.
 GG_CLUSTER="$cluster" GG_REGION="$region" GG_ENVIRONMENT="$environment" GG_ACCOUNT="$account" \
+  GG_MASTER_SECRET_ARN="$master_secret_arn" \
   GG_PV_INVENTORY_FILE="${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}" \
   "$here/pre-destroy.sh"
 "$terraform_bin" destroy

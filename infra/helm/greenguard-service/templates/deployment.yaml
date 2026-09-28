@@ -152,12 +152,25 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.kafka.caSecretName }}
+            - name: kafka-ca
+              mountPath: /etc/greenguard/kafka
+              readOnly: true
+            {{- end }}
             {{- with .Values.container.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.kafka.caSecretName }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.kafka.caSecretName | quote }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+              - {key: registry-ca.crt, path: registry-ca.crt}
+        {{- end }}
         {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

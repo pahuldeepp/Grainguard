@@ -23,14 +23,21 @@
     {"name":"hardware-service-worker","chart":"greenguard-service","profile":"hardware-service-worker","image":"hardware-service","phase":"applications","secret":"hardware-service-config","health":null},
     {"name":"eventbridge-bridge","chart":"greenguard-service","profile":"eventbridge-bridge","image":"eventbridge-bridge","phase":"applications","secret":"eventbridge-bridge-config","health":null},
     {"name":"saga-api","chart":"greenguard-service","profile":"saga-api","image":"saga-orchestrator","phase":"applications","secret":"saga-api-config","health":"tcp:8092"},
-    {"name":"saga-worker","chart":"greenguard-service","profile":"saga-worker","image":"saga-orchestrator","phase":"applications","secret":"saga-worker-config","health":null}
+    {"name":"saga-worker","chart":"greenguard-service","profile":"saga-worker","image":"saga-orchestrator","phase":"applications","secret":"saga-worker-config","health":null},
+    {"name":"tenant-control-plane","chart":"greenguard-service","profile":"tenant-control-plane","image":"tenant-control-plane","phase":"applications","secret":"tenant-control-plane-config","health":"/readyz"},
+    {"name":"billing-service","chart":"greenguard-service","profile":"billing-service","image":"billing-service","phase":"applications","secret":"billing-service-config","health":"/readyz"},
+    {"name":"notification-service","chart":"greenguard-service","profile":"notification-service","image":"notification-service","phase":"applications","secret":"notification-service-config","health":"/readyz/notification-history"},
+    {"name":"jobs-worker","chart":"greenguard-service","profile":"jobs-worker","image":"jobs-worker","phase":"applications","secret":"jobs-worker-config","health":"/readyz"},
+    {"name":"cassandra-writer","chart":"greenguard-service","profile":"cassandra-writer","image":"cassandra-writer","phase":"applications","secret":"cassandra-writer-config","health":"/readyz"},
+    {"name":"search-indexer","chart":"greenguard-service","profile":"search-indexer","image":"search-indexer","phase":"applications","secret":"search-indexer-config","health":null}
   ],
   "blockingGaps": [
-    "No controller/GitOps bootstrap is owned by Terraform",
-    "No complete AWS data and broker provisioning or migration jobs",
-    "No immutable digest promotion from CI to deployment values",
-    "No environment secrets or NetworkPolicy and mesh peer resolution",
-    "Tenant-control-plane, billing, notifications, jobs, Cassandra writer and search indexer lack deployment artifacts",
+    "Terraform owns seven locally archived controller releases with checked SHA-256 locks and an optional GitOps root, but the default private EKS API is unreachable from an external Terraform runner; live CRD/webhook/application health remain unproven",
+    "The data Application covers Kafka, RabbitMQ and Redis manifests; RDS bootstrap and eleven PostgreSQL owner migration Jobs render offline. PgBouncer, Kafka topics, Connect, OpenSearch and Cassandra have conditional digest-pinned Argo children. Cassandra TLS/auth/schema/role bootstrap and OpenSearch TLS/scoped users have local proof, but their Secret values, image promotion, Argo ordering, EKS behavior, rotation, storage recovery and teardown lack live proof. MQTT remains an unwired private chart; device access/credential provisioning, connector/schema registration and live RDS/RLS proof remain missing",
+    "CI digest assembly and GHCR-to-ECR promotion have only offline proof; ECR publication, node pull and deployment values have no live proof",
+    "Secret containers and a guarded one-shot sync exist without operator source values, automatic rotation or live proof; service and in-cluster data NetworkPolicy links render and VPC CNI policy support is configured, but enforcement and external database, identity and provider egress require live proof/design",
+    "New runtime images and Helm profiles need built/published digests, secrets, data egress and live startup proof; search-indexer quarantine PVC needs live binding proof",
+    "Stage 11 observability has digest-pinned OTel/Prometheus/Grafana/Tempo/Loki ownership plus offline OTLP/HTTP and scrape wiring, but image execution, dashboards, alert routing, backend access and real end-to-end telemetry are unvalidated",
     "No AWS web/iPhone acceptance or teardown proof"
   ]
 }

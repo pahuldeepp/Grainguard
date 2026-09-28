@@ -2,12 +2,19 @@ nameOverride: gateway
 autoscaling:
   hpa: { enabled: true }
 networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
   ingressSources:
     - namespace: istio-system
       selector: { app: istio-ingressgateway }
     - namespace: greenguard
-      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: greenguard-dashboard }
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: dashboard }
   egressServices:
+    - name: greenguard-bff
+      namespace: greenguard
+      release: bff
+      port: 4000
     - name: read-api
       namespace: greenguard
       release: read-api
@@ -16,6 +23,10 @@ networkPolicy:
       namespace: greenguard
       release: saga-api
       port: 8092
+    - name: tenant-control-plane
+      namespace: greenguard
+      release: tenant-control-plane
+      port: 3010
 service:
   port: 4002
   containerPort: 4002

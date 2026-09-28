@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "= 6.60.0"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "= 3.3.0"
+    }
   }
 
   # This disposable cell owns its whole state locally. Keep the state file and

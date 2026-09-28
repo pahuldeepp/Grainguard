@@ -41,6 +41,9 @@
     },
     "env": { "type": "array", "items": { "type": "object" } },
     "envFrom": { "type": "array", "items": { "type": "object" } },
+    "volumeMounts": { "type": "array", "items": { "type": "object" } },
+    "volumes": { "type": "array", "items": { "type": "object" } },
+    "kafka": { "type": "object", "required": ["caSecretName"], "properties": { "caSecretName": { "type": "string", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" } } },
     "resources": {
       "type": "object",
       "required": ["requests", "limits"],
@@ -62,11 +65,22 @@
     },
     "networkPolicy": {
       "type": "object",
-      "required": ["enabled", "ingressNamespace", "ingressSelector", "egressServices"],
+      "required": ["enabled", "ingressNamespace", "ingressSelector", "egressServices", "egressPods"],
       "properties": {
         "enabled": { "type": "boolean", "const": true },
         "ingressNamespace": { "type": "string", "minLength": 1 },
         "ingressSelector": { "type": "object", "minProperties": 1 },
+        "additionalIngressSources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["namespace", "selector"],
+            "properties": {
+              "namespace": { "type": "string", "minLength": 1 },
+              "selector": { "type": "object", "minProperties": 1 }
+            }
+          }
+        },
         "egressServices": {
           "type": "array",
           "items": {
@@ -76,6 +90,18 @@
               "name": { "type": "string", "minLength": 1 },
               "namespace": { "type": "string" },
               "release": { "type": "string", "minLength": 1 },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            }
+          }
+        },
+        "egressPods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["namespace", "selector", "port"],
+            "properties": {
+              "namespace": { "type": "string", "minLength": 1 },
+              "selector": { "type": "object", "minProperties": 1 },
               "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
             }
           }

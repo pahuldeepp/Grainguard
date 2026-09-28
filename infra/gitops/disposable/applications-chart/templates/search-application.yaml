@@ -1,0 +1,42 @@
+{{- $search := .Values.searchPlane | default dict }}
+{{- if and (hasKey $search "enabled") (not (kindIs "bool" $search.enabled)) }}{{ fail "searchPlane.enabled must be boolean" }}{{ end }}
+{{- if $search.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "search plane requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "search plane requires an HTTPS Git repository" }}{{ end }}
+{{- if not .Values.cell }}{{ fail "search plane requires a cell" }}{{ end }}
+{{- range (list "image" "bootstrapImage") }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $search . | default "")) }}{{ fail (printf "search plane %s must be an immutable OCI digest" .) }}{{ end }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-opensearch
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/helm/greenguard-opensearch
+    helm:
+      valuesObject:
+        image: {{ $search.image | quote }}
+        bootstrap:
+          enabled: true
+          image: {{ $search.bootstrapImage | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

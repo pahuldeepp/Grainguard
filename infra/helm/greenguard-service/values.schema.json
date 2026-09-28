@@ -67,6 +67,7 @@
       }
     },
     "volumes": { "type": "array", "items": { "type": "object" } },
+    "kafka": { "type": "object", "required": ["caSecretName"], "properties": { "caSecretName": { "type": "string", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" } } },
     "probes": {
       "type": "object",
       "required": ["startup", "readiness", "liveness"],
@@ -97,12 +98,13 @@
     },
     "networkPolicy": {
       "type": "object",
-      "required": ["enabled", "ingressEnabled", "ingressSources", "egressServices", "egressCIDRs"],
+      "required": ["enabled", "ingressEnabled", "ingressSources", "egressServices", "egressPods", "egressCIDRs"],
       "properties": {
         "enabled": { "type": "boolean", "const": true },
         "ingressEnabled": { "type": "boolean" },
         "ingressSources": { "type": "array", "items": { "type": "object", "required": ["namespace", "selector"], "properties": { "namespace": { "type": "string", "minLength": 1 }, "selector": { "type": "object", "minProperties": 1 } } } },
         "egressServices": { "type": "array", "items": { "$ref": "#/definitions/egressService" } },
+        "egressPods": { "type": "array", "items": { "$ref": "#/definitions/egressPod" } },
         "egressCIDRs": { "type": "array", "items": { "$ref": "#/definitions/egressCidr" } }
       }
     },
@@ -173,6 +175,15 @@
         "name": { "type": "string", "minLength": 1 },
         "namespace": { "type": "string" },
         "release": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "egressPod": {
+      "type": "object",
+      "required": ["namespace", "selector", "port"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "selector": { "type": "object", "minProperties": 1 },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },

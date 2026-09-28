@@ -1,0 +1,25 @@
+nameOverride: jobs-worker
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+service:
+  enabled: true
+  port: 8095
+  containerPort: 8095
+container:
+  name: jobs-worker
+  envFrom:
+    - secretRef:
+        name: jobs-worker-config
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+scheduling:
+  nodeSelector: { greenguard.io/workload-class: compute }
+  tolerations:
+    - { key: greenguard.io/workload-class, operator: Equal, value: compute, effect: NoSchedule }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: rabbitmq }, port: 5672 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }

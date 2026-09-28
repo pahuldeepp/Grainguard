@@ -64,7 +64,22 @@ spec:
         - protocol: TCP
           port: {{ .port }}
     {{- end }}
+    {{- range .Values.networkPolicy.egressPods }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .selector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
     {{- range .Values.networkPolicy.egressCIDRs }}
+    {{- if or (eq .cidr "0.0.0.0/0") (eq .cidr "::/0") }}
+    {{- fail "networkPolicy.egressCIDRs must not permit all destinations" }}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: {{ .cidr | quote }}

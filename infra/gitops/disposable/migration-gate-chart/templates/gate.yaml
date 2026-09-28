@@ -1,0 +1,2 @@
+{{- if not .Values.ownerMigrationsReady }}{{ fail "Owner schema migration Jobs are not yet packaged and verified; runtime deployment is blocked" }}{{ end }}
+{{- fail "No owner migration Jobs are declared; refusing to release runtimes" }}

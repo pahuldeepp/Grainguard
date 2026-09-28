@@ -4,6 +4,8 @@
 #   ./check-teardown.sh <region> <environment> <cluster-name> <account-id>
 set -euo pipefail
 
+preflight=false
+if [ "${1:-}" = --preflight ]; then preflight=true; shift; fi
 region="${1:?region}" environment="${2:?environment}" cluster="${3:?cluster name}" account="${4:?account ID}"
 master_secret_arn="${5:-}"
 pv_inventory="${6:-${GG_PV_INVENTORY_FILE:-$(dirname "$0")/.last-destroy-pvs}}"
@@ -61,6 +63,7 @@ cognito_prefix="gg-${cognito_hash}"
 
 report() {
   local title="$1" items="$2"
+  [ "$preflight" = true ] && return
   items="$(printf '%s\n' "$items" | tr '\t' '\n' | sed '/^$/d;/^None$/d')"
   [ -z "$items" ] && return
   found=1
@@ -183,11 +186,16 @@ if [ -n "$master_secret_arn" ]; then
 fi
 
 for key in $(printf '%s\n' "$project_resources" | tr '\t' '\n' | grep ':kms:' || true); do
-  state="$(aws kms describe-key --key-id "$key" --query 'KeyMetadata.KeyState' --output text 2>/dev/null || echo Unknown)"
+  if ! state="$(aws kms describe-key --key-id "$key" --query 'KeyMetadata.KeyState' --output text)"; then
+    echo "check-teardown: KMS key inventory failed for $key" >&2
+    exit 1
+  fi
   [ "$state" = "PendingDeletion" ] || report "KMS key not scheduled for deletion" "$key ($state)"
 done
 
-if [ "$found" -eq 0 ]; then
+if [ "$preflight" = true ]; then
+  echo "check-teardown: inventory read permissions verified for $environment/$cluster in $region"
+elif [ "$found" -eq 0 ]; then
   echo "check-teardown: no GreenGuard resources found for $environment/$cluster in $region"
 else
   echo "check-teardown: resources remain; delete them through their owner, then rerun" >&2

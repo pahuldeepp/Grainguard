@@ -1,0 +1,46 @@
+{{- $cassandra := .Values.cassandraPlane | default dict }}
+{{- if and (hasKey $cassandra "enabled") (not (kindIs "bool" $cassandra.enabled)) }}{{ fail "cassandraPlane.enabled must be boolean" }}{{ end }}
+{{- if $cassandra.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "Cassandra plane requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "Cassandra plane requires an HTTPS Git repository" }}{{ end }}
+{{- if not .Values.cell }}{{ fail "Cassandra plane requires a cell" }}{{ end }}
+{{- range (list "image" "migratorImage") }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $cassandra . | default "")) }}{{ fail (printf "Cassandra plane %s must be an immutable OCI digest" .) }}{{ end }}
+{{- end }}
+{{- if ne ($cassandra.authSecret | default "") "greenguard-cassandra-auth" }}{{ fail "Cassandra auth Secret name drifted" }}{{ end }}
+{{- if ne ($cassandra.tlsSecret | default "") "greenguard-cassandra-tls" }}{{ fail "Cassandra TLS Secret name drifted" }}{{ end }}
+{{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/32$" ($cassandra.apiServerCIDR | default "")) }}{{ fail "Cassandra API Service needs an exact /32" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-cassandra
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "24"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/cassandra-chart
+    helm:
+      valuesObject:
+        cassandraImage: {{ $cassandra.image | quote }}
+        migratorImage: {{ $cassandra.migratorImage | quote }}
+        authSecret: {{ $cassandra.authSecret | quote }}
+        tlsSecret: {{ $cassandra.tlsSecret | quote }}
+        apiServerCIDR: {{ $cassandra.apiServerCIDR | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

@@ -26,17 +26,37 @@ production availability sizing.
 2. Install the StorageClass, then create a Kubernetes Secret named
    `greenguard-data-credentials` in namespace `greenguard`. It must contain
    `REDIS_PASSWORD`, `RABBITMQ_DEFAULT_USER`, `RABBITMQ_DEFAULT_PASS`, and
-   `RABBITMQ_ERLANG_COOKIE`. Generate high-entropy values outside source
+   `RABBITMQ_ERLANG_COOKIE`. Also create `greenguard-kafka-auth` with
+   `broker-jaas`, `registry-kafka-jaas`, `broker.keystore.p12`,
+   `broker.truststore.p12`, `keystore-password`, `key-password`,
+   `truststore-password`, `registry.keystore.p12`,
+   `registry-keystore-password`, `registry-key-password`,
+   `kafka.truststore.p12`, `registry-jaas.conf`, and
+   `registry-users.properties`. Create `greenguard-kafka-ca` with `ca.crt`
+   and `registry-ca.crt` PEM trust roots for clients. Create
+   `greenguard-kafka-connect-auth` with `KAFKA_SASL_USERNAME`,
+   `KAFKA_SASL_PASSWORD`, `SCHEMA_REGISTRY_USERNAME`, and
+   `SCHEMA_REGISTRY_PASSWORD`, and `KAFKA_SASL_JAAS_CONFIG` for Kafka Connect.
+   Create `greenguard-kafka-admin-auth` with `KAFKA_SASL_USERNAME`,
+   `KAFKA_SASL_PASSWORD`, and matching `KAFKA_SASL_JAAS_CONFIG` for the topic
+   bootstrap Job. PKCS12 entries in the AWS
+   source JSON are base64 encoded and sync to binary Secret values. Generate high-entropy values outside source
    control, provision from the cell's approved secret workflow, and verify
    the references resolve. The manifests contain no secret values and fail
    to start when the Secret or a key is missing.
 3. Apply the StatefulSets, Services, Deployment, and NetworkPolicies. Redis uses parallel
    pod management because all six nodes must start before cluster formation.
-4. Wait for Kafka and Schema Registry readiness, then provision the exact
+4. Wait for Kafka readiness, run the secured ACL/topic bootstrap Jobs, then
+   start Schema Registry and wait for its readiness. Provision the exact
    topics in `scripts/kafka-topics.mjs` and register checked-in schemas through
    `scripts/contacts-schema.mjs` and the connector flow. Their local command
    wrappers target Docker Compose, so an EKS migration Job or equivalent still
-   needs to be built.
+   needs to be built. It must use a scoped SASL/PLAIN identity, the Kafka CA,
+   and a client properties file with `security.protocol=SASL_SSL`,
+   `sasl.mechanism=PLAIN`, `sasl.jaas.config`, and `ssl.truststore` settings;
+   a plaintext `kafka-topics.sh --bootstrap-server` call will fail. The
+   GitOps topic Job now uses `greenguard-kafka-admin-auth` and the CA Secret;
+   its live authorization check remains a readiness gap.
    Topic auto-creation is disabled. Connect and connector registration are
    also missing; these manifests alone cannot carry GreenGuard events.
 5. Run the `redis-cluster-bootstrap` Job after the six Redis Pods answer
@@ -51,23 +71,47 @@ production availability sizing.
 
 The NetworkPolicies allow only Pods in the `greenguard` namespace to reach
 the client ports. Redis cluster-bus traffic is limited to Redis Pods. Nothing
-is exposed with a LoadBalancer. Broker traffic is plain TCP inside the pod
-network until Istio mTLS is deployed and proven; NetworkPolicy alone does not
-encrypt it. RabbitMQ authentication is required, but this single node is not
-highly available. Kafka has no SASL/ACL in this disposable manifest and carries
-tenant data, so broker authorization and mesh transport policy are blocking
-security gaps. Redis persistence does not replace PostgreSQL authority or
+is exposed with a LoadBalancer. Kafka's client listener requires SASL/PLAIN
+over TLS. The broker JAAS Secret value must include a broker inter-node user
+and `user_<name>` entries for every allowed client. The Registry's Kafka JAAS
+Secret value must authenticate a matching broker user. Both PKCS12 truststores
+must trust the Kafka server certificate. The broker certificate must include
+both `kafka.greenguard.svc.cluster.local` and
+`kafka-0.kafka-headless.greenguard.svc.cluster.local` as DNS SANs. Schema
+Registry serves HTTPS with Jetty BASIC authentication: `registry-jaas.conf`
+must define the `SchemaRegistry-Props` realm with a
+`PropertyFileLoginModule` pointing to
+`/etc/greenguard/registry/registry-users.properties`; users in that file
+need the `registry-user` role. Its certificate must include
+`schema-registry.greenguard.svc.cluster.local` as a DNS SAN. Client Pods need
+the issuing CA as `/etc/greenguard/kafka/ca.crt`, plus distinct usernames and
+passwords from their service Secret; mount only the CA Secret in client Pods.
+No certificate material or passwords belong in Git.
+Controller traffic uses SASL_SSL and stays within the Kafka Pod; it is not a
+client endpoint. KRaft `StandardAuthorizer` defaults to deny, with only the
+`broker` and `admin` identities configured as superusers. The broker identity
+must appear in `broker-jaas` as both its login and a `user_broker` entry. The
+admin identity must appear in the same JAAS file and in
+`greenguard-kafka-admin-auth` with matching credentials. The ACL bootstrap
+Job in `streaming-topics-chart` provisions fixed Registry, Connect and runtime
+principals from its reviewed `files/acls.tsv`; runtime usernames must match
+the release names exactly. The admin Secret is mounted only by bootstrap Jobs.
+RabbitMQ authentication is required, but this single node is not highly
+available. Live ACL denial/allowance and TLS client verification remain
+blocking security gaps. Redis persistence does not replace PostgreSQL authority or
 prove cache recovery behavior. A single Kafka broker is not an availability
 or Stage 13 scale proof.
 
 `ruby check-contract.rb --ready` deliberately fails while these security and
 live connectivity gaps remain. The normal check only validates manifest shape.
-Moving Kafka to SASL/TLS requires coordinated configuration in every client:
+Kafka SASL/TLS requires coordinated configuration in every client:
 Go `kafka-go` readers/writers, Python `confluent_kafka`, Node `kafkajs`, Kafka
 Connect, Schema Registry, topic/schema bootstrap jobs, and test utilities.
-The current application clients generally pass only `KAFKA_BROKERS` and use
-the default plaintext protocol; changing the broker alone would stop event
-processing. RabbitMQ clients use `RABBITMQ_URL` (including jobs-worker and
+Clients must set `KAFKA_SECURITY_PROTOCOL=SASL_SSL`,
+`KAFKA_SASL_MECHANISM=PLAIN`, `KAFKA_SASL_USERNAME`,
+`KAFKA_SASL_PASSWORD`, and `KAFKA_TLS_CA_FILE` and use
+`https://schema-registry.greenguard.svc.cluster.local:8081` with HTTP Basic
+credentials and the Registry CA. RabbitMQ clients use `RABBITMQ_URL` (including jobs-worker and
 notification-service), so the deployed URL must contain the generated user
 and password and be tested against the real broker. Redis clients must receive
 password-bearing node URLs for all six advertised cluster hosts, including
