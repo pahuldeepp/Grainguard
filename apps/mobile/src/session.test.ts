@@ -123,6 +123,23 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
   );
 });
 
+test("a no-tenant token cannot enter offline state without a BFF membership resolver", async () => {
+  const h = harness();
+  const session = new MobileSession(config, h.store, {
+    fetch: (async () => jsonResponse(200, {
+      access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+      expires_in: 300,
+    })) as unknown as typeof fetch,
+    now: h.clock.now,
+    crypto: defaultCrypto(),
+  });
+  const url = new URL(await session.beginSignIn());
+  await assert.rejects(
+    session.completeSignIn(`greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`),
+    /resolved by the BFF/,
+  );
+});
+
 test("a token with neither tenant claim nor issuer is rejected", async () => {
   const h = harness();
   h.grants.push({ noTenantClaim: true });
