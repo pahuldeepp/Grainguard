@@ -14,7 +14,7 @@
 
 - Preserve existing OAuth/OIDC, membership authorization, RLS, tenant filters, transactional outboxes, event IDs, idempotency receipts, and Redis `{t:tenantId}` hash tags.
 - Start with four physical shard primaries and one read replica per shard; each shard may configure replica count 0–5 only through guarded Terraform configuration.
-- Do not route by alphabet, modulo shard count, request header, process-local default, or first healthy database.
+- Use the versioned hash ring only for first onboarding assignment. Do not route requests by alphabet, modulo, rehashing, request header, process-local default, or first healthy database.
 - Verify tenant ownership inside every write transaction; fence by monotonically increasing BIGINT epoch serialized as a decimal string.
 - A move has one owner at a time and uses the approved short write pause; ambiguous provider effects block cutover pending reconciliation.
 - No production access or real AWS apply. Offline/local proof must be distinguished from AWS/live proof.
@@ -73,7 +73,8 @@
 - `compareAndSetPlacement(tenantId, expectedEpoch, targetShardId, operationId)` advances epoch exactly once and is idempotent by operation ID.
 - API accepts tenant identity from verified principal/context only; shard ID or epoch supplied by callers is rejected/ignored.
 
-- [ ] Add migration tests for shard registry, default existing shard assignment for all existing organizations, uniqueness and BIGINT-to-decimal serialization.
+- [ ] Add migration tests for shard registry, explicit compatibility assignment for existing organizations, uniqueness and BIGINT-to-decimal serialization. Store ring version on each placement.
+- [ ] Add deterministic ring tests for canonical tenant IDs, 128 virtual nodes per active shard, stable assignment across process restarts, ring-version changes affecting new tenants only, and a trusted onboarding override; requests must never calculate a ring result.
 - [ ] Add route resolver tests for active, quiescing, unknown shard, expired route, stale epoch, control-plane outage, and tenant mismatch.
 - [ ] Implement bounded cache expiry/invalidation and fail-closed behavior; never infer a shard from health or assume shard zero.
 - [ ] Implement placement CAS, move lock uniqueness, durable operation ledger and monotonic epoch rules.
@@ -97,7 +98,7 @@
 - [ ] Add ownership rows and triggers to every tenant-owned operational DB, including projection DBs; define safe migration initialization for pre-existing tenants.
 - [ ] Implement language helpers and migrate service write transactions without dropping RLS or existing tenant filters.
 - [ ] Restrict ownership writes, trigger changes, replication role, bypass procedures and runtime TRUNCATE from runtime roles; separate migration/copy credentials.
-- [ ] Run all affected service DB suites with two different tenant IDs and assert cross-shard and cross-tenant isolation.
+- [ ] Run affected service DB suites with tenants placed across s1–s4 and assert cross-shard and cross-tenant isolation.
 
 ## Task 4: Run four independent local database bundles
 
@@ -110,7 +111,7 @@
 **Interfaces:**
 - Runtime configuration provides a registry of shard ID → private owner DB endpoints/credentials; tenant route contains shard ID only, never credentials.
 - Every service can hold bounded pools for eligible shard owners and close them cleanly.
-- Initial stable shard IDs are `s1`, `s2`, `s3`, and `s4`; no renumbering based on count.
+- Initial stable shard IDs are `s1`, `s2`, `s3`, and `s4`; no renumbering based on count; the versioned ring uses 128 vnodes per shard for new tenants only.
 
 - [ ] Add compose profile with four separately named PostgreSQL primaries and independently bootstrapped logical databases/roles.
 - [ ] Run every owner migration against all four bundles and verify schema/grants/partition setup match.

@@ -40,7 +40,7 @@ Evidence and alternatives are recorded in
 
 ## 3. Deployment and data ownership
 
-Use application-routed operational tenant bundles. The initial topology has four stable shard IDs (`s1`–`s4`), each owning a
+Use application-routed operational tenant bundles. The initial topology has four stable shard IDs (`s1`–`s4`), represented by 128 virtual nodes each in a versioned onboarding ring. The ring is used only during tenant creation; persisted placement is authoritative afterward. Each shard owns a
 private PostgreSQL primary and one read replica, distinct endpoint/role
 Secrets, PgBouncer targets, migration history, CDC sources and health metrics.
 Replica counts remain configurable per shard within the reviewed connection budget.
@@ -58,7 +58,7 @@ Redis, Kafka, Cassandra, OpenSearch, S3 and DynamoDB remain shared in the first
 implementation. Their tenant data is not moved just because PostgreSQL moves.
 Consumers, live streams and provider delivery intents must nevertheless respect
 placement, source lineage and deduplication. OAuth identities and device IDs do
-not change during a move. No alphabetic, modulo-shard-count, or consistent-hash routing. The four-shard baseline is explicit placement in the control-plane table; placement is authoritative and never recomputed from shard count.
+not change during a move. Use a versioned consistent-hash ring with 128 virtual nodes per active shard only to suggest placement during tenant onboarding. Persist the selected stable shard ID and ring version atomically with tenant creation. The placement table is authoritative afterward: requests never rehash, adding ring members never remaps existing tenants, and a move requires the fenced migration protocol. A trusted administrative onboarding override may choose another active shard and is recorded.
 
 ## 4. Read replica policy
 
@@ -268,7 +268,7 @@ traffic admission; old credentials/processes remain fenced.
 
 ## 10. Local and cloud topology
 
-Create four independent local PostgreSQL bundles (`s1`–`s4`) with one real streaming replica per bundle for lag tests, while using the existing shared Redis Cluster/event stack. New tenants receive an explicit persisted shard assignment at onboarding using configured capacity/administrative policy; requests never recalculate a hash. Existing tenants may remain explicitly assigned to s1 until moved by the fenced migration protocol. Apply all owner migrations and RLS/grant checks to all four bundles. Central control/billing fixtures remain separate. Bootstrap is repeatable and does not mutate unrelated local data.
+Create four independent local PostgreSQL bundles (`s1`–`s4`) with one real streaming replica per bundle for lag tests, while using the existing shared Redis Cluster/event stack. New tenants receive a persisted shard assignment from the versioned ring at onboarding; trusted operators may override the suggestion. Existing tenants keep their saved shard even if the ring changes, and move only through the fenced migration protocol. Apply all owner migrations and RLS/grant checks to all four bundles. Central control/billing fixtures remain separate. Bootstrap is repeatable and does not mutate unrelated local data.
 
 Terraform uses stable for_each shard IDs and explicit replica maps, not list
 positions. Argo migration, Secret, PgBouncer and connector inventories derive from
