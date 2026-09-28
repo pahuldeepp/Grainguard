@@ -1,0 +1,170 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"sync"
+	"time"
+
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"syscall"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"greenguard.local/hardware-service/hardware"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	if err := run(ctx); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	url := os.Getenv("HARDWARE_DATABASE_URL")
+	if url == "" {
+		return errors.New("HARDWARE_DATABASE_URL required")
+	}
+	brokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
+	if os.Getenv("KAFKA_BROKERS") == "" {
+		return errors.New("KAFKA_BROKERS required")
+	}
+	mqttURL := os.Getenv("MQTT_BROKER_URL")
+	if mqttURL == "" {
+		return errors.New("MQTT_BROKER_URL required for physical sensor configuration")
+	}
+	clientID := strings.TrimSpace(os.Getenv("MQTT_CLIENT_ID"))
+	if clientID == "" {
+		return errors.New("MQTT_CLIENT_ID required for persistent broker sessions")
+	}
+	mqttTLS, err := mqttTLSConfig(mqttURL, strings.TrimSpace(os.Getenv("MQTT_CA_FILE")))
+	if err != nil {
+		return err
+	}
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelStartup()
+	if err := pool.Ping(startupCtx); err != nil {
+		return fmt.Errorf("connect hardware database: %w", err)
+	}
+	client, err := hardware.KafkaClient(brokers)
+	if err != nil {
+		return err
+	}
+	defer client.CloseAllowingRebalance()
+	store := hardware.Store{DB: pool}
+	dispatcher := hardware.MQTTDispatcher{Store: store}
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+	opts := mqtt.NewClientOptions().AddBroker(mqttURL).SetClientID(clientID)
+	if mqttTLS != nil {
+		opts.SetTLSConfig(mqttTLS)
+	}
+	opts.SetAutoReconnect(false).SetConnectRetry(false).SetCleanSession(false)
+	// Serialize acknowledgements and let QoS 1 redeliver if the database write fails.
+	opts.SetOrderMatters(true).SetAutoAckDisabled(true)
+	if user := os.Getenv("MQTT_USERNAME"); user != "" {
+		opts.SetUsername(user)
+		opts.SetPassword(os.Getenv("MQTT_PASSWORD"))
+	}
+	var ackSubscriptionMu sync.Mutex
+	ackSubscriptionRunning := false
+	ackResubscribePending := false
+	ackSubscriptionReady := make(chan struct{})
+	reconnectRequests := make(chan struct{}, 1)
+	var ackReadyOnce sync.Once
+	requestReconnect := func() {
+		select {
+		case reconnectRequests <- struct{}{}:
+		default:
+		}
+	}
+	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		log.Printf("MQTT connection lost; reconnecting: %v", err)
+		requestReconnect()
+	})
+	opts.SetOnConnectHandler(func(mc mqtt.Client) {
+		ackSubscriptionMu.Lock()
+		if ackSubscriptionRunning {
+			ackResubscribePending = true
+			ackSubscriptionMu.Unlock()
+			return
+		}
+		ackSubscriptionRunning = true
+		ackSubscriptionMu.Unlock()
+		go func() {
+			for runtimeCtx.Err() == nil {
+				subscribeAckUntilReady(runtimeCtx, mc.IsConnected, func() mqtt.Token {
+					return mc.Subscribe("greenguard/+/+/ack", 1, func(_ mqtt.Client, m mqtt.Message) {
+						ackCtx, cancelAck := context.WithTimeout(runtimeCtx, 10*time.Second)
+						defer cancelAck()
+						if _, err := dispatcher.HandleAck(ackCtx, m.Topic(), m.Payload()); err != nil {
+							if errors.Is(err, hardware.ErrPermanentMQTTAck) {
+								log.Printf("permanent device acknowledgement rejected; message discarded")
+								m.Ack()
+								return
+							}
+							if runtimeCtx.Err() != nil {
+								return
+							}
+							log.Printf("transient MQTT acknowledgement failure; reconnecting for redelivery: %v", err)
+							requestReconnect()
+							return
+						}
+						m.Ack()
+					})
+				}, 5*time.Second, 250*time.Millisecond, mqttSubscriptionTokenGranted, func() {
+					ackReadyOnce.Do(func() { close(ackSubscriptionReady) })
+				}, func(err error) {
+					log.Printf("MQTT ack subscription failed; retrying: %v", err)
+				})
+				ackSubscriptionMu.Lock()
+				if ackResubscribePending && runtimeCtx.Err() == nil {
+					ackResubscribePending = false
+					ackSubscriptionMu.Unlock()
+					continue
+				}
+				ackResubscribePending = false
+				ackSubscriptionRunning = false
+				ackSubscriptionMu.Unlock()
+				return
+			}
+		}()
+	})
+	mqttClient := mqtt.NewClient(opts)
+	dispatcher.Client = mqttClient
+	connectionDone := make(chan struct{})
+	go func() {
+		defer close(connectionDone)
+		maintainMQTTConnection(runtimeCtx, mqttClient, reconnectRequests, func(err error) {
+			log.Printf("MQTT connection attempt failed; retrying: %v", err)
+		})
+	}()
+	defer func() {
+		cancelRuntime()
+		<-connectionDone
+		mqttClient.Disconnect(250)
+	}()
+	select {
+	case <-ackSubscriptionReady:
+	case <-ctx.Done():
+		return nil
+	}
+	return runWorkers(ctx,
+		dispatcher.Run,
+		(hardware.OutboxPublisher{Store: store, Client: client}).Run,
+		(hardware.Worker{Store: store, Client: client}).Run,
+	)
+}
