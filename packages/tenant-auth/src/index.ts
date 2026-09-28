@@ -13,6 +13,12 @@ export interface Principal {
   tenantId: string;
   roles: Role[];
   expiresAt: Date;
+  principalType?: "service";
+  scopes?: string[];
+  keyId?: string;
+  deviceId?: string;
+  email?: string;
+  emailVerified?: boolean;
 }
 
 export type AuthErrorCode =
@@ -38,7 +44,11 @@ export class AuthError extends Error {
 
 export interface VerifierOptions {
   issuer: string;
-  audience: string;
+  audience?: string;
+  // Cognito access tokens normally identify the public app in client_id rather
+  // than aud. This opt-in mode is only for mapped human identities.
+  tokenMode?: "audience" | "cognito-access";
+  cognitoClientIds?: string[];
   keys:
     | {
         jwksUrl: string;
@@ -49,6 +59,10 @@ export interface VerifierOptions {
     | { getKey: JWTVerifyGetKey };
   clockToleranceSec?: number;
   now?: () => Date;
+  // ADR-0014: when set, the IdP token proves identity only and this maps the
+  // verified payload to GreenGuard claims (tenant_id, roles). Return undefined
+  // for an identity with no membership.
+  mapIdentity?: (payload: JWTPayload) => JWTPayload | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -106,12 +120,24 @@ function toPrincipal(payload: JWTPayload): Principal {
     tenantId,
     roles: [...new Set(roles as Role[])],
     expiresAt: new Date(Number(payload.exp) * 1000),
+    email: typeof payload.email === "string" ? payload.email : undefined,
+    emailVerified: payload.email_verified === true,
   };
 }
 
 export function createTokenVerifier(options: VerifierOptions): {
   verify(authorizationHeader: string | undefined): Promise<Principal>;
 } {
+  const tokenMode = options.tokenMode ?? "audience";
+  if (tokenMode === "audience" && !options.audience)
+    throw new Error("audience is required for audience token mode");
+  if (
+    tokenMode === "cognito-access" &&
+    (!options.mapIdentity ||
+      !options.cognitoClientIds?.length ||
+      options.cognitoClientIds.some((id) => !id || id.trim() !== id))
+  )
+    throw new Error("cognito-access requires mapped identity and client IDs");
   const { keys } = options;
   const getKey =
     "getKey" in keys
@@ -131,7 +157,7 @@ export function createTokenVerifier(options: VerifierOptions): {
         ({ payload } = await jwtVerify(token, getKey, {
           algorithms: ["RS256"],
           issuer: options.issuer,
-          audience: options.audience,
+          audience: tokenMode === "audience" ? options.audience : undefined,
           clockTolerance: options.clockToleranceSec ?? DEFAULT_TOLERANCE_SEC,
           currentDate: now(),
           requiredClaims: ["exp"],
@@ -146,13 +172,50 @@ export function createTokenVerifier(options: VerifierOptions): {
             : "invalid_token",
         );
       }
-      return toPrincipal(payload);
+      if (
+        tokenMode === "cognito-access" &&
+        (payload.token_use !== "access" ||
+          typeof payload.client_id !== "string" ||
+          !options.cognitoClientIds!.includes(payload.client_id) ||
+          typeof payload.username !== "string" ||
+          !payload.username ||
+          typeof payload.auth_time !== "number" ||
+          !Number.isFinite(payload.auth_time) ||
+          payload.sub === payload.client_id ||
+          payload.grant_type === "client_credentials" ||
+          payload.gty === "client_credentials")
+      )
+        throw new AuthError(401, "invalid_token");
+      if (tokenMode === "cognito-access" && payload.aud !== undefined) {
+        const audiences = Array.isArray(payload.aud)
+          ? payload.aud
+          : [payload.aud];
+        if (!options.audience || !audiences.includes(options.audience))
+          throw new AuthError(401, "invalid_token");
+      } else if (tokenMode === "cognito-access" && options.audience) {
+        throw new AuthError(401, "invalid_token");
+      }
+      const claims = options.mapIdentity
+        ? options.mapIdentity(payload)
+        : payload;
+      if (!claims) throw new AuthError(401, "invalid_claims");
+      return toPrincipal(claims);
     },
   };
 }
 
 export function requireRole(principal: Principal, ...allowed: Role[]): void {
-  if (!principal.roles.some((role) => allowed.includes(role))) {
+  if (
+    principal.principalType === "service" ||
+    !principal.roles.some((role) => allowed.includes(role))
+  ) {
     throw new AuthError(403, "insufficient_role");
   }
 }
+
+export {
+  createTokenVerifierFromEnv,
+  membershipMapper,
+  parseMemberships,
+  type Membership,
+} from "./oidc.js";
