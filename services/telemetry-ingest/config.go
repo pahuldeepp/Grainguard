@@ -3,20 +3,26 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // ingestConfig is everything the ingest endpoint needs beyond the database. Auth is nil when
 // no AUTH_* setting is present, which leaves the service with its health probes only.
 type ingestConfig struct {
+	TelemetryV2Enabled  bool
 	BindingFeedMaxStale time.Duration
 	Auth                *AuthConfig
 	OTLPEndpoint        string
 	SampleRatio         float64
 	Limits              LimitConfig
 	Policy              QualityPolicy
+	APIKeyEndpoint      string
+	APIKeyLookupToken   string
+	TrustedProxyCIDRs   []netip.Prefix
 }
 
 var loopbackHosts = map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
@@ -27,6 +33,25 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 		return ingestConfig{}, err
 	}
 	cfg := ingestConfig{Auth: auth, Limits: DefaultLimitConfig(), SampleRatio: 1}
+	switch getenv("INGEST_TELEMETRY_V2_ENABLED") {
+	case "", "0":
+	case "1":
+		cfg.TelemetryV2Enabled = true
+	default:
+		return ingestConfig{}, errors.New("INGEST_TELEMETRY_V2_ENABLED must be 0 or 1")
+	}
+	cfg.APIKeyEndpoint, cfg.APIKeyLookupToken = getenv("CONTROL_PLANE_URL"), getenv("CONTROL_LOOKUP_TOKEN")
+	if cfg.TrustedProxyCIDRs, err = loadTrustedProxyCIDRs(getenv("INGEST_TRUSTED_PROXY_CIDRS")); err != nil {
+		return ingestConfig{}, err
+	}
+	if (cfg.APIKeyEndpoint == "") != (cfg.APIKeyLookupToken == "") {
+		return ingestConfig{}, errors.New("CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together")
+	}
+	if cfg.APIKeyEndpoint != "" {
+		if _, err := NewAPIKeyVerifier(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken); err != nil {
+			return ingestConfig{}, err
+		}
+	}
 	if cfg.OTLPEndpoint, err = loadOTLPEndpoint(getenv); err != nil {
 		return ingestConfig{}, err
 	}
@@ -44,6 +69,29 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 	}
 	cfg.BindingFeedMaxStale, err = loadBindingFeedBound(getenv)
 	return cfg, err
+}
+
+func loadTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 64 {
+		return nil, errors.New("INGEST_TRUSTED_PROXY_CIDRS accepts at most 64 CIDR prefixes")
+	}
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || value == "" {
+			return nil, errors.New("INGEST_TRUSTED_PROXY_CIDRS must be a comma-separated list of CIDR prefixes")
+		}
+		if prefix.Bits() == 0 {
+			return nil, errors.New("INGEST_TRUSTED_PROXY_CIDRS must not contain universal CIDRs")
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 // The three AUTH_* settings are all or nothing: a partial set is a deployment mistake and
@@ -88,6 +136,7 @@ func loadLimits(getenv func(string) string, limits *LimitConfig) error {
 	}{
 		{"INGEST_DEVICE_RATE", &limits.Device.Rate, 0, false}, {"INGEST_DEVICE_BURST", &limits.Device.Burst, 1, true},
 		{"INGEST_TENANT_RATE", &limits.Tenant.Rate, 0, false}, {"INGEST_TENANT_BURST", &limits.Tenant.Burst, 1, true},
+		{"INGEST_KEY_RATE", &limits.Key.Rate, 0, false}, {"INGEST_KEY_BURST", &limits.Key.Burst, 1, true},
 	}
 	for _, target := range targets {
 		value, err := envFloat(getenv, target.key, *target.into, target.low, 1e9, target.inclusive)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -44,6 +45,13 @@ func startBindingConsumer(parent context.Context, db TxStarter, cfg ingestConfig
 	feed := &BindingFeed{DB: db, MaxStale: cfg.BindingFeedMaxStale, Partitions: 6, Now: time.Now}
 	consumer := &BindingConsumer{Validate: schemas.Validate, Source: kafka, Sink: kafka, Attempts: 5, RetryDelay: time.Second, Timeout: 20 * time.Second,
 		Apply: func(ctx context.Context, body []byte) (BindingOutcome, error) {
+			var event struct {
+				EventType string `json:"event_type"`
+			}
+			_ = json.Unmarshal(body, &event)
+			if event.EventType == eventCableLayout {
+				return ApplyLayoutEvent(ctx, db, body)
+			}
 			return ApplyInventoryEvent(ctx, db, body)
 		}, Heartbeat: feed.Heartbeat}
 	app.Consumer, app.Feed = consumer, feed

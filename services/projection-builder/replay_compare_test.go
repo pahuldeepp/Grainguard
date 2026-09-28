@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,7 +23,7 @@ func referenceEnvelope(kind, device, id string, version int, payload map[string]
 			payload["measurements"] = map[string]any{}
 		}
 	}
-	body, _ := json.Marshal(map[string]any{fieldType: kind, fieldAggregate: device, fieldEvent: id, fieldVersion: version, fieldPayload: payload})
+	body, _ := json.Marshal(map[string]any{fieldType: kind, fieldSchema: 1, fieldAggregate: device, fieldEvent: id, fieldVersion: version, fieldPayload: payload})
 	return body
 }
 func TestCanonicalAccumulatorMatchesReferenceAndHistoryCutoff(t *testing.T) {
@@ -97,5 +98,24 @@ func TestReferenceFoldRejectsAmbiguousVersion(t *testing.T) {
 	e := referenceEnvelope(typeStatus, d, "one", 1, map[string]any{"status": "online"})
 	if _, err := referenceFold([][]byte{e, e}); err == nil {
 		t.Fatal("ambiguous stream version accepted")
+	}
+}
+
+func TestCanonicalLayoutSensorsIgnoresOrderAndNormalizesDepth(t *testing.T) {
+	first := map[string]any{"sensor_id": "sensor-a", "position": json.Number("1"), "label": "Top", "depth_m": nil}
+	second := map[string]any{"sensor_id": "sensor-b", "position": json.Number("2"), "label": "Bottom", "depth_m": json.Number("3.5")}
+	forward, err := canonicalLayoutSensors([]any{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, err := canonicalLayoutSensors([]any{second, first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forward != reversed {
+		t.Fatalf("sensor order affected canonical layout: %s != %s", forward, reversed)
+	}
+	if !strings.Contains(forward, `"depth_m":null`) {
+		t.Fatalf("missing depth was not normalized to null: %s", forward)
 	}
 }

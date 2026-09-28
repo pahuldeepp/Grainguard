@@ -110,7 +110,8 @@ class EventParsingTest(unittest.TestCase):
         )
         for key, value in mutations:
             with self.subTest(key=key, value=value):
-                self.assert_invalid(events.TELEMETRY_TOPIC, {**good, key: value})
+                self.assert_invalid(events.TELEMETRY_TOPIC, {**good, key: value},
+                                    "unsupported_event" if key == "schema_version" and value == 2 else "invalid_event")
         self.assert_invalid(events.TELEMETRY_TOPIC, {**good, "extra": 1})
         self.assert_invalid(events.TELEMETRY_TOPIC, {**good, "event_type": "x"}, "unsupported_event")
         payload = good["payload"]

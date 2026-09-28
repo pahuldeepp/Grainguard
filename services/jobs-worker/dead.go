@@ -62,22 +62,14 @@ type deadOutboxRef struct {
 	generation     int
 }
 
-// DrainDead scans identifiers under a read-only scope, then confirms and marks each
-// message inside a tenant-scoped row lock. Broker outages leave the row pending.
+// DrainDead lists identifiers through the ID-only selector, then reads, confirms and marks
+// each message inside a tenant-scoped row lock. Broker outages leave the row pending.
 func (d *Dispatcher) DrainDead(ctx context.Context) error {
-	var refs []deadOutboxRef
-	err := inTx(ctx, d.DB, "app.scope", "dead-scan", func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT tenant_id::text, intent_id::text, delivery_generation FROM dead_letter_outbox
-			WHERE published_at IS NULL ORDER BY dead_at LIMIT $1`, d.Batch)
-		if err != nil {
-			return err
-		}
-		refs, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (deadOutboxRef, error) {
+	refs, err := selectRefs(ctx, d.DB, `SELECT tenant_id::text, intent_id::text, delivery_generation FROM jobs_dead_letter_refs($1)`, d.Batch,
+		func(r pgx.CollectableRow) (deadOutboxRef, error) {
 			var ref deadOutboxRef
 			return ref, r.Scan(&ref.tenant, &ref.intent, &ref.generation)
 		})
-		return err
-	})
 	if err != nil {
 		return fmt.Errorf("scan dead-letter outbox: %w", err)
 	}

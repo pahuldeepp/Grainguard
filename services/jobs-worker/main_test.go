@@ -54,7 +54,7 @@ func TestServeHTTPExposesHealthAndMetrics(t *testing.T) {
 	_ = l.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveHTTP(addr, &Metrics{}, fakePinger{})(ctx) }()
+	go func() { done <- serveHTTP(addr, &Metrics{}, fakePinger{}, nil)(ctx) }()
 	var resp *http.Response
 	for i := 0; i < 50; i++ {
 		if resp, err = http.Get("http://" + addr + "/healthz"); err == nil {
@@ -75,7 +75,7 @@ func TestServeHTTPExposesHealthAndMetrics(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := serveHTTP("256.0.0.1:bad", &Metrics{}, fakePinger{})(context.Background()); err == nil {
+	if err := serveHTTP("256.0.0.1:bad", &Metrics{}, fakePinger{}, nil)(context.Background()); err == nil {
 		t.Fatal("bad address accepted")
 	}
 }

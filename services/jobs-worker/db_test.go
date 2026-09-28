@@ -54,6 +54,8 @@ func alertEvent(t *testing.T, tenant string) AlertEvent {
 		t.Fatal(err)
 	}
 	ev.TenantID, ev.EventID = tenant, randomUUID()
+	// Warning is the RabbitMQ path; critical alerts belong to the serverless path (Stage 10d).
+	ev.Payload.Severity = "warning"
 	ev.Payload.EpisodeID = randomUUID()
 	ev.AggregateID = ev.Payload.EpisodeID
 	return ev
@@ -66,6 +68,7 @@ func alertEventBytes(t *testing.T, ev AlertEvent) []byte {
 		m["event_id"] = ev.EventID
 		m["aggregate_id"] = ev.AggregateID
 		m["payload"].(map[string]any)["episode_id"] = ev.Payload.EpisodeID
+		m["payload"].(map[string]any)["severity"] = ev.Payload.Severity
 	})
 }
 
@@ -132,7 +135,7 @@ func TestRecordEventIsIdempotentAndTenantIsolated(t *testing.T) {
 	a, b := randomUUID(), randomUUID()
 	ev := alertEvent(t, a)
 	out, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 1})
-	if err != nil || out.Duplicate || len(out.Intents) != 3 {
+	if err != nil || out.Duplicate || len(out.Intents) != 2 {
 		t.Fatalf("%+v %v", out, err)
 	}
 	again, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 1})
@@ -144,7 +147,7 @@ func TestRecordEventIsIdempotentAndTenantIsolated(t *testing.T) {
 	if other, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 2}); err != nil || len(other.Intents) != 0 {
 		t.Fatalf("second event created intents: %+v %v", other, err)
 	}
-	if n := countRows(t, db, a, "SELECT count(*) FROM notification_intents"); n != 3 {
+	if n := countRows(t, db, a, "SELECT count(*) FROM notification_intents"); n != 2 {
 		t.Fatalf("tenant a sees %d", n)
 	}
 	if n := countRows(t, db, b, "SELECT count(*) FROM notification_intents"); n != 0 {
@@ -156,6 +159,28 @@ func TestRecordEventIsIdempotentAndTenantIsolated(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("tenant b wrote a row for tenant a")
+	}
+}
+
+func TestCriticalTenantOwnsEscalationDelivery(t *testing.T) {
+	db := dbPool(t)
+	tenant := randomUUID()
+	ev := alertEvent(t, tenant)
+	ev.EventType, ev.Payload.Severity = eventEscalated, "critical"
+	out, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 1})
+	if err != nil || out.Duplicate || len(out.Intents) != 0 {
+		t.Fatalf("critical event created local intents: %+v %v", out, err)
+	}
+	if n := countRows(t, db, tenant, "SELECT count(*) FROM inbox"); n != 1 {
+		t.Fatalf("critical path must retain inbox evidence; got %d", n)
+	}
+	if n := countRows(t, db, tenant, "SELECT count(*) FROM notification_intents"); n != 0 {
+		t.Fatalf("critical path created %d RabbitMQ intents", n)
+	}
+	ev.EventID, ev.Payload.Severity = randomUUID(), "warning"
+	local, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 2})
+	if err != nil || len(local.Intents) != 2 {
+		t.Fatalf("warning must retain RabbitMQ delivery: %+v %v", local, err)
 	}
 }
 
@@ -181,28 +206,6 @@ func TestNoTenantContextSeesNothingAndCannotDelete(t *testing.T) {
 	}
 }
 
-func TestDispatchScanPolicyIsReadOnlyIdentifiers(t *testing.T) {
-	db := dbPool(t)
-	a := randomUUID()
-	if _, err := RecordEvent(context.Background(), db, alertEvent(t, a), SourceRef{}); err != nil {
-		t.Fatal(err)
-	}
-	err := withDispatchScan(context.Background(), db, func(ctx context.Context, tx pgx.Tx) error {
-		var intents int
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM notification_intents").Scan(&intents); err != nil || intents != 0 {
-			return fmt.Errorf("scan scope read intents: %d %v", intents, err)
-		}
-		tag, err := tx.Exec(ctx, "UPDATE dispatch_outbox SET available_at = now() WHERE tenant_id = $1", a)
-		if err != nil || tag.RowsAffected() != 0 {
-			return fmt.Errorf("scan scope updated outbox: %v %v", tag, err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestCrashBeforeCommitLeavesNothingThenRetrySucceeds(t *testing.T) {
 	db := dbPool(t)
 	a := randomUUID()
@@ -213,7 +216,7 @@ func TestCrashBeforeCommitLeavesNothingThenRetrySucceeds(t *testing.T) {
 	if n := countRows(t, db, a, "SELECT count(*) FROM inbox") + countRows(t, db, a, "SELECT count(*) FROM notification_intents"); n != 0 {
 		t.Fatalf("rolled-back work is visible: %d", n)
 	}
-	if out, err := RecordEvent(context.Background(), db, ev, SourceRef{}); err != nil || len(out.Intents) != 3 {
+	if out, err := RecordEvent(context.Background(), db, ev, SourceRef{}); err != nil || len(out.Intents) != 2 {
 		t.Fatalf("%+v %v", out, err)
 	}
 }
@@ -259,7 +262,7 @@ func TestConcurrentDispatchersPublishEachIntentOnce(t *testing.T) {
 		}
 	}
 	wg.Wait()
-	if published.Load() != 3 || len(pub.ids) != 3 || len(dueFor(t, db, a)) != 0 {
+	if published.Load() != 2 || len(pub.ids) != 2 || len(dueFor(t, db, a)) != 0 {
 		t.Fatalf("published=%d ids=%v", published.Load(), pub.ids)
 	}
 	status, attempts := intentStatus(t, db, a, pub.ids[0])
@@ -352,7 +355,7 @@ func TestReceiptsAreMonotonic(t *testing.T) {
 	if ok, err := ApplyReceipt(context.Background(), db, Receipt{TenantID: a, IntentID: id, Outcome: "sent"}); !ok || err != nil {
 		t.Fatalf("%v %v", ok, err)
 	}
-	if len(dueFor(t, db, a)) != 2 {
+	if len(dueFor(t, db, a)) != 1 {
 		t.Fatal("receipted intent still due for dispatch")
 	}
 	for _, late := range []string{"sent", "dead", "failed"} {
@@ -405,7 +408,7 @@ func TestIntakeProcessesRecordsAlongsidePollError(t *testing.T) {
 	if !errors.Is(err, brokerErr) || !errors.Is(err, commitErr) {
 		t.Fatalf("errors not joined: %v", err)
 	}
-	if len(src.committed) != 1 || countRows(t, db, tenant, "SELECT count(*) FROM notification_intents") != 3 {
+	if len(src.committed) != 1 || countRows(t, db, tenant, "SELECT count(*) FROM notification_intents") != 2 {
 		t.Fatal("record returned alongside poll error was dropped")
 	}
 }
@@ -422,7 +425,7 @@ func TestIntakeCommitsAfterEffectOrQuarantine(t *testing.T) {
 	if err := in.PollOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(src.committed) != 2 || in.Metrics.EventsQuarantine.Load() != 1 || in.Metrics.IntentsCreated.Load() != 3 {
+	if len(src.committed) != 2 || in.Metrics.EventsQuarantine.Load() != 1 || in.Metrics.IntentsCreated.Load() != 2 {
 		t.Fatalf("committed=%d metrics=%+v", len(src.committed), in.Metrics)
 	}
 	if err := in.PollOnce(context.Background()); err != nil {

@@ -78,7 +78,7 @@ type testCluster struct {
 func cluster(t *testing.T) *testCluster {
 	t.Helper()
 	network := new(kfake.VirtualNetwork)
-	c, err := kfake.NewCluster(kfake.ListenFn(network.Listen), kfake.NumBrokers(1), kfake.SeedTopics(2, topicTelemetry, topicInventory, topicQuarantine))
+	c, err := kfake.NewCluster(kfake.ListenFn(network.Listen), kfake.NumBrokers(1), kfake.SeedTopics(2, append(projectionTopics, topicQuarantine)...))
 	if err != nil {
 		t.Fatal(err)
 	}

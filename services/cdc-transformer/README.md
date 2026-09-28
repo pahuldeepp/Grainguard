@@ -1,6 +1,6 @@
 # Canonical CDC transformer
 
-Go service for Stages 04 and 06. Reads the inventory, telemetry, risk and alert outbox CDC topics,
+Go service for Stages 04, 06 and 09. Reads the inventory, control-plane, billing, telemetry, risk and alert outbox CDC topics,
 validates against the repository's immutable JSON Schema contracts, and publishes
 canonical JSON or a bounded quarantine record. It never accesses a tenant database
 or invents event identity. No milestone completion or live deployment is claimed.
@@ -30,12 +30,18 @@ explicit key/header choices overriding the older design sketch.
 
 ## Mapping and routing
 
-Input topics are `greenguard.raw.inventory.outbox`,
-`greenguard.raw.telemetry.outbox`, `greenguard.raw.risk.outbox`, and
-`greenguard.raw.alerts.outbox`. Each event type is accepted only from its owning
-source topic. Risk assessments route to `greenguard.risk.assessment.v1`,
-invalidation to `greenguard.risk.assessment_invalidated.v1`, and alert lifecycle
-events to `greenguard.alerts.lifecycle.v1`. Accept both the direct JSON envelope emitted by
+Input topics are `greenguard.raw.inventory.outbox`, `greenguard.raw.control.outbox`,
+`greenguard.raw.telemetry.outbox`, `greenguard.raw.risk.outbox`,
+`greenguard.raw.alerts.outbox`, and `greenguard.raw.projection.notifications`.
+Each event type is accepted only from its owning source topic. Control-plane
+`tenant.created`, `membership.changed` and `service_principal.*` route to
+`greenguard.inventory.tenant.v1`. `risk.assessed@1` routes to
+`greenguard.risk.assessment.v1`, `risk.assessed@2` routes to
+`greenguard.risk.assessment.v2`, and `risk.policy_changed@1` routes to
+`greenguard.risk.policy.v1`. Risk invalidation routes to
+`greenguard.risk.assessment_invalidated.v1`; alert lifecycle events to
+`greenguard.alerts.lifecycle.v1`, and `projection.notification` to
+`greenguard.projection.notification.v1`. Accept both the direct JSON envelope emitted by
 `schemas.enable=false` and an envelope under `payload`. Require
 `source.table=outbox_events` for inserts/snapshots; metadata cannot supply tenant ID.
 The topic's domain must match the validated event type.
@@ -57,6 +63,8 @@ validated by the shared schema.
 | `lot.changed@1` | `greenguard.inventory.lot.v1` |
 | `telemetry.recorded@1` | `greenguard.telemetry.recorded.v1` |
 | `device.registered@1`, `device.binding_changed@1`, `device.status_changed@1` | `greenguard.inventory.device.v1` |
+| `subscription.changed@1`, `entitlements.changed@1`, `usage.accepted@1`, `billing.reconciliation_required@1`, `billing.command_requested@1` | `greenguard.billing.lifecycle.v1` |
+| `flag.configuration_changed@1` | `greenguard.platform.config.v1` |
 
 Ordinary domain-event keys are exactly `tenant_id:aggregate_id`. Their headers are `event_id`, `event_type`,
 `schema_version`, `tenant_id`, `correlation_id`, `traceparent`. Values are ordinary
@@ -142,3 +150,12 @@ Debezium, database rollback, real rebalances, replicated broker durability, or
 E01–E05 deployment evidence. Go's coverage report measures statements, not branch
 coverage; branch cases are tested explicitly but no separate branch instrumenter
 is included. Sonar's actual quality gate must still run in CI.
+
+ADR-0027 adds allowlisted `telemetry.recorded@2` on
+`greenguard.telemetry.recorded.v2` and `cable.layout_changed@1` on
+`greenguard.inventory.sensor-layout.v1`. Telemetry v1 keeps its schema and topic.
+The transformer validates units, finite values, unique sample identities and
+owner layout snapshot semantics against the shared contracts, while keeping
+canonical event IDs/bytes stable across create/snapshot replay. Production
+telemetry v2 emission remains disabled at ingest until all consumers and the
+registry release gate support v2.

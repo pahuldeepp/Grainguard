@@ -80,13 +80,15 @@ func TestPromotionFailsClosed(t *testing.T) {
 }
 
 func TestPromotionRollbackOnFailure(t *testing.T) {
-	db := &promotionDB{tx: &promotionTx{failAt: 3}}
-	verify := func(context.Context, pgx.Tx, string) (PromotionProof, error) { return fullPromotionProof(), nil }
-	if err := PromoteReadViews(context.Background(), db, "read_v2", verify); err == nil {
-		t.Fatal("expected DDL failure")
-	}
-	if db.tx.commits != 0 || db.tx.rollbacks != 1 {
-		t.Fatalf("transaction not rolled back: %+v", db.tx)
+	for _, failAt := range []int{3, len(promotionViews) + 2} {
+		db := &promotionDB{tx: &promotionTx{failAt: failAt}}
+		verify := func(context.Context, pgx.Tx, string) (PromotionProof, error) { return fullPromotionProof(), nil }
+		if err := PromoteReadViews(context.Background(), db, "read_v2", verify); err == nil {
+			t.Fatalf("expected failure at statement %d", failAt)
+		}
+		if db.tx.commits != 0 || db.tx.rollbacks != 1 {
+			t.Fatalf("statement %d not rolled back: %+v", failAt, db.tx)
+		}
 	}
 }
 
@@ -97,17 +99,25 @@ func TestPromotionSecureViewsAndIdempotence(t *testing.T) {
 		if err := PromoteReadViews(context.Background(), db, "read_v2", verify); err != nil {
 			t.Fatal(err)
 		}
-		if db.tx.commits != 1 || len(db.tx.queries) != 10 {
-			t.Fatalf("unexpected transaction: %+v", db.tx)
+		assertSecurePromotion(t, db.tx)
+	}
+}
+
+func assertSecurePromotion(t *testing.T, tx *promotionTx) {
+	t.Helper()
+	if tx.commits != 1 || len(tx.queries) != len(promotionViews)+23 {
+		t.Fatalf("unexpected transaction: %+v", tx)
+	}
+	for _, q := range tx.queries[2 : 2+len(promotionViews)] {
+		if !strings.Contains(q, "security_invoker=true, security_barrier=true") || !strings.Contains(q, "SELECT * FROM read_v2.") {
+			t.Fatalf("insecure view: %s", q)
 		}
-		for _, q := range db.tx.queries[2:6] {
-			if !strings.Contains(q, "security_invoker=true, security_barrier=true") || !strings.Contains(q, "SELECT * FROM read_v2.") {
-				t.Fatalf("insecure view: %s", q)
-			}
-		}
-		if q := db.tx.queries[9]; !strings.Contains(q, "JOIN read_v2.consumer_inbox") || !strings.Contains(q, "security_invoker=true, security_barrier=true") {
-			t.Fatalf("latest view not routed to promoted inbox: %s", q)
-		}
+	}
+	if q := tx.queries[2+len(promotionViews)+4]; !strings.Contains(q, "JOIN read_v2.consumer_inbox") || !strings.Contains(q, "security_invoker=true, security_barrier=true") {
+		t.Fatalf("latest view not routed to promoted inbox: %s", q)
+	}
+	if !strings.Contains(tx.queries[len(tx.queries)-2], "public.consumer_inbox") || !strings.Contains(tx.queries[len(tx.queries)-1], "promotion_changed") {
+		t.Fatal("promotion did not atomically queue an epoch notification")
 	}
 }
 

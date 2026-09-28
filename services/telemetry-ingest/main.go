@@ -53,6 +53,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer worker.close()
+	sagaWorker, err := startSagaBindingRuntime(ctx, pool, getenv)
+	if err != nil {
+		return err
+	}
+	defer sagaWorker.close()
 	addr := getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
@@ -65,6 +70,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	case err := <-done:
 		return err
 	case err := <-worker.done:
+		err = bindingWorkerResult(ctx, err)
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return errors.Join(err, server.Shutdown(shutdown))
+	case err := <-sagaWorker.done:
 		err = bindingWorkerResult(ctx, err)
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -105,9 +115,19 @@ func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
 		return App{}, nil, err
 	}
 	app.Verifier = verifier
+	app.PreAuth = NewPreAuthGuard(cfg.TrustedProxyCIDRs...)
+	if cfg.APIKeyEndpoint != "" {
+		app.APIKeys, err = NewAPIKeyVerifier(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken)
+		if err != nil {
+			shutdown()
+			return App{}, nil, err
+		}
+	}
 	app.Metrics = NewMetrics()
 	app.Limiter = NewTokenBuckets(cfg.Limits, nil)
 	app.Ingestor = NewIngestor(pool, cfg.Policy, nil)
+	app.Ingestor.v2Enabled = cfg.TelemetryV2Enabled
+	app.Ingestor.sensors = resolveLocalSensor
 	app.Recorder = NewRejectionRecorder(pool, app.Metrics, nil)
 	return app, shutdown, nil
 }
@@ -117,7 +137,13 @@ var exit = os.Exit
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Getenv); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "entitlement-projector" {
+		err = runEntitlementProjector(ctx, os.Getenv)
+	} else {
+		err = run(ctx, os.Getenv)
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
 		slog.Error("service stopped", "error", err)
 		exit(1)
 	}

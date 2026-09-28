@@ -40,6 +40,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	memberships := map[string]apiMembership{}
+	if cfg.MembershipSource == "file" {
+		memberships, err = loadAPIMemberships(cfg.MembershipFile)
+		if err != nil {
+			return err
+		}
+	}
+	membershipPath := cfg.MembershipFile
+	if cfg.MembershipSource != "file" {
+		membershipPath = ""
+	}
+	authHTTP := &http.Client{Timeout: 4 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	pool, err := openPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -49,7 +61,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	pub := rabbit.NewPublisher(cfg.RabbitURL, nil)
 	defer pub.Close()
 	dispatcher := &Dispatcher{DB: pool, Pub: pub, Policy: cfg.Policy, Workers: cfg.Workers, Batch: cfg.Batch, Interval: 500 * time.Millisecond, Metrics: metrics}
-	parts := []component{dispatcher.Run, receiptLoop(cfg, pool, metrics), serveHTTP(cfg.HTTPAddr, metrics, pool)}
+	parts := []component{dispatcher.Run, receiptLoop(cfg, pool, metrics), serveHTTP(cfg.HTTPAddr, metrics, pool, &notificationAPI{db: pool, issuer: cfg.AuthIssuer, audience: cfg.AuthAudience, jwksURL: cfg.AuthJWKSURL, cursorKey: cfg.CursorHMACKey, client: authHTTP, memberships: memberships, membershipPath: membershipPath, membershipCheckedAt: time.Now(), membershipLastSuccess: time.Now(), membershipSource: cfg.MembershipSource, controlPlaneURL: cfg.ControlPlaneURL, controlLookupToken: cfg.ControlLookupToken, allowInsecureMembership: cfg.AllowInsecureMembership})}
 	if len(cfg.KafkaBrokers) > 0 {
 		src, err := newKafkaSource(cfg.KafkaBrokers, cfg.KafkaGroup, cfg.AlertsTopic)
 		if err != nil {
@@ -108,10 +120,15 @@ func consumeReceipts(ctx context.Context, cfg Config, db TxStarter, m *Metrics) 
 
 type pinger interface{ Ping(context.Context) error }
 
-func serveHTTP(addr string, m *Metrics, db pinger) component {
+func serveHTTP(addr string, m *Metrics, db pinger, notificationReads *notificationAPI) component {
 	return func(ctx context.Context) error {
+		if notificationReads == nil {
+			notificationReads = &notificationAPI{}
+		}
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m)
+		mux.Handle("/internal/v1/notification-intents", notificationReads.handler())
+		mux.Handle("GET /readyz/notification-history", notificationReads.readinessHandler(db))
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 		mux.HandleFunc("GET /readyz", readyHandler(db))
 		srv := &http.Server{Addr: addr, Handler: common.REDMetrics(mux), ReadHeaderTimeout: 5 * time.Second}

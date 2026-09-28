@@ -69,11 +69,11 @@ func TestEveryDatabaseFailureIsReportedAndNothingIsAppliedTwice(t *testing.T) {
 		steps []step
 	}{
 		{"register a new device", eventSpec{kind: "device.registered", tenant: tenant, device: device, version: 1},
-			[]step{{rows: 1}, {rows: 1}, {err: pgx.ErrNoRows}, {rows: 1}, {rows: 1}}},
+			[]step{{rows: 1}, {rows: 1}, {err: pgx.ErrNoRows}, {rows: 1}, {rows: 1}, {rows: 0}}},
 		{"binding change", eventSpec{kind: "device.binding_changed", tenant: tenant, device: device, version: 2},
-			[]step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}, {rows: 1}}},
+			[]step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}, {rows: 1}, {rows: 0}}},
 		{"status change", eventSpec{kind: "device.status_changed", tenant: tenant, device: device, version: 2, status: "disabled"},
-			[]step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}, {rows: 1}}},
+			[]step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}, {rows: 1}, {rows: 0}}},
 		{"duplicate delivery", eventSpec{kind: "device.registered", tenant: tenant, device: device, version: 1},
 			[]step{{rows: 1}, {rows: 0}, {scan: setBool(true)}}},
 	}

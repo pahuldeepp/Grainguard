@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
 TELEMETRY_TOPIC = "greenguard.telemetry.recorded.v1"
+TELEMETRY_V2_TOPIC = "greenguard.telemetry.recorded.v2"
 DEVICE_TOPIC = "greenguard.inventory.device.v1"
 LOT_TOPIC = "greenguard.inventory.lot.v1"
-TOPICS = (TELEMETRY_TOPIC, DEVICE_TOPIC, LOT_TOPIC)
+TOPICS = (TELEMETRY_TOPIC, TELEMETRY_V2_TOPIC, DEVICE_TOPIC, LOT_TOPIC)
 CHECKPOINT_TYPE = "binding.feed_checkpoint"
 DEVICE_EVENT_TYPES = ("device.registered", "device.binding_changed", "device.status_changed")
 
@@ -108,6 +110,8 @@ class Telemetry:
     binding_version: int
     observed_at: datetime
     measurements: Mapping[str, object]
+    schema_version: int = 1
+    sensor_observations: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -142,7 +146,8 @@ class Checkpoint:
 def parse_envelope(event: Any) -> Envelope:
     if not isinstance(event, dict) or set(event) != _ENVELOPE_KEYS:
         raise _fail("envelope fields do not match v1")
-    if event["schema_version"] != 1 or not isinstance(event["payload"], dict):
+    if (isinstance(event["schema_version"], bool) or event["schema_version"] not in (1, 2)
+            or not isinstance(event["payload"], dict)):
         raise _fail("unsupported schema version or payload")
     traceparent = event["traceparent"]
     if not isinstance(traceparent, str) or not _TRACEPARENT.fullmatch(traceparent):
@@ -166,13 +171,82 @@ def _telemetry(envelope: Envelope) -> Telemetry:
     if device_id != envelope.aggregate_id:
         raise _fail("aggregate_id must equal payload.device_id")
     measurements = payload.get("measurements")
-    if not isinstance(measurements, dict) or not measurements:
+    if not isinstance(measurements, dict):
         raise _fail("measurements must be a non-empty object")
+    if envelope.raw["schema_version"] == 1:
+        if not measurements:
+            raise _fail("measurements must be a non-empty object")
+        observations: tuple[Mapping[str, Any], ...] = ()
+    else:
+        if envelope.raw["schema_version"] != 2:
+            raise InvalidEvent("unsupported_event", "telemetry schema version")
+        required = {"reading_id", "device_id", "site_id", "bin_id", "binding_version",
+                    "source_message_id", "observed_at", "received_at", "measurements", "measurement_units"}
+        if not required.issubset(payload) or set(payload) - required - {"sensor_observations"}:
+            raise _fail("v2 telemetry payload fields do not match contract")
+        if set(measurements) - {"temperature_c", "relative_humidity_percent", "co2_ppm", "grain_moisture_percent"}:
+            raise _fail("unsupported v2 measurement")
+        units = payload.get("measurement_units")
+        expected_units = {"temperature_c": "Cel", "relative_humidity_percent": "%",
+                          "co2_ppm": "ppm", "grain_moisture_percent": "%"}
+        if not isinstance(units, dict) or set(units) != set(measurements):
+            raise _fail("measurement_units must exactly match measured fields")
+        if any(units[key] != expected_units[key] for key in measurements):
+            raise _fail("measurement unit mismatch")
+        for key, value in measurements.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise _fail(f"{key} must be finite numeric")
+            bounds = {"temperature_c": (-80, 120), "relative_humidity_percent": (0, 100),
+                      "co2_ppm": (0, float("inf")), "grain_moisture_percent": (0, 100)}[key]
+            if not bounds[0] <= value <= bounds[1]:
+                raise _fail(f"{key} is outside its physical range")
+        uuid_field(payload, "site_id")
+        message_id = payload.get("source_message_id")
+        if not isinstance(message_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", message_id):
+            raise _fail("source_message_id is invalid")
+        parse_time(payload.get("received_at"), "received_at")
+        raw_observations = payload.get("sensor_observations", [])
+        if not isinstance(raw_observations, list) or len(raw_observations) > 256:
+            raise _fail("sensor_observations must be an array of at most 256 items")
+        seen: set[tuple[str, str]] = set()
+        for observation in raw_observations:
+            if not isinstance(observation, dict):
+                raise _fail("sensor observation must be an object")
+            sensor_id = uuid_field(observation, "sensor_id")
+            metric = observation.get("metric")
+            unit = observation.get("unit")
+            if set(observation) != {"sensor_id", "metric", "value", "unit", "layout_version", "cable_id", "position", "depth_m"}:
+                raise _fail("sensor observation fields do not match contract")
+            uuid_field(observation, "cable_id")
+            version_field(observation, "layout_version")
+            position = observation.get("position")
+            depth = observation.get("depth_m")
+            if isinstance(position, bool) or not isinstance(position, int) or position < 1:
+                raise _fail("sensor position must be a positive integer")
+            if depth is not None and (isinstance(depth, bool) or not isinstance(depth, (int, float))
+                                      or not math.isfinite(depth) or depth < 0):
+                raise _fail("sensor depth must be finite and nonnegative")
+            value = observation.get("value")
+            if not isinstance(metric, str) or metric not in expected_units or unit != expected_units[metric]:
+                raise _fail("sensor observation metric/unit mismatch")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise _fail("sensor observation value must be finite")
+            bounds = {"temperature_c": (-80, 120), "relative_humidity_percent": (0, 100),
+                      "co2_ppm": (0, float("inf")), "grain_moisture_percent": (0, 100)}[metric]
+            if not bounds[0] <= value <= bounds[1]:
+                raise _fail("sensor observation is outside its physical range")
+            if (sensor_id, metric) in seen:
+                raise _fail("duplicate sensor observation")
+            seen.add((sensor_id, metric))
+        if not measurements and not raw_observations:
+            raise _fail("v2 telemetry requires measurements or sensor observations")
+        observations = tuple(raw_observations)
     return Telemetry(
         envelope=envelope, reading_id=uuid_field(payload, "reading_id"), device_id=device_id,
         bin_id=uuid_field(payload, "bin_id", nullable=True),
         binding_version=version_field(payload, "binding_version"),
         observed_at=parse_time(payload.get("observed_at"), "observed_at"), measurements=measurements,
+        schema_version=int(envelope.raw["schema_version"]), sensor_observations=observations,
     )
 
 
@@ -217,7 +291,8 @@ def _lot(envelope: Envelope) -> LotChange:
     )
 
 
-_PARSERS = {TELEMETRY_TOPIC: _telemetry, DEVICE_TOPIC: _binding, LOT_TOPIC: _lot}
+_PARSERS = {TELEMETRY_TOPIC: _telemetry, TELEMETRY_V2_TOPIC: _telemetry,
+            DEVICE_TOPIC: _binding, LOT_TOPIC: _lot}
 
 
 def parse(topic: str, value: bytes | None) -> Telemetry | BindingChange | LotChange | Checkpoint:
@@ -229,4 +304,11 @@ def parse(topic: str, value: bytes | None) -> Telemetry | BindingChange | LotCha
         raise _fail("record value is not JSON") from exc
     if topic == DEVICE_TOPIC and isinstance(event, dict) and event.get("event_type") == CHECKPOINT_TYPE:
         return Checkpoint(parse_time(event.get("source_time"), "source_time"))
-    return _PARSERS[topic](parse_envelope(event))
+    envelope = parse_envelope(event)
+    if topic == TELEMETRY_TOPIC and event.get("schema_version") != 1:
+        raise InvalidEvent("unsupported_event", "v1 topic requires schema version 1")
+    if topic == TELEMETRY_V2_TOPIC and event.get("schema_version") != 2:
+        raise InvalidEvent("unsupported_event", "v2 topic requires schema version 2")
+    if topic in (DEVICE_TOPIC, LOT_TOPIC) and event.get("schema_version") != 1:
+        raise InvalidEvent("unsupported_event", "inventory topic requires schema version 1")
+    return _PARSERS[topic](envelope)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -11,6 +12,32 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"greenguard.local/cassandra-writer/history"
 )
+
+func TestCanonicalTelemetryAllowsUnboundBin(t *testing.T) {
+	raw, err := os.ReadFile("../../tests/fixtures/events/telemetry-recorded.v1.valid.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := map[string]any{}
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatal(err)
+	}
+	event[fieldPayload].(map[string]any)["bin_id"] = nil
+	raw, err = json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := loadSchema("../../contracts/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Message{Topic: topicTelemetry, Key: []byte("11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333"), Value: raw,
+		Headers: []kgo.RecordHeader{{Key: fieldEvent, Value: []byte("0d72ff07-a646-4d41-9b5b-52c5f25e4ca8")}, {Key: fieldType, Value: []byte(typeTelemetry)}, {Key: fieldSchema, Value: []byte("1")}, {Key: fieldTenant, Value: []byte("11111111-1111-4111-8111-111111111111")}}}
+	r, _, reason := parse(schema, m)
+	if reason != "" || r.BinID != "" {
+		t.Fatalf("unbound reading rejected: reason=%q reading=%+v", reason, r)
+	}
+}
 
 type testWriter struct {
 	steps                *[]string
@@ -31,6 +58,10 @@ type testSink struct {
 	steps *[]string
 	err   error
 }
+
+type oneMessageSource struct{ message Message }
+
+func (s oneMessageSource) Next(context.Context) (Message, error) { return s.message, nil }
 
 func (s testSink) Publish(context.Context, Record) error {
 	*s.steps = append(*s.steps, "quarantine")
@@ -110,5 +141,26 @@ func TestProcessorOversizedPoisonHoldsOffset(t *testing.T) {
 	}
 	if len(steps) != 0 {
 		t.Fatalf("oversized record was published or committed: %v", steps)
+	}
+}
+
+func TestRunDoesNotRepublishQuarantineAfterCommitDeadline(t *testing.T) {
+	steps := []string{}
+	p := &Processor{
+		Source:         oneMessageSource{message: Message{Topic: topicTelemetry, Value: []byte("{"), Commit: func(context.Context) error { steps = append(steps, "commit"); return context.DeadlineExceeded }}},
+		Sink:           testSink{steps: &steps},
+		Attempts:       1,
+		RetryDelay:     time.Millisecond,
+		ProcessTimeout: time.Second,
+		Rejected:       func(error) bool { return false },
+	}
+	if err := p.Run(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run error = %v, want commit deadline", err)
+	}
+	if got := strings.Join(steps, ","); got != "quarantine,commit" {
+		t.Fatalf("quarantine was repeated after commit failure: %s", got)
+	}
+	if got := p.Quarantined.Load(); got != 1 {
+		t.Fatalf("Quarantined = %d, want one acknowledged publish", got)
 	}
 }

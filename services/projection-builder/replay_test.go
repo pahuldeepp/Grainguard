@@ -50,7 +50,7 @@ func replayFixture(t *testing.T, ctx context.Context) (*testCluster, *kgo.Client
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parts) != 4 {
+	if len(parts) != len(projectionTopics)*2 {
 		t.Fatal(parts)
 	}
 	return c, producer, parts, e

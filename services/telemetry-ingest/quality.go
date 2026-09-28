@@ -34,6 +34,11 @@ var allowedFields = map[string]bool{
 
 // ReadingRequest is a validated reading. Absent measurements are nil, never zero.
 type ReadingRequest struct {
+	SchemaVersion           int
+	CO2PPM                  *float64
+	GrainMoisturePercent    *float64
+	MeasurementUnits        map[string]string
+	SensorObservations      []SensorObservation
 	SourceMessageID         string
 	ObservedAt              time.Time
 	TemperatureC            *float64
@@ -72,8 +77,12 @@ func decodeObject(body []byte) (map[string]any, *Rejection) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, newRejection(ReasonInvalidBody, statusBadRequest, "body must be a single JSON object")
 	}
+	allowed := allowedFields
+	if fields["schema_version"] == json.Number("2") {
+		allowed = v2Fields
+	}
 	for name := range fields {
-		if !allowedFields[name] {
+		if !allowed[name] {
 			return nil, newRejection(ReasonInvalidBody, statusBadRequest, "body contains an unknown field")
 		}
 	}
@@ -166,6 +175,13 @@ func parseReadingRequest(body []byte) (ReadingRequest, *Rejection) {
 	id, observed, rej := parseIdentity(fields)
 	if rej != nil {
 		return ReadingRequest{}, rej
+	}
+	if fields["schema_version"] == json.Number("2") {
+		req := ReadingRequest{SourceMessageID: id, ObservedAt: observed}
+		if rej := parseV2Measurements(fields, &req); rej != nil {
+			return ReadingRequest{}, rej
+		}
+		return req, nil
 	}
 	temperature, humidity, rej := parseMeasurements(fields)
 	if rej != nil {

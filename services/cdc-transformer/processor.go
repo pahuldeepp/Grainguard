@@ -64,11 +64,15 @@ func canonicalRecord(event map[string]any, topic string) Record {
 	for _, key := range []string{fieldEvent, fieldType, fieldSchema, fieldTenant, fieldCorrelation, fieldTrace} {
 		headers[key] = fmt.Sprint(event[key])
 	}
-	return Record{Topic: topic, Key: []byte(event[fieldTenant].(string) + ":" + event[fieldAggregate].(string)), Value: body, Headers: headers}
+	tenantKey := "global"
+	if tenant, ok := event[fieldTenant].(string); ok {
+		tenantKey = tenant
+	}
+	return Record{Topic: topic, Key: []byte(tenantKey + ":" + event[fieldAggregate].(string)), Value: body, Headers: headers}
 }
 
 func transform(m Message, s SchemaSet) (Record, string, *failure) {
-	if m.Topic != rawInventory && m.Topic != rawTelemetry && m.Topic != rawRisk && m.Topic != rawAlerts {
+	if m.Topic != rawInventory && m.Topic != rawControl && m.Topic != rawBilling && m.Topic != rawTelemetry && m.Topic != rawRisk && m.Topic != rawAlerts && m.Topic != rawProjection {
 		return Record{}, "", fail(reasonEnvelope, "unexpected source topic")
 	}
 	row, ignored, err := unwrap(m.Value)
@@ -96,10 +100,16 @@ func sourceForType(eventType any) string {
 	switch eventType {
 	case typeTelemetry:
 		return rawTelemetry
-	case typeRiskAssessed, typeRiskInvalidated:
+	case typeMembershipChanged, typeTenantCreated, typeIdentityConnectionChanged, typeServicePrincipalCreated, typeServicePrincipalRotated, typeServicePrincipalRevoked, typeFlagConfigurationChanged:
+		return rawControl
+	case typeSubscriptionChanged, typeEntitlementsChanged, typeUsageAccepted, typeBillingReconciliation, typeBillingCommandRequested:
+		return rawBilling
+	case typeRiskAssessed, typeRiskPolicyChanged, typeRiskInvalidated:
 		return rawRisk
 	case typeAlertOpened, typeAlertUpdated, typeAlertAcked, typeAlertEscalated, typeAlertResolved:
 		return rawAlerts
+	case typeProjection:
+		return rawProjection
 	default:
 		return rawInventory
 	}

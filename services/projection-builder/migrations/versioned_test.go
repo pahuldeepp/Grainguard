@@ -63,7 +63,7 @@ func TestProvisionVersionDatabase(t *testing.T) {
 	if err := conn.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, schema).Scan(&total, &forced); err != nil {
 		t.Fatal(err)
 	}
-	if total != 10 || forced != total {
+	if total != 17 || forced != total {
 		t.Fatalf("shadow RLS %d/%d", forced, total)
 	}
 	if err := ProvisionVersion(ctx, url, schema); err == nil {

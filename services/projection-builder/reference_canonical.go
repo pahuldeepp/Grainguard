@@ -145,6 +145,9 @@ func (f *canonicalFold) result() (map[string]referenceState, error) {
 	result := map[string]referenceState{}
 	for tenant, acc := range f.accumulators {
 		result[tenant] = acc.finish()
+		if acc.domainErr != nil {
+			return nil, fmt.Errorf("canonical domain fold for tenant %s: %w", tenant, acc.domainErr)
+		}
 	}
 	return result, nil
 }

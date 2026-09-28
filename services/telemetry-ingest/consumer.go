@@ -81,6 +81,9 @@ func (c *BindingConsumer) Run(ctx context.Context) error {
 }
 
 func bindingReason(m BindingMessage) string {
+	if m.Topic == sensorLayoutTopic {
+		return layoutReason(m)
+	}
 	if m.Topic != bindingTopic || !json.Valid(m.Value) {
 		return reasonEnvelope
 	}
@@ -104,7 +107,7 @@ func bindingReason(m BindingMessage) string {
 }
 
 func (c *BindingConsumer) process(ctx context.Context, m BindingMessage) error {
-	if string(m.Key) == bindingHeartbeatKey {
+	if m.Topic == bindingTopic && string(m.Key) == bindingHeartbeatKey {
 		return c.checkpoint(ctx, m)
 	}
 	reason := bindingReason(m)

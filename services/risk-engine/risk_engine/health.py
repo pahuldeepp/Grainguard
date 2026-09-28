@@ -7,8 +7,8 @@ and event identifiers never become labels; they belong in logs and traces.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable
 
 _FORBIDDEN_LABELS = frozenset({"tenant_id", "tenant", "device_id", "lot_id", "bin_id", "event_id"})
 
@@ -37,11 +37,14 @@ class Metrics:
         return "\n".join(lines) + "\n"
 
 
-def serve(port: int, metrics: Metrics, ready: Callable[[], bool], host: str = "0.0.0.0") -> ThreadingHTTPServer:
+def serve(port: int, metrics: Metrics, ready: Callable[[], bool], host: str = "0.0.0.0",
+          policy_api: object | None = None) -> ThreadingHTTPServer:
     """Start /healthz (liveness), /readyz (database reachable) and /metrics."""
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - http.server API
+        def do_GET(self) -> None:
+            if policy_api is not None and policy_api.handle(self):
+                return
             if self.path == "/healthz":
                 self._send(200, "ok\n")
             elif self.path == "/readyz":
@@ -52,6 +55,15 @@ def serve(port: int, metrics: Metrics, ready: Callable[[], bool], host: str = "0
             else:
                 self._send(404, "not found\n")
 
+        def do_POST(self) -> None:
+            if policy_api is not None and policy_api.handle(self):
+                return
+            self._send(404, "not found\n")
+
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(10)
+
         def _send(self, status: int, body: str) -> None:
             data = body.encode()
             self.send_response(status)
@@ -60,7 +72,7 @@ def serve(port: int, metrics: Metrics, ready: Callable[[], bool], host: str = "0
             self.end_headers()
             self.wfile.write(data)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: object) -> None:
             """Probes are frequent; access logs are intentionally not written."""
 
     server = ThreadingHTTPServer((host, port), Handler)

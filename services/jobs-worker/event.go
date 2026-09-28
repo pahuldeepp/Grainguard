@@ -210,12 +210,9 @@ func (e AlertEvent) Version() (int64, error) {
 func Channels(eventType, severity string) []string {
 	switch eventType {
 	case eventOpened, eventEscalated:
-		if severity == "critical" {
-			return []string{"email", "sms", "push"}
-		}
-		return []string{"email"}
+		return []string{"email", "sms"}
 	case eventResolved:
-		return []string{"email"}
+		return []string{"email", "sms"}
 	default:
 		return nil
 	}

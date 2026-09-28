@@ -6,7 +6,8 @@ from risk_engine import events
 from risk_engine.apply import (APPLIED, DUPLICATE, NOT_READY, QUARANTINE, SKIPPED, STALE, Applier, Record,
                                RetryPolicy, TransientExhausted, build_event, deterministic_ids)
 from risk_engine.store import StoreError
-from test_fakes import FakeDatabase, binding_changed, lot_changed, new_id, record, registered, status_changed, telemetry
+from test_fakes import (FakeDatabase, TEST_POLICIES, binding_changed, lot_changed, new_id, record,
+                        registered, status_changed, telemetry)
 
 try:
     import jsonschema
@@ -22,7 +23,10 @@ SCHEMA = json.loads((ROOT / "contracts/events/risk-assessed.v1.schema.json").rea
 def validate(event):
     if jsonschema is None:
         raise unittest.SkipTest("jsonschema not installed")
-    jsonschema.Draft202012Validator(SCHEMA, format_checker=jsonschema.FormatChecker()).validate(event)
+    version = event.get("schema_version", 1)
+    schema_path = ROOT / f"contracts/events/risk-assessed.v{version}.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(event)
 
 
 class Scenario:
@@ -30,6 +34,7 @@ class Scenario:
         self.db = FakeDatabase()
         self.sleeps = []
         self.watermark = LATE
+        kwargs.setdefault("policies", TEST_POLICIES)
         self.applier = Applier(self.db, "risk-test", lambda: self.watermark, sleep=self.sleeps.append,
                                retry=RetryPolicy(attempts=3), **kwargs)
         self.tenant, self.site, self.bin, self.device = new_id(), new_id(), new_id(), new_id()
@@ -50,6 +55,21 @@ class Scenario:
 
 
 class ApplyTelemetryTest(unittest.TestCase):
+    def test_additive_v2_measurements_apply_without_quarantine(self):
+        s = Scenario(self)
+        s.setup_wheat_then_canola()
+        reading = s.reading("2026-09-24T11:00:00Z", measurements={
+            "temperature_c": 23, "relative_humidity_percent": 62,
+            "co2_ppm": 410, "grain_moisture_percent": 13.5,
+        })
+        reading["schema_version"] = 2
+        reading["payload"]["measurement_units"] = {
+            "temperature_c": "Cel", "relative_humidity_percent": "%",
+            "co2_ppm": "ppm", "grain_moisture_percent": "%",
+        }
+        reading["payload"]["sensor_observations"] = []
+        self.assertEqual(s.apply(reading).outcome, APPLIED)
+
     def test_late_reading_scores_against_wheat_and_emits_valid_event(self):
         s = Scenario(self)
         s.setup_wheat_then_canola()
@@ -79,7 +99,7 @@ class ApplyTelemetryTest(unittest.TestCase):
         self.assertEqual(s.apply(reading).outcome, DUPLICATE)
         self.assertEqual(len(s.db.state["outbox"]), 1)
         # A replay under a new consumer identity finds the stored assessment: same IDs, no new row.
-        replayer = Applier(s.db, "risk-replay", lambda: LATE)
+        replayer = Applier(s.db, "risk-replay", lambda: LATE, policies=TEST_POLICIES)
         replay = replayer.apply(record(reading), events.parse(events.TELEMETRY_TOPIC, json.dumps(reading).encode()))
         self.assertEqual((replay.outcome, replay.event_id, replay.assessment_id),
                          (DUPLICATE, first.event_id, first.assessment_id))

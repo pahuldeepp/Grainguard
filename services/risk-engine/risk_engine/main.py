@@ -19,6 +19,9 @@ from risk_engine.apply import Applier
 from risk_engine.consumer import Consumer, DatabaseSink, LotFeed
 from risk_engine.health import Metrics, serve
 from risk_engine.kafka_source import KafkaSource
+from risk_engine.policy_api import PolicyAPI
+from risk_engine.policy_auth import OIDCVerifier
+from risk_engine.policy_service import PolicyService
 from risk_engine.store import PgDatabase
 
 log = logging.getLogger("risk_engine")
@@ -58,6 +61,9 @@ def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None
     stop = stop or threading.Event()
     db = database(config.database_url)
     health_db = database(config.database_url)
+    verifier = OIDCVerifier.from_env(getenv)
+    policy_db = database(config.database_url) if verifier is not None else None
+    policy_api = PolicyAPI(PolicyService(policy_db) if policy_db is not None else None, verifier)
     kafka = source(config.kafka_brokers, config.group, events.TOPICS, config.offset_reset)
     metrics = Metrics()
     lot_feed = LotFeed(enabled=config.lot_feed_gate)
@@ -70,7 +76,7 @@ def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None
         return (last_step_at is not None and time.monotonic() - last_step_at <= 10.0
                 and health_db.ping())
 
-    server = start_health(config.health_port, metrics, ready)
+    server = start_health(config.health_port, metrics, ready, policy_api=policy_api)
     try:
         while not stop.is_set():
             consumer.step(1.0)
@@ -79,6 +85,8 @@ def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None
         server.shutdown()
         kafka.close()
         health_db.close()
+        if policy_db is not None:
+            policy_db.close()
         db.close()
     return 0
 

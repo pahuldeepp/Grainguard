@@ -4,6 +4,7 @@ They run when RISK_DIRECT_URL and RISK_MIGRATION_URL are set (`set -a; . ./.env`
 Every test uses fresh random tenant IDs, so no cleanup (and no DELETE) is needed.
 """
 
+import json
 import os
 import unittest
 import uuid
@@ -13,6 +14,8 @@ from risk_engine import events
 from risk_engine.apply import APPLIED, DUPLICATE, STALE, Applier
 from risk_engine.consumer import DatabaseSink
 from risk_engine.store import PgDatabase, StoreError
+from risk_engine.policy import PolicyVersion
+from risk_engine.policy_service import PolicyService, VerifiedPrincipal
 from test_apply import validate
 from test_fakes import binding_changed, lot_changed, new_id, record, registered, telemetry
 
@@ -21,7 +24,7 @@ POOLED_URL = os.environ.get("RISK_DATABASE_URL")
 OWNER_URL = os.environ.get("RISK_MIGRATION_URL")
 LATE = datetime(2030, 1, 1, tzinfo=timezone.utc)
 TENANT_TABLES = ("consumer_inbox", "device_bindings", "bin_lot_intervals", "device_risk_streams",
-                 "risk_assessments", "outbox_events")
+                 "risk_assessments", "outbox_events", "grain_policies")
 
 try:
     import psycopg
@@ -64,6 +67,26 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         self.applier = Applier(self.db, "risk-live", lambda: LATE)
         self.tenant, self.site, self.bin, self.device = new_id(), new_id(), new_id(), new_id()
         self.wheat, self.canola = new_id(), new_id()
+        self.policy_service = PolicyService(self.db)
+        self.admin = VerifiedPrincipal(self.tenant, "live-admin", frozenset({"admin"}))
+        self.publish_test_policy("wheat", {"temperature_c": (25, 35, "Cel"),
+                                           "relative_humidity_percent": (65, 80, "%")})
+        self.publish_test_policy("canola", {"temperature_c": (22, 30, "Cel"),
+                                             "relative_humidity_percent": (60, 75, "%")})
+
+    def publish_test_policy(self, grain, thresholds, tenant=None):
+        tenant = tenant or self.tenant
+        principal = VerifiedPrincipal(tenant, "live-admin", frozenset({"admin"}))
+        policy_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"test-policy:{tenant}:{grain}"))
+        measurement_thresholds = {
+            metric: {"warning": warning, "critical": critical, "unit": unit}
+            for metric, (warning, critical, unit) in thresholds.items()
+        }
+        self.policy_service.publish(principal, PolicyVersion(
+            tenant, policy_id, 1, grain, None, datetime(2026, 1, 1, tzinfo=timezone.utc), None,
+            measurement_thresholds, {"warning_score": 50, "critical_score": 75},
+            True, "active", {"source": "live-test-fixture"},
+            "TEST-CALIBRATION", "live-admin", datetime(2026, 1, 1, tzinfo=timezone.utc)))
 
     def apply(self, event, applier=None):
         rec = record(event)
@@ -96,7 +119,11 @@ class LiveRiskDatabaseTest(unittest.TestCase):
             event["occurred_at"] = events.format_time(event["occurred_at"].astimezone(timezone.utc))
             event["aggregate_version"] = str(event["aggregate_version"])
             result.append(event)
-        return result
+        return [event for event in result if event["event_type"] != "risk.policy_changed"]
+
+    def risk_outbox_count(self, tenant):
+        return sql(OWNER_URL, "SELECT count(*) FROM outbox_events WHERE tenant_id = %s"
+                   " AND event_type <> 'risk.policy_changed'", (tenant,), tenant)[0][0]
 
     def test_event_time_join_and_contract_valid_outbox(self):
         self.seed()
@@ -114,6 +141,27 @@ class LiveRiskDatabaseTest(unittest.TestCase):
             validate(event)
         self.assertEqual(published[0]["causation_id"], late["event_id"])
         self.assertEqual(published[0]["traceparent"], late["traceparent"])
+
+    def test_policy_versions_select_by_bin_and_event_time_without_rewriting_history(self):
+        policy_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"test-policy:{self.tenant}:wheat"))
+        next_policy = PolicyVersion(
+            self.tenant, policy_id, 2, "wheat", None, datetime(2027, 1, 1, tzinfo=timezone.utc), None,
+            {"temperature_c": {"warning": 26.0, "critical": 36.0, "unit": "Cel"},
+             "relative_humidity_percent": {"warning": 66.0, "critical": 81.0, "unit": "%"}},
+            {"warning_score": 50, "critical_score": 75}, True, "active",
+            {"source": "live-test-fixture-v2"}, "TEST-CALIBRATION-V2", "live-admin",
+            datetime(2026, 12, 1, tzinfo=timezone.utc))
+        self.policy_service.publish(self.admin, next_policy)
+        before = self.policy_service.effective(
+            self.admin, self.bin, "wheat", datetime(2026, 10, 1, tzinfo=timezone.utc))
+        after = self.policy_service.effective(
+            self.admin, self.bin, "wheat", datetime(2027, 2, 1, tzinfo=timezone.utc))
+        self.assertEqual(before.version, 1)
+        self.assertEqual(after.version, 2)
+        self.assertEqual(before.effective_to, datetime(2027, 1, 1, tzinfo=timezone.utc))
+        other_tenant = VerifiedPrincipal(new_id(), "other-admin", frozenset({"admin"}))
+        self.assertIsNone(self.policy_service.effective(
+            other_tenant, self.bin, "wheat", datetime(2027, 2, 1, tzinfo=timezone.utc)))
 
     def test_duplicate_crash_and_replay(self):
         self.seed()
@@ -137,7 +185,7 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.apply(reading)
         self.db.transaction = original
-        self.assertEqual([self.count(t, self.tenant) for t in ("risk_assessments", "outbox_events")], [0, 0])
+        self.assertEqual([self.count("risk_assessments", self.tenant), self.risk_outbox_count(self.tenant)], [0, 0])
         self.assertEqual(sql(OWNER_URL, "SELECT count(*) FROM consumer_inbox WHERE event_id = %s",
                              (reading["event_id"],), self.tenant)[0][0], 0)
         first = self.apply(reading)
@@ -147,7 +195,7 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         self.addCleanup(pooled.close)
         replay = self.apply(reading, Applier(pooled, "risk-replay", lambda: LATE))
         self.assertEqual((replay.outcome, replay.event_id), (DUPLICATE, first.event_id))
-        self.assertEqual(self.count("outbox_events", self.tenant), 1)
+        self.assertEqual(self.risk_outbox_count(self.tenant), 1)
 
     def test_stale_inventory_cannot_regress(self):
         other_bin = new_id()
@@ -191,7 +239,7 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         self.assertEqual(self.apply(change).late_assessments, 1)
         self.assertEqual(self.apply(change).outcome, DUPLICATE)
         self.assertEqual(self.count("risk_assessment_invalidations", self.tenant), 1)
-        self.assertEqual(self.count("outbox_events", self.tenant), 3)
+        self.assertEqual(self.risk_outbox_count(self.tenant), 3)
         invalidation = [e for e in self.outbox(self.tenant)
                         if e["event_type"] == "risk.assessment_invalidated"]
         self.assertEqual(len(invalidation), 1)
@@ -253,6 +301,46 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         rows = sql(OWNER_URL, "SELECT source_offset, reason FROM quarantine_samples WHERE consumer_name = 'risk-live'"
                    " AND source_topic = %s AND slot = %s", (rec.topic, offset % 1000))
         self.assertEqual(rows, [(offset, "invalid_measurements")])
+
+    def copy_to(self, table, where, params, intruder, policy_id=None):
+        """Insert tenant A's row into `table` again for `intruder`, keeping every identifier."""
+        row = sql(OWNER_URL, f"SELECT to_jsonb(t) FROM {table} t WHERE tenant_id = %s AND {where}",
+                  (self.tenant, *params), self.tenant)[0][0]
+        row["tenant_id"] = intruder
+        if policy_id is not None:
+            row["policy_id"] = policy_id
+        sql(OWNER_URL, f"INSERT INTO {table} SELECT * FROM jsonb_populate_record(NULL::{table}, %s::jsonb)",
+            (json.dumps(row),), intruder)
+
+    def test_same_ids_in_two_tenants_neither_collide_nor_leak(self):
+        self.seed()
+        self.apply(self.reading())
+        assessment_id, event_id = sql(OWNER_URL, "SELECT assessment_id, event_id FROM risk_assessments"
+                                      " WHERE tenant_id = %s", (self.tenant,), self.tenant)[0]
+        intruder = new_id()
+        self.seed(intruder)  # same device/bin/lot ids, now owned by the second tenant
+        self.publish_test_policy("wheat", {"temperature_c": (25, 35, "Cel"),
+                                            "relative_humidity_percent": (65, 80, "%")}, intruder)
+        second_policy = sql(OWNER_URL, "SELECT policy_id FROM grain_policies WHERE tenant_id = %s"
+                            " AND grain_type = 'wheat'", (intruder,), intruder)[0][0]
+        self.copy_to("risk_assessments", "assessment_id = %s", (assessment_id,), intruder, str(second_policy))
+        self.copy_to("outbox_events", "event_id = %s", (event_id,), intruder)
+        for tenant in (self.tenant, intruder):
+            with self.subTest(tenant=tenant):
+                self.assertEqual(sql(OWNER_URL, "SELECT DISTINCT tenant_id::text FROM risk_assessments"
+                                     " WHERE assessment_id = %s", (assessment_id,), tenant), [(tenant,)])
+                self.assertEqual(sql(OWNER_URL, "SELECT DISTINCT tenant_id::text FROM outbox_events"
+                                     " WHERE event_id = %s", (event_id,), tenant), [(tenant,)])
+
+    def test_every_unique_key_on_tenant_tables_is_tenant_scoped(self):
+        rows = sql(OWNER_URL, "SELECT c.conrelid::regclass::text || '.' || c.conname FROM pg_constraint c"
+                   " JOIN pg_class r ON r.oid = c.conrelid"
+                   " WHERE c.contype IN ('p', 'u') AND r.relnamespace = 'public'::regnamespace"
+                   " AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = r.oid AND a.attname = 'tenant_id')"
+                   " AND NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = r.oid"
+                   "   AND a.attname = 'tenant_id' AND a.attnum = ANY(c.conkey))"
+                   " ORDER BY 1")
+        self.assertEqual(rows, [])
 
     def test_connection_failures_are_transient_store_errors(self):
         broken = PgDatabase("postgresql://risk_app:wrong@127.0.0.1:1/greenguard_risk?connect_timeout=1")

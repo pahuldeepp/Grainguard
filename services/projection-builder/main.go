@@ -104,7 +104,7 @@ func prepareWriterSchema(pool *pgxpool.Pool, targetSchema string) (*writerLease,
 	}
 	var total, forced int
 	err := pool.QueryRow(context.Background(), `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, targetSchema).Scan(&total, &forced)
-	if err != nil || total != 10 || forced != total {
+	if err != nil || total != 17 || forced != total {
 		return nil, errors.New("versioned writer schema missing or RLS incomplete")
 	}
 	return acquireWriterLease(context.Background(), pool, targetSchema)

@@ -19,6 +19,7 @@ func Statements(keyspace, datacenter string, rf int, ttl time.Duration) []string
   event_id uuid, stream_version bigint, received_at timestamp,
   site_id uuid, bin_id uuid,
   temperature_c double, relative_humidity_percent double,
+  co2_ppm double, grain_moisture_percent double, measurement_units text, sensor_observations text, schema_version int,
   PRIMARY KEY ((tenant_id, device_id, day), observed_at, reading_id)
 ) WITH CLUSTERING ORDER BY (observed_at DESC, reading_id ASC)
   AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_unit': 'DAYS', 'compaction_window_size': 1}
@@ -53,7 +54,7 @@ func Migrate(ctx context.Context, s Session, cfg Config, ttl time.Duration) erro
 			}
 		}
 	}
-	return nil
+	return migrateTelemetryV2(ctx, s, cfg.Keyspace)
 }
 
 // OpenSystem connects without a keyspace for migrations.

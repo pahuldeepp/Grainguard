@@ -86,9 +86,16 @@ func TestIntentIDIsStableAndDistinct(t *testing.T) {
 	}
 }
 
+func TestIntentIDMatchesServerlessIngressContract(t *testing.T) {
+	got := IntentID("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", 3, "email")
+	if got != "c0df11e7-dbcb-5b03-81e5-a2693f9126b1" {
+		t.Fatalf("intent ID contract changed: %s", got)
+	}
+}
+
 func TestChannelPolicy(t *testing.T) {
-	if len(Channels("alert.opened", "critical")) != 3 || len(Channels("alert.escalated", "warning")) != 1 ||
-		len(Channels("alert.resolved", "critical")) != 1 || Channels("alert.acknowledged", "critical") != nil {
+	if len(Channels("alert.opened", "critical")) != 2 || len(Channels("alert.escalated", "warning")) != 2 ||
+		len(Channels("alert.resolved", "critical")) != 2 || Channels("alert.acknowledged", "critical") != nil {
 		t.Fatal("policy changed")
 	}
 }

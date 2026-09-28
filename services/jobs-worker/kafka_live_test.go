@@ -32,7 +32,12 @@ func TestKafkaAlertIntakeLive(t *testing.T) {
 	event["tenant_id"] = tenant
 	event["event_id"] = randomUUID()
 	event["aggregate_id"] = episode
-	event["payload"].(map[string]any)["episode_id"] = episode
+	payload := event["payload"].(map[string]any)
+	payload["episode_id"] = episode
+	// This live test exercises Kafka ingestion into the RabbitMQ intent ledger.
+	// Critical alerts are exclusively handled by the serverless path and must
+	// not create RabbitMQ intents.
+	payload["severity"] = "warning"
 	raw, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)
@@ -64,8 +69,11 @@ func TestKafkaAlertIntakeLive(t *testing.T) {
 	if ctx.Err() != nil {
 		t.Fatal("canonical alert not consumed before deadline")
 	}
-	if n := countRows(t, db, tenant, "SELECT count(*) FROM notification_intents"); n != 3 {
-		t.Fatalf("expected three intents for one critical alert, got %d", n)
+	if n := countRows(t, db, tenant, "SELECT count(*) FROM inbox"); n != 1 {
+		t.Fatalf("expected one inbox record after replay, got %d", n)
+	}
+	if n := countRows(t, db, tenant, "SELECT count(*) FROM notification_intents"); n != 2 {
+		t.Fatalf("expected two warning intents after replay, got %d", n)
 	}
 	if n := countRows(t, db, randomUUID(), "SELECT count(*) FROM notification_intents"); n != 0 {
 		t.Fatalf("other tenant can see %d intents", n)

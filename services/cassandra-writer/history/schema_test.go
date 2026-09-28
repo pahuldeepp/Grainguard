@@ -29,7 +29,10 @@ func (s *migrationSession) Exec(context.Context, Consistency, string, ...any) er
 	s.execs++
 	return nil
 }
-func (s *migrationSession) Iter(context.Context, Consistency, string, ...any) Rows {
+func (s *migrationSession) Iter(_ context.Context, _ Consistency, stmt string, _ ...any) Rows {
+	if strings.Contains(stmt, "system_schema.columns") {
+		return &columnRows{names: []string{"co2_ppm", "grain_moisture_percent", "measurement_units", "sensor_observations", "schema_version"}}
+	}
 	return s.rows
 }
 

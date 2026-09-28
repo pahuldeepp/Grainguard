@@ -6,16 +6,24 @@ import (
 )
 
 func TestExplicitRoutingAllowlist(t *testing.T) {
-	for _, tc := range []struct{ eventType, topic string }{
-		{typeTelemetry, topicTelemetry}, {typeRegistered, topicInventory},
-		{typeBinding, topicInventory}, {typeStatus, topicInventory},
-		{typeSiteChanged, topicFacility}, {typeBinChanged, topicFacility},
-		{typeLotChanged, topicLot},
-		{typeRiskAssessed, topicRisk}, {typeRiskInvalidated, topicRiskInvalidated},
-		{typeAlertOpened, topicAlerts}, {typeAlertUpdated, topicAlerts},
-		{typeAlertAcked, topicAlerts}, {typeAlertEscalated, topicAlerts}, {typeAlertResolved, topicAlerts},
+	for _, tc := range []struct {
+		eventType, topic string
+		schema           any
+	}{
+		{typeTelemetry, topicTelemetry, "1"}, {typeRegistered, topicInventory, nil},
+		{typeBinding, topicInventory, nil}, {typeStatus, topicInventory, nil},
+		{typeSiteChanged, topicFacility, nil}, {typeBinChanged, topicFacility, nil},
+		{typeLotChanged, topicLot, nil},
+		{typeRiskAssessed, topicRisk, "1"}, {typeRiskAssessed, topicRiskV2, "2"},
+		{typeRiskPolicyChanged, topicRiskPolicy, "1"}, {typeRiskInvalidated, topicRiskInvalidated, nil},
+		{typeAlertOpened, topicAlerts, nil}, {typeAlertUpdated, topicAlerts, nil},
+		{typeAlertAcked, topicAlerts, nil}, {typeAlertEscalated, topicAlerts, nil}, {typeAlertResolved, topicAlerts, nil},
 	} {
-		topic, err := route(map[string]any{fieldType: tc.eventType})
+		event := map[string]any{fieldType: tc.eventType}
+		if tc.schema != nil {
+			event[fieldSchema] = tc.schema
+		}
+		topic, err := route(event)
 		requireReason(t, err, "")
 		if topic != tc.topic {
 			t.Fatalf("%s routed to %s", tc.eventType, topic)

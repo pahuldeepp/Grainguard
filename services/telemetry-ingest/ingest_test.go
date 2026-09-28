@@ -499,6 +499,7 @@ func ingHappySteps(status string) []step {
 	}
 	return []step{
 		{rows: 1}, {scan: setInt64(0)}, {err: pgx.ErrNoRows}, {scan: binding},
+		{scan: setInt64(100000)}, {scan: setInt64(1)},
 		{rows: 1}, {rows: 1}, {rows: 1}, {rows: 1}, {rows: 1},
 	}
 }

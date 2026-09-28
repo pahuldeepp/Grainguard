@@ -31,7 +31,9 @@ fixed the Kafka consumer on franz-go v1.22.0 and every other alert-path consumer
    `quarantined_events` (coordinates, hash, reason; never the payload) before the offset
    commits. Offsets commit only after every record has an effect or a confirmed quarantine.
 2. **Dispatch** (`dispatcher.go`): a scanner lists due outbox identifiers (read-only
-   `dispatch_scan` RLS policy), then a bounded pool (`JOBS_DISPATCH_WORKERS`) locks each intent
+   `jobs_due_dispatch_refs` SECURITY DEFINER selector, IDs only; migration 000005 removed the
+   `app.scope` policies, and the redrive and DLQ scans use `jobs_dead_intent_refs` and
+   `jobs_dead_letter_refs` the same way), then a bounded pool (`JOBS_DISPATCH_WORKERS`) locks each intent
    with `FOR UPDATE SKIP LOCKED`, publishes to RabbitMQ with a **publisher confirm** and
    marks it `dispatched` in the same transaction. A crash between the confirm and the commit
    leaves the row `pending`, so it is re-published with the **same message id**; the
@@ -88,7 +90,9 @@ without it, the read-only `redrive_scan` policy lists dead intents across tenant
 `JOBS_DATABASE_URL`, `RABBITMQ_URL` (required); `KAFKA_BROKERS` (empty disables intake),
 `ALERTS_LIFECYCLE_TOPIC`, `JOBS_KAFKA_GROUP`, `JOBS_HTTP_ADDR` (127.0.0.1:8095),
 `JOBS_DISPATCH_WORKERS` (4), `JOBS_DISPATCH_BATCH` (50), `JOBS_RECEIPT_PREFETCH` (20),
-`JOBS_MAX_DISPATCH_ATTEMPTS` (8). Metrics carry no tenant labels.
+`JOBS_MAX_DISPATCH_ATTEMPTS` (8). Critical opened/escalated/resolved transitions are always retained in the inbox but create no RabbitMQ intents; EventBridge/SQS/Lambda owns those notifications. Warning/non-critical email and SMS remain on RabbitMQ. The split is unconditional and has no runtime feature switch. Metrics carry no tenant labels.
+
+The owner read API `GET /internal/v1/notification-intents?alertId=<uuid>&limit=50&after=<cursor>` pages warning intents (maximum 100). It verifies the RS256 signature, issuer, audience and expiry, then resolves `(issuer, subject)` through the GreenGuard membership source; tenant and operator/admin roles come from that source, never from a request parameter or IdP role claims. File mode reads `AUTH_MEMBERSHIP_FILE`; control-plane mode calls the bounded internal membership lookup using `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN`. The control-plane URL must use HTTPS. Local HTTP requires the explicit `AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP=true` opt-in. The DB query uses transaction-local forced RLS and an explicit tenant predicate. `JOBS_NOTIFICATION_CURSOR_KEY` must contain at least 32 random bytes. Missing auth, membership or cursor configuration leaves this read capability unavailable; `/readyz/notification-history` reports that separately from worker readiness. Critical delivery history is not exposed by this service.
 
 ## Commands
 

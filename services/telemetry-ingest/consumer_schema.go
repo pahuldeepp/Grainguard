@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	common "greenguard.local/go-common"
 	"path/filepath"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -15,7 +16,7 @@ func loadBindingSchemas(dir string) (bindingSchemas, error) {
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.AssertFormat()
 	result := make(bindingSchemas)
-	for kind, file := range map[string]string{eventRegistered: "device-registered.v1.schema.json", eventBindingChanged: "device-binding-changed.v1.schema.json", eventStatusChanged: "device-status-changed.v1.schema.json"} {
+	for kind, file := range map[string]string{eventCableLayout: "cable-layout-changed.v1.schema.json", eventRegistered: "device-registered.v1.schema.json", eventBindingChanged: "device-binding-changed.v1.schema.json", eventStatusChanged: "device-status-changed.v1.schema.json"} {
 		schema, err := compiler.Compile(filepath.Join(dir, file))
 		if err != nil {
 			return nil, err
@@ -48,6 +49,9 @@ func (s bindingSchemas) Validate(body []byte) error {
 	trace, _ := event["traceparent"].(string)
 	if _, ok := sanitizeTraceparent(trace); !ok {
 		return ErrInvalidEvent
+	}
+	if kind == eventCableLayout {
+		return common.ValidateCableLayout(event["payload"].(map[string]any))
 	}
 	return nil
 }

@@ -26,17 +26,27 @@ def event(filename, tenant, resource, version):
 def create_index_after_startup(elastic, index):
     """Elasticsearch can answer health probes before its first mapping write is ready."""
     deadline = time.monotonic() + 120
+    last_error = None
     while True:
         try:
             elastic.create_index(index)
             health = elastic.request("GET", f"/_cluster/health/{index}?wait_for_status=yellow&timeout=10s")
             if not health.get("timed_out") and health.get("status") in ("yellow", "green"):
                 return
+            last_error = health
         except (TimeoutError, urllib.error.URLError, SearchError) as exc:
             if isinstance(exc, SearchError) and exc.status not in (408, 429, 500, 502, 503, 504):
                 raise
+            last_error = exc
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"index {index} did not acquire an active shard")
+            try:
+                allocation = elastic.request("GET", "/_cluster/allocation/explain")
+            except (TimeoutError, urllib.error.URLError, SearchError) as exc:
+                allocation = exc
+            raise TimeoutError(
+                f"index {index} did not acquire an active shard; "
+                f"last health/error={last_error}; allocation={allocation}"
+            )
         time.sleep(2)
 
 
