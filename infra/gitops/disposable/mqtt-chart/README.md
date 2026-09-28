@@ -12,7 +12,7 @@ Provision the five Secret keys through the disposable environment's managed secr
 python3 infra/gitops/disposable/mqtt-chart/check-secret.py \
   --secret-json /secure/temporary/mqtt-secret.json \
   --devices-json /secure/temporary/mqtt-devices.json \
-  --namespace greenguard-data
+  --namespace greenguard
 ```
 
 The input Secret JSON contains sensitive material: restrict its file mode and remove it after validation. The checker prints only a pass/fail reason; it validates the server certificate chain, private-key match, `mqtt.<namespace>.svc.cluster.local` hostname, hash formats, and exact ACL grants. When external ingress is enabled, pass the same `external.hostname` as `--external-hostname`; the checker then requires that name in the server certificate too. It rejects unknown principals and broad device topics. It does not create credentials, prove a successful broker login, or check Secret Manager/Kubernetes equality. Rotation requires validating the new Secret, syncing it, restarting the broker and affected clients, then proving reconnect and acknowledgement delivery. Never revoke a prior device credential before firmware and broker changes have converged.

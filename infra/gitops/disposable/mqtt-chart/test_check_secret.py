@@ -27,8 +27,8 @@ class MQTTSecretTests(unittest.TestCase):
         root = self.path / "root"
         server = self.path / "server"
         openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=MQTT test CA", "-addext", "basicConstraints=critical,CA:TRUE", "-keyout", str(root) + ".key", "-out", str(root) + ".crt")
-        openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=mqtt.greenguard-data.svc.cluster.local", "-addext", "subjectAltName=DNS:mqtt.greenguard-data.svc.cluster.local", "-keyout", str(server) + ".key", "-out", str(server) + ".csr")
-        (self.path / "ext.cnf").write_text("subjectAltName=DNS:mqtt.greenguard-data.svc.cluster.local,DNS:sensors.example.org\n")
+        openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=mqtt.greenguard.svc.cluster.local", "-addext", "subjectAltName=DNS:mqtt.greenguard.svc.cluster.local", "-keyout", str(server) + ".key", "-out", str(server) + ".csr")
+        (self.path / "ext.cnf").write_text("subjectAltName=DNS:mqtt.greenguard.svc.cluster.local,DNS:sensors.example.org\n")
         openssl("x509", "-req", "-in", str(server) + ".csr", "-CA", str(root) + ".crt", "-CAkey", str(root) + ".key", "-CAcreateserial", "-days", "2", "-extfile", str(self.path / "ext.cnf"), "-out", str(server) + ".crt")
         self.data = {
             "tls.crt": Path(str(server) + ".crt").read_bytes(),
@@ -39,9 +39,9 @@ class MQTTSecretTests(unittest.TestCase):
         }
         (self.path / "devices.json").write_text(json.dumps({"devices": [{"username": "sensor1", "tenant_id": TENANT, "asset_id": ASSET}]}))
 
-    def validate(self, data=None, namespace="greenguard-data", external_hostname=None):
+    def validate(self, data=None, namespace="greenguard", external_hostname=None):
         encoded = {name: base64.b64encode(value).decode() for name, value in (data or self.data).items()}
-        (self.path / "secret.json").write_text(json.dumps({"kind": "Secret", "type": "Opaque", "metadata": {"name": "greenguard-mqtt-broker", "namespace": "greenguard-data"}, "data": encoded}))
+        (self.path / "secret.json").write_text(json.dumps({"kind": "Secret", "type": "Opaque", "metadata": {"name": "greenguard-mqtt-broker", "namespace": "greenguard"}, "data": encoded}))
         CHECK.validate(self.path / "secret.json", self.path / "devices.json", namespace, "greenguard-mqtt-broker", "greenguard-hardware-worker", external_hostname)
 
     def test_valid_exact_secret(self):
