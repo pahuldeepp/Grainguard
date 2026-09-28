@@ -1,0 +1,26 @@
+{
+  "name": "@greenguard/entitlements",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build -w @greenguard/kafka-security && tsc",
+    "typecheck": "npm run build -w @greenguard/kafka-security && tsc --noEmit",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
+    "heartbeat": "npm run build && node dist/heartbeat.js"
+  },
+  "dependencies": {
+    "kafkajs": "2.2.4",
+    "kafkajs-snappy": "1.1.0",
+    "@greenguard/kafka-security": "0.1.0"
+  }
+}
