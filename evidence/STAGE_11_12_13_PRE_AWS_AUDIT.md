@@ -198,3 +198,13 @@ those were fixed and their offline checks pass. The latest local checks include
 44 teardown fixtures, 31 secret/registration fixtures, all affected Go module
 tests, all-workspace TypeScript typecheck, Kafka security parser tests,
 notification tests, Helm validation, Terraform validation and actionlint.
+
+The isolated shared Compose verification subsequently completed with exit
+status 0 using `make COMPOSE='docker compose -p greenguard-stage12 --env-file
+.env -f infra/compose/compose.yaml -f
+infra/compose/stage12-isolated.override.yaml' verify`. This exercised the
+local PostgreSQL/PgBouncer migrations and the repository's service test and
+build gate. The isolated Compose containers and network were then stopped
+without deleting volumes. This is local verification only; it does not prove
+AWS deployment, live mesh/data-service interoperability, public HTTPS login,
+or physical-iPhone acceptance.
