@@ -108,6 +108,8 @@ jobs:
         run: ruby infra/gitops/disposable/test-resolve-images.rb
       - name: Verify verified-digest CI artifact assembly
         run: ruby infra/gitops/disposable/test-assemble-ci-digests.rb
+      - name: Verify anonymous digest-pull preflight offline
+        run: python3 -m unittest infra/gitops/disposable/test_check_public_release_images.py -v
       - name: Verify signed-image ECR promotion contract offline
         run: ruby infra/gitops/disposable/test-promote-images-to-ecr.rb
 
@@ -449,6 +451,10 @@ jobs:
         env:
           REVISION: ${{ github.sha }}
         run: ruby infra/gitops/disposable/assemble-ci-digests.rb release-digests "$REVISION" release-inputs
+      - name: Require every release digest to be anonymously pullable by EKS
+        env:
+          REVISION: ${{ github.sha }}
+        run: python3 infra/gitops/disposable/check-public-release-images.py release-inputs/release-inputs.tfvars.json "$REVISION"
       - name: Upload reviewed release inputs
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

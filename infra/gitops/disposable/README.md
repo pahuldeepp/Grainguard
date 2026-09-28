@@ -148,6 +148,27 @@ its full digest reference. For example:
 {"bff":"123456789012.dkr.ecr.us-east-1.amazonaws.com/greenguard/bff@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 ```
 
+The main-branch CI `greenguard-release-inputs-<commit>` artifact contains
+signed exact-commit GHCR digest references only when every exact manifest can
+be pulled anonymously. Package owners must publish all 20 GHCR packages as
+public before this route can pass; publishing an image does not itself prove
+that the package is public. The September 2026 audit of existing `latest`
+manifests found mixed anonymous access, so this route is **not yet green**.
+To avoid an ECR bootstrap cycle during the first disposable apply, use that
+artifact directly only after checking the intended Git checkout:
+
+```sh
+python3 infra/gitops/disposable/check-public-release-images.py \
+  release-inputs/release-inputs.tfvars.json "$(git rev-parse HEAD)"
+```
+
+This read-only preflight rejects missing, foreign, mutable, inaccessible or
+changed manifests. It does not prove EKS NAT egress, architecture support,
+image startup or workload health; those require live acceptance. The existing
+ECR promotion script is optional for a later ECR-backed rollout. It cannot be
+used as a prerequisite for a single first apply because Terraform creates the
+target ECR repositories in that same apply.
+
 The real manifest must contain every image. Run
 `ruby infra/gitops/disposable/resolve-images.rb manifest.json release-images`.
 It writes one immutable `image:` Helm values file for each release.
