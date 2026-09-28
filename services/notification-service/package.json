@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @greenguard/kafka-security && tsc",
-    "typecheck": "npm run build -w @greenguard/kafka-security && tsc --noEmit",
+    "build": "npm run build:deps && tsc",
+    "typecheck": "npm run build:deps && tsc --noEmit",
+    "build:deps": "npm run build -w @greenguard/kafka-security -w @greenguard/feature-flags",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "npm run build && node dist/migrate.js",
