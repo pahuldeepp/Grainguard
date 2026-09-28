@@ -168,9 +168,12 @@ export async function assertTelemetryMoveEffectsDrained(
     [tenantId],
   );
   const effects = result.rows[0];
-  if (!effects) throw new Error("telemetry move effect preflight returned no result");
+  if (!effects)
+    throw new Error("telemetry move effect preflight returned no result");
   if (effects.has_cdc_history)
-    throw new Error("telemetry move blocked: CDC outbox history needs a deduplication-aware migration protocol");
+    throw new Error(
+      "telemetry move blocked: CDC outbox history needs a deduplication-aware migration protocol",
+    );
 }
 
 export async function fenceTelemetryMoveSource(

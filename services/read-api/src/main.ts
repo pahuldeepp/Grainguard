@@ -36,6 +36,12 @@ for (const key of ["CASSANDRA_HOSTS", "ELASTICSEARCH_URL"]) {
   if (!process.env[key]) throw new Error(`${key} is required`);
 }
 if (
+  process.env.SHARD_ROUTING_REQUIRED !== undefined &&
+  process.env.SHARD_ROUTING_REQUIRED !== "true" &&
+  process.env.SHARD_ROUTING_REQUIRED !== "false"
+)
+  throw new Error("SHARD_ROUTING_REQUIRED must be true or false");
+if (
   process.env.READ_SHARD_DATABASE_URLS &&
   process.env.READ_SHARD_REGISTRY_FILE
 )
@@ -43,6 +49,10 @@ if (
 const shardConfig = process.env.READ_SHARD_REGISTRY_FILE
   ? readFileSync(process.env.READ_SHARD_REGISTRY_FILE, "utf8")
   : process.env.READ_SHARD_DATABASE_URLS;
+if (process.env.SHARD_ROUTING_REQUIRED === "true" && !shardConfig)
+  throw new Error(
+    "read shard registry is required when SHARD_ROUTING_REQUIRED=true",
+  );
 if (!shardConfig && !process.env.READ_QUERY_DATABASE_URL)
   throw new Error("read database configuration is required");
 if (

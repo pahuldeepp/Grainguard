@@ -199,7 +199,6 @@ test("risk copy preflight accepts exact nonpartitioned schema and rejects drift"
   );
 });
 
-
 test("risk move preflight rejects CDC history and allows a drained tenant", async () => {
   const historical = new FakePool();
   historical.effects.has_cdc_history = true;
@@ -207,7 +206,10 @@ test("risk move preflight rejects CDC history and allows a drained tenant", asyn
     assertRiskMoveEffectsDrained(historical as unknown as Pool, tenant),
     /CDC outbox history/,
   );
-  assert.match(historical.calls[0]!.sql, /greenguard_internal\.tenant_move_has_cdc_history/);
+  assert.match(
+    historical.calls[0]!.sql,
+    /greenguard_internal\.tenant_move_has_cdc_history/,
+  );
   assert.deepEqual(historical.calls[0]!.values, [tenant]);
 
   const drained = new FakePool();

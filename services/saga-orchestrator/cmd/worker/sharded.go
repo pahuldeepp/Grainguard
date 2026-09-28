@@ -48,7 +48,12 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 		return err
 	}
 	defer producer.Close()
-	consumer, err := kgo.NewClient(append(transport.Options(cfg.brokers, cfg.group, []string{saga.ResultTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted())), security...)...)
+	if err := producer.Ping(ctx); err != nil {
+		return fmt.Errorf("saga producer broker ping: %w", err)
+	}
+	health := newWorkerHealth(4, 90*time.Second)
+	consumerExtra := append([]kgo.Opt{kgo.FetchIsolationLevel(kgo.ReadCommitted())}, health.consumerGroupOptions()...)
+	consumer, err := kgo.NewClient(append(transport.Options(cfg.brokers, cfg.group, []string{saga.ResultTopic}, consumerExtra...), security...)...)
 	if err != nil {
 		return err
 	}
@@ -57,10 +62,14 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	defer cancel()
 	metrics := &saga.Metrics{}
 	results := make(chan error, 6)
+	if cfg.health != "" {
+		stopHealth := serveWorkerHealth(work, cfg.health, health, results)
+		defer stopHealth()
+	}
 	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
-		results <- resultConsumer{store: saga.Store{DB: db}, client: consumer, producer: producer, metrics: metrics}.run(work)
+		results <- resultConsumer{store: saga.Store{DB: db}, client: consumer, producer: producer, metrics: metrics, health: health}.run(work)
 	}()
 	if cfg.metrics != "" {
 		stop := serveMetrics(work, cfg.metrics, saga.ShardedHandler(metrics, db), results)
@@ -68,7 +77,7 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	}
 	workersDone := make(chan struct{}, 4)
 	for _, shard := range []string{"s1", "s2", "s3", "s4"} {
-		w := worker{db: db.InfrastructureDB(shard), store: saga.Store{DB: db, Fence: leases}, leases: leases[shard], metrics: metrics, cursors: map[int]string{}, publish: func(ctx context.Context, key, value []byte) error {
+		w := worker{db: db.InfrastructureDB(shard), store: saga.Store{DB: db, Fence: leases}, leases: leases[shard], metrics: metrics, cursors: map[int]string{}, health: health, healthID: shard, publish: func(ctx context.Context, key, value []byte) error {
 			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
 		}}
 		go func() {

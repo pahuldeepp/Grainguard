@@ -396,6 +396,7 @@ test("an invalid task is dead-lettered without touching the database", async () 
 
 test("private shard registry config preserves placement authority without legacy pool URL", () => {
   const env: Record<string, string> = {
+    SHARD_ROUTING_REQUIRED: "true",
     SHARD_REGISTRY_FILE: "/private/owners.json",
     RABBITMQ_URL: "amqp://localhost",
     CONTROL_PLANE_URL: "https://control.test",
@@ -404,6 +405,7 @@ test("private shard registry config preserves placement authority without legacy
   };
   const config = loadConfig((key) => env[key]);
   assert.equal(config.databaseUrl, "");
+  assert.equal(config.ownerEnvironment?.SHARD_ROUTING_REQUIRED, "true");
   assert.equal(
     config.ownerEnvironment?.SHARD_REGISTRY_FILE,
     env.SHARD_REGISTRY_FILE,
@@ -412,6 +414,15 @@ test("private shard registry config preserves placement authority without legacy
     config.ownerEnvironment?.CONTROL_LOOKUP_TOKEN,
     env.CONTROL_LOOKUP_TOKEN,
   );
+});
+
+test("required shard mode rejects missing registry despite a legacy database URL", () => {
+  const env: Record<string, string> = {
+    SHARD_ROUTING_REQUIRED: "true",
+    NOTIFICATIONS_DATABASE_URL: "postgres://legacy",
+    RABBITMQ_URL: "amqp://localhost",
+  };
+  assert.throws(() => loadConfig((key) => env[key]), /shard_registry_required/);
 });
 
 test("exported send and reconcile calls share capacity and retain their own provider deadline", async () => {

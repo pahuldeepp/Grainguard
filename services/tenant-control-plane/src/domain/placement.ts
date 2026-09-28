@@ -53,7 +53,7 @@ const moveDto = (row: MoveRow): PlacementMove => ({
 /** Every operational tenant store must independently acknowledge a cutover.
  * Control/billing are central and are intentionally excluded. Keep in sync with
  * infra/gitops/disposable/owner-migration-inventory.json. */
-const SHARDED_MOVE_OWNERS = [
+export const SHARDED_MOVE_OWNERS = [
   "telemetry",
   "projection",
   "jobs",

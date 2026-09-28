@@ -521,9 +521,13 @@ export async function copyTenantSnapshot(
       for (;;) {
         const page = await readPage(sourceClient, table, cursor);
         for (const row of page.rows) {
-          sourceHash.update(canonical(Object.fromEntries(
-            table.columns.map((column) => [column, row[column]]),
-          )));
+          sourceHash.update(
+            canonical(
+              Object.fromEntries(
+                table.columns.map((column) => [column, row[column]]),
+              ),
+            ),
+          );
           sourceHash.update("\n");
           sourceRowCount++;
           sourceTableRowCount++;
@@ -545,9 +549,13 @@ export async function copyTenantSnapshot(
       for (;;) {
         const page = await readPage(targetClient, table, cursor);
         for (const row of page.rows) {
-          targetHash.update(canonical(Object.fromEntries(
-            table.columns.map((column) => [column, row[column]]),
-          )));
+          targetHash.update(
+            canonical(
+              Object.fromEntries(
+                table.columns.map((column) => [column, row[column]]),
+              ),
+            ),
+          );
           targetHash.update("\n");
           targetTableRowCount++;
           targetRowCount++;

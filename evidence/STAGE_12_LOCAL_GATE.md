@@ -176,3 +176,68 @@ Postgres/PgBouncer storage. This remains local acceptance: Kubernetes rollout,
 mesh, autoscaler/canary, admission/runtime-security, cloud, optional broker/search
 integrations, and Stage 12.15 staging E2E acceptance remain pending as listed
 above. Stage 12 is still in progress.
+
+## Isolated rerun — 2026-09-28
+
+The corrected gate wrapper was run from a fresh scratch environment
+(`greenguard-stage12-c261b0de4f`) using:
+
+```sh
+node scripts/stage12-compose-gate.mjs run
+```
+
+It applied the service migrations, ran `make verify`, then ran `make smoke`.
+The full verify completed successfully, including workspace formatting, lint,
+typechecking, application tests, and Go format/vet/race checks. Risk Engine
+reported 97 passing tests and one optional isolated-shard test skipped. The
+workspace results included the tenant-control-plane move-boundary suite after
+correcting its fixture to restore the target shard's original offline state.
+The smoke result was:
+
+> PASS: live database readiness, unavailable database returns 503, application
+> database privileges and cross-database denial.
+
+The wrapper removed the exact run's containers, network, and database volume and
+reported `PASS: isolated Compose verification and smoke; project and volume
+removed.` Separate static contracts also passed: Stage 12/13 harness tests (8),
+four-shard Terraform/runtime contracts (5), and lifecycle audit tests (8 runs,
+70 assertions). Terraform 1.16.4 `fmt -check` and `validate` passed for the
+bootstrap-state, platform, and disposable roots; this was offline validation,
+not an AWS plan.
+
+This is not a complete-stack Compose E2E: the smoke starts Telemetry Ingest and
+Device Service against isolated PostgreSQL/PgBouncer. Kafka, Redis Cluster,
+Cassandra, OpenSearch, Dex/OIDC, Argo CD, web, and mobile were not all running
+together. Optional broker, real Redis, and real four-shard acceptance cases were
+skipped when their dedicated endpoints were absent. The Stage 13 harness only
+validates bounded local manifests and explicitly does not certify capacity or
+chaos behavior.
+
+## Remaining pre-AWS blockers confirmed — 2026-09-28
+
+- Terraform's normal disposable readiness precondition still blocks a normal
+  `plan`/`apply` until tenant enrollment, bootstrap/data acceptance, live secret
+  synchronization, and audit-export acceptance are complete. No apply was run.
+- Four RDS shard bundles and runtime registries are modeled, but control-plane
+  bootstrap still seeds the legacy state (only `s1` active). No guarded deployed
+  activation path or tenant-created-event provisioner installs tenant ownership
+  in every owner database. Enabling greenfield mode alone would leave all shards
+  unavailable to onboarding.
+- There is no trusted all-owner tenant-move coordinator. Only Risk, Inventory,
+  and Telemetry have local adapters; other owner effects lack operation-bound
+  receipts and migration acceptance. The new deny-by-default database migration
+  prevents the untrusted control role from forging receipts or completing a
+  cutover. Actual shard movement therefore remains blocked safely.
+- `saga-worker` now has loopback-only liveness/readiness based on consumer
+  assignment and worker-loop progress. Runtime behavior on Kubernetes remains
+  unproven.
+- Destruction must use `infra/terraform/disposable/destroy-verified.sh`; raw
+  `terraform destroy` has no guaranteed final-inventory hook. The verifier's
+  inventory scope is the configured account and region plus named global
+  resources, not an exhaustive scan of every account/region.
+- OAuth/OIDC callback configuration exists, but real-user tenant enrollment,
+  deployed HTTPS login, browser/mobile sign-in, and physical-iPhone API flows
+  still require an owned AWS environment and live acceptance.
+
+No AWS APIs, production resources, Terraform apply/destroy, or shared database
+state were touched during this rerun.

@@ -27,6 +27,17 @@ test("defaults and required database URL", () => {
   assert.throws(() => readConfig({ ...base, PORT: "70000" }), /PORT/);
 });
 
+test("required shard mode rejects a missing registry instead of using the legacy URL", () => {
+  assert.throws(
+    () => readConfig({ ...base, SHARD_ROUTING_REQUIRED: "true" }),
+    /shard_registry_required/,
+  );
+  assert.equal(
+    readConfig({ ...base, SHARD_ROUTING_REQUIRED: "false" }).databaseUrl,
+    base.ALERTS_DATABASE_URL,
+  );
+});
+
 test("AUTH_* is all-or-nothing and JWKS needs https outside loopback", () => {
   assert.equal(readConfig({ ...base, ...auth }).auth?.issuer, auth.AUTH_ISSUER);
   assert.throws(

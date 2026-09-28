@@ -45,6 +45,9 @@ func writerTarget(schema, database, role string) (string, string, error) {
 }
 
 func buildApp(getenv func(string) string) (*app, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, err
+	}
 	window, err := history.Window(getenv)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,5 @@
 import {
+  startProbeHealth,
   startEntitlementWorker,
   type Envelope,
 } from "@greenguard/entitlements";
@@ -39,19 +40,24 @@ if (process.argv[1]?.endsWith("/entitlements/projector.js")) {
       "CONTROL_ENTITLEMENT_PROJECTOR_URL and KAFKA_BROKERS required",
     );
   const db = createDb(url);
+  const health = await startProbeHealth();
   const stop = await startEntitlementWorker({
     brokers: brokers.split(","),
     groupId: "greenguard-control-entitlements-v1",
     clientId: "control-entitlements",
     apply: (event) => applyEntitlement(db, event),
     heartbeat: (partition, at) => applyHeartbeat(db, partition, at),
+    onGroupAssigned: health.ready,
+    onGroupUnavailable: health.notReady,
     onFatal: (error) => {
       console.error(error);
       process.exit(1);
     },
   });
   const shutdown = () => {
-    void stop().finally(() => db.$disconnect());
+    void stop()
+      .finally(() => health.close())
+      .finally(() => db.$disconnect());
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

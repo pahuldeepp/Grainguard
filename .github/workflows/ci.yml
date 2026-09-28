@@ -80,6 +80,8 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/disposable init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/terraform/disposable validate
+      - name: Verify four-shard runtime contract
+        run: python3 -m unittest infra/terraform/disposable/test_shard_runtime_contract.py infra/terraform/disposable/test_shard_routing_required_contract.py -v
       - name: Verify disposable teardown guards offline
         run: bash infra/terraform/disposable/teardown_test.sh
       - name: Audit disposable Terraform lifecycle offline

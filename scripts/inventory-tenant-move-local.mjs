@@ -20,10 +20,14 @@ const initSqlPath = resolve(root, "infra/compose/init-databases.sql");
 const initSql = readFileSync(initSqlPath, "utf8");
 const secretKeys = new Set([
   "POSTGRES_PASSWORD",
-  ...Array.from(initSql.matchAll(/\\getenv\s+\w+\s+(\w+)/g), (match) => match[1]),
+  ...Array.from(
+    initSql.matchAll(/\\getenv\s+\w+\s+(\w+)/g),
+    (match) => match[1],
+  ),
 ]);
 const environment = { ...process.env };
-for (const key of secretKeys) environment[key] = randomBytes(24).toString("hex");
+for (const key of secretKeys)
+  environment[key] = randomBytes(24).toString("hex");
 const secretPath = resolve(scratch, "local-postgres.env");
 writeFileSync(
   secretPath,
@@ -65,7 +69,10 @@ const connectionString = (role, passwordKey, database, port) => {
 };
 const waitPg = async (url) => {
   for (let attempt = 0; attempt < 120; attempt++) {
-    const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 500 });
+    const client = new pg.Client({
+      connectionString: url,
+      connectionTimeoutMillis: 500,
+    });
     try {
       await client.connect();
       await client.query("SELECT 1");
@@ -93,25 +100,48 @@ let containerId;
 let sourcePool;
 let targetPool;
 
-async function seedTenant(adminUrl, tenantId, { withOutbox = false, withPendingSaga = false } = {}) {
+async function seedTenant(
+  adminUrl,
+  tenantId,
+  { withOutbox = false, withPendingSaga = false } = {},
+) {
   const deviceId = randomUUID();
   const siteId = randomUUID();
   const binId = randomUUID();
-  const operationIds = { command: randomUUID(), saga: randomUUID(), result: randomUUID() };
+  const operationIds = {
+    command: randomUUID(),
+    saga: randomUUID(),
+    result: randomUUID(),
+  };
   await withClient(adminUrl, async (db) => {
     await db.query("BEGIN");
     try {
       await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
-      await db.query("SELECT set_config('app.shard_id',$1,true)", [source.shardId]);
-      await db.query("SELECT set_config('app.shard_incarnation',$1,true)", [source.incarnation]);
-      await db.query("SELECT set_config('app.placement_epoch',$1,true)", [source.epoch]);
+      await db.query("SELECT set_config('app.shard_id',$1,true)", [
+        source.shardId,
+      ]);
+      await db.query("SELECT set_config('app.shard_incarnation',$1,true)", [
+        source.incarnation,
+      ]);
+      await db.query("SELECT set_config('app.placement_epoch',$1,true)", [
+        source.epoch,
+      ]);
       await db.query(
         "INSERT INTO greenguard_internal.tenant_ownership(tenant_id,shard_id,shard_incarnation,placement_epoch,state) VALUES($1,$2,$3,$4,'active')",
         [tenantId, source.shardId, source.incarnation, source.epoch],
       );
-      await db.query("INSERT INTO tenants(tenant_id,name) VALUES($1,'isolated move acceptance')", [tenantId]);
-      await db.query("INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'site')", [tenantId, siteId]);
-      await db.query("INSERT INTO bins(tenant_id,bin_id,site_id,name) VALUES($1,$2,$3,'bin')", [tenantId, binId, siteId]);
+      await db.query(
+        "INSERT INTO tenants(tenant_id,name) VALUES($1,'isolated move acceptance')",
+        [tenantId],
+      );
+      await db.query(
+        "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'site')",
+        [tenantId, siteId],
+      );
+      await db.query(
+        "INSERT INTO bins(tenant_id,bin_id,site_id,name) VALUES($1,$2,$3,'bin')",
+        [tenantId, binId, siteId],
+      );
       await db.query(
         "INSERT INTO devices(tenant_id,device_id,site_id,bin_id,serial_number,status) VALUES($1,$2,$3,$4,$5,'active')",
         [tenantId, deviceId, siteId, binId, `serial-${tenantId}`],
@@ -127,12 +157,24 @@ async function seedTenant(adminUrl, tenantId, { withOutbox = false, withPendingS
         await db.query(
           `INSERT INTO inventory_saga_receipts(tenant_id,command_id,saga_id,device_id,asset_id,step,saga_version,fencing_token,outcome,result_id)
            VALUES($1,$2,$3,$4,$5,'inventory.activate',1,1,'succeeded',$6)`,
-          [tenantId, operationIds.command, operationIds.saga, deviceId, randomUUID(), operationIds.result],
+          [
+            tenantId,
+            operationIds.command,
+            operationIds.saga,
+            deviceId,
+            randomUUID(),
+            operationIds.result,
+          ],
         );
         await db.query(
           `INSERT INTO inventory_saga_result_outbox(tenant_id,result_id,command_id,saga_id,step,saga_version,fencing_token,outcome)
            VALUES($1,$2,$3,$4,'inventory.activate',1,1,'succeeded')`,
-          [tenantId, operationIds.result, operationIds.command, operationIds.saga],
+          [
+            tenantId,
+            operationIds.result,
+            operationIds.command,
+            operationIds.saga,
+          ],
         );
       }
       await db.query("COMMIT");
@@ -144,12 +186,26 @@ async function seedTenant(adminUrl, tenantId, { withOutbox = false, withPendingS
   return { deviceId, siteId, binId };
 }
 
-async function assertFunctionFenceRejected(url, tenantId, operationId, expected) {
+async function assertFunctionFenceRejected(
+  url,
+  tenantId,
+  operationId,
+  expected,
+) {
   await withClient(url, async (db) => {
     await assert.rejects(
       db.query(
         `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint)`,
-        [tenantId, operationId, source.shardId, source.incarnation, source.epoch, target.shardId, target.incarnation, target.epoch],
+        [
+          tenantId,
+          operationId,
+          source.shardId,
+          source.incarnation,
+          source.epoch,
+          target.shardId,
+          target.incarnation,
+          target.epoch,
+        ],
       ),
       expected,
     );
@@ -159,22 +215,63 @@ async function assertFunctionFenceRejected(url, tenantId, operationId, expected)
 try {
   run("npm", ["run", "build", "-w", "@greenguard/tenant-control-plane"]);
   const id = docker([
-    "run", "-d", "--name", container, "--env-file", secretPath,
-    "-p", "127.0.0.1::5432", "-v", `${initSqlPath}:/docker-entrypoint-initdb.d/001-init.sql:ro`, "postgres:16",
+    "run",
+    "-d",
+    "--name",
+    container,
+    "--env-file",
+    secretPath,
+    "-p",
+    "127.0.0.1::5432",
+    "-v",
+    `${initSqlPath}:/docker-entrypoint-initdb.d/001-init.sql:ro`,
+    "postgres:16",
   ]);
   containerId = id;
   const port = docker(["port", container, "5432/tcp"]).split(":").at(-1);
-  const adminUrl = connectionString("postgres", "POSTGRES_PASSWORD", "postgres", port);
-  const inventoryAdminUrl = connectionString("postgres", "POSTGRES_PASSWORD", "greenguard_inventory", port);
-  const sourceUrl = connectionString("inventory_migrator", "INVENTORY_MIGRATOR_PASSWORD", "greenguard_inventory", port);
+  const adminUrl = connectionString(
+    "postgres",
+    "POSTGRES_PASSWORD",
+    "postgres",
+    port,
+  );
+  const inventoryAdminUrl = connectionString(
+    "postgres",
+    "POSTGRES_PASSWORD",
+    "greenguard_inventory",
+    port,
+  );
+  const sourceUrl = connectionString(
+    "inventory_migrator",
+    "INVENTORY_MIGRATOR_PASSWORD",
+    "greenguard_inventory",
+    port,
+  );
   await waitPg(adminUrl);
   environment.INVENTORY_MIGRATION_URL = sourceUrl;
-  run("npm", ["run", "migrate", "-w", "@greenguard/device-service"], root, environment);
-  await withClient(adminUrl, (db) => db.query(
-    "CREATE DATABASE greenguard_inventory_s2 WITH TEMPLATE greenguard_inventory OWNER inventory_migrator",
-  ));
-  const targetUrl = connectionString("inventory_migrator", "INVENTORY_MIGRATOR_PASSWORD", "greenguard_inventory_s2", port);
-  const targetAdminUrl = connectionString("postgres", "POSTGRES_PASSWORD", "greenguard_inventory_s2", port);
+  run(
+    "npm",
+    ["run", "migrate", "-w", "@greenguard/device-service"],
+    root,
+    environment,
+  );
+  await withClient(adminUrl, (db) =>
+    db.query(
+      "CREATE DATABASE greenguard_inventory_s2 WITH TEMPLATE greenguard_inventory OWNER inventory_migrator",
+    ),
+  );
+  const targetUrl = connectionString(
+    "inventory_migrator",
+    "INVENTORY_MIGRATOR_PASSWORD",
+    "greenguard_inventory_s2",
+    port,
+  );
+  const targetAdminUrl = connectionString(
+    "postgres",
+    "POSTGRES_PASSWORD",
+    "greenguard_inventory_s2",
+    port,
+  );
   sourcePool = new pg.Pool({ connectionString: sourceUrl, max: 2 });
   targetPool = new pg.Pool({ connectionString: targetUrl, max: 2 });
   const {
@@ -185,36 +282,91 @@ try {
     fenceInventoryMoveSource,
     prepareInventoryMoveTarget,
     reactivateInventoryMoveSource,
-  } = await import("../services/tenant-control-plane/dist/tenant-move/inventory-owner.js");
+  } =
+    await import("../services/tenant-control-plane/dist/tenant-move/inventory-owner.js");
 
   // Execute a complete owner-local copy + receipt + target abort + source epoch
   // advance, with real row triggers and RLS in the two isolated shard databases.
   const tenantId = randomUUID();
   const operationId = randomUUID();
   const seeded = await seedTenant(inventoryAdminUrl, tenantId);
-  await Promise.all([assertInventoryMoveSchema(sourcePool), assertInventoryMoveSchema(targetPool)]);
-  await prepareInventoryMoveTarget(targetPool, tenantId, operationId, source, target);
-  await fenceInventoryMoveSource(sourcePool, tenantId, operationId, source, target);
-  const copied = await copyInventoryTenantSnapshot(sourcePool, targetPool, tenantId, operationId, source, target);
+  await Promise.all([
+    assertInventoryMoveSchema(sourcePool),
+    assertInventoryMoveSchema(targetPool),
+  ]);
+  await prepareInventoryMoveTarget(
+    targetPool,
+    tenantId,
+    operationId,
+    source,
+    target,
+  );
+  await fenceInventoryMoveSource(
+    sourcePool,
+    tenantId,
+    operationId,
+    source,
+    target,
+  );
+  const copied = await copyInventoryTenantSnapshot(
+    sourcePool,
+    targetPool,
+    tenantId,
+    operationId,
+    source,
+    target,
+  );
   assert.equal(copied.receipt.phase, "copy_verified");
   assert.equal(copied.receipt.rowCount, "4");
   assert.equal(copied.receipt.tableCount, 15);
   assert.equal(copied.receipt.sourceSha256, copied.receipt.targetSha256);
-  const replay = await copyInventoryTenantSnapshot(sourcePool, targetPool, tenantId, operationId, source, target);
+  const replay = await copyInventoryTenantSnapshot(
+    sourcePool,
+    targetPool,
+    tenantId,
+    operationId,
+    source,
+    target,
+  );
   assert.deepEqual(replay.receipt, copied.receipt);
-  const targetAbort = await abortInventoryMoveTarget(targetPool, tenantId, operationId, source, target);
+  const targetAbort = await abortInventoryMoveTarget(
+    targetPool,
+    tenantId,
+    operationId,
+    source,
+    target,
+  );
   assert.equal(targetAbort.state, "absent");
-  const sourceReactivated = await reactivateInventoryMoveSource(sourcePool, tenantId, operationId, source, target, targetAbort);
+  const sourceReactivated = await reactivateInventoryMoveSource(
+    sourcePool,
+    tenantId,
+    operationId,
+    source,
+    target,
+    targetAbort,
+  );
   assert.equal(sourceReactivated.epoch, target.epoch);
   await withClient(targetAdminUrl, async (db) => {
-    const rows = await db.query("SELECT count(*)::int AS n FROM devices WHERE tenant_id=$1", [tenantId]);
-    const owner = await db.query("SELECT count(*)::int AS n FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId]);
+    const rows = await db.query(
+      "SELECT count(*)::int AS n FROM devices WHERE tenant_id=$1",
+      [tenantId],
+    );
+    const owner = await db.query(
+      "SELECT count(*)::int AS n FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+      [tenantId],
+    );
     assert.equal(rows.rows[0].n, 0);
     assert.equal(owner.rows[0].n, 0);
   });
   await withClient(inventoryAdminUrl, async (db) => {
-    const rows = await db.query("SELECT count(*)::int AS n FROM devices WHERE tenant_id=$1", [tenantId]);
-    const owner = await db.query("SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId]);
+    const rows = await db.query(
+      "SELECT count(*)::int AS n FROM devices WHERE tenant_id=$1",
+      [tenantId],
+    );
+    const owner = await db.query(
+      "SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+      [tenantId],
+    );
     assert.equal(rows.rows[0].n, 1);
     assert.deepEqual(owner.rows[0], { state: "active", epoch: "2" });
   });
@@ -229,7 +381,9 @@ try {
     try {
       // The migration role's RLS policy must not let a caller scope itself to
       // another tenant and discover that tenant's CDC history.
-      await db.query("SELECT set_config('app.tenant_id',$1,true)", [randomUUID()]);
+      await db.query("SELECT set_config('app.tenant_id',$1,true)", [
+        randomUUID(),
+      ]);
       const hidden = await db.query(
         "SELECT count(*)::int AS n FROM public.outbox_events WHERE tenant_id=$1::uuid",
         [cdcTenant],
@@ -247,22 +401,56 @@ try {
       throw error;
     }
   });
-  await prepareInventoryMoveTarget(targetPool, cdcTenant, cdcOperation, source, target);
-  await assert.rejects(assertInventoryMoveEffectsDrained(sourcePool, cdcTenant), /CDC outbox history/);
-  await assertFunctionFenceRejected(sourceUrl, cdcTenant, cdcOperation, /CDC outbox history/);
+  await prepareInventoryMoveTarget(
+    targetPool,
+    cdcTenant,
+    cdcOperation,
+    source,
+    target,
+  );
+  await assert.rejects(
+    assertInventoryMoveEffectsDrained(sourcePool, cdcTenant),
+    /CDC outbox history/,
+  );
+  await assertFunctionFenceRejected(
+    sourceUrl,
+    cdcTenant,
+    cdcOperation,
+    /CDC outbox history/,
+  );
 
   // Pending saga outcomes are independently rejected before source fencing.
   const sagaTenant = randomUUID();
   const sagaOperation = randomUUID();
   await seedTenant(inventoryAdminUrl, sagaTenant, { withPendingSaga: true });
-  await prepareInventoryMoveTarget(targetPool, sagaTenant, sagaOperation, source, target);
-  await assert.rejects(assertInventoryMoveEffectsDrained(sourcePool, sagaTenant), /pending saga result effects/);
-  await assertFunctionFenceRejected(sourceUrl, sagaTenant, sagaOperation, /pending saga result effects/);
+  await prepareInventoryMoveTarget(
+    targetPool,
+    sagaTenant,
+    sagaOperation,
+    source,
+    target,
+  );
+  await assert.rejects(
+    assertInventoryMoveEffectsDrained(sourcePool, sagaTenant),
+    /pending saga result effects/,
+  );
+  await assertFunctionFenceRejected(
+    sourceUrl,
+    sagaTenant,
+    sagaOperation,
+    /pending saga result effects/,
+  );
 
   // Ensure copy performed the intended four inventory entity rows and source
   // data was retained throughout the aborted migration path.
-  assert.deepEqual(seeded, { deviceId: seeded.deviceId, siteId: seeded.siteId, binId: seeded.binId });
-  console.log("Inventory owner isolated acceptance passed: 15-table schema gate, 4-row verified copy and durable receipt, idempotent copy replay, abort cleanup, source recovery at epoch 2, and SQL + adapter rejection of historical CDC and pending saga effects.");
+  assert.deepEqual(seeded, {
+    deviceId: seeded.deviceId,
+    siteId: seeded.siteId,
+    binId: seeded.binId,
+  });
+  console.log(
+    "Inventory owner isolated acceptance passed: 15-table schema gate, 4-row verified copy and durable receipt, idempotent copy replay, abort cleanup, source recovery at epoch 2, and SQL + adapter rejection of historical CDC and pending saga effects.",
+  );
 } finally {
   await sourcePool?.end().catch(() => {});
   await targetPool?.end().catch(() => {});

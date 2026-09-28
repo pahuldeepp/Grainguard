@@ -27,7 +27,11 @@ const notificationTables = [
 
 class FakePool {
   calls: string[] = [];
-  tables = [] as { table_name: string; relkind: string; is_partition: boolean }[];
+  tables = [] as {
+    table_name: string;
+    relkind: string;
+    is_partition: boolean;
+  }[];
   ownership = {
     shard_id: source.shardId,
     incarnation: source.incarnation,
@@ -65,7 +69,11 @@ test("jobs drain gate accepts only fenced, schema-pinned, empty outboxes", async
     pending_dispatch: "0",
     pending_dead_letter: "0",
   });
-  const proof = await inspectJobsMoveDrain(db as unknown as Pool, tenant, source);
+  const proof = await inspectJobsMoveDrain(
+    db as unknown as Pool,
+    tenant,
+    source,
+  );
   assert.equal(proof.owner, "jobs");
   assert.equal(proof.liveRows, 0);
   assert.equal(db.calls.length, 3);

@@ -1,5 +1,6 @@
 import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { createRequire } from "node:module";
+import { createServer, type Server } from "node:http";
 import kafkaJs from "kafkajs";
 import { validateEvent, type DomainEvent } from "@greenguard/contracts";
 import type { Db } from "../db/client.js";
@@ -10,6 +11,38 @@ export const TENANT_TOPIC = "greenguard.inventory.tenant.v1";
 export const TENANT_DLQ_TOPIC = "greenguard.inventory.tenant.dlq.v1";
 
 export class InvalidTenantProjectionEvent extends Error {}
+
+/** Readiness means Kafka completed group assignment, not that a message arrived.
+ * An assigned idle consumer is healthy and must remain ready. */
+export class TenantProjectorHealth {
+  private assigned = false;
+
+  setAssigned(assigned: boolean): void {
+    this.assigned = assigned;
+  }
+
+  status(path: string): number {
+    if (path === "/healthz") return 200;
+    if (path === "/readyz") return this.assigned ? 200 : 503;
+    return 404;
+  }
+}
+
+/** Loopback-only probe listener; Kubernetes probes use exec from the container. */
+export function serveTenantProjectorHealth(
+  health: TenantProjectorHealth,
+  port: number,
+): Server {
+  const server = createServer((request, response) => {
+    const status = health.status(request.url ?? "");
+    response.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+    response.end(
+      status === 200 ? "ok\n" : status === 503 ? "not ready\n" : "not found\n",
+    );
+  });
+  server.listen(port, "127.0.0.1");
+  return server;
+}
 
 export function decodeTenantEvent(
   value: Buffer,
@@ -71,6 +104,7 @@ export async function startTenantProjector(
   brokers: string[],
   groupId = "greenguard-inventory-tenant-v1",
   onFatal?: (error: Error) => void,
+  health = new TenantProjectorHealth(),
 ): Promise<() => Promise<void>> {
   if (!brokers.length || brokers.some((broker) => !broker))
     throw new Error("tenant projector requires Kafka brokers");
@@ -85,7 +119,10 @@ export async function startTenantProjector(
   });
   const consumer = kafka.consumer({ groupId, allowAutoTopicCreation: false });
   const producer = kafka.producer({ allowAutoTopicCreation: false });
+  consumer.on(consumer.events.GROUP_JOIN, () => health.setAssigned(true));
+  consumer.on(consumer.events.DISCONNECT, () => health.setAssigned(false));
   consumer.on(consumer.events.CRASH, ({ payload }) => {
+    health.setAssigned(false);
     if (!payload.restart) onFatal?.(payload.error);
   });
   await producer.connect();
@@ -130,6 +167,7 @@ export async function startTenantProjector(
       },
     });
     return async () => {
+      health.setAssigned(false);
       await consumer.disconnect();
       await producer.disconnect();
     };

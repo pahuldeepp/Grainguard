@@ -166,7 +166,8 @@ export async function assertRiskMoveEffectsDrained(
     [tenantId],
   );
   const effects = result.rows[0];
-  if (!effects) throw new Error("risk move effect preflight returned no result");
+  if (!effects)
+    throw new Error("risk move effect preflight returned no result");
   if (effects.has_cdc_history)
     throw new Error(
       "risk move blocked: CDC outbox history needs a deduplication-aware migration protocol",
@@ -316,8 +317,12 @@ export async function copyRiskTenantSnapshot(
         source,
         target,
       );
-      if (copyReceipt.sourceSha256 !== proof.sourceSha256 || copyReceipt.targetSha256 !== proof.targetSha256 ||
-          copyReceipt.rowCount !== proof.rowCount || copyReceipt.tableCount !== proof.tableCount)
+      if (
+        copyReceipt.sourceSha256 !== proof.sourceSha256 ||
+        copyReceipt.targetSha256 !== proof.targetSha256 ||
+        copyReceipt.rowCount !== proof.rowCount ||
+        copyReceipt.tableCount !== proof.tableCount
+      )
         throw new Error("risk copy receipt differs from verified snapshot");
     },
   );
@@ -346,9 +351,7 @@ export async function activateRiskMoveTarget(
     route.placementEpoch !== target.epoch ||
     route.state !== "activating"
   )
-    throw new Error(
-      "control-plane placement is not switched to risk target",
-    );
+    throw new Error("control-plane placement is not switched to risk target");
   const receipt = await callReceipt(
     pool,
     `SELECT greenguard_internal.activate_tenant_move_target($1::uuid,$2::uuid) AS receipt`,

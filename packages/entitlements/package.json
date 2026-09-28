@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./worker-health": {
+      "types": "./dist/worker-health.d.ts",
+      "default": "./dist/worker-health.js"
     }
   },
   "scripts": {

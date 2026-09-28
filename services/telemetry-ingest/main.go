@@ -23,6 +23,9 @@ var (
 )
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return err
+	}
 	url := getenv("TELEMETRY_DATABASE_URL")
 	if url == "" && getenv("SHARD_REGISTRY_FILE") == "" {
 		return errors.New("TELEMETRY_DATABASE_URL is required")
@@ -157,6 +160,13 @@ func buildAppWithDB(db TxStarter, ping func(context.Context) error, pool *pgxpoo
 var exit = os.Exit
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "probe" {
+		if err := runWorkerProbe(os.Args[2], os.Args[3]); err != nil {
+			slog.Error("probe failed", "error", err)
+			exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var err error

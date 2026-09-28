@@ -24,6 +24,12 @@ abort 'search-indexer claim must not deadlock data health before its consumer st
 
 contract = JSON.parse(File.read(File.join(root, 'contract.json')))
 releases = contract.fetch('releases')
+shard_routed_releases = %w[
+  device-service telemetry-ingest projection-builder risk-engine workflow-alerts jobs-worker
+  notification-service saga-api saga-worker hardware-service-worker tenant-control-plane read-api
+  audit-export-worker device-saga-worker device-tenant-projector inventory-entitlement-projector
+  telemetry-entitlement-projector read-entitlement-projector
+]
 digest = "123456789012.dkr.ecr.us-east-1.amazonaws.com/greenguard/example@sha256:#{'a' * 64}"
 values = {
   'cell' => 'greenguard-example',
@@ -72,9 +78,17 @@ values = {
             else
               {}
             end
+    shard_routing_required = shard_routed_releases.include?(release.fetch('name'))
+    if shard_routing_required
+      extra['container'] ||= {}
+      extra['container']['env'] = Array(extra['container']['env']) + [
+        { 'name' => 'SHARD_ROUTING_REQUIRED', 'value' => 'true' }
+      ]
+    end
     extra['mesh'] = { 'enabled' => true, 'strictMtls' => true }
     { 'name' => release.fetch('name'), 'chart' => release.fetch('chart'),
       'profile' => release['profile'], 'imageDigest' => digest,
+      'shardRoutingRequired' => shard_routing_required,
       'extraValues' => extra }
   end
 }
@@ -132,6 +146,20 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
     abort 'wrong destination namespace' unless spec.fetch('destination').fetch('namespace') == 'greenguard'
     abort 'missing cell ownership label' unless app.fetch('metadata').fetch('labels').fetch('greenguard.io/cell') == values.fetch('cell')
   end
+  missing_shard_mode = JSON.parse(JSON.generate(values))
+  broken_release = missing_shard_mode.fetch('releases').find { |release| release.fetch('name') == 'device-service' }
+  broken_release.fetch('extraValues').fetch('container')['env'] = []
+  file.rewind
+  file.truncate(0)
+  file.write(missing_shard_mode.to_yaml)
+  file.flush
+  _, missing_mode_error, missing_mode_status = Open3.capture3('helm', 'template', 'applications', chart, '--namespace', 'argocd', '-f', file.path)
+  abort 'sharded release rendered without mandatory shard routing mode' if missing_mode_status.success?
+  abort 'missing shard routing mode did not fail for the expected reason' unless missing_mode_error.include?('SHARD_ROUTING_REQUIRED=true')
+  file.rewind
+  file.truncate(0)
+  file.write(values.to_yaml)
+  file.flush
   root_rendered, root_error, root_status = Open3.capture3('helm', 'template', 'bootstrap', File.join(root, 'bootstrap-chart'), '--namespace', 'argocd', '-f', file.path)
   abort "bootstrap chart failed: #{root_error}" unless root_status.success?
   root_app = YAML.safe_load_stream(root_rendered).compact.fetch(0)

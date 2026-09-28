@@ -6,11 +6,15 @@ autoscaling:
   hpa: { enabled: false }
 service:
   enabled: false
+  port: 8090
+  containerPort: 8090
 container:
   name: device-saga-worker
   command: ["node", "services/device-service/dist/saga/main.js"]
   envFrom:
     - secretRef: { name: device-service-config }
+  env:
+    - { name: WORKER_HEALTH_PORT, value: "8090" }
 networkPolicy:
   egressPods:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
@@ -23,6 +27,6 @@ networkPolicy:
       }
   ingressSources: []
 probes:
-  startup: { enabled: false }
-  readiness: { enabled: false }
-  liveness: { enabled: false }
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

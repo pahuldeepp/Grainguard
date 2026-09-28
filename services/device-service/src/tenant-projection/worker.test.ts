@@ -10,6 +10,8 @@ import {
   decodeTenantEvent,
   InvalidTenantProjectionEvent,
   startTenantProjector,
+  serveTenantProjectorHealth,
+  TenantProjectorHealth,
   TENANT_TOPIC,
 } from "./worker.js";
 
@@ -39,6 +41,31 @@ function event(tenant: string = randomUUID(), version = "1"): DomainEvent {
   };
 }
 const key = (e: DomainEvent) => Buffer.from(`${e.tenant_id}:${e.aggregate_id}`);
+
+test("M10 tenant projector probes become ready after Kafka assignment and stay ready while idle", async (t) => {
+  const health = new TenantProjectorHealth();
+  const server = serveTenantProjectorHealth(health, 0);
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  assert.equal((await fetch(`${base}/healthz`)).status, 200);
+  assert.equal((await fetch(`${base}/readyz`)).status, 503);
+
+  health.setAssigned(true);
+  assert.equal((await fetch(`${base}/readyz`)).status, 200);
+  // No event is required: an assigned Kafka consumer may legitimately be idle.
+  assert.equal((await fetch(`${base}/readyz`)).status, 200);
+  health.setAssigned(false);
+  assert.equal((await fetch(`${base}/readyz`)).status, 503);
+  assert.equal((await fetch(`${base}/unknown`)).status, 404);
+});
 
 test("M10 tenant event decoder accepts canonical key and rejects forged identity", () => {
   const e = event();

@@ -329,6 +329,14 @@ class MainTest(unittest.TestCase):
                     {**self.ENV, "RISK_NOT_READY_MAX_WAIT_S": "0"}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 main.load_config(bad.get)
+        with self.subTest("required shard registry cannot fall back to central URL"), self.assertRaisesRegex(
+                ValueError, "SHARD_REGISTRY_FILE is required"):
+            main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "true"}.get)
+        with self.subTest("invalid shard routing mode fails closed"), self.assertRaisesRegex(
+                ValueError, "SHARD_ROUTING_REQUIRED must be true or false"):
+            main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "yes"}.get)
+        # Explicit local legacy mode remains supported.
+        main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "false"}.get)
 
     def test_run_wires_collaborators_and_shuts_down(self):
         stop = threading.Event()

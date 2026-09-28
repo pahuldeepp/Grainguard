@@ -5,6 +5,15 @@
 {{- if not (regexMatch "^[a-z0-9-]+$" .name) }}{{ fail "invalid release name" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9-]+$" .chart) }}{{ fail "invalid chart name" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" .imageDigest) }}{{ fail (printf "%s: immutable image digest required" .name) }}{{ end }}
+{{- if .shardRoutingRequired }}
+{{- $container := get (.extraValues | default dict) "container" | default dict }}
+{{- $env := get $container "env" | default list }}
+{{- $routingMode := false }}
+{{- range $entry := $env }}
+{{- if and (eq (get $entry "name") "SHARD_ROUTING_REQUIRED") (eq (get $entry "value") "true") }}{{ $routingMode = true }}{{ end }}
+{{- end }}
+{{- if not $routingMode }}{{ fail (printf "%s: SHARD_ROUTING_REQUIRED=true is required for sharded releases" .name) }}{{ end }}
+{{- end }}
 {{- if hasKey (.extraValues | default dict) "image" }}{{ fail (printf "%s: extraValues.image cannot override the pinned digest" .name) }}{{ end }}
 ---
 apiVersion: argoproj.io/v1alpha1

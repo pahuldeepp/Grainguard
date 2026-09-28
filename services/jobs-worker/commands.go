@@ -77,6 +77,9 @@ func dlqReplayCommand(ctx context.Context, args []string, getenv func(string) st
 }
 
 func operationalDB(ctx context.Context, getenv func(string) string) (TxStarter, func(), error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, nil, err
+	}
 	if getenv("SHARD_REGISTRY_FILE") != "" {
 		db, err := common.ShardedDBFromEnvironment(getenv, "jobs-worker", "greenguard_jobs", "jobs_app")
 		if err != nil {

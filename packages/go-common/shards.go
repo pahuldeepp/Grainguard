@@ -22,6 +22,7 @@ import (
 const InfrastructureTenant = "00000000-0000-4000-8000-000000000001"
 
 var ErrShardRegistry = errors.New("invalid private shard registry")
+var ErrShardRegistryRequired = errors.New("private shard registry is required")
 var ErrUnscopedShardTransaction = errors.New("sharded database requires tenant placement or an explicit shard")
 var projectionSchema = regexp.MustCompile(`^read_v[1-9][0-9]{0,8}$`)
 
@@ -144,6 +145,21 @@ func ShardedDBFromEnvironment(getenv func(string) string, service, database, rol
 		return nil, err
 	}
 	return NewShardedDB(registry, resolver), nil
+}
+
+// RequireShardRegistry prevents a production deployment from falling back to
+// its legacy database URL when registry environment wiring is accidentally
+// omitted. Local legacy mode remains available when the setting is absent or
+// explicitly false.
+func RequireShardRegistry(getenv func(string) string) error {
+	raw := getenv("SHARD_ROUTING_REQUIRED")
+	if raw != "" && raw != "true" && raw != "false" {
+		return errors.New("SHARD_ROUTING_REQUIRED must be true or false")
+	}
+	if raw == "true" && strings.TrimSpace(getenv("SHARD_REGISTRY_FILE")) == "" {
+		return ErrShardRegistryRequired
+	}
+	return nil
 }
 
 func (s *ShardedDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {

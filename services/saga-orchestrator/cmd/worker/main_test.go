@@ -26,6 +26,12 @@ func TestLoadConfigFailsClosedAndRejectsStaticTenantList(t *testing.T) {
 		cfg.group != "greenguard-saga-orchestrator-v1" || cfg.ttl.Seconds() != 15 {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
+	if _, err := loadConfig(get(map[string]string{"SHARD_ROUTING_REQUIRED": "true"})); err == nil {
+		t.Fatal("required shard routing accepted missing registry with legacy URL present")
+	}
+	if _, err := loadConfig(get(map[string]string{"SHARD_ROUTING_REQUIRED": "false"})); err != nil {
+		t.Fatalf("explicit legacy local mode rejected: %v", err)
+	}
 	cfg, err = loadConfig(get(map[string]string{"SAGA_LEASE_TTL_SECONDS": "4", "SAGA_MAX_SHARDS": "8", "SAGA_WORKER_ID": "w1", "SAGA_RESULT_GROUP": "g"}))
 	if err != nil || cfg.ttl.Seconds() != 4 || cfg.maxShards != 8 || cfg.holder != "w1" || cfg.group != "g" {
 		t.Fatalf("overrides: %+v %v", cfg, err)

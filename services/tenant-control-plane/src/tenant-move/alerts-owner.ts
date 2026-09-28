@@ -58,7 +58,8 @@ export async function assertAlertsMovePreflight(
     [tenantId],
   );
   const blockers = effects.rows[0];
-  if (!blockers) throw new Error("alerts move effect preflight returned no result");
+  if (!blockers)
+    throw new Error("alerts move effect preflight returned no result");
 
   // PostgreSQL logical publication does not retain a per-row acknowledgement
   // that proves all downstream consumers have applied historical records.

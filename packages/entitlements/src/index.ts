@@ -142,6 +142,7 @@ export {
   type Envelope,
 } from "./event.js";
 export { startEntitlementWorker, TOPIC, DLQ } from "./worker.js";
+export { startProbeHealth, type ProbeHealth } from "./probe-health.js";
 export {
   startEntitlementHeartbeat,
   HEARTBEAT_INTERVAL_MS,

@@ -18,6 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 	"greenguard.local/projection-builder/history"
 )
@@ -616,6 +617,9 @@ func (j *replayJob) newRunner(schemas schemas, window time.Duration) *replayRunn
 }
 
 func replayMain(ctx context.Context, getenv func(string) string) error {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return err
+	}
 	if getenv("SHARD_REGISTRY_FILE") != "" {
 		return errors.New("sharded operational replay requires an explicit shard migration/replay protocol; fixed replay URLs are not admitted")
 	}

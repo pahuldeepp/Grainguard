@@ -40,6 +40,11 @@ class Config:
 
 
 def load_config(getenv: Callable[[str], str | None]) -> Config:
+    routing_required = getenv("SHARD_ROUTING_REQUIRED")
+    if routing_required not in (None, "", "true", "false"):
+        raise ValueError("SHARD_ROUTING_REQUIRED must be true or false")
+    if routing_required == "true" and not getenv("SHARD_REGISTRY_FILE"):
+        raise ValueError("SHARD_REGISTRY_FILE is required when SHARD_ROUTING_REQUIRED=true")
     database_url = getenv("RISK_DATABASE_URL")
     brokers = getenv("KAFKA_BROKERS")
     if (not database_url and not getenv("SHARD_REGISTRY_FILE")) or not brokers:

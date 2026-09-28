@@ -17,6 +17,9 @@ export async function startEntitlementWorker(options: {
   apply: (event: Envelope) => Promise<boolean>;
   heartbeat: (partition: number, emittedAt: Date) => Promise<void>;
   onFatal?: (error: Error) => void;
+  onKafkaHeartbeat?: () => void;
+  onGroupAssigned?: () => void;
+  onGroupUnavailable?: () => void;
 }): Promise<() => Promise<void>> {
   if (!options.brokers.length || options.brokers.some((x) => !x))
     throw new Error("Kafka brokers required");
@@ -34,7 +37,20 @@ export async function startEntitlementWorker(options: {
     allowAutoTopicCreation: false,
   });
   const producer = kafka.producer({ allowAutoTopicCreation: false });
+  consumer.on(
+    consumer.events.HEARTBEAT,
+    options.onKafkaHeartbeat ?? (() => undefined),
+  );
+  consumer.on(
+    consumer.events.GROUP_JOIN,
+    options.onGroupAssigned ?? (() => undefined),
+  );
+  consumer.on(
+    consumer.events.DISCONNECT,
+    options.onGroupUnavailable ?? (() => undefined),
+  );
   consumer.on(consumer.events.CRASH, ({ payload }) => {
+    options.onGroupUnavailable?.();
     if (!payload.restart) options.onFatal?.(payload.error);
   });
   await producer.connect();
@@ -87,6 +103,7 @@ export async function startEntitlementWorker(options: {
       },
     });
     return async () => {
+      options.onGroupUnavailable?.();
       await consumer.disconnect();
       await producer.disconnect();
     };

@@ -195,7 +195,11 @@ try {
   const leases =
     await import("../services/tenant-control-plane/dist/domain/read-leases.js");
   const riskOwnerModule = pathToFileURL(
-    process.env.GG_RISK_OWNER_MODULE ?? resolve(root, "services/tenant-control-plane/dist/tenant-move/risk-owner.js"),
+    process.env.GG_RISK_OWNER_MODULE ??
+      resolve(
+        root,
+        "services/tenant-control-plane/dist/tenant-move/risk-owner.js",
+      ),
   ).href;
   const {
     abortRiskMoveTarget,
@@ -365,11 +369,21 @@ try {
     }
     // CDC history remains intentionally unmigratable. Prove both the adapter
     // preflight and the owner SQL fence refuse a different tenant with outbox rows.
-    const outboxWriter = await connectScoped(adminSource, otherTenant, sourceIdentity);
+    const outboxWriter = await connectScoped(
+      adminSource,
+      otherTenant,
+      sourceIdentity,
+    );
     try {
       await outboxWriter.query(
         `INSERT INTO outbox_events(event_id,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,occurred_at,correlation_id,causation_id,traceparent,payload) VALUES($1,$2,'device',$3,1,'risk.test',1,clock_timestamp(),$4,$5,'', '{}'::jsonb)`,
-        [randomUUID(), otherTenant, unrelatedDevice, randomUUID(), randomUUID()],
+        [
+          randomUUID(),
+          otherTenant,
+          unrelatedDevice,
+          randomUUID(),
+          randomUUID(),
+        ],
       );
       await outboxWriter.query("COMMIT");
     } finally {
@@ -383,13 +397,26 @@ try {
     await assert.rejects(
       adminSource.query(
         `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint)`,
-        [otherTenant, randomUUID(), sourceIdentity.shardId, sourceIdentity.incarnation, sourceIdentity.epoch,
-          targetIdentity.shardId, targetIdentity.incarnation, targetIdentity.epoch],
+        [
+          otherTenant,
+          randomUUID(),
+          sourceIdentity.shardId,
+          sourceIdentity.incarnation,
+          sourceIdentity.epoch,
+          targetIdentity.shardId,
+          targetIdentity.incarnation,
+          targetIdentity.epoch,
+        ],
       ),
       /CDC outbox history/,
     );
     assert.equal(
-      (await adminSource.query("SELECT state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [otherTenant])).rows[0].state,
+      (
+        await adminSource.query(
+          "SELECT state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+          [otherTenant],
+        )
+      ).rows[0].state,
       "active",
     );
 
@@ -543,21 +570,40 @@ try {
       unrelatedRead.release();
     }
     const targetAbortReceipt = await abortRiskMoveTarget(
-      adminTarget, tenantId, operationId, sourceIdentity, targetIdentity,
+      adminTarget,
+      tenantId,
+      operationId,
+      sourceIdentity,
+      targetIdentity,
     );
     assert.equal(targetAbortReceipt.owner, "risk");
     assert.equal(targetAbortReceipt.state, "absent");
     const sourceReactivatedReceipt = await reactivateRiskMoveSource(
-      adminSource, tenantId, operationId, sourceIdentity, targetIdentity, targetAbortReceipt,
+      adminSource,
+      tenantId,
+      operationId,
+      sourceIdentity,
+      targetIdentity,
+      targetAbortReceipt,
     );
     assert.equal(sourceReactivatedReceipt.owner, "risk");
     assert.equal(sourceReactivatedReceipt.epoch, targetIdentity.epoch);
     assert.equal(
-      (await adminTarget.query("SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1", [tenantId])).rows[0].count,
+      (
+        await adminTarget.query(
+          "SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1",
+          [tenantId],
+        )
+      ).rows[0].count,
       0,
     );
     assert.equal(
-      (await adminSource.query("SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId])).rows[0].epoch,
+      (
+        await adminSource.query(
+          "SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+          [tenantId],
+        )
+      ).rows[0].epoch,
       targetIdentity.epoch,
     );
     const stillQuiescing = await placement.resolveTenant(control, tenantId);
@@ -567,24 +613,45 @@ try {
       `Risk-owner isolated acceptance passed: operation=${operationId} tables=${copy.evidence.tableCount} rows=${copy.evidence.rowCount} sha256=${copy.evidence.sourceSha256}; atomic copy receipt, CDC history refusal, source fence, abort cleanup, and epoch-advanced owner reactivation verified. Global cutover remains refused because all nine owner adapters are not integrated.`,
     );
     const abortedTarget = await abortRiskMoveTarget(
-      adminTarget, tenantId, operationId, sourceIdentity, targetIdentity,
+      adminTarget,
+      tenantId,
+      operationId,
+      sourceIdentity,
+      targetIdentity,
     );
     assert.equal(abortedTarget.owner, "risk");
     assert.equal(abortedTarget.state, "absent");
     const reactivatedSource = await reactivateRiskMoveSource(
-      adminSource, tenantId, operationId, sourceIdentity, targetIdentity, abortedTarget,
+      adminSource,
+      tenantId,
+      operationId,
+      sourceIdentity,
+      targetIdentity,
+      abortedTarget,
     );
     assert.equal(reactivatedSource.owner, "risk");
     assert.equal(reactivatedSource.epoch, targetIdentity.epoch);
     assert.equal(
-      (await adminTarget.query("SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1", [tenantId])).rows[0].count,
+      (
+        await adminTarget.query(
+          "SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1",
+          [tenantId],
+        )
+      ).rows[0].count,
       0,
     );
     assert.equal(
-      (await adminSource.query("SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId])).rows[0].epoch,
+      (
+        await adminSource.query(
+          "SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+          [tenantId],
+        )
+      ).rows[0].epoch,
       targetIdentity.epoch,
     );
-    console.log("Risk owner target abort removed imported rows and source reactivated at the advanced epoch; control-plane placement remains quiescing because owner-wide receipts are incomplete.");
+    console.log(
+      "Risk owner target abort removed imported rows and source reactivated at the advanced epoch; control-plane placement remains quiescing because owner-wide receipts are incomplete.",
+    );
   } finally {
     await Promise.all([
       source.end(),

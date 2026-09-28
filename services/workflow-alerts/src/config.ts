@@ -1,4 +1,5 @@
 import { secret } from "./api/identity.js";
+import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
 
 export interface AlertsConfig {
   databaseUrl: string;
@@ -70,6 +71,7 @@ function authFrom(env: NodeJS.ProcessEnv): AlertsConfig["auth"] {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): AlertsConfig {
+  requireShardRegistry(env);
   const auth = authFrom(env);
   if (auth) {
     secret(env.ALERTS_ACTOR_HMAC_KEY, "ALERTS_ACTOR_HMAC_KEY");

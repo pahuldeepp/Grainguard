@@ -177,7 +177,11 @@
       "secret": "eventbridge-bridge-config",
       "health": {
         "type": "exec",
-        "command": ["python", "-c", "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"]
+        "command": [
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"
+        ]
       }
     },
     {
@@ -196,7 +200,7 @@
       "image": "saga-orchestrator",
       "phase": "applications",
       "secret": "saga-worker-config",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "tenant-control-plane",
@@ -252,7 +256,11 @@
       "secret": "search-indexer-config",
       "health": {
         "type": "exec",
-        "command": ["python", "-c", "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"]
+        "command": [
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"
+        ]
       }
     },
     {
@@ -263,7 +271,7 @@
       "phase": "applications",
       "secret": "device-service-config",
       "kafkaPrincipal": "device-service",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "device-tenant-projector",
@@ -273,7 +281,7 @@
       "phase": "applications",
       "secret": "device-service-config",
       "kafkaPrincipal": "device-service",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "inventory-entitlement-projector",
@@ -283,7 +291,7 @@
       "phase": "applications",
       "secret": "device-service-config",
       "kafkaPrincipal": "device-service",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "telemetry-entitlement-projector",
@@ -293,7 +301,7 @@
       "phase": "applications",
       "secret": "telemetry-ingest-config",
       "kafkaPrincipal": "telemetry-ingest",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "control-entitlement-projector",
@@ -303,7 +311,7 @@
       "phase": "applications",
       "secret": "tenant-control-plane-config",
       "kafkaPrincipal": "tenant-control-plane",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "read-entitlement-projector",
@@ -313,7 +321,7 @@
       "phase": "applications",
       "secret": "read-api-config",
       "kafkaPrincipal": "read-api",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "entitlement-heartbeat",
@@ -323,7 +331,7 @@
       "phase": "applications",
       "secret": "billing-service-config",
       "kafkaPrincipal": "billing-service",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "notification-contacts-projector",
@@ -337,10 +345,38 @@
     }
   ],
   "scheduledTasks": [
-    { "name": "projection-history-s1", "image": "projection-builder", "shard": "s1", "secret": "greenguard-s1-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s1-initial" },
-    { "name": "projection-history-s2", "image": "projection-builder", "shard": "s2", "secret": "greenguard-s2-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s2-initial" },
-    { "name": "projection-history-s3", "image": "projection-builder", "shard": "s3", "secret": "greenguard-s3-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s3-initial" },
-    { "name": "projection-history-s4", "image": "projection-builder", "shard": "s4", "secret": "greenguard-s4-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s4-initial" }
+    {
+      "name": "projection-history-s1",
+      "image": "projection-builder",
+      "shard": "s1",
+      "secret": "greenguard-s1-projection-history-maintenance-config",
+      "schedule": "*/10 * * * *",
+      "initialJob": "projection-history-s1-initial"
+    },
+    {
+      "name": "projection-history-s2",
+      "image": "projection-builder",
+      "shard": "s2",
+      "secret": "greenguard-s2-projection-history-maintenance-config",
+      "schedule": "*/10 * * * *",
+      "initialJob": "projection-history-s2-initial"
+    },
+    {
+      "name": "projection-history-s3",
+      "image": "projection-builder",
+      "shard": "s3",
+      "secret": "greenguard-s3-projection-history-maintenance-config",
+      "schedule": "*/10 * * * *",
+      "initialJob": "projection-history-s3-initial"
+    },
+    {
+      "name": "projection-history-s4",
+      "image": "projection-builder",
+      "shard": "s4",
+      "secret": "greenguard-s4-projection-history-maintenance-config",
+      "schedule": "*/10 * * * *",
+      "initialJob": "projection-history-s4-initial"
+    }
   ],
   "acceptanceJobs": [
     {
@@ -348,7 +384,10 @@
       "selector": {
         "greenguard.io/migration-gate": "true"
       },
-      "images": ["migration-gate", "migration-sql"]
+      "images": [
+        "migration-gate",
+        "migration-sql"
+      ]
     }
   ],
   "blockingGaps": [

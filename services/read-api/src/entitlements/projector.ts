@@ -36,6 +36,7 @@ export function closeProjectorPool(pool: pg.Pool): Promise<void> {
   return closeOwnerDatabase(pool, 5000, (owner) => owner.end());
 }
 import {
+  startProbeHealth,
   startEntitlementWorker,
   type Envelope,
 } from "@greenguard/entitlements";
@@ -101,6 +102,7 @@ export async function startProjector(
   pool: pg.Pool,
   brokers: string[],
   start: typeof startEntitlementWorker = startEntitlementWorker,
+  health?: Awaited<ReturnType<typeof startProbeHealth>>,
 ): Promise<() => Promise<void>> {
   let stop: Awaited<ReturnType<typeof startEntitlementWorker>> | undefined;
   let closing: Promise<void> | undefined;
@@ -115,6 +117,8 @@ export async function startProjector(
       clientId: "read-entitlements",
       apply: (event) => applyEntitlement(pool, event),
       heartbeat: (partition, at) => applyHeartbeat(pool, partition, at),
+      onGroupAssigned: health?.ready,
+      onGroupUnavailable: health?.notReady,
       onFatal: () => {
         console.error("read entitlement projector failed");
         void shutdown()
@@ -137,12 +141,20 @@ if (process.argv[1]?.endsWith("/entitlements/projector.js")) {
       "READ_ENTITLEMENT_PROJECTOR_URL or SHARD_REGISTRY_FILE and KAFKA_BROKERS required",
     );
   const pool = createProjectorPool();
-  const stop = await startProjector(pool, brokers.split(","));
+  const health = await startProbeHealth();
+  const stop = await startProjector(
+    pool,
+    brokers.split(","),
+    undefined,
+    health,
+  );
   const shutdown = () => {
-    void stop().catch(() => {
-      console.error("read entitlement projector shutdown failed");
-      process.exitCode = 1;
-    });
+    void stop()
+      .catch(() => {
+        console.error("read entitlement projector shutdown failed");
+        process.exitCode = 1;
+      })
+      .finally(() => health.close());
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

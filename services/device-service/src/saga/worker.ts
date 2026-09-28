@@ -144,6 +144,8 @@ export async function startInventorySagaWorker(
   brokers: string[],
   groupId = "greenguard-inventory-saga-v1",
   onFatal?: (error: Error) => void,
+  onKafkaHeartbeat?: () => void,
+  onDatabaseSuccess?: () => void,
 ): Promise<() => Promise<void>> {
   if (!brokers.length || brokers.some((broker) => !broker))
     throw new Error("inventory saga worker requires Kafka brokers");
@@ -173,6 +175,7 @@ export async function startInventorySagaWorker(
   consumer.on(consumer.events.CRASH, ({ payload }) => {
     if (!payload.restart) onFatal?.(payload.error);
   });
+  consumer.on(consumer.events.HEARTBEAT, onKafkaHeartbeat ?? (() => undefined));
   await producer.connect();
   try {
     await consumer.connect();
@@ -182,6 +185,7 @@ export async function startInventorySagaWorker(
       publishing = publishResultsPass(db, cursor, publish)
         .then((next) => {
           cursor = next;
+          onDatabaseSuccess?.();
         })
         .catch((error: unknown) => {
           if (active) onFatal?.(error as Error);
@@ -205,6 +209,7 @@ export async function startInventorySagaWorker(
           const command = decodeInventoryCommand(message.value, message.key);
           // Every tenant's command runs in that tenant's RLS transaction.
           if (command) await applyInventoryCommand(db, command);
+          if (command) onDatabaseSuccess?.();
         } catch (error) {
           if (!(error instanceof InvalidInventorySagaCommandError)) throw error;
           await producer.send({

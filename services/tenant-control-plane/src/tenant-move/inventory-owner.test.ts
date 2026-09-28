@@ -93,7 +93,9 @@ test("inventory adapter calls owner-local procedures and validates their receipt
   );
   assert.equal(fenced.phase, "source_fenced");
   assert.match(
-    sourcePool.calls.find((call) => call.sql.includes("fence_tenant_move_source"))!.sql,
+    sourcePool.calls.find((call) =>
+      call.sql.includes("fence_tenant_move_source"),
+    )!.sql,
     /fence_tenant_move_source/,
   );
 
@@ -212,7 +214,6 @@ test("inventory copy preflight accepts exact nonpartitioned schema and rejects d
     /schema differs/,
   );
 });
-
 
 test("inventory move preflight refuses historical CDC and pending saga effects", async () => {
   const historical = new FakePool();

@@ -3,6 +3,7 @@ import {
   ownerDatabases,
 } from "@greenguard/membership-client/owner-db";
 import {
+  startProbeHealth,
   startEntitlementWorker,
   type Envelope,
 } from "@greenguard/entitlements";
@@ -48,21 +49,26 @@ if (process.argv[1]?.endsWith("/entitlements/projector.js")) {
       "INVENTORY_PROJECTOR_DIRECT_URL and KAFKA_BROKERS required",
     );
   const db = createDb(url ?? "", 10, process.env, "inventory_projector");
+  const health = await startProbeHealth();
   const stop = await startEntitlementWorker({
     brokers: brokers.split(","),
     groupId: "greenguard-inventory-entitlements-v1",
     clientId: "inventory-entitlements",
     apply: (event) => applyEntitlement(db, event),
     heartbeat: (partition, at) => applyHeartbeat(db, partition, at),
+    onGroupAssigned: health.ready,
+    onGroupUnavailable: health.notReady,
     onFatal: (error) => {
       console.error(error);
       process.exit(1);
     },
   });
   const shutdown = () => {
-    void stop().finally(() =>
-      closeOwnerDatabase(db, 5000, (client) => client.$disconnect()),
-    );
+    void stop()
+      .finally(() => health.close())
+      .finally(() =>
+        closeOwnerDatabase(db, 5000, (client) => client.$disconnect()),
+      );
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

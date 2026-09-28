@@ -33,6 +33,9 @@ func run(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return nil
 	}
+	if err := common.RequireShardRegistry(os.Getenv); err != nil {
+		return err
+	}
 	url := os.Getenv("HARDWARE_DATABASE_URL")
 	if url == "" && os.Getenv("SHARD_REGISTRY_FILE") == "" {
 		return errors.New("HARDWARE_DATABASE_URL required")

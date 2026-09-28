@@ -17,7 +17,6 @@ import {
   beginPlacementMove,
   compareAndSetPlacement,
   placementMove,
-  recordPlacementMoveReceipt,
   PlacementUnavailableError,
   PlacementConflictError,
 } from "./placement.js";
@@ -40,47 +39,6 @@ async function fixture() {
   const target = lease.route.shardId === "s4" ? "s1" : "s4";
   return { tenantId, lease, target, operationId: randomUUID() };
 }
-async function receipts(tenantId: string, operationId: string) {
-  const move = await placementMove(db, tenantId, operationId);
-  for (const key of ["source_fenced", "target_prepared", "copy_verified"]) {
-    const common = {
-      tenantId,
-      operationId,
-      phase: key,
-      sourceShardId: move.sourceShardId,
-      sourceIncarnation: "11111111-1111-4111-8111-111111111111",
-      sourceEpoch: move.expectedEpoch,
-      targetShardId: move.targetShardId,
-      targetIncarnation: "22222222-2222-4222-8222-222222222222",
-      targetEpoch: (BigInt(move.expectedEpoch) + 1n).toString(),
-    };
-    const proof =
-      key === "source_fenced"
-        ? {
-            ...common,
-            shardId: move.sourceShardId,
-            incarnation: common.sourceIncarnation,
-            epoch: move.expectedEpoch,
-            state: "fenced",
-          }
-        : key === "target_prepared"
-          ? {
-              ...common,
-              shardId: move.targetShardId,
-              incarnation: common.targetIncarnation,
-              epoch: common.targetEpoch,
-              state: "prepared",
-            }
-          : {
-              ...common,
-              sourceSha256: "a".repeat(64),
-              targetSha256: "a".repeat(64),
-              rowCount: "0",
-              tableCount: 1,
-            };
-    await recordPlacementMoveReceipt(db, tenantId, operationId, key, proof);
-  }
-}
 test("quiesce closes new leases, existing responses drain before epoch CAS", async () => {
   const { tenantId, lease, target, operationId } = await fixture();
   await admitReadLease(db, tenantId, lease.leaseId);
@@ -96,7 +54,6 @@ test("quiesce closes new leases, existing responses drain before epoch CAS", asy
     PlacementUnavailableError,
   );
   await admitReadLease(db, tenantId, lease.leaseId);
-  await receipts(tenantId, operationId);
   await assert.rejects(
     compareAndSetPlacement(
       db,
@@ -112,16 +69,19 @@ test("quiesce closes new leases, existing responses drain before epoch CAS", asy
     admitReadLease(db, tenantId, lease.leaseId),
     PlacementConflictError,
   );
-  const moved = await compareAndSetPlacement(
-    db,
-    tenantId,
-    lease.route.placementEpoch,
-    target,
-    operationId,
+  await assert.rejects(
+    compareAndSetPlacement(
+      db,
+      tenantId,
+      lease.route.placementEpoch,
+      target,
+      operationId,
+    ),
+    /operation-bound placement evidence is missing or invalid/,
   );
   assert.equal(
-    moved.resultingEpoch,
-    (BigInt(lease.route.placementEpoch) + 1n).toString(),
+    (await placementMove(db, tenantId, operationId)).state,
+    "quiescing",
   );
 });
 test("expired/lost leases cannot admit a response or indefinitely block cutover", async () => {
@@ -141,18 +101,23 @@ test("expired/lost leases cannot admit a response or indefinitely block cutover"
     target,
     operationId,
   );
-  await receipts(tenantId, operationId);
+  await assert.rejects(
+    compareAndSetPlacement(
+      db,
+      tenantId,
+      lease.route.placementEpoch,
+      target,
+      operationId,
+    ),
+    /operation-bound placement evidence is missing or invalid/,
+  );
   assert.equal(
-    (
-      await compareAndSetPlacement(
-        db,
-        tenantId,
-        lease.route.placementEpoch,
-        target,
-        operationId,
-      )
-    ).state,
-    "switched",
+    (await placementMove(db, tenantId, operationId)).state,
+    "quiescing",
+  );
+  await assert.rejects(
+    acquireReadLease(db, tenantId),
+    PlacementUnavailableError,
   );
 });
 test("lease RLS prevents another tenant from reading, releasing or using it", async () => {

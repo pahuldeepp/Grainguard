@@ -1,4 +1,5 @@
 import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
+import { startProbeHealth } from "./probe-health.js";
 import kafkaJs from "kafkajs";
 import { TOPIC } from "./worker.js";
 const { Kafka, logLevel } = kafkaJs;
@@ -14,6 +15,7 @@ export async function startEntitlementHeartbeat(options: {
   jitterMs?: number;
   now?: () => Date;
   onError?: (error: Error) => void;
+  onSuccess?: () => void;
 }): Promise<() => Promise<void>> {
   const kafka = new Kafka({
     brokers: options.brokers,
@@ -34,6 +36,8 @@ export async function startEntitlementHeartbeat(options: {
       const meta = await admin.fetchTopicMetadata({ topics: [TOPIC] });
       const partitions =
         meta.topics[0]?.partitions.map((p) => p.partitionId) ?? [];
+      if (partitions.length === 0)
+        throw new Error("entitlement heartbeat topic has no partitions");
       const value = JSON.stringify({
         event_type: "entitlements.heartbeat",
         emitted_at: now().toISOString(),
@@ -47,6 +51,7 @@ export async function startEntitlementHeartbeat(options: {
           value,
         })),
       });
+      options.onSuccess?.();
     } catch (error) {
       options.onError?.(error as Error);
     }
@@ -68,13 +73,18 @@ export async function startEntitlementHeartbeat(options: {
 if (process.argv[1]?.endsWith("/heartbeat.js")) {
   const brokers = process.env.KAFKA_BROKERS;
   if (!brokers) throw new Error("KAFKA_BROKERS required");
+  const health = await startProbeHealth();
   const stop = await startEntitlementHeartbeat({
     brokers: brokers.split(","),
     clientId: "entitlement-heartbeat",
-    onError: (error) => console.error(error),
+    onError: (error) => {
+      health.notReady();
+      console.error(error);
+    },
+    onSuccess: health.ready,
   });
   const shutdown = () => {
-    void stop();
+    void stop().finally(() => health.close());
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

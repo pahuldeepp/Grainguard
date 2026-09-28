@@ -26,6 +26,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "probe" {
+		if err := probeHealth(os.Args[2], os.Args[3]); err != nil {
+			slog.Error("saga worker probe failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Getenv); err != nil {
@@ -44,11 +51,15 @@ type config struct {
 	ttl       time.Duration
 	maxShards int
 	metrics   string
+	health    string
 }
 
 // loadConfig fails closed. The retired explicit tenant list is rejected so a
 // stale deployment cannot silently fall back to unleased static dispatch.
 func loadConfig(getenv func(string) string) (config, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		url:       getenv("SAGA_DATABASE_URL"),
 		brokers:   strings.FieldsFunc(getenv("KAFKA_BROKERS"), func(r rune) bool { return r == ',' || r == ' ' }),
@@ -57,6 +68,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		ttl:       15 * time.Second,
 		maxShards: saga.ShardCount,
 		metrics:   strings.TrimSpace(getenv("SAGA_METRICS_ADDR")),
+		health:    strings.TrimSpace(getenv("SAGA_HEALTH_ADDR")),
 	}
 	if getenv("SAGA_TENANT_IDS") != "" {
 		return config{}, errors.New("SAGA_TENANT_IDS is retired: workers take leased shards (ADR-0013)")
@@ -118,8 +130,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer producer.Close()
+	if err := producer.Ping(ctx); err != nil {
+		return fmt.Errorf("saga producer broker ping: %w", err)
+	}
+	health := newWorkerHealth(1, 90*time.Second)
+	consumerExtra := append([]kgo.Opt{kgo.FetchIsolationLevel(kgo.ReadCommitted())}, health.consumerGroupOptions()...)
 	consumerOptions := append(transport.Options(cfg.brokers, cfg.group,
-		[]string{saga.ResultTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted())), security...)
+		[]string{saga.ResultTopic}, consumerExtra...), security...)
 	consumer, err := kgo.NewClient(consumerOptions...)
 	if err != nil {
 		return err
@@ -140,13 +157,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	metrics := &saga.Metrics{}
 	results := make(chan error, 2)
 	go func() {
-		results <- resultConsumer{store: saga.Store{DB: pool}, client: consumer, producer: producer, metrics: metrics}.run(workerCtx)
+		results <- resultConsumer{store: saga.Store{DB: pool}, client: consumer, producer: producer, metrics: metrics, health: health}.run(workerCtx)
 	}()
+	if cfg.health != "" {
+		stopHealth := serveWorkerHealth(workerCtx, cfg.health, health, results)
+		defer stopHealth()
+	}
 	if cfg.metrics != "" {
 		stopMetrics := serveMetrics(workerCtx, cfg.metrics, saga.Handler(metrics, pool), results)
 		defer stopMetrics()
 	}
-	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics, cursors: map[int]string{},
+	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics, cursors: map[int]string{}, health: health, healthID: "legacy",
 		publish: func(ctx context.Context, key, value []byte) error {
 			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
 		}}
@@ -154,12 +175,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 
 type worker struct {
-	db      common.TxStarter
-	store   saga.Store
-	leases  *saga.Leases
-	publish saga.PublishCommand
-	metrics *saga.Metrics
-	cursors map[int]string
+	db       common.TxStarter
+	store    saga.Store
+	leases   *saga.Leases
+	publish  saga.PublishCommand
+	metrics  *saga.Metrics
+	cursors  map[int]string
+	health   *workerHealth
+	healthID string
 }
 
 // commandHeaders copies the command's trace context into Kafka headers.
@@ -196,6 +219,7 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 	if err := w.renew(ctx); err != nil {
 		return err
 	}
+	w.progress()
 	renewTicker := time.NewTicker(ttl / 3)
 	defer renewTicker.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -213,6 +237,7 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 			err = w.renew(ctx)
 		case <-deadlineTicker.C:
 			err = w.eachTenant(ctx, func(tenant string) error {
+				w.progress()
 				n, err := w.store.ExpireDue(ctx, tenant, 100)
 				w.metrics.DeadlinesExpired.Add(int64(n))
 				return err
@@ -223,6 +248,15 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 		if err != nil && ctx.Err() == nil {
 			return err
 		}
+		if err == nil {
+			w.progress()
+		}
+	}
+}
+
+func (w worker) progress() {
+	if w.health != nil {
+		w.health.workerProgress(w.healthID)
 	}
 }
 
@@ -240,6 +274,7 @@ func (w worker) renew(ctx context.Context) error {
 
 func (w worker) publishTenant(ctx context.Context, tenant string) error {
 	for i := 0; i < 50; i++ {
+		w.progress()
 		sent, err := w.store.PublishNextCommand(ctx, tenant, w.publish)
 		if err != nil || !sent {
 			return err
@@ -266,7 +301,10 @@ func (w worker) eachTenantInShard(ctx context.Context, shard int, fn func(string
 	if err != nil {
 		return err
 	}
-	lost, err := visit(ids, fn)
+	lost, err := visit(ids, func(tenant string) error {
+		w.progress()
+		return fn(tenant)
+	})
 	if err != nil {
 		return err
 	}
@@ -308,6 +346,7 @@ type resultConsumer struct {
 	client   transport.Client
 	producer transport.Client
 	metrics  *saga.Metrics
+	health   *workerHealth
 }
 
 func (c resultConsumer) run(ctx context.Context) error {
@@ -319,11 +358,17 @@ func (c resultConsumer) run(ctx context.Context) error {
 			}
 			return err
 		}
+		if c.health != nil {
+			c.health.beginConsumerWork()
+		}
 		if err := c.apply(ctx, message); err != nil {
 			return err
 		}
 		if err := message.Commit(ctx); err != nil {
 			return err
+		}
+		if c.health != nil {
+			c.health.endConsumerWork()
 		}
 	}
 	return nil

@@ -13,14 +13,30 @@ container:
   envFrom:
     - secretRef:
         name: saga-worker-config
+  env:
+    - name: SAGA_HEALTH_ADDR
+      value: 127.0.0.1:8092
 networkPolicy:
   egressPods:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
   ingressSources: []
 probes:
-  startup: { enabled: false, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
-  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
-  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+  startup:
+    enabled: true
+    type: exec
+    command: ["/saga-worker", "probe", "/healthz", "127.0.0.1:8092"]
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    command: ["/saga-worker", "probe", "/readyz", "127.0.0.1:8092"]
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    command: ["/saga-worker", "probe", "/healthz", "127.0.0.1:8092"]
+    periodSeconds: 10
 scheduling:
   nodeSelector:
     greenguard.io/workload-class: compute

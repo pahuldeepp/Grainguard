@@ -20,4 +20,4 @@ Customer ownership is separate from the reserved infrastructure tenant `00000000
 
 The owner migrations install this narrow function and grant only their existing runtime roles. Operators must bootstrap the reserved identity on every primary. Projection's customer snapshot importer preserves it separately; other owner snapshot imports currently need the reserved row explicitly in the complete snapshot to avoid fencing it. Customers discovered on an old shard still resolve the current authority before reading operational data or mutating it.
 
-Run services with a registry to use these paths. Without one, the prior fixed URL mode remains for existing local fixtures. Missing or malformed registry/authority/ownership never falls back to that URL.
+Run services with a registry to use these paths. Every production tenant-owned workload must set `SHARD_ROUTING_REQUIRED=true`; its startup then rejects a missing registry instead of silently selecting a legacy fixed URL. An absent or `false` setting retains legacy mode for local fixtures. A present but malformed registry is always rejected. Missing authority or ownership never falls back to the fixed URL.

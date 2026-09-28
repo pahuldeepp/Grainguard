@@ -44,7 +44,8 @@ class FakePool {
   async query(sql: string, values?: unknown[]) {
     this.calls.push({ sql, values });
     if (sql.includes("FROM pg_class")) return { rows: this.tables };
-    if (sql.includes("has_cdc_history")) return { rows: [{ has_cdc_history: this.hasCdcHistory }] };
+    if (sql.includes("has_cdc_history"))
+      return { rows: [{ has_cdc_history: this.hasCdcHistory }] };
     return { rows: [{ receipt: this.receipt }] };
   }
 }
@@ -88,7 +89,10 @@ test("telemetry adapter calls owner-local procedures and validates their receipt
     target,
   );
   assert.equal(fenced.phase, "source_fenced");
-  assert.match(sourcePool.calls[0]!.sql, /greenguard_internal\.tenant_move_has_cdc_history/);
+  assert.match(
+    sourcePool.calls[0]!.sql,
+    /greenguard_internal\.tenant_move_has_cdc_history/,
+  );
   assert.match(sourcePool.calls[1]!.sql, /fence_tenant_move_source/);
 
   const activationPool = pool({
@@ -214,15 +218,27 @@ test("telemetry move refuses historical CDC outbox before source fence", async (
   });
   sourcePool.hasCdcHistory = true;
   await assert.rejects(
-    fenceTelemetryMoveSource(sourcePool as unknown as Pool, tenant, operation, source, target),
+    fenceTelemetryMoveSource(
+      sourcePool as unknown as Pool,
+      tenant,
+      operation,
+      source,
+      target,
+    ),
     /CDC outbox history/,
   );
   assert.equal(sourcePool.calls.length, 1);
-  assert.match(sourcePool.calls[0]!.sql, /greenguard_internal\.tenant_move_has_cdc_history/);
+  assert.match(
+    sourcePool.calls[0]!.sql,
+    /greenguard_internal\.tenant_move_has_cdc_history/,
+  );
 
   const malformed = pool({});
   await assert.rejects(
-    assertTelemetryMoveEffectsDrained(malformed as unknown as Pool, "not-a-uuid"),
+    assertTelemetryMoveEffectsDrained(
+      malformed as unknown as Pool,
+      "not-a-uuid",
+    ),
     /invalid telemetry move tenant id/,
   );
   assert.equal(malformed.calls.length, 0);

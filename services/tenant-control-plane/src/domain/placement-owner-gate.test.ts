@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { hasExactShardedOwnerReceiptSet } from "./placement.js";
+import {
+  hasExactShardedOwnerReceiptSet,
+  SHARDED_MOVE_OWNERS,
+} from "./placement.js";
 
 const owners = [
   "telemetry",
@@ -15,6 +19,24 @@ const owners = [
 ];
 const complete = () =>
   Object.fromEntries(owners.map((owner) => [owner, { owner }]));
+
+test("placement cutover roster matches the deployment owner inventory", () => {
+  const inventory = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../../infra/gitops/disposable/owner-migration-inventory.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ) as Array<{ name: string; central: boolean }>;
+  const deploymentOwners = inventory
+    .filter((owner) => !owner.central)
+    .map((owner) => owner.name)
+    .sort();
+
+  assert.deepEqual([...SHARDED_MOVE_OWNERS].sort(), deploymentOwners);
+});
 
 test("owner cutover gate requires exactly the nine sharded owner claims", () => {
   // Synthetic values exercise roster shape only. They do not prove adapter

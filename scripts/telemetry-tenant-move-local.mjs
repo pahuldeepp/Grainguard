@@ -307,7 +307,11 @@ try {
   sourceOwner = makePool(telemetryUrl("greenguard_telemetry"));
   targetOwner = makePool(telemetryUrl("greenguard_telemetry_s2"));
   const telemetryOwnerModule = pathToFileURL(
-    process.env.GG_TELEMETRY_OWNER_MODULE ?? resolve(root, "services/tenant-control-plane/dist/tenant-move/telemetry-owner.js"),
+    process.env.GG_TELEMETRY_OWNER_MODULE ??
+      resolve(
+        root,
+        "services/tenant-control-plane/dist/tenant-move/telemetry-owner.js",
+      ),
   ).href;
   const {
     prepareTelemetryMoveTarget,
@@ -405,20 +409,46 @@ try {
   const cdcOperation = randomUUID();
   await seedOwnership(telemetryUrl("greenguard_telemetry"), cdcTenant, source);
   await seedTenant(telemetryUrl("greenguard_telemetry"), cdcTenant);
-  await prepareTelemetryMoveTarget(targetOwner, cdcTenant, cdcOperation, source, target);
+  await prepareTelemetryMoveTarget(
+    targetOwner,
+    cdcTenant,
+    cdcOperation,
+    source,
+    target,
+  );
   await assert.rejects(
-    fenceTelemetryMoveSource(sourceOwner, cdcTenant, cdcOperation, source, target),
+    fenceTelemetryMoveSource(
+      sourceOwner,
+      cdcTenant,
+      cdcOperation,
+      source,
+      target,
+    ),
     /CDC outbox history/,
   );
   await assert.rejects(
     sourceOwner.query(
       `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint)`,
-      [cdcTenant, cdcOperation, source.shardId, source.incarnation, source.epoch, target.shardId, target.incarnation, target.epoch],
+      [
+        cdcTenant,
+        cdcOperation,
+        source.shardId,
+        source.incarnation,
+        source.epoch,
+        target.shardId,
+        target.incarnation,
+        target.epoch,
+      ],
     ),
     /CDC outbox history/,
   );
   assert.equal(
-    (await sourceOwner.query("SELECT state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [cdcTenant])).rows[0].state,
+    (
+      await sourceOwner.query(
+        "SELECT state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+        [cdcTenant],
+      )
+    ).rows[0].state,
     "active",
   );
 

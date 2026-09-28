@@ -170,10 +170,22 @@ func applyEntitlementHeartbeat(ctx context.Context, db heartbeatExec, partition 
 	return err
 }
 func runEntitlementProjector(ctx context.Context, getenv func(string) string) error {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return err
+	}
 	url, brokers := getenv("TELEMETRY_ENTITLEMENT_PROJECTOR_URL"), getenv("KAFKA_BROKERS")
 	if (url == "" && getenv("SHARD_REGISTRY_FILE") == "") || brokers == "" {
 		return errors.New("TELEMETRY_ENTITLEMENT_PROJECTOR_URL and KAFKA_BROKERS required")
 	}
+	probe, err := newWorkerProbe(probeAddress(getenv("TELEMETRY_ENTITLEMENT_PROJECTOR_HEALTH_ADDR")))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = probe.close(closeCtx)
+	}()
 	var db TxStarter
 	if getenv("SHARD_REGISTRY_FILE") != "" {
 		shards, err := common.ShardedDBFromEnvironment(getenv, "telemetry-ingest", "greenguard_telemetry", "telemetry_entitlement_projector")
@@ -190,7 +202,11 @@ func runEntitlementProjector(ctx context.Context, getenv func(string) string) er
 		defer pool.Close()
 		db = pool
 	}
-	options, err := transport.SecureOptions(strings.Split(brokers, ","), "telemetry-entitlements-v1", []string{entitlementTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted()))
+	options, err := transport.SecureOptions(strings.Split(brokers, ","), "telemetry-entitlements-v1", []string{entitlementTopic},
+		kgo.FetchIsolationLevel(kgo.ReadCommitted()),
+		kgo.OnPartitionsAssigned(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(true) }),
+		kgo.OnPartitionsRevoked(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(false) }),
+		kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(false) }))
 	if err != nil {
 		return err
 	}

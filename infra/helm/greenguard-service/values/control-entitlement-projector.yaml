@@ -6,17 +6,34 @@ autoscaling:
   hpa: { enabled: false }
 service:
   enabled: false
+  port: 8090
+  containerPort: 8090
 container:
   name: control-entitlement-projector
   command:
     ["node", "services/tenant-control-plane/dist/entitlements/projector.js"]
   envFrom:
     - secretRef: { name: tenant-control-plane-config }
+  env:
+    - { name: WORKER_HEALTH_PORT, value: "8090" }
 networkPolicy:
   egressPods:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
   ingressSources: []
 probes:
-  startup: { enabled: false }
-  readiness: { enabled: false }
-  liveness: { enabled: false }
+  startup:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/readyz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 10

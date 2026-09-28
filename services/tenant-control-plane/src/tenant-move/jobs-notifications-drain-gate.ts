@@ -139,7 +139,10 @@ export async function inspectJobsMoveDrain(
     epoch: source.epoch,
     liveRows: count(row.live_rows, "Jobs live row"),
     pendingDispatch: count(row.pending_dispatch, "Jobs pending dispatch"),
-    pendingDeadLetter: count(row.pending_dead_letter, "Jobs pending dead-letter"),
+    pendingDeadLetter: count(
+      row.pending_dead_letter,
+      "Jobs pending dead-letter",
+    ),
     checkedAt: new Date().toISOString(),
   };
   assertDrained(proof);

@@ -202,12 +202,13 @@ locals {
     shardRegistry = lookup(local.shard_registry_by_release, release.name, null)
   })]
   application_releases = [for release in local.application_release_inputs : {
-    name          = release.name
-    chart         = release.chart
-    profile       = try(release.profile, null)
-    baseValues    = release.baseValues
-    shardRegistry = release.shardRegistry
-    imageDigest   = lookup(var.deployment_image_digests, release.image, "")
+    name                 = release.name
+    chart                = release.chart
+    profile              = try(release.profile, null)
+    baseValues           = release.baseValues
+    shardRegistry        = release.shardRegistry
+    shardRoutingRequired = release.shardRegistry != null
+    imageDigest          = lookup(var.deployment_image_digests, release.image, "")
     extraValues = merge(
       { for key, value in {
         publicOidc = local.oidc_dashboard_values.publicOidc
@@ -248,6 +249,7 @@ locals {
               { name = "KAFKA_TLS_CA_FILE", value = "/etc/greenguard/kafka/ca.crt" },
             ],
             release.shardRegistry != null ? [
+              { name = "SHARD_ROUTING_REQUIRED", value = "true" },
               { name = release.shardRegistry.env, value = "/run/greenguard-shards/registry.json" },
             ] : [],
             release.name == "hardware-service-worker" ? [

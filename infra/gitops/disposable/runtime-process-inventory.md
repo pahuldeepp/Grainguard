@@ -76,3 +76,20 @@ Six shard-aware projector/saga profiles plus heartbeat/contact release render
 checks provide local evidence. Audit export and scheduled partition maintenance
 remain explicit deployment gaps. The DynamoDB table/endpoint/IAM contract is
 static configuration only; no live AWS or EKS behavior is proven.
+
+The device saga worker now exposes a private health listener without a
+Kubernetes Service. `/healthz` proves the process event loop can answer; its
+`/readyz` additionally requires a recent Kafka consumer heartbeat and a
+successful result-database polling pass. The other event-driven worker commands
+remain without dependency readiness probes: their idle periods do not provide a
+safe continuous database check through the current tenant-scoped shard routing
+interface. Do not treat their Kubernetes Pod Ready state as proof that their
+broker/database processing path is healthy.
+
+The saga-orchestrator worker exposes loopback-only health endpoints and uses
+exec probes, so its probe port needs no NetworkPolicy ingress exception. Its
+`/healthz` requires fresh progress from every configured shard loop and fails
+when a result record remains stuck in processing beyond 90 seconds. `/readyz`
+also requires an assigned result-topic partition; Kafka rebalance callbacks
+clear readiness until assignment returns. This is local runtime instrumentation,
+not proof of live Kafka ACLs or deployed broker behavior.

@@ -35,6 +35,9 @@ type Config struct {
 }
 
 func loadConfig(getenv func(string) string) (Config, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return Config{}, err
+	}
 	c := Config{
 		DatabaseURL:             getenv("JOBS_DATABASE_URL"),
 		RabbitURL:               getenv("RABBITMQ_URL"),

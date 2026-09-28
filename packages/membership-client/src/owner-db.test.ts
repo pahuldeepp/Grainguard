@@ -6,6 +6,7 @@ import {
   createOwnerDatabase,
   ownerDatabases,
   parseOwnerRegistry,
+  requireShardRegistry,
   resolveOwnerDatabase,
 } from "./owner-db.js";
 import type { TenantRoute } from "./placement.js";
@@ -122,6 +123,62 @@ test("registry validates all four owner roles/database/TLS endpoints before allo
         allowLoopback: false,
       }),
     /invalid_owner_endpoint/,
+  );
+});
+
+test("shard-required runtime rejects a missing registry instead of using the legacy URL", () => {
+  let allocated = 0;
+  assert.throws(
+    () =>
+      createOwnerDatabase({
+        ...config,
+        legacyUrl: "legacy-central-database",
+        env: { SHARD_ROUTING_REQUIRED: "true" },
+        create: () => {
+          allocated++;
+          return {};
+        },
+        close: async () => {},
+      }),
+    /shard_registry_required/,
+  );
+  assert.equal(allocated, 0);
+  assert.throws(
+    () =>
+      requireShardRegistry(
+        { SHARD_ROUTING_REQUIRED: "true", READ_SHARD_REGISTRY_FILE: " " },
+        "READ_SHARD_REGISTRY_FILE",
+      ),
+    /shard_registry_required/,
+  );
+});
+
+test("legacy database selection is retained only when shard routing is not required", () => {
+  for (const env of [{}, { SHARD_ROUTING_REQUIRED: "false" }]) {
+    let selected = "";
+    const db = createOwnerDatabase({
+      ...config,
+      legacyUrl: "legacy-central-database",
+      env,
+      create: (url) => {
+        selected = url;
+        return {};
+      },
+      close: async () => {},
+    });
+    assert.equal(selected, "legacy-central-database");
+    void db;
+  }
+  assert.throws(
+    () =>
+      createOwnerDatabase({
+        ...config,
+        legacyUrl: "legacy-central-database",
+        env: { SHARD_ROUTING_REQUIRED: "yes" },
+        create: () => ({}),
+        close: async () => {},
+      }),
+    /invalid_shard_routing_required/,
   );
 });
 

@@ -11,6 +11,18 @@ func TestServerlessCriticalRoutingHasNoRuntimeSwitch(t *testing.T) {
 	_ = cfg
 }
 
+func TestRequiredShardRoutingRejectsLegacyURLFallback(t *testing.T) {
+	base := map[string]string{"JOBS_DATABASE_URL": "postgres://jobs", "RABBITMQ_URL": "amqp://rabbit"}
+	base["SHARD_ROUTING_REQUIRED"] = "true"
+	if _, err := loadConfig(func(k string) string { return base[k] }); err == nil {
+		t.Fatal("required shard routing accepted missing registry with legacy URL present")
+	}
+	base["SHARD_ROUTING_REQUIRED"] = "false"
+	if _, err := loadConfig(func(k string) string { return base[k] }); err != nil {
+		t.Fatalf("explicit legacy local mode rejected: %v", err)
+	}
+}
+
 func TestControlPlaneMembershipRequiresSecureEndpointAndCredential(t *testing.T) {
 	base := map[string]string{
 		"JOBS_DATABASE_URL":      "postgres://jobs",

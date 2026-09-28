@@ -9,6 +9,19 @@ import {
 
 export class OwnerDatabaseError extends PlacementError {}
 
+/** Production deployments set this to prevent a missing registry from
+ * silently selecting the legacy, unsharded database URL. */
+export function requireShardRegistry(
+  env: NodeJS.ProcessEnv,
+  registryKey = "SHARD_REGISTRY_FILE",
+): void {
+  const required = env.SHARD_ROUTING_REQUIRED;
+  if (required !== undefined && required !== "true" && required !== "false")
+    throw new OwnerDatabaseError("invalid_shard_routing_required");
+  if (required === "true" && !env[registryKey]?.trim())
+    throw new OwnerDatabaseError("shard_registry_required");
+}
+
 export interface OwnerDatabaseOptions<T extends object> {
   legacyUrl: string;
   env?: NodeJS.ProcessEnv;
@@ -150,6 +163,7 @@ export function createOwnerDatabase<T extends object>(
   options: OwnerDatabaseOptions<T>,
 ): T {
   const env = options.env ?? process.env;
+  requireShardRegistry(env);
   if (!env.SHARD_REGISTRY_FILE) {
     if (!options.legacyUrl)
       throw new OwnerDatabaseError("owner_database_not_configured");

@@ -20,7 +20,8 @@ export const PROJECTION_MOVE_BLOCKERS = [
  * frontier and owner-level CDC protocol are not tenant-row properties.
  */
 export function assertProjectionMovePreflight(tenantId: string): never {
-  if (!UUID.test(tenantId)) throw new Error("invalid projection move tenant id");
+  if (!UUID.test(tenantId))
+    throw new Error("invalid projection move tenant id");
   throw new Error(
     `projection tenant move blocked: ${PROJECTION_MOVE_BLOCKERS.join("; ")}`,
   );

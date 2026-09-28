@@ -122,6 +122,38 @@ func TestPrivateShardRegistryAndPoolShutdown(t *testing.T) {
 	}
 }
 
+func TestRequireShardRegistryPreventsLegacyFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want error
+	}{
+		{name: "local legacy default", env: map[string]string{}},
+		{name: "explicit local legacy", env: map[string]string{"SHARD_ROUTING_REQUIRED": "false"}},
+		{name: "required registry present", env: map[string]string{"SHARD_ROUTING_REQUIRED": "true", "SHARD_REGISTRY_FILE": "/run/private/registry.json"}},
+		{name: "missing required registry", env: map[string]string{"SHARD_ROUTING_REQUIRED": "true"}, want: ErrShardRegistryRequired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := RequireShardRegistry(func(key string) string { return tc.env[key] })
+			if tc.want != nil {
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("RequireShardRegistry() error = %v, want %v", err, tc.want)
+				}
+			} else if err != nil {
+				t.Fatalf("RequireShardRegistry() error = %v", err)
+			}
+		})
+	}
+	if err := RequireShardRegistry(func(key string) string {
+		if key == "SHARD_ROUTING_REQUIRED" {
+			return "yes"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("invalid mode accepted")
+	}
+}
+
 type fixedPlacement struct {
 	route TenantPlacement
 	err   error

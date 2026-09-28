@@ -48,6 +48,9 @@ type server struct {
 }
 
 func main() {
+	if err := common.RequireShardRegistry(os.Getenv); err != nil {
+		log.Fatal(err)
+	}
 	for _, key := range []string{"SAGA_DIRECT_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL"} {
 		if key == "SAGA_DIRECT_URL" && os.Getenv("SHARD_REGISTRY_FILE") != "" {
 			continue

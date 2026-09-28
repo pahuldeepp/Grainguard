@@ -11,16 +11,17 @@ stable IDs `s1` through `s4`; provisioning and local database ownership fences a
 separate requirements before those targets accept tenant traffic. Existing tenants
 retain `s1` when the placement migration runs.
 The legacy bundle `s1` remains active; `s2`–`s4` start offline. Ring version 1
-contains only `s1`. After proving primary/replica, migrations, ownership import and
-CDC readiness, bootstrap atomically activates the new registry entries, inserts
+contains only `s1`. The required guarded bootstrap transition is not implemented:
+there is no production command that proves primary/replica, migrations, ownership
+import, and CDC readiness, then atomically activates the registry entries, inserts
 immutable ring version 2 containing all four, and changes the onboarding policy to
-version 2 in the same control-plane transaction. This prevents partial bootstrap
-from assigning tenants to an unprovisioned bundle.
+version 2. Do not treat the registry seeds as a completed four-shard bootstrap.
 For a fresh disposable cell, the trusted migration connection sets
 `greenguard.bootstrap_mode=greenfield` (PostgreSQL startup `options=-c greenguard.bootstrap_mode=greenfield`).
-That seeds all four offline and the first ring with all four; guarded bootstrap
-activates them atomically only after proving readiness. Unknown modes fail the
-migration. Onboarding rejects a policy containing any inactive or unknown member.
+That seeds all four offline and the first ring with all four. A guarded activation
+step is still required before onboarding can work in this mode; the current
+onboarding path rejects a policy containing any inactive or unknown member.
+Unknown bootstrap modes fail the migration.
 
 New organizations use a SHA-256 consistent hash ring with 128 virtual positions per
 shard to suggest their initial placement. The chosen shard and immutable ring
@@ -58,23 +59,46 @@ control-plane primary, and the persisted epoch plus database transaction ownersh
 fence remain authoritative across processes. `expectedEpoch` rejects stale caller
 leases, and cache/read admission must compare leases with persisted placement.
 
-Placement mutations are domain functions for the trusted migration controller;
-there is no public move endpoint. Every mutation locks the organization row before
-the operation row, while a partial unique index enforces one live move per tenant.
-`preparePlacementMove` creates a durable `preparing` operation while the tenant
-remains active for bulk baseline copy. `beginPlacementMove` then enters `quiescing`
-for the short final pause and drain. The controller verifies and records immutable
-`source_fenced`, `target_prepared`, and `copy_verified` receipts before
-`compareAndSetPlacement` atomically changes the shard and advances the epoch once.
-Each required receipt must carry `verified: true`. The control-plane DB trigger
-also checks the switched operation and positive markers before changing ownership;
-runtime epoch bumps and reactivation require the corresponding durable operation.
-The new route remains `activating` until a positive `target_activated` receipt and
-`finishPlacementMove(..., "completed")`. A pre-switch abort requires positive
-`targets_unactivated` and `source_reactivated` receipts and advances the epoch.
-Retries replay the durable operation; a different request with the same operation
-ID fails. Receipt storage is a controller interface: the later migration layer
-must verify actual database fence/activation receipts before recording them.
+Placement mutations are domain functions; there is no public move endpoint or
+deployed trusted migration controller. Every mutation locks the organization row
+before the operation row, while a partial unique index enforces one live move per
+tenant. `preparePlacementMove` creates a durable `preparing` operation while the
+tenant remains active for bulk baseline copy. `beginPlacementMove` enters
+`quiescing` for the short final pause and drain. The domain functions validate
+operation-bound receipt fields and owner names, but those checks only validate JSON
+shape and identity. They do not establish that an owner database produced the
+receipt. The SQL predicate in `20260928160000_structured_move_evidence` likewise
+checks the top-level receipt envelope, not the owner roster or independent owner
+database provenance. `control_app` currently has permission to insert a move and
+update its state, result epoch, and receipts. Therefore the current database
+permissions do not make caller-supplied receipts trustworthy. The append-only
+trigger prevents later edits/removal of existing receipt entries; it does not
+authenticate the first write. No production tenant cutover is safe to enable on
+these checks alone.
+
+The migration-owner interfaces are incomplete: Risk, Telemetry, and Inventory have
+owner-local procedures that create durable operation receipts, but their TypeScript
+adapters validate returned JSON in the application and do not provide a
+cryptographic/database-verifiable attestation to the control-plane database.
+Projection is a hard preflight blocker because history partitions, shared Kafka
+offsets, CDC outbox, inbox/completion state, and watermarks lack a coordinated
+copy/replay receipt. Alerts only has a CDC-history preflight; Jobs and Notifications
+only have separate drain checks, not copy/activate receipt APIs. Saga and Hardware
+have no complete move adapters. Thus there is no source that can currently furnish
+an authentic receipt set for all nine owners.
+
+Before enabling cutover, add a private mover runtime with a separate database
+identity and an owner contract for every roster member. Each owner must expose a
+restricted operation that independently checks its committed fence/copy/activation
+state and returns an authenticated receipt bound to tenant, operation, phase,
+source/target shard IDs and incarnations, source/target epochs, and copy lineage.
+The control-plane commit/cutover function must verify those authentic receipts,
+require exactly the nine-owner inventory, check read-lease drain and replica
+freshness, and perform the placement CAS atomically. `control_app` must not be able
+to write receipts or advance placement; deployment must provision the separate
+mover credential only to that private runtime. Until that interface, the nine
+owner adapters, and negative privilege tests exist, migration must fail closed.
+Synthetic JSON fixtures prove only validation behavior, not migration acceptance.
 
 This control-plane slice does not by itself fence operational databases or migrate
 tenant data. Operational transactions must separately validate the database-local

@@ -1,5 +1,6 @@
 import type { Policy } from "./worker.js";
 import type { NotificationProviderConfig } from "./providers.js";
+import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
 
 export interface Config {
   ownerEnvironment?: NodeJS.ProcessEnv;
@@ -49,6 +50,10 @@ function positive(getenv: Getenv, key: string, fallback: number): number {
 
 /** Reads configuration from an injected getenv so entry points stay testable. */
 export function loadConfig(getenv: Getenv): Config {
+  requireShardRegistry({
+    SHARD_ROUTING_REQUIRED: getenv("SHARD_ROUTING_REQUIRED"),
+    SHARD_REGISTRY_FILE: getenv("SHARD_REGISTRY_FILE"),
+  });
   const databaseUrl = getenv("NOTIFICATIONS_DATABASE_URL") ?? "";
   const rabbitUrl = getenv("RABBITMQ_URL") ?? "";
   if ((!databaseUrl && !getenv("SHARD_REGISTRY_FILE")) || !rabbitUrl)
@@ -128,6 +133,7 @@ export function loadConfig(getenv: Getenv): Config {
     ownerEnvironment: Object.fromEntries(
       [
         "SHARD_REGISTRY_FILE",
+        "SHARD_ROUTING_REQUIRED",
         "SHARD_LOCAL_LOOPBACK",
         "CONTROL_PLANE_URL",
         "CONTROL_LOOKUP_TOKEN",

@@ -4,6 +4,23 @@ import { readConfig } from "./config.js";
 test("requires the database URL without echoing any value", () => {
   assert.throws(() => readConfig({}), /INVENTORY_DATABASE_URL is required/);
 });
+test("required shard mode rejects missing registry despite a legacy database URL", () => {
+  assert.throws(
+    () =>
+      readConfig({
+        INVENTORY_DATABASE_URL: "postgres://legacy",
+        SHARD_ROUTING_REQUIRED: "true",
+      }),
+    /shard_registry_required/,
+  );
+  assert.equal(
+    readConfig({
+      INVENTORY_DATABASE_URL: "postgres://legacy",
+      SHARD_ROUTING_REQUIRED: "false",
+    }).databaseUrl,
+    "postgres://legacy",
+  );
+});
 test("applies local defaults", () => {
   assert.deepEqual(readConfig({ INVENTORY_DATABASE_URL: "postgres://x" }), {
     databaseUrl: "postgres://x",

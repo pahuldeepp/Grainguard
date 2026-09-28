@@ -1,3 +1,5 @@
+import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
+
 export interface AuthConfig {
   issuer: string;
   audience?: string;
@@ -163,6 +165,7 @@ function readOtel(env: NodeJS.ProcessEnv): OtelConfig | undefined {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): Config {
+  requireShardRegistry(env);
   const databaseUrl = env.INVENTORY_DATABASE_URL ?? "";
   if (!databaseUrl && !env.SHARD_REGISTRY_FILE)
     throw new Error(
