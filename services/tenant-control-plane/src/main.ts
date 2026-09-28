@@ -28,6 +28,11 @@ export async function start(env: NodeJS.ProcessEnv) {
       sources: new AuditSources(
         config.audit.inventoryDatabaseUrl,
         config.audit.billingDatabaseUrl,
+        env,
+        {
+          service: "audit-export-worker",
+          roles: ["inventory_audit_reader"],
+        },
       ),
     },
     auth:

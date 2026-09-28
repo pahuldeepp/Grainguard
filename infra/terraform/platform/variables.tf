@@ -124,7 +124,7 @@ variable "compute_node_max_size" {
 }
 
 variable "image_repositories" {
-  description = "Immutable ECR repository names provisioned for runtime release images."
+  description = "Immutable ECR repository names provisioned for runtime releases and separately built migration/tool images."
   type        = set(string)
   default = [
     "dashboard",
@@ -147,6 +147,19 @@ variable "image_repositories" {
     "jobs-worker",
     "cassandra-writer",
     "search-indexer",
+    "migration-control",
+    "migration-billing",
+    "migration-telemetry",
+    "migration-projection",
+    "migration-jobs",
+    "migration-saga",
+    "migration-hardware",
+    "migration-inventory",
+    "migration-alerts",
+    "migration-risk",
+    "migration-notifications",
+    "migration-gate",
+    "migration-sql",
   ]
 }
 

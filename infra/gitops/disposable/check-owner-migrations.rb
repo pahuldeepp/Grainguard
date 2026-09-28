@@ -55,6 +55,7 @@ abort error unless status.success?
 gate_docs = YAML.safe_load_stream(output).compact
 gate = gate_docs.find { |d| d['kind']=='Job' }; role = gate_docs.find { |d| d['kind']=='Role' }
 abort 'gate can inspect unrelated Jobs' unless role.dig('rules',0,'resourceNames').sort == names.sort
+abort 'migration acceptance Job selector label missing' unless gate.dig('metadata', 'labels', 'greenguard.io/migration-gate') == 'true'
 abort 'gate sidecar can block completion' unless gate.dig('spec','template','metadata','annotations','sidecar.istio.io/inject') == 'false'
 pod = gate.dig('spec','template','spec'); init = pod.fetch('initContainers')
 abort 'gate did not check all SQL owners' unless init.length == 39

@@ -27,11 +27,26 @@ def inputs(cell, release, contract):
             not re.fullmatch(r"[a-z][a-z0-9-]{1,15}", cell.get("environment", "")) or cell["environment"].lower() in ("prod", "production")):
         raise ValueError("invalid or production cell scope")
     expected = {item["image"] for item in contract["releases"]}
-    if (not isinstance(release, dict) or set(release) != {"gitops_revision", "deployment_image_digests"} or
+    acceptance_jobs = contract.get("acceptanceJobs")
+    if (not isinstance(acceptance_jobs, list) or len(acceptance_jobs) != 1
+            or not isinstance(acceptance_jobs[0], dict)
+            or acceptance_jobs[0].get("name") != "postgres-owner-migration-gate"
+            or acceptance_jobs[0].get("selector") != {"greenguard.io/migration-gate": "true"}
+            or acceptance_jobs[0].get("images") != ["migration-gate", "migration-sql"]):
+        raise ValueError("contract must require the PostgreSQL owner migration gate Job")
+    migration_owners = {owner["name"] for owner in json.loads((BASE / "owner-migration-inventory.json").read_text())}
+    if (not isinstance(release, dict) or set(release) != {
+            "gitops_revision", "deployment_image_digests", "migration_image_digests",
+            "migration_gate_image_digest", "migration_sql_image_digest"} or
             not re.fullmatch(r"[a-f0-9]{40}", release.get("gitops_revision", "")) or
-            not isinstance(release["deployment_image_digests"], dict) or set(release["deployment_image_digests"]) != expected):
+            not isinstance(release["deployment_image_digests"], dict) or set(release["deployment_image_digests"]) != expected or
+            not isinstance(release["migration_image_digests"], dict) or set(release["migration_image_digests"]) != migration_owners):
         raise ValueError("invalid exact-revision image inventory")
-    for service, image in release["deployment_image_digests"].items():
+    expected_images = dict(release["deployment_image_digests"])
+    expected_images.update({f"migration-{owner}": image for owner, image in release["migration_image_digests"].items()})
+    expected_images["migration-gate"] = release["migration_gate_image_digest"]
+    expected_images["migration-sql"] = release["migration_sql_image_digest"]
+    for service, image in expected_images.items():
         ghcr = f"ghcr.io/pahuldeepp/grainguard/{service}"
         ecr = f"{cell['account_id']}.dkr.ecr.{cell['region']}.amazonaws.com/greenguard/{service}"
         if not isinstance(image, str) or not any(re.fullmatch(re.escape(repo) + r"@sha256:[a-f0-9]{64}", image) for repo in (ghcr, ecr)):
@@ -186,6 +201,59 @@ def readiness(snapshot, release, contract):
                                for condition in conditions if isinstance(condition, dict))
                     or _integer(succeeded, "initial Job succeeded count") < 1):
                 failures.append(f"{name}: initial Job has not completed at the immutable image")
+
+    # Argo's owner-migration Application can be healthy before all of its
+    # child resources have converged: root Application sync waves order the
+    # Application CRs themselves. Require the migration chart's own SQL/RLS
+    # gate Job to finish before Terraform can report the deploy as healthy.
+    # That Job waits for every immutable owner migration Job and runs the
+    # owner-specific schema, grants, placement-fence and RLS checks.
+    for acceptance_job in contract.get("acceptanceJobs", []):
+        name = acceptance_job.get("name", "acceptance job")
+        selector = acceptance_job.get("selector")
+        if not isinstance(selector, dict) or not selector or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in selector.items()):
+            failures.append(f"{name}: invalid acceptance Job selector")
+            continue
+        selected = [obj for obj in items if obj.get("kind") == "Job" and all(
+            obj.get("metadata", {}).get("labels", {}).get(key) == value
+            for key, value in selector.items())]
+        if len(selected) != 1:
+            failures.append(f"{name}: expected exactly one completed acceptance Job")
+            continue
+        job = selected[0]
+        spec = job.get("spec", {})
+        template = spec.get("template", {}) if isinstance(spec, dict) else {}
+        pod_spec = template.get("spec", {}) if isinstance(template, dict) else {}
+        init = pod_spec.get("initContainers", []) if isinstance(pod_spec, dict) else []
+        containers = pod_spec.get("containers", []) if isinstance(pod_spec, dict) else []
+        if not isinstance(init, list) or not isinstance(containers, list) or any(
+                not isinstance(container, dict) for container in [*init, *containers]):
+            failures.append(f"{name}: invalid acceptance Job container specification")
+            continue
+        image_fields = {
+            "migration-gate": "migration_gate_image_digest",
+            "migration-sql": "migration_sql_image_digest",
+        }
+        tool_names = acceptance_job.get("images", [])
+        if not isinstance(tool_names, list) or any(tool not in image_fields for tool in tool_names):
+            failures.append(f"{name}: invalid acceptance Job image contract")
+            continue
+        expected_images = {release[image_fields[tool]] for tool in tool_names}
+        actual_images = {container.get("image") for container in [*init, *containers]}
+        if not expected_images.issubset(actual_images):
+            failures.append(f"{name}: acceptance tools differ from immutable release inputs")
+        status = job.get("status", {})
+        conditions = status.get("conditions", []) if isinstance(status, dict) else []
+        succeeded = status.get("succeeded", 0) if isinstance(status, dict) else 0
+        failed = status.get("failed", 0) if isinstance(status, dict) else 0
+        if (not isinstance(conditions, list)
+                or not any(condition.get("type") == "Complete" and condition.get("status") == "True"
+                           for condition in conditions if isinstance(condition, dict))
+                or _integer(succeeded, "acceptance Job succeeded count") < 1
+                or _integer(failed, "acceptance Job failed count") != 0):
+            failures.append(f"{name}: owner migrations and SQL admission gate have not completed successfully")
     return failures
 
 
@@ -238,8 +306,8 @@ def main(argv=None):
     parser.add_argument("kubeconfig")
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
-    if not 1 <= args.timeout <= 1800:
-        parser.error("timeout must be between 1 and 1800 seconds")
+    if not 1 <= args.timeout <= 3600:
+        parser.error("timeout must be between 1 and 3600 seconds")
     try:
         cell = json.loads(Path(args.cell_identity).read_text())
         release = json.loads(Path(args.release_inputs).read_text())
@@ -252,7 +320,7 @@ def main(argv=None):
             failures = readiness(collect(cell, args.kubeconfig, deadline), release, contract)
             if not failures:
                 print(f"PASS: {len(contract['releases'])} deployed application workloads ready at exact immutable images for {release['gitops_revision']}")
-                print("User journeys, migrations/data integrity, telemetry and physical iPhone acceptance remain separate gates.")
+                print("PostgreSQL migration/RLS gate passed. Non-PostgreSQL data integrity, user journeys, telemetry and physical iPhone acceptance remain separate gates.")
                 return 0
             if time.monotonic() >= deadline:
                 print("BLOCKED: " + "; ".join(failures), file=sys.stderr)

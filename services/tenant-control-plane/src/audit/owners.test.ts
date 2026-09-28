@@ -64,14 +64,14 @@ test("audit inventory pages admit only the resolved owner and restart exports af
       registry,
       JSON.stringify({
         formatVersion: 1,
-        service: "device-service",
+        service: "audit-export-worker",
         database: "greenguard_inventory",
         shards: Object.fromEntries(
           ["s1", "s2", "s3", "s4"].map((id, index) => [
             id,
             {
               incarnation,
-              primaryUrl: `postgres://inventory_app:test@127.0.0.1:${5441 + index}/greenguard_inventory?sslmode=disable`,
+              primaryUrl: `postgres://inventory_audit_reader:test@127.0.0.1:${5441 + index}/greenguard_inventory?sslmode=disable`,
               replicaUrls: [],
             },
           ]),
@@ -87,6 +87,10 @@ test("audit inventory pages admit only the resolved owner and restart exports af
         SHARD_LOCAL_LOOPBACK: "true",
         CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
         CONTROL_LOOKUP_TOKEN: "internal-test-token",
+      },
+      {
+        service: "audit-export-worker",
+        roles: ["inventory_audit_reader"],
       },
     );
     const session = await sources.session(tenantId);
@@ -140,6 +144,46 @@ test("audit inventory pages admit only the resolved owner and restart exports af
       !calls[3].statements.some((sql) =>
         sql.includes("admit_tenant_placement"),
       ),
+    );
+
+    await sources.close();
+    sources = undefined;
+    await writeFile(
+      registry,
+      JSON.stringify({
+        formatVersion: 1,
+        service: "audit-export-worker",
+        database: "greenguard_inventory",
+        shards: Object.fromEntries(
+          ["s1", "s2", "s3", "s4"].map((id, index) => [
+            id,
+            {
+              incarnation,
+              primaryUrl: `postgres://inventory_app:test@127.0.0.1:${5441 + index}/greenguard_inventory?sslmode=disable`,
+              replicaUrls: [],
+            },
+          ]),
+        ),
+      }),
+      { mode: 0o600 },
+    );
+    assert.throws(
+      () =>
+        new AuditSources(
+          "",
+          "postgres://billing_app:test@127.0.0.1/greenguard_billing",
+          {
+            INVENTORY_SHARD_REGISTRY_FILE: registry,
+            SHARD_LOCAL_LOOPBACK: "true",
+            CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
+            CONTROL_LOOKUP_TOKEN: "internal-test-token",
+          },
+          {
+            service: "audit-export-worker",
+            roles: ["inventory_audit_reader"],
+          },
+        ),
+      /invalid_owner_endpoint/,
     );
   } finally {
     connectionMock.mock.restore();

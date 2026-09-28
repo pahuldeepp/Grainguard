@@ -127,6 +127,16 @@ variable "mqtt_image_digest" {
   }
 }
 
+variable "application_acceptance_timeout_seconds" {
+  description = "Maximum time for Argo-created application, owner migrations, and the PostgreSQL SQL/RLS admission gate to become healthy after bootstrap."
+  type        = number
+  default     = 2400
+  validation {
+    condition     = var.application_acceptance_timeout_seconds >= 60 && var.application_acceptance_timeout_seconds <= 3600 && floor(var.application_acceptance_timeout_seconds) == var.application_acceptance_timeout_seconds
+    error_message = "application_acceptance_timeout_seconds must be an integer from 60 through 3600."
+  }
+}
+
 locals {
   deployment_contract = jsondecode(file("${path.module}/../../gitops/disposable/contract.json"))
   required_images     = toset([for release in local.deployment_contract.releases : release.image])
@@ -154,7 +164,7 @@ locals {
     "saga-api"                        = { service = "saga-orchestrator", secret = "saga-orchestrator", env = "SHARD_REGISTRY_FILE" }
     "saga-worker"                     = { service = "saga-orchestrator", secret = "saga-orchestrator", env = "SHARD_REGISTRY_FILE" }
     "hardware-service-worker"         = { service = "hardware-service", secret = "hardware-service", env = "SHARD_REGISTRY_FILE" }
-    "tenant-control-plane"            = { service = "device-service", secret = "device-service", env = "INVENTORY_SHARD_REGISTRY_FILE" }
+    "tenant-control-plane"            = { service = "audit-export-worker", secret = "audit-export-worker", env = "INVENTORY_SHARD_REGISTRY_FILE" }
     "read-api"                        = { service = "read-api", secret = "read-api", env = "READ_SHARD_REGISTRY_FILE" }
     "audit-export-worker"             = { service = "audit-export-worker", secret = "audit-export-worker", env = "INVENTORY_AUDIT_SHARD_REGISTRY_FILE" }
     "device-saga-worker"              = { service = "device-service", secret = "device-service", env = "SHARD_REGISTRY_FILE" }
@@ -416,8 +426,10 @@ resource "terraform_data" "deployed_workload_acceptance" {
       cluster_name = var.cluster_name
     }
     release = {
-      gitops_revision          = var.gitops_revision
-      deployment_image_digests = var.deployment_image_digests
+      gitops_revision             = var.gitops_revision
+      deployment_image_digests    = var.deployment_image_digests
+      migration_gate_image_digest = var.migration_gate_image_digest
+      migration_sql_image_digest  = var.migration_sql_image_digest
     }
   }
   # Helm revision changes for any root Application value update, including
@@ -428,8 +440,9 @@ resource "terraform_data" "deployed_workload_acceptance" {
   provisioner "local-exec" {
     command = "python3 ${path.module}/../../gitops/disposable/run-deployed-workloads.py"
     environment = {
-      GG_DISPOSABLE_CELL_IDENTITY  = jsonencode(self.input.cell_identity)
-      GG_DISPOSABLE_RELEASE_INPUTS = jsonencode(self.input.release)
+      GG_DISPOSABLE_CELL_IDENTITY              = jsonencode(self.input.cell_identity)
+      GG_DISPOSABLE_RELEASE_INPUTS             = jsonencode(self.input.release)
+      GG_DISPOSABLE_ACCEPTANCE_TIMEOUT_SECONDS = tostring(var.application_acceptance_timeout_seconds)
     }
     quiet = true
   }

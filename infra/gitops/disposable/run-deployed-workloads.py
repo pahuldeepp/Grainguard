@@ -14,9 +14,9 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 
 
-def run(cell, release, timeout=900, command=subprocess.run):
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 1800:
-        raise ValueError("readiness timeout must be between 1 and 1800 seconds")
+def run(cell, release, timeout=2400, command=subprocess.run):
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 3600:
+        raise ValueError("readiness timeout must be between 1 and 3600 seconds")
     # Reuse the complete gate contract before AWS CLI discovery or kubeconfig creation.
     try:
         contract = json.loads((BASE / "contract.json").read_text())
@@ -50,7 +50,8 @@ def main():
     try:
         cell = json.loads(os.environ["GG_DISPOSABLE_CELL_IDENTITY"])
         release = json.loads(os.environ["GG_DISPOSABLE_RELEASE_INPUTS"])
-        result = run(cell, release)
+        timeout = int(os.environ.get("GG_DISPOSABLE_ACCEPTANCE_TIMEOUT_SECONDS", "2400"))
+        result = run(cell, release, timeout=timeout)
         return result
     except (KeyError, json.JSONDecodeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"BLOCKED: post-deployment health check failed ({type(error).__name__})", file=sys.stderr)

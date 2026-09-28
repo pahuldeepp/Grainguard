@@ -47,6 +47,9 @@ class DeploymentGateWiringTests(unittest.TestCase):
         self.assertIn("triggers_replace = helm_release.gitops_bootstrap[0].metadata.revision", gate)
         self.assertIn("depends_on       = [helm_release.gitops_bootstrap]", gate)
         self.assertIn("run-deployed-workloads.py", gate)
+        self.assertIn("GG_DISPOSABLE_ACCEPTANCE_TIMEOUT_SECONDS", gate)
+        self.assertIn("migration_gate_image_digest", gate)
+        self.assertIn("migration_sql_image_digest", gate)
         self.assertNotIn("on_failure", gate)
 
     def test_offline_readiness_gate_stays_closed_by_default(self):

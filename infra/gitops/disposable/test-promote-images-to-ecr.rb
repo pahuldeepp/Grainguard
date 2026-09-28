@@ -5,7 +5,9 @@ require 'fileutils'
 
 script = File.join(__dir__, 'promote-images-to-ecr.rb')
 contract = JSON.parse(File.read(File.join(__dir__, 'contract.json')))
-services = contract.fetch('releases').map { |release| release.fetch('image') }.uniq
+services = contract.fetch('releases').map { |release| release.fetch('image') }.uniq.sort
+owners = JSON.parse(File.read(File.join(__dir__, 'owner-migration-inventory.json'))).map { |owner| owner.fetch('name') }.sort
+repositories = (services + owners.map { |owner| "migration-#{owner}" } + %w[migration-gate migration-sql]).sort
 revision = 'a' * 40
 account = '123456789012'
 region = 'us-east-1'
@@ -39,10 +41,18 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
   inputs = File.join(directory, 'release-inputs.json')
   urls = File.join(directory, 'ecr-urls.json')
   cell = File.join(directory, 'cell.json')
-  source = services.to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
-  repositories = services.to_h { |name| [name, "#{registry}/greenguard/#{name}"] }
-  File.write(inputs, JSON.generate('gitops_revision' => revision, 'deployment_image_digests' => source))
-  File.write(urls, JSON.generate(repositories))
+  deployment = services.to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
+  migration = owners.to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/migration-#{name}@#{digest}"] }
+  tools = %w[migration-gate migration-sql].to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
+  File.write(inputs, JSON.generate({
+    'gitops_revision' => revision,
+    'deployment_image_digests' => deployment,
+    'migration_image_digests' => migration,
+    'migration_gate_image_digest' => tools.fetch('migration-gate'),
+    'migration_sql_image_digest' => tools.fetch('migration-sql')
+  }))
+  repositories_by_name = repositories.to_h { |name| [name, "#{registry}/greenguard/#{name}"] }
+  File.write(urls, JSON.generate(repositories_by_name))
   File.write(cell, JSON.generate('region' => region, 'account_id' => account,
                                  'cluster_name' => 'greenguard-sandbox-cell-1', 'environment' => 'sandbox'))
   environment = {
@@ -60,12 +70,16 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
   succeeded, output = run.call('valid')
   abort 'valid promotion rejected' unless succeeded
   promoted = JSON.parse(File.read(File.join(output, 'release-inputs.tfvars.json')))
-  expected = services.to_h { |name| [name, "#{registry}/greenguard/#{name}@#{digest}"] }
-  abort 'ECR manifest mismatch' unless promoted.fetch('deployment_image_digests') == expected
+  expected_deployment = services.to_h { |name| [name, "#{registry}/greenguard/#{name}@#{digest}"] }
+  expected_migration = owners.to_h { |name| [name, "#{registry}/greenguard/migration-#{name}@#{digest}"] }
+  abort 'ECR runtime manifest mismatch' unless promoted.fetch('deployment_image_digests') == expected_deployment
+  abort 'ECR owner migration manifest mismatch' unless promoted.fetch('migration_image_digests') == expected_migration
+  abort 'ECR kubectl image mismatch' unless promoted.fetch('migration_gate_image_digest') == "#{registry}/greenguard/migration-gate@#{digest}"
+  abort 'ECR PostgreSQL image mismatch' unless promoted.fetch('migration_sql_image_digest') == "#{registry}/greenguard/migration-sql@#{digest}"
   calls = File.read(log)
-  abort 'signature verification missing' unless calls.scan(/^cosign verify /).length == services.length
-  abort 'multi-architecture digest preservation missing' unless calls.scan(/^skopeo copy --all --preserve-digests /).length == services.length
-  abort 'ECR digest lookup missing' unless calls.scan(/^aws ecr describe-images /).length == services.length
+  abort 'signature verification inventory mismatch' unless calls.scan(/^cosign verify /).length == repositories.length
+  abort 'multi-architecture digest preservation missing' unless calls.scan(/^skopeo copy --all --preserve-digests /).length == repositories.length
+  abort 'ECR digest lookup inventory mismatch' unless calls.scan(/^aws ecr describe-images /).length == repositories.length
 
   File.write(environment.fetch('GG_PROMOTION_WRONG_ACCOUNT'), '')
   succeeded, output = run.call('wrong-account')
@@ -82,8 +96,18 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
   abort 'changed ECR digest accepted' if succeeded || File.exist?(output)
   File.unlink(environment.fetch('GG_PROMOTION_BAD_DIGEST'))
 
-  File.write(urls, JSON.generate(repositories.merge(services.first => "999999999999.dkr.ecr.#{region}.amazonaws.com/greenguard/#{services.first}")))
+  File.write(urls, JSON.generate(repositories_by_name.merge('migration-control' => "999999999999.dkr.ecr.#{region}.amazonaws.com/greenguard/migration-control")))
   succeeded, output = run.call('foreign-repository')
-  abort 'foreign ECR repository accepted' if succeeded || File.exist?(output)
+  abort 'foreign repository accepted' if succeeded || File.exist?(output)
+
+  File.write(urls, JSON.generate(repositories_by_name))
+  File.write(inputs, JSON.generate({
+    'gitops_revision' => revision, 'deployment_image_digests' => deployment,
+    'migration_image_digests' => migration.reject { |name, _| name == 'risk' },
+    'migration_gate_image_digest' => tools.fetch('migration-gate'),
+    'migration_sql_image_digest' => tools.fetch('migration-sql')
+  }))
+  succeeded, output = run.call('missing-migration')
+  abort 'missing owner migration accepted' if succeeded || File.exist?(output)
 end
-puts "ECR promotion: #{services.length} signed digest copies and four rejection cases passed offline."
+puts "ECR promotion: #{services.length} runtime, #{owners.length} owner migrations and 2 tool digests; signatures, exact digests and fail-closed inventories passed offline."

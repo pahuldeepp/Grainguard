@@ -21,7 +21,11 @@ class TerraformHealthAdapterTests(unittest.TestCase):
         self.release = {"gitops_revision": "a" * 40, "deployment_image_digests": {
             service: f"ghcr.io/pahuldeepp/grainguard/{service}@sha256:" + "b" * 64
             for service in {release["image"] for release in contract["releases"]}
-        }}
+        }, "migration_image_digests": {
+            owner["name"]: f"ghcr.io/pahuldeepp/grainguard/migration-{owner['name']}@sha256:" + "c" * 64
+            for owner in json.loads((runner.BASE / "owner-migration-inventory.json").read_text())
+        }, "migration_gate_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-gate@sha256:" + "d" * 64,
+            "migration_sql_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-sql@sha256:" + "e" * 64}
 
     def test_creates_ephemeral_kubeconfig_and_invokes_scoped_readiness_gate(self):
         calls = []
@@ -40,10 +44,10 @@ class TerraformHealthAdapterTests(unittest.TestCase):
         aws_command, aws_options = calls[0]
         self.assertEqual(aws_command[0:6], ["aws", "eks", "update-kubeconfig", "--region", "us-east-1", "--name"])
         self.assertTrue(aws_options["capture_output"])
-        self.assertEqual(calls[1][1]["timeout"], 1020)
+        self.assertEqual(calls[1][1]["timeout"], 2520)
         gate_command = calls[1][0]
         self.assertEqual(gate_command[1], str(Path(runner.BASE / "check-deployed-workloads.py")))
-        self.assertEqual(gate_command[-2:], ["--timeout", "900"])
+        self.assertEqual(gate_command[-2:], ["--timeout", "2400"])
         self.assertFalse(Path(gate_command[2]).exists())
         self.assertFalse(Path(gate_command[3]).exists())
         self.assertFalse(Path(gate_command[4]).exists())
@@ -75,20 +79,20 @@ class TerraformHealthAdapterTests(unittest.TestCase):
         environment = {"GG_DISPOSABLE_CELL_IDENTITY": json.dumps(self.cell), "GG_DISPOSABLE_RELEASE_INPUTS": json.dumps(self.release)}
         with patch.dict(runner.os.environ, environment), patch.object(runner, "run", return_value=1) as run:
             self.assertEqual(1, runner.main())
-            run.assert_called_once_with(self.cell, self.release)
+            run.assert_called_once_with(self.cell, self.release, timeout=2400)
 
     def test_terraform_production_environment_is_rejected_without_aws(self):
         self.cell["environment"] = "prod"
         environment = {"GG_DISPOSABLE_CELL_IDENTITY": json.dumps(self.cell), "GG_DISPOSABLE_RELEASE_INPUTS": json.dumps(self.release)}
         command = Mock()
         real_run = runner.run
-        with patch.dict(runner.os.environ, environment), patch.object(runner, "run", side_effect=lambda cell, release: real_run(cell, release, command=command)), patch.object(runner.sys, "stderr", io.StringIO()) as error:
+        with patch.dict(runner.os.environ, environment), patch.object(runner, "run", side_effect=lambda cell, release, timeout: real_run(cell, release, timeout=timeout, command=command)), patch.object(runner.sys, "stderr", io.StringIO()) as error:
             self.assertEqual(1, runner.main())
             self.assertIn("BLOCKED", error.getvalue())
             command.assert_not_called()
 
     def test_invalid_timeout_is_rejected_before_aws(self):
-        for timeout in (0, 1801, True, "900"):
+        for timeout in (0, 3601, True, "900"):
             command = Mock()
             with self.assertRaisesRegex(ValueError, "readiness timeout"):
                 runner.run(self.cell, self.release, timeout=timeout, command=command)

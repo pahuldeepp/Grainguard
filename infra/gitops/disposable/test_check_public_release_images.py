@@ -22,6 +22,8 @@ class Response(io.BytesIO):
 class PublicImagePreflightTest(unittest.TestCase):
     def setUp(self):
         self.contract = {"releases": [{"image": "bff"}, {"image": "bff"}, {"image": "dashboard"}]}
+        self.owners = ("control", "billing", "telemetry", "projection", "jobs", "saga",
+                       "hardware", "inventory", "alerts", "risk", "notifications")
         self.digest = "sha256:" + "a" * 64
         self.inputs = {
             "gitops_revision": "b" * 40,
@@ -29,10 +31,16 @@ class PublicImagePreflightTest(unittest.TestCase):
                 name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}"
                 for name in ("bff", "dashboard")
             },
+            "migration_image_digests": {
+                owner: f"ghcr.io/pahuldeepp/grainguard/migration-{owner}@{self.digest}"
+                for owner in self.owners
+            },
+            "migration_gate_image_digest": f"ghcr.io/pahuldeepp/grainguard/migration-gate@{self.digest}",
+            "migration_sql_image_digest": f"ghcr.io/pahuldeepp/grainguard/migration-sql@{self.digest}",
         }
 
     def test_exact_inventory(self):
-        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 2)
+        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 15)
 
     def test_rejects_missing_image(self):
         del self.inputs["deployment_image_digests"]["bff"]
@@ -51,6 +59,16 @@ class PublicImagePreflightTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.inventory(self.inputs, self.contract)
 
+    def test_rejects_missing_owner_image(self):
+        del self.inputs["migration_image_digests"]["risk"]
+        with self.assertRaises(ValueError):
+            module.inventory(self.inputs, self.contract)
+
+    def test_rejects_foreign_tool_digest(self):
+        self.inputs["migration_gate_image_digest"] = f"ghcr.io/elsewhere/kubectl@{self.digest}"
+        with self.assertRaises(ValueError):
+            module.inventory(self.inputs, self.contract)
+
     def test_anonymous_manifest_exact_digest(self):
         requests = []
 
@@ -60,7 +78,7 @@ class PublicImagePreflightTest(unittest.TestCase):
                 return Response(json.dumps({"token": "private-test-token"}).encode())
             return Response(digest=self.digest)
 
-        module.anonymous_manifest("bff", self.inputs["deployment_image_digests"]["bff"], opener)
+        module.anonymous_manifest("migration-control", self.inputs["migration_image_digests"]["control"], opener)
         self.assertEqual(requests[1].get_method(), "HEAD")
         self.assertEqual(requests[1].get_header("Authorization"), "Bearer private-test-token")
         self.assertTrue(requests[1].full_url.endswith("/manifests/" + self.digest))

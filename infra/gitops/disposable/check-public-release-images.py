@@ -25,8 +25,12 @@ ACCEPT = ",".join((
 
 
 def inventory(inputs, contract):
-    if not isinstance(inputs, dict) or set(inputs) != {"gitops_revision", "deployment_image_digests"}:
-        raise ValueError("release inputs must contain only gitops_revision and deployment_image_digests")
+    required_fields = {
+        "gitops_revision", "deployment_image_digests", "migration_image_digests",
+        "migration_gate_image_digest", "migration_sql_image_digest",
+    }
+    if not isinstance(inputs, dict) or set(inputs) != required_fields:
+        raise ValueError("release inputs must contain runtime, all owner migration, and both migration tool digests")
     revision = inputs["gitops_revision"]
     if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("gitops_revision must be an exact commit SHA")
@@ -40,7 +44,29 @@ def inventory(inputs, contract):
             r"[a-f0-9]{64}", reference.removeprefix(prefix)
         ):
             raise ValueError(f"{service}: expected an exact signed-CI GHCR digest reference")
-    return images
+    owner_inventory = json.loads((BASE / "owner-migration-inventory.json").read_text())
+    expected_owners = {owner["name"] for owner in owner_inventory}
+    migrations = inputs["migration_image_digests"]
+    if not isinstance(migrations, dict) or set(migrations) != expected_owners:
+        raise ValueError("owner migration image inventory does not match the migration contract")
+    image_references = dict(images)
+    for owner, reference in migrations.items():
+        verify_reference(f"migration-{owner}", reference)
+        image_references[f"migration-{owner}"] = reference
+    for field, repository in (("migration_gate_image_digest", "migration-gate"),
+                              ("migration_sql_image_digest", "migration-sql")):
+        reference = inputs[field]
+        verify_reference(repository, reference)
+        image_references[repository] = reference
+    return image_references
+
+
+def verify_reference(repository, reference):
+    prefix = f"ghcr.io/pahuldeepp/grainguard/{repository}@sha256:"
+    if not isinstance(reference, str) or not reference.startswith(prefix) or not re.fullmatch(
+        r"[a-f0-9]{64}", reference.removeprefix(prefix)
+    ):
+        raise ValueError(f"{repository}: expected an exact signed-CI GHCR digest reference")
 
 
 def anonymous_manifest(service, reference, opener=urllib.request.urlopen):
@@ -73,13 +99,13 @@ def main():
         images = inventory(inputs, contract)
         if inputs["gitops_revision"] != sys.argv[2]:
             raise ValueError("release artifact revision differs from the selected Git checkout")
-        for service, reference in sorted(images.items()):
-            anonymous_manifest(service, reference)
-            print(f"{service}: anonymous immutable pull available")
+        for repository, reference in sorted(images.items()):
+            anonymous_manifest(repository, reference)
+            print(f"{repository}: anonymous immutable pull available")
     except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError) as error:
         print(f"BLOCKED: public release image preflight failed: {error}", file=sys.stderr)
         return 1
-    print(f"Verified {len(images)} public immutable manifests for {inputs['gitops_revision']}.")
+    print(f"Verified {len(images)} public immutable runtime, migration and tool manifests for {inputs['gitops_revision']}.")
     return 0
 
 

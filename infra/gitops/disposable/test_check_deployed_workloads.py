@@ -17,9 +17,25 @@ SPEC.loader.exec_module(gate)
 class WorkloadGateTests(unittest.TestCase):
     def setUp(self):
         self.cell = {"account_id": "123456789012", "region": "us-west-2", "environment": "dev", "cluster_name": "gg-test"}
-        self.contract = {"releases": [{"name": "bff", "image": "bff", "health": "/readyz"}]}
+        self.contract = {
+            "releases": [{"name": "bff", "image": "bff", "health": "/readyz"}],
+            "acceptanceJobs": [{
+                "name": "postgres-owner-migration-gate",
+                "selector": {"greenguard.io/migration-gate": "true"},
+                "images": ["migration-gate", "migration-sql"],
+            }],
+        }
         self.image = "ghcr.io/pahuldeepp/grainguard/bff@sha256:" + "a" * 64
-        self.release = {"gitops_revision": "b" * 40, "deployment_image_digests": {"bff": self.image}}
+        self.release = {
+            "gitops_revision": "b" * 40,
+            "deployment_image_digests": {"bff": self.image},
+            "migration_image_digests": {
+                owner["name"]: f"ghcr.io/pahuldeepp/grainguard/migration-{owner['name']}@sha256:" + "c" * 64
+                for owner in json.loads((gate.BASE / "owner-migration-inventory.json").read_text())
+            },
+            "migration_gate_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-gate@sha256:" + "d" * 64,
+            "migration_sql_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-sql@sha256:" + "e" * 64,
+        }
         labels = {"app.kubernetes.io/instance": "bff"}
         self.snapshot = {"items": [
             {"kind": "Deployment", "metadata": {"labels": labels, "generation": 2},
@@ -28,7 +44,18 @@ class WorkloadGateTests(unittest.TestCase):
              "status": {"observedGeneration": 2, "updatedReplicas": 1, "readyReplicas": 1, "availableReplicas": 1, "replicas": 1}},
             {"kind": "Pod", "metadata": {"labels": labels}, "spec": {"containers": [{"name": "bff", "image": self.image}]},
              "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}],
-                        "containerStatuses": [{"name": "bff", "ready": True, "imageID": "containerd://sha256:" + "c" * 64, "state": {"running": {}}}]}}
+                        "containerStatuses": [{"name": "bff", "ready": True, "imageID": "containerd://sha256:" + "c" * 64, "state": {"running": {}}}]}},
+            {"kind": "Job", "metadata": {"name": "gg-migration-gate-test",
+                                             "labels": {"greenguard.io/migration-gate": "true"}},
+             "spec": {"template": {"spec": {
+                 "initContainers": [
+                     {"name": "completed-owner-jobs", "image": self.release["migration_gate_image_digest"]},
+                     {"name": "owner-sql-check", "image": self.release["migration_sql_image_digest"]},
+                 ],
+                 "containers": [{"name": "accepted", "image": self.release["migration_sql_image_digest"]}],
+             }}},
+             "status": {"succeeded": 1, "failed": 0,
+                        "conditions": [{"type": "Complete", "status": "True"}]}},
         ]}
 
     def test_exact_healthy_release_passes(self):
@@ -111,6 +138,32 @@ class WorkloadGateTests(unittest.TestCase):
     def test_rollout_does_not_infer_promotion_from_ready_pods(self):
         self.snapshot["items"][0]["kind"] = "Rollout"
         self.assertIn("controller-aware", gate.readiness(self.snapshot, self.release, self.contract)[0])
+
+    def test_postdeploy_gate_requires_completed_postgres_migration_and_rls_job(self):
+        self.snapshot["items"] = [obj for obj in self.snapshot["items"] if obj["kind"] != "Job"]
+        self.assertIn("expected exactly one completed acceptance Job", " ".join(
+            gate.readiness(self.snapshot, self.release, self.contract)))
+        self.snapshot = copy.deepcopy(self.snapshot)
+        self.snapshot["items"].append({"kind": "Job", "metadata": {"name": "gate", "labels": {
+            "greenguard.io/migration-gate": "true"}}, "spec": {"template": {"spec": {
+            "initContainers": [{"name": "completed-owner-jobs", "image": self.release["migration_gate_image_digest"]},
+                               {"name": "sql", "image": self.release["migration_sql_image_digest"]}],
+            "containers": [{"name": "accepted", "image": self.release["migration_sql_image_digest"]}],
+        }}}, "status": {"succeeded": 1, "failed": 0, "conditions": []}})
+        self.assertIn("have not completed successfully", " ".join(
+            gate.readiness(self.snapshot, self.release, self.contract)))
+
+    def test_postdeploy_gate_requires_exact_tool_digests(self):
+        gate_job = next(obj for obj in self.snapshot["items"] if obj["kind"] == "Job")
+        gate_job["spec"]["template"]["spec"]["initContainers"][0]["image"] = "wrong/tool:latest"
+        self.assertIn("tools differ from immutable release inputs", " ".join(
+            gate.readiness(self.snapshot, self.release, self.contract)))
+
+    def test_inputs_fail_closed_if_migration_gate_contract_is_removed(self):
+        contract = copy.deepcopy(self.contract)
+        contract.pop("acceptanceJobs")
+        with self.assertRaisesRegex(ValueError, "must require the PostgreSQL owner migration gate"):
+            gate.inputs(self.cell, self.release, contract)
 
     def test_scheduled_shard_task_requires_cronjob_and_successful_initial_job(self):
         task_image = "ghcr.io/pahuldeepp/grainguard/projection-builder@sha256:" + "d" * 64
@@ -204,6 +257,9 @@ class WorkloadGateTests(unittest.TestCase):
     def cli_fixture(self, directory):
         root = Path(directory)
         (root / "contract.json").write_text(json.dumps(self.contract))
+        (root / "owner-migration-inventory.json").write_text(
+            (Path(__file__).with_name("owner-migration-inventory.json")).read_text()
+        )
         (root / "cell.json").write_text(json.dumps(self.cell))
         (root / "release.json").write_text(json.dumps(self.release))
         (root / "kubeconfig").write_text("offline-fixture")

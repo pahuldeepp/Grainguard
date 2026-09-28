@@ -431,7 +431,7 @@ jobs:
 
   release-inputs:
     name: Assemble immutable deployment inputs
-    needs: publish
+    needs: [publish, publish-migrations]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -441,17 +441,23 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Download only this run's verified image digests
+      - name: Download only this run's verified runtime image digests
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           pattern: image-digest-*
           path: release-digests
           merge-multiple: true
+      - name: Download only this run's verified migration and tool image digests
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: migration-digest-*
+          path: migration-digests
+          merge-multiple: true
       - name: Assemble exact-commit Terraform inputs
         env:
           REVISION: ${{ github.sha }}
-        run: ruby infra/gitops/disposable/assemble-ci-digests.rb release-digests "$REVISION" release-inputs
-      - name: Require every release digest to be anonymously pullable by EKS
+        run: ruby infra/gitops/disposable/assemble-ci-digests.rb release-digests migration-digests "$REVISION" release-inputs
+      - name: Require every runtime, migration and tool digest to be anonymously pullable by EKS
         env:
           REVISION: ${{ github.sha }}
         run: python3 infra/gitops/disposable/check-public-release-images.py release-inputs/release-inputs.tfvars.json "$REVISION"
@@ -460,6 +466,153 @@ jobs:
         with:
           name: greenguard-release-inputs-${{ github.sha }}
           path: release-inputs/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-migrations:
+    name: Publish signed owner migration and tool images
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - owner: control
+            image: migration-control
+            dockerfile: services/tenant-control-plane/Dockerfile
+            target: migration
+          - owner: billing
+            image: migration-billing
+            dockerfile: services/billing-service/Dockerfile
+            target: migration
+          - owner: telemetry
+            image: migration-telemetry
+            dockerfile: services/telemetry-ingest/Dockerfile
+            target: migration
+          - owner: projection
+            image: migration-projection
+            dockerfile: services/projection-builder/Dockerfile
+            target: migration
+          - owner: jobs
+            image: migration-jobs
+            dockerfile: services/jobs-worker/Dockerfile
+            target: migration
+          - owner: saga
+            image: migration-saga
+            dockerfile: services/saga-orchestrator/Dockerfile
+            target: migration
+          - owner: hardware
+            image: migration-hardware
+            dockerfile: services/hardware-service/Dockerfile
+            target: migration
+          - owner: inventory
+            image: migration-inventory
+            dockerfile: services/device-service/Dockerfile
+            target: migration
+          - owner: alerts
+            image: migration-alerts
+            dockerfile: services/workflow-alerts/Dockerfile
+            target: migration
+          - owner: risk
+            image: migration-risk
+            dockerfile: services/risk-engine/Dockerfile
+            target: migration
+          - owner: notifications
+            image: migration-notifications
+            dockerfile: services/notification-service/Dockerfile
+            target: migration
+          - owner: migration-gate
+            image: migration-gate
+            dockerfile: infra/gitops/disposable/migration-gate-image/Dockerfile
+            target: ""
+            kubectl: true
+          - owner: migration-sql
+            image: migration-sql
+            dockerfile: infra/gitops/disposable/migration-sql-image.Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download and checksum-verify kubectl 1.37.0
+        if: matrix.kubectl == true
+        run: |
+          set -euo pipefail
+          curl -fsSLo infra/gitops/disposable/migration-gate-image/kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+          echo '6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  infra/gitops/disposable/migration-gate-image/kubectl' | sha256sum -c -
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build immutable migration image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Scan published image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f6699e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the exact migration image digest
+        env:
+          IMAGE: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_IDENTITY: https://github.com/pahuldeepp/Grainguard/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign verify \
+            --certificate-identity "${EXPECTED_IDENTITY}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}"
+      - name: Record this owner or tool digest
+        env:
+          OWNER: ${{ matrix.owner }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          mkdir -p migration-digest
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          image = os.environ['IMAGE']
+          Path(f'migration-digest/{image}.json').write_text(json.dumps({
+              'service': os.environ['OWNER'],
+              'image': f'ghcr.io/pahuldeepp/grainguard/{image}@{os.environ["DIGEST"]}',
+              'revision': os.environ['REVISION']
+          }) + '\n')
+          PY
+      - name: Upload this verified migration digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: migration-digest-${{ matrix.image }}
+          path: migration-digest/${{ matrix.image }}.json
           if-no-files-found: error
           retention-days: 30
 

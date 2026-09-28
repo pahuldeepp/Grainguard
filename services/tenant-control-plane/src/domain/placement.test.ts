@@ -609,6 +609,33 @@ test("immutable receipts and forced RLS isolate move ledgers", async () => {
     }),
     IdempotencyConflictError,
   );
+  await assert.rejects(
+    asRuntime(
+      { "app.tenant_id": a.tenantId },
+      "UPDATE placement_moves SET receipts=receipts - 'source_fenced' WHERE tenant_id=$1 AND operation_id=$2",
+      [a.tenantId, op],
+    ),
+    /receipts are append-only/,
+  );
+  await assert.rejects(
+    asRuntime(
+      { "app.tenant_id": a.tenantId },
+      "UPDATE placement_moves SET receipts=jsonb_set(receipts,'{source_fenced,epoch}','\"9\"'::jsonb) WHERE tenant_id=$1 AND operation_id=$2",
+      [a.tenantId, op],
+    ),
+    /receipts are append-only/,
+  );
+  await recordPlacementMoveReceipt(
+    db,
+    a.tenantId,
+    op,
+    "target_prepared",
+    await receipt(a.tenantId, op, "target_prepared"),
+  );
+  assert.deepEqual(
+    Object.keys((await placementMove(db, a.tenantId, op)).receipts).sort(),
+    ["source_fenced", "target_prepared"],
+  );
   assert.equal((await placementMove(db, a.tenantId, op)).expectedEpoch, "1");
   await assert.rejects(placementMove(db, b.tenantId, op), NotFoundError);
   assert.equal(

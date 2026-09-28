@@ -50,7 +50,20 @@ class AuditExportWiringTests(unittest.TestCase):
         self.assertIn('AUDIT_EXPORT_LINK_SECRET', runtime)
         self.assertRegex(shard, r'audit-export-worker\s*=\s*\{ role = "inventory_audit_reader"')
         self.assertIn('INVENTORY_AUDIT_SHARD_REGISTRY_FILE', gitops)
+        self.assertRegex(
+            gitops,
+            r'"tenant-control-plane"\s*=\s*\{ service = "audit-export-worker", secret = "audit-export-worker", env = "INVENTORY_SHARD_REGISTRY_FILE" \}',
+        )
         self.assertIn('aws_eks_pod_identity_association.audit_export', gitops)
+
+        inventory_reader = REPO / "services/device-service/prisma/migrations/20260928210000_audit_export_reader/migration.sql"
+        grants = inventory_reader.read_text()
+        self.assertIn("GRANT SELECT ON public.audit_events TO inventory_audit_reader", grants)
+        self.assertIn("GRANT EXECUTE ON FUNCTION greenguard_internal.admit_tenant_placement", grants)
+        self.assertNotIn(" TO inventory_app", grants)
+        main = (REPO / "services/tenant-control-plane/src/main.ts").read_text()
+        self.assertIn('service: "audit-export-worker"', main)
+        self.assertIn('roles: ["inventory_audit_reader"]', main)
 
     def test_worker_health_checks_and_blocked_live_gate_are_present(self):
         worker = (REPO / "services/tenant-control-plane/src/audit/worker.ts").read_text()

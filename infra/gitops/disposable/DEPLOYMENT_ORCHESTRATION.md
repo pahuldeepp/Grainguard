@@ -54,7 +54,7 @@ remaining live journeys. For an independent post-deployment check, invoke:
 ```sh
 python3 infra/gitops/disposable/check-deployed-workloads.py \
   cell-identity.json release-inputs.tfvars.json /private/path/cell-kubeconfig \
-  --timeout 900
+  --timeout 2400
 ```
 
 Inputs:
@@ -63,7 +63,9 @@ Inputs:
   output with `account_id`, `region`, `environment`, and `cluster_name`.
 - `release-inputs.tfvars.json`: the verified CI assembled (or ECR promoted)
   artifact with `gitops_revision` and the complete `deployment_image_digests`
-  inventory. Mutable references and foreign registries/accounts are rejected.
+  inventory, plus immutable `migration_gate_image_digest` and
+  `migration_sql_image_digest` values. Mutable application references and
+  foreign registries/accounts are rejected.
 - An explicit kubeconfig for this cell, with its inline EKS CA. The runner
   does not change kubeconfig or select a global context.
 
@@ -86,14 +88,24 @@ that mode. The normal Deployment/StatefulSet/Pod query does not require the opti
 Rollout CRD. Discovery collects Rollouts separately only when that CRD exists;
 a missing contract Deployment still fails, so an absent CRD cannot hide a
 replacement workload. DaemonSets, CronJobs and Jobs cannot substitute for
-a contract's application Deployment/StatefulSet. This script does not check
-controller or data workloads, migration Jobs, database correctness, public
-API journeys, tenant isolation, telemetry/projection/alert flows, or iPhone
-behavior. Those remain separate acceptance phases.
+a contract's application Deployment/StatefulSet. The PostgreSQL migration
+gate is separately required below; this script does not check controller or
+other data workloads, public API journeys, tenant isolation,
+telemetry/projection/alert flows, or iPhone behavior. Those remain separate
+acceptance phases.
+
+The Terraform acceptance wait also requires exactly one completed Job labeled
+`greenguard.io/migration-gate=true`, with the immutable kubectl/psql images
+passed through Terraform. That Job waits for all 38 central and shard owner
+migration Jobs, then checks owner databases and roles, runtime grants, forced
+RLS, and shard placement admission. Nested Argo Application sync waves are not
+treated as proof that their child resources have converged. The default wait
+is 2,400 seconds (configurable from 60 to 3,600) to cover the 900-second owner
+Jobs and 1,800-second SQL gate.
 
 ## Remaining automatic acceptance work
 
-The deployment must run separately scoped migrations/data checks, authenticated
+The deployment must run separately scoped non-PostgreSQL data checks, authenticated
 web/API and tenant-isolation journeys, and telemetry-to-projection/alert/ACK
 checks. Existing `check-live-acceptance.py` validates a hashed evidence
 inventory including physical-iPhone and teardown outcomes; it does not execute
