@@ -64,6 +64,16 @@ class LifecycleAuditTest < Minitest::Test
     assert_includes ids(fixture), 'raw_destroy_no_post_inventory'
   end
 
+  def test_every_aws_resource_type_is_classified_for_teardown_inventory
+    assert_empty LifecycleAudit.aws_resource_inventory_gaps(sources)
+
+    fixture = sources
+    fixture['main.tf'] += "\nresource \"aws_new_metered_service\" \"surprise\" {}\n"
+    finding = LifecycleAudit.findings(fixture).find { |item| item.fetch(:id) == 'aws_resource_inventory_coverage' }
+    refute_nil finding
+    assert_equal ['aws_new_metered_service'], finding.fetch(:missing)
+  end
+
   def test_raw_destroy_guard_remains_because_partial_state_can_omit_cleanup_owner
     teardown = sources.fetch('teardown.tf')
     # This owner is intentionally created after the EKS/GitOps resources it

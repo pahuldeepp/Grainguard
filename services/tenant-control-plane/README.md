@@ -1,5 +1,26 @@
 # Tenant control plane
 
+## Greenfield tenant ownership bootstrap status
+
+The control plane can persist an initial shard placement, but tenant creation is
+not yet a complete four-shard bootstrap workflow. No deployed event consumer or
+request path currently provisions `greenguard_internal.tenant_ownership` in all
+nine owner databases before making the placement available. The existing
+`seed_tenant_ownership` database function is a full-shard snapshot importer; it
+can fence local rows missing from its input and must not be used as a
+single-tenant seed operation.
+
+`src/tenant-bootstrap/preflight.ts` defines an offline contract for the missing
+provisioner. It requires exactly one adapter per sharded owner, direct readiness
+proof from all owners on the selected shard, and matching read-back proofs for
+all nine owners before routing activation. The module is validation-only: it
+does not contact databases, write ownership rows, or activate tenants. Its
+plain-object assertions are forgeable and its migration hashes are not compared
+against an expected per-owner manifest; they are useful only for testing input
+shape and must never authorize activation. Until authenticated probes, an
+expected migration manifest, and a durable worker implement and deploy the full
+protocol, tenant bootstrap across shards remains blocked and must fail closed.
+
 Stage 09a implementation: first-party organizations, identities, invitations and
 versioned memberships. See [ADR-0017](../../docs/adr/0017-tenant-control-plane.md).
 The service owns `greenguard_control`; `control_app` is a non-owner runtime role.
@@ -99,6 +120,17 @@ to write receipts or advance placement; deployment must provision the separate
 mover credential only to that private runtime. Until that interface, the nine
 owner adapters, and negative privilege tests exist, migration must fail closed.
 Synthetic JSON fixtures prove only validation behavior, not migration acceptance.
+
+`src/tenant-move/move-coordinator.ts` is a preflight skeleton for that private
+mover, not an enabled migration controller. Its adapter roster requires every
+owner to implement quiesce/drain, source fencing, copy verification, target
+preparation/activation, replica-freshness verification, and recovery before an
+adapter roster is accepted. The current registered owner set (Inventory, Risk,
+Telemetry) is intentionally rejected. This module exposes no execution callback
+or cutover path. The gate does not attest adapter provenance or manufacture
+receipts; it must be paired with the separately authenticated owner receipt
+contract above before cutover code can be implemented. Tests cover missing
+owners, incomplete safety boundaries, and duplicate registrations.
 
 This control-plane slice does not by itself fence operational databases or migrate
 tenant data. Operational transactions must separately validate the database-local

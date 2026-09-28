@@ -71,6 +71,16 @@ locals {
     "tenant-control-plane-config" = { key = "CONTROL_DATABASE_URL", role = "control_app", database = "greenguard_control", password_key = "CONTROL_DB_PASSWORD" }
     "billing-service-config"      = { key = "BILLING_DATABASE_URL", role = "billing_app", database = "greenguard_billing", password_key = "BILLING_DB_PASSWORD" }
   }
+  # Every caller of the placement/membership authority gets the one token
+  # owned by the control-plane Secret. Do not accept per-service variants:
+  # they can drift and make otherwise healthy sharded workloads fail closed.
+  control_lookup_secret_consumers = toset([
+    "bff-config", "gateway-config", "device-service-config", "read-api-config",
+    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config",
+    "projection-builder-config", "risk-engine-config", "jobs-worker-config",
+    "hardware-service-config", "saga-api-config", "saga-worker-config",
+    "tenant-control-plane-config",
+  ])
   generated_runtime_values = var.enable_application_tree ? {
     "notification-contacts-projector-config" = {
       for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] :
@@ -104,6 +114,9 @@ locals {
   runtime_secret_owned_values = {
     for name, values in merge(var.runtime_secret_values, local.generated_migration_values, local.generated_all_runtime_values) : name => merge(
       { for key, value in values : key => value if !contains([for config, profile in local.runtime_database_profiles : profile.key if !contains(["tenant-control-plane-config", "billing-service-config"], config)], key) },
+      contains(local.control_lookup_secret_consumers, name) ? {
+        CONTROL_LOOKUP_TOKEN = try(var.runtime_secret_values["tenant-control-plane-config"]["CONTROL_LOOKUP_TOKEN"], "")
+      } : {},
       name == "tenant-control-plane-config" ? { CONTROL_ENTITLEMENT_PROJECTOR_URL = "postgresql://control_entitlement_projector:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem" } : {},
       name == "notification-contacts-projector-config" ? { NOTIFICATION_STATE_TABLE = aws_dynamodb_table.notification_state[0].name, AWS_REGION = var.aws_region } : {},
       name == "eventbridge-bridge-config" ? { AWS_REGION = var.aws_region, AWS_ACCOUNT_ID = var.target_account_id } : {},
@@ -163,6 +176,10 @@ resource "aws_secretsmanager_secret_version" "runtime" {
     precondition {
       condition     = each.key != "notification-contacts-projector-config" || alltrue([for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] : try(length(trimspace(var.runtime_secret_values["notification-service-config"][key])) > 0, false)])
       error_message = "The contacts projector needs broker and Registry credentials copied from notification-service-config."
+    }
+    precondition {
+      condition     = each.key != "tenant-control-plane-config" || try(length(var.runtime_secret_values[each.key]["CONTROL_LOOKUP_TOKEN"]) >= 32, false)
+      error_message = "The canonical control-plane lookup token must contain at least 32 characters."
     }
     precondition {
       condition     = each.key != "audit-export-worker-config" || (toset(keys(var.audit_export_signing_material)) == toset(["AUDIT_EXPORT_PRIVATE_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_ID", "AUDIT_EXPORT_LINK_SECRET"]) && try(length(var.runtime_secret_values["tenant-control-plane-config"]["CONTROL_LOOKUP_TOKEN"]) >= 32, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_AUDIT_WORKER_PASSWORD"]) > 0, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["BILLING_AUDIT_READER_PASSWORD"]) > 0, false))

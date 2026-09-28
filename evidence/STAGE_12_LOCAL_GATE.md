@@ -241,3 +241,37 @@ chaos behavior.
 
 No AWS APIs, production resources, Terraform apply/destroy, or shared database
 state were touched during this rerun.
+
+## Isolated rerun after Stage 12 integration fixes — 2026-09-28
+
+The isolated gate was repeated after adding canonical control-plane token
+propagation and tenant bootstrap/move preflight contracts:
+
+```sh
+node scripts/stage12-compose-gate.mjs run
+```
+
+The wrapper used fresh Compose project `greenguard-stage12-d73a41088f`, ran the
+entire `make verify` target and runtime smoke, then removed that project's
+containers, network, and Postgres volume. `make verify` passed workspace
+formatting, lint, typechecking, application tests, migration/build steps, and Go
+format/vet/race suites. Optional live tests requiring external Kafka, Redis,
+search, cloud, or a separately configured four-shard endpoint remained skipped.
+The smoke passed live database readiness, unavailable-database 503 handling,
+restricted application database privileges, and cross-database denial.
+
+Additional focused checks after those edits passed: tenant bootstrap and move
+preflight tests (7), canonical lookup-token and Secret readiness tests (32),
+teardown lifecycle audit (9 runs / 74 assertions), Terraform formatting for
+`runtime-secrets.tf`, and offline validation of the disposable Terraform root.
+OIDC identity contract tests passed (7 runs / 127 assertions), and mobile tests
+passed (7 suites / 59 tests plus 4 config tests). The tenant-control-plane test
+script was also invoked directly without its required `CONTROL_DATABASE_URL`
+and `CONTROL_DIRECT_URL`; that invocation failed for missing environment
+configuration. The complete suite passed inside the isolated Stage 12 gate.
+
+This remains a local acceptance gate. It does not deploy the full Kafka/Redis
+Cluster/Cassandra/OpenSearch/OIDC/Argo/web/mobile stack, nor prove AWS, EKS,
+tenant bootstrap, tenant movement, browser login, or physical-iPhone flows. No
+AWS APIs, production resources, Terraform apply/destroy, or shared database
+state were touched during this rerun.

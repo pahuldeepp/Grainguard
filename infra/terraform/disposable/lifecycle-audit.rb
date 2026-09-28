@@ -16,9 +16,77 @@ def require_contract(findings, id, file, *markers)
   findings << { id: id, file: file, missing: missing } unless missing.empty?
 end
 
+# Every AWS resource in this root must be visible to teardown inventory or be
+# explicitly classified as a non-metered supporting object. Keep this list
+# deliberately exhaustive: adding a new AWS resource type must make its
+# inventory strategy explicit in review.
+TAG_INVENTORY_TYPES = %w[
+  aws_cloudfront_distribution aws_cloudfront_vpc_origin aws_cloudwatch_log_group
+  aws_cognito_user_pool aws_cognito_user_pool_domain
+  aws_db_instance aws_db_parameter_group aws_db_subnet_group aws_dynamodb_table
+  aws_ecr_repository aws_eip aws_eks_addon aws_eks_cluster aws_eks_node_group
+  aws_iam_role aws_internet_gateway aws_kms_key aws_lb aws_lb_target_group
+  aws_nat_gateway aws_s3_bucket aws_secretsmanager_secret aws_security_group
+  aws_subnet aws_vpc aws_vpc_endpoint aws_wafv2_web_acl aws_route_table
+].freeze
+
+DIRECT_INVENTORY_MARKERS = {
+  'aws_cloudfront_distribution' => 'cloudfront list-distributions',
+  'aws_cloudfront_vpc_origin' => 'cloudfront list-vpc-origins',
+  'aws_cloudwatch_log_group' => 'logs describe-log-groups',
+  'aws_cognito_user_pool' => 'cognito-idp list-user-pools',
+  'aws_cognito_user_pool_domain' => 'cognito-idp describe-user-pool-domain',
+  'aws_db_instance' => 'rds describe-db-instances',
+  'aws_dynamodb_table' => 'dynamodb describe-table',
+  'aws_eks_cluster' => 'eks list-clusters',
+  'aws_lb' => 'elbv2 describe-load-balancers',
+  'aws_s3_bucket' => 's3api list-buckets',
+  'aws_wafv2_web_acl' => 'wafv2 list-web-acls'
+}.freeze
+
+SUPPORTING_RESOURCE_TYPES = %w[
+  aws_cloudfront_cache_policy aws_cognito_user_pool_client aws_eks_access_entry
+  aws_eks_access_policy_association aws_eks_pod_identity_association
+  aws_flow_log aws_iam_role_policy aws_iam_role_policy_attachment
+  aws_lb_listener aws_launch_template aws_route aws_route_table_association
+  aws_s3_bucket_ownership_controls aws_s3_bucket_policy
+  aws_s3_bucket_public_access_block aws_s3_bucket_server_side_encryption_configuration
+  aws_secretsmanager_secret_version aws_vpc_security_group_egress_rule
+  aws_vpc_security_group_ingress_rule
+].freeze
+
+def aws_resource_inventory_gaps(sources = nil)
+  terraform_files = if sources
+    sources.keys.select { |name| name.end_with?('.tf') }
+  else
+    Dir.glob(File.join(ROOT, '*.tf')).map { |path| File.basename(path) }
+  end
+  declared = terraform_files.flat_map do |file|
+    source(file).scan(/\bresource\s+"(aws_[^"]+)"\s+"[^"]+"/).flatten
+  end.uniq
+  classified = TAG_INVENTORY_TYPES + SUPPORTING_RESOURCE_TYPES
+  gaps = declared - classified
+  check = source('check-teardown.sh')
+  gaps.concat(TAG_INVENTORY_TYPES.reject do |type|
+    marker = DIRECT_INVENTORY_MARKERS[type]
+    marker ? check.include?(marker) : true
+  end)
+  if declared.any? { |type| TAG_INVENTORY_TYPES.include?(type) }
+    versions = source('versions.tf')
+    check_marker = 'project_resources="$(tagged Key=Project,Values=GreenGuard "Key=Environment,Values=$environment")"'
+    unless versions.include?('default_tags') && check.include?(check_marker)
+      gaps.concat(declared & TAG_INVENTORY_TYPES)
+    end
+  end
+  gaps.uniq.sort
+end
+
 def findings(sources = nil)
   @sources = sources
   findings = []
+  inventory_gaps = aws_resource_inventory_gaps(sources)
+  findings << { id: 'aws_resource_inventory_coverage', file: 'check-teardown.sh',
+                missing: inventory_gaps } unless inventory_gaps.empty?
   require_contract(findings, 'account_guard', 'versions.tf', 'allowed_account_ids = [var.target_account_id]', 'backend "local"')
   require_contract(findings, 'production_guard', 'pre-destroy.sh', 'production', 'actual_account="$(aws sts get-caller-identity')
   require_contract(findings, 'network_ownership', 'main.tf', 'resource "aws_vpc" "cell"', 'resource "aws_nat_gateway" "az"', 'resource "aws_eip" "nat"')

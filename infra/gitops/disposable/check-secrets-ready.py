@@ -21,6 +21,16 @@ KAFKA_KEYS = KAFKA_BINARY_KEYS | {
     "truststore-password", "registry-keystore-password", "registry-key-password",
     "registry-jaas.conf", "registry-users.properties",
 }
+# These application Secrets are consumed by runtimes that call the control
+# plane for placement or membership. Terraform copies the canonical token from
+# tenant-control-plane-config into each one before Kubernetes materialization.
+CONTROL_LOOKUP_SECRET_CONSUMERS = {
+    "bff-config", "gateway-config", "device-service-config", "read-api-config",
+    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config",
+    "projection-builder-config", "risk-engine-config", "jobs-worker-config",
+    "hardware-service-config", "saga-api-config", "saga-worker-config",
+    "tenant-control-plane-config", "audit-export-worker-config",
+}
 
 
 def secret_bytes(name, data):
@@ -298,6 +308,18 @@ def expected_secrets(args):
             raise ValueError("tenant-control-plane-config: API public key does not match the worker signing identity")
         if api_config["AUDIT_EXPORT_S3_BUCKET"] != worker_config["AUDIT_EXPORT_S3_BUCKET"] or api_config["AUDIT_EXPORT_S3_REGION"] != worker_config["AUDIT_EXPORT_S3_REGION"]:
             raise ValueError("tenant-control-plane-config: API and worker must use the same Terraform-owned S3 bucket and region")
+
+    if CONTROL_LOOKUP_SECRET_CONSUMERS & application_secrets.keys():
+        control_config = expected.get("tenant-control-plane-config", {}).get("data", {})
+        canonical_token = control_config.get("CONTROL_LOOKUP_TOKEN", "")
+        if len(canonical_token.encode("utf-8")) < 32:
+            raise ValueError("tenant-control-plane-config: canonical CONTROL_LOOKUP_TOKEN must contain at least 32 bytes")
+        for name in sorted(CONTROL_LOOKUP_SECRET_CONSUMERS & application_secrets.keys()):
+            token = expected.get(name, {}).get("data", {}).get("CONTROL_LOOKUP_TOKEN", "")
+            if len(token.encode("utf-8")) < 32:
+                raise ValueError(f"{name}: CONTROL_LOOKUP_TOKEN must contain at least 32 bytes")
+            if token != canonical_token:
+                raise ValueError(f"{name}: CONTROL_LOOKUP_TOKEN differs from the control-plane authority token")
 
     broker_jaas = expected["greenguard-kafka-auth"]["data"]["broker-jaas"]
     if not re.search(r'\busername="broker"\s+password="([^"]+)"', broker_jaas):

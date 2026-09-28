@@ -39,14 +39,16 @@ class PreflightTests(unittest.TestCase):
         ]}))
         self.sql = root / "init.sql"
         self.sql.write_text("\\getenv role_password ROLE_PASSWORD\n\\getenv other_password OTHER_PASSWORD\n\\getenv cdc_password CDC_DB_PASSWORD\n")
+        lookup_token = "c" * 32
         self.values = {
-            "bff-config": {"BFF_TOKEN": "dummy-token", "KAFKA_SASL_USERNAME": "bff", "KAFKA_SASL_PASSWORD": "dummy"},
-            "read-api-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
+            "bff-config": {"BFF_TOKEN": "dummy-token", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "bff", "KAFKA_SASL_PASSWORD": "dummy"},
+            "read-api-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
             "search-indexer-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "search-indexer", "KAFKA_SASL_PASSWORD": "dummy"},
             "cassandra-writer-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "cassandra-writer", "KAFKA_SASL_PASSWORD": "dummy"},
-            "notification-service-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
+            "notification-service-config": {"CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
             "notification-contacts-projector-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "NOTIFICATION_STATE_TABLE": "greenguard-cell-state", "AWS_REGION": "us-east-1"},
             "tenant-control-plane-config": {
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
                 "KAFKA_SASL_USERNAME": "tenant-control-plane", "KAFKA_SASL_PASSWORD": "dummy",
                 "AUDIT_EXPORT_S3_BUCKET": "cell-audit-bucket", "AUDIT_EXPORT_S3_REGION": "ca-central-1",
                 "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
@@ -56,7 +58,7 @@ class PreflightTests(unittest.TestCase):
             "audit-export-worker-config": {
                 "CONTROL_AUDIT_DATABASE_URL": "postgresql://control_audit_worker:secret@db.example.rds.amazonaws.com:5432/greenguard_control?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
                 "BILLING_AUDIT_DATABASE_URL": "postgresql://billing_audit_reader:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
-                "CONTROL_LOOKUP_TOKEN": "c" * 32,
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
                 "AUDIT_EXPORT_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----\nprivate-key\n-----END PRIVATE KEY-----",
                 "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
                 "AUDIT_EXPORT_PUBLIC_KEY_ID": "audit-key-v1",
@@ -231,6 +233,18 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("scoped Kafka SASL username/password", output)
+
+    def test_control_plane_clients_must_share_the_canonical_lookup_token(self):
+        self.values["read-api-config"]["CONTROL_LOOKUP_TOKEN"] = "d" * 32
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("read-api-config: CONTROL_LOOKUP_TOKEN differs", output)
+
+    def test_control_plane_client_requires_a_lookup_token(self):
+        del self.values["bff-config"]["CONTROL_LOOKUP_TOKEN"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("bff-config: CONTROL_LOOKUP_TOKEN must contain at least 32 bytes", output)
 
     def test_shared_runtime_secret_cannot_map_to_conflicting_principals(self):
         contract = json.loads(self.contract.read_text())
