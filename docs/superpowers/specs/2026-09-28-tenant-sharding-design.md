@@ -2,8 +2,8 @@
 
 Status: written specification awaiting user review. Architecture approved in
 conversation; implementation has not been approved against this written spec.
-Scope: finish one read replica, then implement physical tenant sharding and
-resumable short-pause moves across two local bundles, followed by disposable AWS
+Scope: finish one read replica per initial physical shard, then implement four-shard tenant routing and
+resumable short-pause moves across four local bundles, followed by disposable AWS
 acceptance. Existing replica/CDN edits remain candidates, not verified features.
 
 ## 1. Intent and agreed constraints
@@ -18,8 +18,8 @@ No real AWS apply occurs until the wider pre-deployment audit is green.
 Success means executable proof for replica consistency, routing, source fencing,
 tenant moves and recovery across every synchronous and background path, plus
 later web/iPhone workflows and complete disposable teardown. Static renders are
-not live proof. Tests cannot substitute one local database for two physical
-shards or replace a real streaming replica with two independent writable DBs.
+not live proof. Tests cannot substitute one local database for four physical
+shards or replace a real streaming replica with independent writable DBs.
 
 ## 2. Current architecture and correction of terminology
 
@@ -40,9 +40,10 @@ Evidence and alternatives are recorded in
 
 ## 3. Deployment and data ownership
 
-Use application-routed operational tenant bundles. Each stable shard ID owns a
-private PostgreSQL primary, zero or more read replicas, distinct endpoint/role
+Use application-routed operational tenant bundles. The initial topology has four stable shard IDs (`s1`–`s4`), each owning a
+private PostgreSQL primary and one read replica, distinct endpoint/role
 Secrets, PgBouncer targets, migration history, CDC sources and health metrics.
+Replica counts remain configurable per shard within the reviewed connection budget.
 Preserve separate logical databases for inventory, telemetry, risk, alerts,
 read projections, jobs, notifications, sagas and hardware.
 
@@ -57,7 +58,7 @@ Redis, Kafka, Cassandra, OpenSearch, S3 and DynamoDB remain shared in the first
 implementation. Their tenant data is not moved just because PostgreSQL moves.
 Consumers, live streams and provider delivery intents must nevertheless respect
 placement, source lineage and deduplication. OAuth identities and device IDs do
-not change during a move. No alphabetic or modulo-shard-count routing.
+not change during a move. No alphabetic, modulo-shard-count, or consistent-hash routing. The four-shard baseline is explicit placement in the control-plane table; placement is authoritative and never recomputed from shard count.
 
 ## 4. Read replica policy
 
@@ -267,11 +268,7 @@ traffic admission; old credentials/processes remain fenced.
 
 ## 10. Local and cloud topology
 
-First preserve a single-shard compatibility mode using the resolver and fences.
-Then create two independent local PostgreSQL bundles plus a real streaming replica
-for lag tests, while using the existing shared Redis Cluster/event stack. Apply
-all owner migrations and RLS/grant checks to both. Central control/billing fixtures
-remain separate. Bootstrap is repeatable and does not mutate unrelated local data.
+Create four independent local PostgreSQL bundles (`s1`–`s4`) with one real streaming replica per bundle for lag tests, while using the existing shared Redis Cluster/event stack. New tenants receive an explicit persisted shard assignment at onboarding using configured capacity/administrative policy; requests never recalculate a hash. Existing tenants may remain explicitly assigned to s1 until moved by the fenced migration protocol. Apply all owner migrations and RLS/grant checks to all four bundles. Central control/billing fixtures remain separate. Bootstrap is repeatable and does not mutate unrelated local data.
 
 Terraform uses stable for_each shard IDs and explicit replica maps, not list
 positions. Argo migration, Secret, PgBouncer and connector inventories derive from
@@ -287,7 +284,7 @@ The existing raw terraform destroy post-inventory gap remains a separate blocker
 | --- | --- |
 | Replica | TLS/RLS and permissions; real paused replay; invalidation followed by stale miss cannot refill current cache; eligible routing and bounded fallback; pool budget; CDN asset/API cache behavior |
 | Placement | CAS contention; trusted tenant selection; expiration/outage; BIGINT epochs; compatibility routing; no stale write admission |
-| Two shards | Every service and worker path; schema/grants; tenant isolation; inbox/outbox atomicity; source lineage and independent health |
+| Four shards | Every service and worker path; schema/grants; tenant isolation; inbox/outbox atomicity; source lineage and independent health |
 | Move | Successful snapshot/final delta/short pause; accepted work drained; old source read/write/fill denied; no lost commands or duplicate provider effects |
 | Faults | Crash each step; partial fences; stale worker; Redis/replica/control outage; copy failure; delayed CDC; active export/notification; forward recovery and new-epoch reverse move |
 | Local E2E | Web/API sign-in, tenant data, alerts/live updates/ACK across a move; mobile queue/reconnect behavior; full verify/coverage gate |
@@ -302,7 +299,7 @@ in protected logs/traces and aggregate metrics by shard/state/reason.
 ## 12. Implementation boundaries and review handoff
 
 Separate deliverables: replica/cache consistency; placement authority; transaction
-admission across languages/services; two-bundle deployment/CDC; move orchestrator;
+admission across languages/services; four-bundle deployment/CDC; move orchestrator;
 fault/E2E acceptance; disposable AWS ownership/acceptance. Each passes its gates
 before the next depends on it. No Redis key redistribution or IdP replacement is
 included. A detailed implementation plan must enumerate exact owner tables,
