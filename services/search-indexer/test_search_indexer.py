@@ -36,6 +36,48 @@ class FakeElastic:
 
 
 class IndexerTests(unittest.TestCase):
+    def test_bootstrap_index_verifies_existing_mapping(self):
+        client = MODULE.Elastic("http://127.0.0.1:19200")
+        with patch.object(client, "create_index") as create, patch.object(client, "request", return_value={"greenguard-inventory-v1": MODULE.MAPPING}) as request:
+            client.bootstrap_index("greenguard-inventory-v1")
+        create.assert_called_once_with("greenguard-inventory-v1")
+        request.assert_called_once_with("GET", "/greenguard-inventory-v1/_mapping")
+        with patch.object(client, "create_index"), patch.object(client, "request", return_value={"greenguard-inventory-v1": {"mappings": {"dynamic": "false"}}}):
+            with self.assertRaisesRegex(RuntimeError, "mapping mismatch"):
+                client.bootstrap_index("greenguard-inventory-v1")
+
+    def test_search_transport_requires_tls_ca_and_credentials_together(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS search requires"):
+            MODULE.Elastic("https://search.example")
+        with self.assertRaisesRegex(ValueError, "credentials require HTTPS"):
+            MODULE.Elastic("http://search.example", "reader", "secret", "/ca.pem")
+        with self.assertRaisesRegex(ValueError, "invalid search URL"):
+            MODULE.Elastic("https://reader:secret@search.example", "reader", "secret", "/ca.pem")
+        context = object()
+        with patch.object(MODULE.ssl, "create_default_context", return_value=context) as create_context:
+            client = MODULE.Elastic("https://search.example", "reader", "secret", "/ca.pem")
+        create_context.assert_called_once_with(cafile="/ca.pem")
+        self.assertEqual(client.context, context)
+        self.assertTrue(client.authorization.startswith("Basic "))
+
+    def test_binding_feed_checkpoint_is_skipped_but_malformed_marker_holds_offset(self):
+        marker = {"event_type": "binding.feed_checkpoint", "schema_version": 1,
+                  "source_time": "2026-09-24T10:00:00Z", "source_position": "123",
+                  "raw_position": 4, "partitions": 6}
+        elastic = FakeElastic()
+        with tempfile.TemporaryDirectory() as folder:
+            quarantine = Path(folder) / "q.jsonl"
+            indexer = MODULE.Indexer(elastic, MODULE.index_name(1), str(quarantine))
+            indexer.process([MODULE.Record(MODULE.TOPICS[0], 0, 1, json.dumps(marker).encode())])
+            self.assertEqual(elastic.actions, [])
+            self.assertFalse(quarantine.exists())
+            for invalid in ({**marker, "partitions": 5}, {**marker, "tenant_id": "unexpected"},
+                            {**marker, "source_time": "2026-09-24T10:00:00"}):
+                record = MODULE.Record(MODULE.TOPICS[0], 0, 2, json.dumps(invalid).encode())
+                with self.assertRaisesRegex(RuntimeError, "invalid device event"):
+                    indexer.process([record])
+            self.assertFalse(quarantine.exists())
+
     def test_http_adapter_success_not_found_and_failure(self):
         client = MODULE.Elastic("http://example.test/")
         class Response:

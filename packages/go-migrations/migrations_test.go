@@ -68,3 +68,31 @@ func TestConnectFailureRedactsCredentials(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 }
+
+func TestRDSMigrationRequiresVerifiedTLS(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		url         string
+		wantSuccess bool
+	}{
+		{"valid", "postgresql://owner:secret@db.example.test/data?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem", true},
+		{"no tls", "postgresql://owner:secret@db.example.test/data?sslmode=disable", false},
+		{"wrong ca", "postgresql://owner:secret@db.example.test/data?sslmode=verify-full&sslrootcert=/tmp/ca.pem", false},
+		{"host override", "postgresql://owner:secret@db.example.test/data?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem&host=other.example.test", false},
+		{"hostaddr override", "postgresql://owner:secret@db.example.test/data?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem&hostaddr=127.0.0.1", false},
+		{"duplicate sslmode", "postgresql://owner:secret@db.example.test/data?sslmode=verify-full&sslmode=disable&sslrootcert=/rds-ca/ca.pem", false},
+		{"invalid url", "not-a-url", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			values := map[string]string{"GG_RDS": "1", "MIGRATION_URL": tc.url}
+			err := Run("MIGRATION_URL", func(key string) string { return values[key] }, func(string) error { called = true; return nil })
+			if (err == nil) != tc.wantSuccess || called != tc.wantSuccess {
+				t.Fatalf("success=%t called=%t error=%v", err == nil, called, err)
+			}
+			if err != nil && strings.Contains(err.Error(), "secret") {
+				t.Fatal("URL credential leaked in validation error")
+			}
+		})
+	}
+}

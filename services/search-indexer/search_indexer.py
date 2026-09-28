@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
+from datetime import datetime
 import hashlib
 import json
 import os
 import signal
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -16,6 +19,7 @@ from typing import Any
 
 ALIAS = os.getenv("SEARCH_ALIAS", "greenguard-inventory")
 TOPICS = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+CHECKPOINT_FIELDS = {"event_type", "schema_version", "source_time", "source_position", "raw_position", "partitions"}
 MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "tenant_id": {"type": "keyword"}, "resource_type": {"type": "keyword"},
     "resource_id": {"type": "keyword"}, "name": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
@@ -42,17 +46,29 @@ def transient_bulk_error(error: SearchError | urllib.error.URLError | TimeoutErr
 
 
 class Elastic:
-    def __init__(self, url: str):
+    def __init__(self, url: str, username: str | None = None, password: str | None = None,
+                 ca_file: str | None = None):
         self.url = url.rstrip("/")
+        parsed = urllib.parse.urlsplit(self.url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("invalid search URL")
+        if parsed.scheme == "https" and (not username or not password or not ca_file):
+            raise ValueError("HTTPS search requires username, password and CA file")
+        if parsed.scheme == "http" and (username or password or ca_file):
+            raise ValueError("search credentials require HTTPS")
+        self.context = ssl.create_default_context(cafile=ca_file) if ca_file else None
+        self.authorization = ("Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()) if username else None
 
     def request(self, method: str, path: str, body: Any = None, ndjson: bool = False) -> Any:
         data = None
         if body is not None:
             data = body if ndjson else json.dumps(body).encode()
-        req = urllib.request.Request(self.url + path, data=data, method=method,
-                                     headers={"Content-Type": "application/x-ndjson" if ndjson else "application/json"})
+        headers = {"Content-Type": "application/x-ndjson" if ndjson else "application/json"}
+        if self.authorization:
+            headers["Authorization"] = self.authorization
+        req = urllib.request.Request(self.url + path, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=20) as response:
+            with urllib.request.urlopen(req, timeout=20, context=self.context) as response:
                 content = response.read()
                 return json.loads(content) if content else {}
         except urllib.error.HTTPError as exc:
@@ -68,6 +84,13 @@ class Elastic:
         except SearchError as exc:
             if exc.status != 400 or "resource_already_exists_exception" not in str(exc.body):
                 raise
+
+    def bootstrap_index(self, index: str) -> None:
+        self.create_index(index)
+        actual = self.request("GET", f"/{index}/_mapping")
+        mapping = actual.get(index, {}).get("mappings", {})
+        if mapping.get("dynamic") != "strict" or mapping.get("properties") != MAPPING["mappings"]["properties"]:
+            raise RuntimeError("inventory index mapping mismatch")
 
     def bulk(self, actions: list[dict[str, Any]]) -> dict[str, Any]:
         lines = []
@@ -199,6 +222,22 @@ class Record:
     value: bytes
 
 
+def validate_checkpoint(event: dict[str, Any], record: Record) -> None:
+    if (record.topic != TOPICS[0] or set(event) != CHECKPOINT_FIELDS or
+        type(event.get("schema_version")) is not int or event["schema_version"] != 1 or
+        type(event.get("partitions")) is not int or event["partitions"] != 6 or
+        not isinstance(event.get("raw_position"), int) or isinstance(event.get("raw_position"), bool) or
+        event["raw_position"] < 0 or not isinstance(event.get("source_position"), str) or
+        not event["source_position"].isdigit() or int(event["source_position"]) < 1 or
+        not isinstance(event.get("source_time"), str)):
+        raise ValueError("invalid binding feed checkpoint")
+    try:
+        if datetime.fromisoformat(event["source_time"].replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError("checkpoint time has no timezone")
+    except ValueError as exc:
+        raise ValueError("invalid binding feed checkpoint") from exc
+
+
 class Indexer:
     def __init__(self, elastic: Elastic, index: str, quarantine_path: str):
         self.elastic, self.index, self.quarantine_path = elastic, index, quarantine_path
@@ -214,6 +253,11 @@ class Indexer:
 
     def _prepare_action(self, record: Record) -> dict[str, Any] | None:
         event = json.loads(record.value)
+        if isinstance(event, dict) and event.get("event_type") == "binding.feed_checkpoint":
+            # CDC places this internal progress marker on every device-topic
+            # partition for the binding feed. It is not a searchable device.
+            validate_checkpoint(event, record)
+            return None
         action = action_for(event, self.index)
         old = self.elastic.document(self.index, action["meta"]["_id"])
         action["incoming"] = dict(action["document"])
@@ -309,10 +353,23 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
             offset_reset: str = "earliest") -> None:
     from confluent_kafka import Consumer, TopicPartition  # imported only by the live runner
 
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "").strip().upper()
+    mechanism = os.getenv("KAFKA_SASL_MECHANISM", "").strip().upper()
+    user, password, ca_file = (os.getenv(name, "") for name in
+                               ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_TLS_CA_FILE"))
+    required = os.getenv("KAFKA_REQUIRE_TLS", "").lower() == "true"
+    security = {}
+    if any((required, protocol, mechanism, user, password, ca_file)):
+        if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
+            raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
+        ssl.create_default_context(cafile=ca_file)
+        security = {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
+                    "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
+                    "enable.ssl.certificate.verification": True}
     index = index_name(version)
     elastic.create_index(index)
     consumer = Consumer({"bootstrap.servers": bootstrap, "group.id": group,
-                         "enable.auto.commit": False, "auto.offset.reset": offset_reset})
+                         "enable.auto.commit": False, "auto.offset.reset": offset_reset, **security})
     consumer.subscribe(list(TOPICS))
     indexer = Indexer(elastic, index, quarantine)
     stopping = False
@@ -352,10 +409,16 @@ def main() -> None:
     promote = commands.add_parser("promote")
     promote.add_argument("--version", type=int, required=True)
     promote.add_argument("--expected-manifest", required=True, help="JSON document-ID-to-version map from trusted inventory source")
+    bootstrap = commands.add_parser("bootstrap")
+    bootstrap.add_argument("--version", type=int, required=True)
     args = parser.parse_args()
-    elastic = Elastic(os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:19200"))
+    elastic = Elastic(os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:19200"),
+                      os.getenv("OPENSEARCH_USERNAME"), os.getenv("OPENSEARCH_PASSWORD"),
+                      os.getenv("OPENSEARCH_CA_FILE"))
     if args.command == "consume":
         consume(elastic, args.version, args.group, args.bootstrap, args.quarantine, args.offset_reset)
+    elif args.command == "bootstrap":
+        elastic.bootstrap_index(index_name(args.version))
     else:
         elastic.promote(index_name(args.version), json.loads(open(args.expected_manifest, encoding="utf-8").read()))
 

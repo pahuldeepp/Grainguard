@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	transport "greenguard.local/kafka-transport"
 )
 
 // kafkaSource is the franz-go adapter. It should move to packages/kafka-transport once that
@@ -14,14 +16,19 @@ type kafkaSource struct {
 }
 
 func newKafkaSource(brokers []string, group, topic string) (*kafkaSource, error) {
-	client, err := kgo.NewClient(
+	security, err := transport.SecurityOptions(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	options := append([]kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumerGroup(group),
 		kgo.ConsumeTopics(topic),
 		kgo.DisableAutoCommit(),
 		kgo.FetchIsolationLevel(kgo.ReadCommitted()),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-	)
+	}, security...)
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}

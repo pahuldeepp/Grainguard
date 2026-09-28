@@ -1,0 +1,38 @@
+package main
+
+import "testing"
+
+func TestServerlessCriticalRoutingHasNoRuntimeSwitch(t *testing.T) {
+	base := map[string]string{"JOBS_DATABASE_URL": "postgres://jobs", "RABBITMQ_URL": "amqp://rabbit", "SERVERLESS_CRITICAL_ENABLED": "false"}
+	cfg, err := loadConfig(func(k string) string { return base[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg
+}
+
+func TestControlPlaneMembershipRequiresSecureEndpointAndCredential(t *testing.T) {
+	base := map[string]string{
+		"JOBS_DATABASE_URL":      "postgres://jobs",
+		"RABBITMQ_URL":           "amqp://rabbit",
+		"AUTH_MEMBERSHIP_SOURCE": "control-plane",
+		"CONTROL_PLANE_URL":      "http://membership.internal",
+		"CONTROL_LOOKUP_TOKEN":   "01234567890123456789012345678901",
+	}
+	if _, err := loadConfig(func(k string) string { return base[k] }); err == nil {
+		t.Fatal("insecure control-plane URL accepted without explicit opt-in")
+	}
+	base["AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP"] = "true"
+	if _, err := loadConfig(func(k string) string { return base[k] }); err != nil {
+		t.Fatalf("explicit local HTTP opt-in rejected: %v", err)
+	}
+	base["AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP"] = "false"
+	base["CONTROL_PLANE_URL"] = "https://membership.internal"
+	if _, err := loadConfig(func(k string) string { return base[k] }); err != nil {
+		t.Fatalf("secure control-plane configuration rejected: %v", err)
+	}
+	base["CONTROL_LOOKUP_TOKEN"] = "short"
+	if _, err := loadConfig(func(k string) string { return base[k] }); err == nil {
+		t.Fatal("short control-plane credential accepted")
+	}
+}

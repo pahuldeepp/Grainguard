@@ -9,6 +9,8 @@ started once with an explicit RISK_KAFKA_OFFSET_RESET=earliest.
 
 from __future__ import annotations
 
+import os
+import ssl
 from typing import Any, Callable, Mapping
 
 from risk_engine.apply import Record
@@ -18,6 +20,23 @@ _TIMEOUT_S = 10.0
 
 class KafkaError(RuntimeError):
     """Broker, fetch or commit failure; the process must stop without committing."""
+
+
+def _security_config() -> dict[str, Any]:
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "").strip().upper()
+    mechanism = os.getenv("KAFKA_SASL_MECHANISM", "").strip().upper()
+    user = os.getenv("KAFKA_SASL_USERNAME", "")
+    password = os.getenv("KAFKA_SASL_PASSWORD", "")
+    ca_file = os.getenv("KAFKA_TLS_CA_FILE", "")
+    required = os.getenv("KAFKA_REQUIRE_TLS", "").lower() == "true"
+    if not any((required, protocol, mechanism, user, password, ca_file)):
+        return {}
+    if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
+        raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
+    ssl.create_default_context(cafile=ca_file)
+    return {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
+            "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
+            "enable.ssl.certificate.verification": True}
 
 
 def _default_factory(config: Mapping[str, Any]) -> Any:
@@ -43,6 +62,7 @@ class KafkaSource:
             "bootstrap.servers": bootstrap, "group.id": group, "enable.auto.commit": False,
             "enable.auto.offset.store": False, "auto.offset.reset": offset_reset,
             "isolation.level": "read_committed",
+            **_security_config(),
         })
         self._consumer.subscribe(list(topics))
 

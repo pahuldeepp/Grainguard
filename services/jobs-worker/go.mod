@@ -9,6 +9,7 @@ require (
 	github.com/twmb/franz-go v1.22.0
 	greenguard.local/go-common v0.0.0
 	greenguard.local/go-migrations v0.0.0
+	greenguard.local/kafka-transport v0.0.0
 )
 
 require (
@@ -27,11 +28,15 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.22.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0 // indirect
+	go.opentelemetry.io/otel/log v0.22.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
+	go.opentelemetry.io/otel/sdk/log v0.22.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
@@ -47,3 +52,5 @@ require (
 replace greenguard.local/go-migrations => ../../packages/go-migrations
 
 replace greenguard.local/go-common => ../../packages/go-common
+
+replace greenguard.local/kafka-transport => ../../packages/kafka-transport

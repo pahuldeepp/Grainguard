@@ -69,6 +69,18 @@ func TestBindingKafkaAdapterSeams(t *testing.T) {
 	}
 }
 
+func TestBindingKafkaRequiresTLSCredentialsWhenEnabled(t *testing.T) {
+	t.Setenv("KAFKA_REQUIRE_TLS", "true")
+	t.Setenv("KAFKA_SECURITY_PROTOCOL", "")
+	t.Setenv("KAFKA_SASL_MECHANISM", "")
+	t.Setenv("KAFKA_SASL_USERNAME", "")
+	t.Setenv("KAFKA_SASL_PASSWORD", "")
+	t.Setenv("KAFKA_TLS_CA_FILE", "")
+	if _, err := newBindingKafka([]string{"localhost:9092"}, "test"); err == nil {
+		t.Fatal("binding Kafka client accepted missing TLS credentials")
+	}
+}
+
 type bindingTestCluster struct {
 	*kfake.Cluster
 	network *kfake.VirtualNetwork

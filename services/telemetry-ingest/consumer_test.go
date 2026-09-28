@@ -110,13 +110,15 @@ func TestBindingConsumerEveryQuarantineReason(t *testing.T) {
 
 func TestBindingConsumerRetryAndCommitFrontier(t *testing.T) {
 	c, m := consumerFixture(t)
-	applied, committed := 0, 0
+	applied, effects, committed := 0, 0, 0
 	c.Apply = func(context.Context, []byte) (BindingOutcome, error) {
 		applied++
 		if applied == 1 {
-			return "", &pgconn.PgError{Code: "40001"}
+			// The database committed, but the caller lost the acknowledgement.
+			effects++
+			return "", io.EOF
 		}
-		return BindingApplied, nil
+		return BindingDuplicate, nil
 	}
 	m.Commit = func(context.Context) error {
 		committed++
@@ -128,8 +130,15 @@ func TestBindingConsumerRetryAndCommitFrontier(t *testing.T) {
 	if err := c.process(context.Background(), m); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 2 || committed != 2 || c.Retries.Load() != 2 {
-		t.Fatal("commit retry reapplied effect")
+	if applied != 2 || effects != 1 || committed != 2 || c.Retries.Load() != 2 {
+		t.Fatalf("ambiguous apply/commit: attempts=%d effects=%d commits=%d retries=%d", applied, effects, committed, c.Retries.Load())
+	}
+	// A broker redelivery after the successful commit still has one effect.
+	if err := c.process(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 3 || effects != 1 || committed != 3 || c.Retries.Load() != 2 {
+		t.Fatalf("redelivery: attempts=%d effects=%d commits=%d retries=%d", applied, effects, committed, c.Retries.Load())
 	}
 }
 
@@ -227,7 +236,7 @@ func TestBindingConsumerExistingApplyPathDuplicateStaleAndGap(t *testing.T) {
 	}{
 		{"duplicate", []step{{rows: 1}, {rows: 0}, {scan: setBool(true)}}, eventRegistered, 1, nil},
 		{"changed ID", []step{{rows: 1}, {rows: 0}, {scan: setBool(false)}}, eventRegistered, 1, nil},
-		{"stale", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(4)}}, eventStatusChanged, 3, nil},
+		{"stale", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(4)}, {rows: 0}}, eventStatusChanged, 3, nil},
 		{"gap", []step{{rows: 1}, {rows: 1}, {scan: setInt(1)}, {scan: setInt64(1)}}, eventStatusChanged, 3, ErrVersionGap},
 		{"missing", []step{{rows: 1}, {rows: 1}, {err: pgx.ErrNoRows}}, eventStatusChanged, 2, ErrBindingMissing},
 	}

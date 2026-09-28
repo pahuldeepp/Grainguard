@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/twmb/franz-go/pkg/kerr"
+	"os"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	transport "greenguard.local/kafka-transport"
 )
 
 // franz-go provides idempotent production (enabled by default), synchronous
@@ -27,14 +29,19 @@ type BindingKafka struct{ client bindingKafkaClient }
 var makeBindingClient = func(options ...kgo.Opt) (bindingKafkaClient, error) { return kgo.NewClient(options...) }
 
 func newBindingKafka(brokers []string, group string) (*BindingKafka, error) {
-	client, err := makeBindingClient(kgo.SeedBrokers(brokers...), kgo.ConsumerGroup(group),
-		kgo.ConsumeTopics(bindingTopic), kgo.DisableAutoCommit(),
+	security, err := transport.SecurityOptions(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	options := []kgo.Opt{kgo.SeedBrokers(brokers...), kgo.ConsumerGroup(group),
+		kgo.ConsumeTopics(bindingTopic, sensorLayoutTopic), kgo.DisableAutoCommit(),
 		// New group: log start. Expired commit: fatal (NoResetOffset), never a silent skip.
 		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()), kgo.ConsumeResetOffset(kgo.NoResetOffset()),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.RequiredAcks(kgo.AllISRAcks()), kgo.RebalanceTimeout(time.Minute),
-		kgo.RecordDeliveryTimeout(15*time.Second), kgo.ProducerLinger(0),
-		kgo.FetchMaxBytes(4*1024*1024), kgo.FetchMaxPartitionBytes(1024*1024))
+		kgo.RecordDeliveryTimeout(15 * time.Second), kgo.ProducerLinger(0),
+		kgo.FetchMaxBytes(4 * 1024 * 1024), kgo.FetchMaxPartitionBytes(1024 * 1024)}
+	client, err := makeBindingClient(append(options, security...)...)
 	if err != nil {
 		return nil, err
 	}

@@ -9,15 +9,33 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Callable, ContextManager, Mapping, Protocol
+from typing import Any, ContextManager, Protocol
 
 from risk_engine import events
 from risk_engine.events import BindingChange, LotChange, Telemetry
-from risk_engine.join import Binding, NotReady, Reading, Reject, Selected, Skip, select_lot
-from risk_engine.scoring import POLICIES, Policy, assess
-from risk_engine.store import HARD, REJECTED, TRANSIENT, InboxEntry, LotRow, StoreError, classify
+from risk_engine.join import (
+    Binding,
+    NotReady,
+    Reading,
+    Reject,
+    Selected,
+    Skip,
+    select_lot,
+)
+from risk_engine.policy import PolicyVersion
+from risk_engine.scoring import Policy, assess
+from risk_engine.store import (
+    HARD,
+    REJECTED,
+    TRANSIENT,
+    InboxEntry,
+    LotRow,
+    StoreError,
+    classify,
+)
 
 APPLIED = "applied"
 DUPLICATE = "duplicate"
@@ -63,10 +81,12 @@ class Tx(Protocol):
     def assessments_after(self, bin_id: str, lot_id: str, instant: datetime) -> list[Mapping[str, Any]]: ...
     def insert_invalidation(self, assessment_id: str, event_id: str, replacement_lot_id: str,
                             replacement_occupancy_version: int, source_event_id: str) -> None: ...
-    def assessment(self, source_event_id: str, lot_id: str, policy_version: int) -> Mapping[str, Any] | None: ...
+    def assessment(self, source_event_id: str, lot_id: str, policy_version: int,
+                   policy_id: str | None = None) -> Mapping[str, Any] | None: ...
     def next_stream_version(self, device_id: str) -> int: ...
     def insert_assessment(self, values: Mapping[str, Any]) -> None: ...
     def insert_outbox(self, event: Mapping[str, Any]) -> None: ...
+    def select_policy(self, bin_id: str, grain_type: str, instant: datetime) -> PolicyVersion | None: ...
 
 
 class Database(Protocol):
@@ -93,8 +113,10 @@ class _Rollback(Exception):
         self.result = result
 
 
-def deterministic_ids(tenant_id: str, source_event_id: str, lot_id: str, policy_version: int) -> tuple[str, str]:
-    identity = f"{tenant_id}:{source_event_id}:{lot_id}:{policy_version}"
+def deterministic_ids(tenant_id: str, source_event_id: str, lot_id: str, policy_version: int,
+                      policy_id: str | None = None) -> tuple[str, str]:
+    identity = (f"{tenant_id}:{source_event_id}:{lot_id}:{policy_version}" if policy_id is None
+                else f"{tenant_id}:{source_event_id}:{lot_id}:{policy_id}:{policy_version}")
     return (str(uuid.uuid5(RISK_NAMESPACE, f"risk.assessed:{identity}")),
             str(uuid.uuid5(RISK_NAMESPACE, f"assessment:{identity}")))
 
@@ -106,10 +128,10 @@ def _utc_now() -> datetime:
 class Applier:
     def __init__(self, db: Database, consumer_name: str,
                  lot_feed_watermark: Callable[[], datetime | None],
-                 policies: Mapping[str, Policy] = POLICIES, retry: RetryPolicy = RetryPolicy(),
+                 policies: Mapping[str, Policy] | None = None, retry: RetryPolicy = RetryPolicy(),
                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], datetime] = _utc_now):
         self.db, self.consumer_name, self.watermark = db, consumer_name, lot_feed_watermark
-        self.policies, self.retry, self.sleep, self.clock = policies, retry, sleep, clock
+        self.policies, self.retry, self.sleep, self.clock = policies or {}, retry, sleep, clock
 
     def apply(self, record: Record, event: Telemetry | BindingChange | LotChange) -> Result:
         for attempt in range(self.retry.attempts):
@@ -212,20 +234,40 @@ class Applier:
 
     def _score(self, tx: Tx, reading: Telemetry, choice: Selected) -> Result:
         interval = choice.interval
-        policy = self.policies.get(interval.grain_type)
+        selected = tx.select_policy(interval.bin_id, interval.grain_type, reading.observed_at) \
+            if hasattr(tx, "select_policy") else None
+        if hasattr(tx, "select_policy"):
+            try:
+                policy = _scoring_policy(selected) if selected is not None else None
+            except (ValueError, KeyError, TypeError):
+                raise _Rollback(Result(QUARANTINE, "policy_unavailable")) from None
+        else:
+            policy = self.policies.get(interval.grain_type)
         if policy is None:
             raise _Rollback(Result(QUARANTINE, "policy_unavailable"))
         try:
             result = assess(reading.measurements, interval.grain_type, policy)
-        except ValueError:
+        except (ValueError, KeyError):
             raise _Rollback(Result(QUARANTINE, "invalid_measurements")) from None
         envelope = reading.envelope
-        existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version)
+        policy_id = policy.policy_id or str(uuid.uuid5(RISK_NAMESPACE, f"synthetic:{policy.grain_type}"))
+        provenance = {"source": policy.provenance, "calibrated": policy.calibrated}
+        if selected is not None:
+            provenance = {**dict(selected.provenance), "status": selected.status,
+                          "effective_from": events.format_time(selected.effective_from),
+                          "effective_to": events.format_time(selected.effective_to) if selected.effective_to else None}
+        if selected is not None:
+            existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version, policy.policy_id)
+            if existing is None and hasattr(tx, "legacy_assessment"):
+                existing = tx.legacy_assessment(envelope.event_id, interval.lot_id, policy.version)
+        else:
+            existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version)
         if existing is not None:
             return Result(DUPLICATE, event_id=str(existing[EVENT_ID]),
                           assessment_id=str(existing[ASSESSMENT_ID]))
         event_id, assessment_id = deterministic_ids(envelope.tenant_id, envelope.event_id,
-                                                    interval.lot_id, policy.version)
+                                                    interval.lot_id, policy.version,
+                                                    policy.policy_id if selected is not None else None)
         version = tx.next_stream_version(reading.device_id)
         values = {
             ASSESSMENT_ID: assessment_id, "source_event_id": envelope.event_id,
@@ -237,27 +279,58 @@ class Applier:
             "observed_at": reading.observed_at, EVENT_ID: event_id, "aggregate_version": version,
             "correlation_id": envelope.correlation_id, "causation_id": envelope.event_id,
             "traceparent": envelope.traceparent,
+            "policy_id": policy_id, "policy_calibrated": policy.calibrated,
+            "policy_provenance": provenance,
         }
         tx.insert_assessment(values)
-        tx.insert_outbox(build_event(envelope.tenant_id, values, self.clock()))
+        tx.insert_outbox(build_event(envelope.tenant_id, values, self.clock(),
+                                     schema_version=2 if selected is not None or reading.schema_version == 2
+                                     or not policy.calibrated else 1))
         return Result(APPLIED, event_id=event_id, assessment_id=assessment_id)
 
 
-def build_event(tenant_id: str, values: Mapping[str, Any], occurred_at: datetime) -> dict[str, Any]:
-    """The risk.assessed v1 envelope (contracts/events/risk-assessed.v1.schema.json)."""
+def build_event(tenant_id: str, values: Mapping[str, Any], occurred_at: datetime,
+                schema_version: int = 1) -> dict[str, Any]:
+    """Build the compatible v1 or provenance-carrying risk.assessed v2 envelope."""
     payload_keys = (ASSESSMENT_ID, DEVICE_ID, "reading_id", "source_event_id", "bin_id",
                     "lot_id", "grain_type", "score", "severity", "alert_eligible", "reasons")
     payload = {key: values[key] for key in payload_keys}
     payload.update(assessment_version="1", occupancy_version=str(values["occupancy_version"]),
                    policy_version=str(values["policy_version"]))
+    if schema_version == 2:
+        payload.update(assessment_version="2", policy_id=values["policy_id"],
+                       policy_calibrated=values["policy_calibrated"],
+                       policy_provenance=values["policy_provenance"])
     return {
-        EVENT_ID: values[EVENT_ID], "event_type": "risk.assessed", "schema_version": 1,
+        EVENT_ID: values[EVENT_ID], "event_type": "risk.assessed", "schema_version": schema_version,
         "occurred_at": events.format_time(occurred_at), "tenant_id": tenant_id,
         "aggregate_type": "device_risk_stream", "aggregate_id": values[DEVICE_ID],
         "aggregate_version": str(values["aggregate_version"]),
         "correlation_id": values["correlation_id"], "causation_id": values["causation_id"],
         "traceparent": values["traceparent"], "payload": payload,
     }
+
+
+def _scoring_policy(policy: PolicyVersion) -> Policy:
+    """Map persisted version fields to the legacy deterministic scoring formula."""
+    temperature = policy.measurement_thresholds.get("temperature_c", {})
+    humidity = policy.measurement_thresholds.get("relative_humidity_percent", {})
+    warning = temperature.get("warning")
+    critical = temperature.get("critical")
+    humidity_warning = humidity.get("warning")
+    humidity_critical = humidity.get("critical")
+    # An incomplete uncalibrated record is valid policy metadata, but has no usable
+    # operational scoring thresholds. Supply safe inert values; assess() returns the
+    # explicit not_calibrated state before it can evaluate them.
+    if any(value is None for value in (warning, critical, humidity_warning, humidity_critical)):
+        if policy.calibrated:
+            raise ValueError("calibrated risk policy is missing temperature or humidity limits")
+        warning, critical, humidity_warning, humidity_critical = 0.0, 1.0, 0.0, 1.0
+    return Policy(policy.grain_type, policy.version, float(warning), float(critical),
+                  float(humidity_warning), float(humidity_critical),
+                  int(policy.risk_thresholds["warning_score"]), policy.calibrated,
+                  policy.policy_id, str(policy.provenance.get("source", "owner")),
+                  int(policy.risk_thresholds["critical_score"]))
 
 
 def build_invalidation_event(change: LotChange, assessment: Mapping[str, Any], event_id: str,

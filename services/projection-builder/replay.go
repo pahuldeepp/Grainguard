@@ -18,6 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
+	transport "greenguard.local/kafka-transport"
 	"greenguard.local/projection-builder/history"
 )
 
@@ -59,7 +60,7 @@ func replayBounds(ctx context.Context, client *kgo.Client) ([]replayPartition, e
 	return result, nil
 }
 
-var replayTopics = []string{topicInventory, topicTelemetry}
+var replayTopics = projectionTopics
 
 func replayMetadata(ctx context.Context, client *kgo.Client) ([]replayPartition, error) {
 	req := kmsg.NewPtrMetadataRequest()
@@ -454,7 +455,7 @@ func (j *replayJob) checkDatabase(ctx context.Context, expected string) error {
 		return nil
 	}
 	var total, forced int
-	if err := j.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, j.schema).Scan(&total, &forced); err != nil || total != 10 || forced != total {
+	if err := j.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, j.schema).Scan(&total, &forced); err != nil || total != 17 || forced != total {
 		return errors.New("versioned replay schema missing or RLS incomplete")
 	}
 	return nil
@@ -465,7 +466,12 @@ func newReplayClient(getenv func(string) string) (*kgo.Client, error) {
 	if strings.TrimSpace(brokers) == "" {
 		return nil, errors.New("KAFKA_BROKERS is required")
 	}
-	return kgo.NewClient(kgo.SeedBrokers(strings.Split(brokers, ",")...), kgo.ConsumeResetOffset(kgo.NoResetOffset()))
+	security, err := transport.SecurityOptions(getenv)
+	if err != nil {
+		return nil, err
+	}
+	options := append([]kgo.Opt{kgo.SeedBrokers(strings.Split(brokers, ",")...), kgo.ConsumeResetOffset(kgo.NoResetOffset())}, security...)
+	return kgo.NewClient(options...)
 }
 
 func (j *replayJob) loadParts(ctx context.Context) error {

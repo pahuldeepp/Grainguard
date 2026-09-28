@@ -9,7 +9,15 @@ COPY services/saga-orchestrator/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /saga-api ./cmd/api
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /saga-worker ./cmd/worker
 
-FROM scratch
+FROM build AS migration-build
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /saga-migrate ./cmd/migrate
+FROM scratch AS migration
+COPY --from=migration-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=migration-build /saga-migrate /saga-migrate
+USER 65532:65532
+ENTRYPOINT ["/saga-migrate"]
+
+FROM scratch AS runtime
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /saga-api /saga-api
 COPY --from=build /saga-worker /saga-worker

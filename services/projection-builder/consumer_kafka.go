@@ -18,7 +18,11 @@ type Kafka struct {
 var makeClient = func(options ...kgo.Opt) (kafkaClient, error) { return kgo.NewClient(options...) }
 
 func newKafka(brokers []string, group string) (*Kafka, error) {
-	client, err := makeClient(transport.Options(brokers, group, []string{topicInventory, topicTelemetry})...)
+	options, err := transport.SecureOptions(brokers, group, projectionTopics)
+	if err != nil {
+		return nil, err
+	}
+	client, err := makeClient(options...)
 	if err != nil {
 		return nil, err
 	}
