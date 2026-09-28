@@ -20,7 +20,9 @@ if len(ids)!=len(set(ids)):errors.append('Duplicate coverage IDs')
 for component in json.loads((root/'docs/COMPONENTS.json').read_text()):
     if not (root/component['path']/'README.md').exists():errors.append('Missing component '+component['path'])
 for md in root.rglob('*.md'):
-    if any(part in {'node_modules', '.git', 'dist', 'build'} for part in md.relative_to(root).parts):continue
+    # Local Codex/Superpowers review artifacts are ignored workspace files, not
+    # checked-in planning documentation; their relative links need not resolve.
+    if any(part in {'node_modules', '.git', '.superpowers', 'dist', 'build'} for part in md.relative_to(root).parts):continue
     for link in re.findall(r'\]\(([^)]+)\)',md.read_text()):
         if link.startswith(('http:','https:','#','mailto:','codex:')):continue
         link=link.split('#')[0].strip('<>')

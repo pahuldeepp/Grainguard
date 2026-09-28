@@ -22,12 +22,27 @@ const secret = (key) => {
 };
 secret("CDC_DB_PASSWORD");
 secret("OBSERVABILITY_DB_PASSWORD");
+// Throwaway password for the opt-in local Dex users (infra/oidc, ADR-0014).
+secret("OIDC_DEV_PASSWORD");
+// Throwaway credentials for the opt-in local MinIO audit-export store (infra/objectstore).
+secret("OBJECTSTORE_ROOT_USER");
+secret("OBJECTSTORE_ROOT_PASSWORD");
+if (!env.get("OBJECTSTORE_KMS_SECRET_KEY"))
+  env.set(
+    "OBJECTSTORE_KMS_SECRET_KEY",
+    `greenguard-local:${randomBytes(32).toString("base64")}`,
+  );
 const admin = secret("POSTGRES_PASSWORD");
 const inventory = secret("INVENTORY_DB_PASSWORD");
+const inventoryProjector = secret("INVENTORY_PROJECTOR_PASSWORD");
 const migrator = secret("INVENTORY_MIGRATOR_PASSWORD");
 const telemetry = secret("TELEMETRY_DB_PASSWORD");
+const telemetryEntitlementProjector = secret(
+  "TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD",
+);
 const telemetryMigrator = secret("TELEMETRY_MIGRATOR_PASSWORD");
 const projection = secret("PROJECTION_DB_PASSWORD");
+const readEntitlementProjector = secret("READ_ENTITLEMENT_PROJECTOR_PASSWORD");
 const readQuery = secret("READ_QUERY_DB_PASSWORD");
 const projectionMigrator = secret("PROJECTION_MIGRATOR_PASSWORD");
 const risk = secret("RISK_DB_PASSWORD");
@@ -43,6 +58,10 @@ env.set(
   `postgresql://inventory_app:${inventory}@${direct}/greenguard_inventory`,
 );
 env.set(
+  "INVENTORY_PROJECTOR_DIRECT_URL",
+  `postgresql://inventory_projector:${inventoryProjector}@${direct}/greenguard_inventory`,
+);
+env.set(
   "INVENTORY_MIGRATION_URL",
   `postgresql://inventory_migrator:${migrator}@${direct}/greenguard_inventory`,
 );
@@ -53,6 +72,10 @@ env.set(
 env.set(
   "TELEMETRY_DIRECT_URL",
   `postgresql://telemetry_app:${telemetry}@${direct}/greenguard_telemetry`,
+);
+env.set(
+  "TELEMETRY_ENTITLEMENT_PROJECTOR_URL",
+  `postgresql://telemetry_entitlement_projector:${telemetryEntitlementProjector}@${direct}/greenguard_telemetry`,
 );
 env.set(
   "TELEMETRY_MIGRATION_URL",
@@ -69,6 +92,10 @@ env.set(
 env.set(
   "PROJECTION_DIRECT_URL",
   `postgresql://projection_app:${projection}@${direct}/greenguard_read`,
+);
+env.set(
+  "READ_ENTITLEMENT_PROJECTOR_URL",
+  `postgresql://read_entitlement_projector:${readEntitlementProjector}@${direct}/greenguard_read`,
 );
 env.set(
   "PROJECTION_MIGRATION_URL",
@@ -92,12 +119,23 @@ env.set(
 );
 // Stage 06d owners: JOBS_* (greenguard_jobs) and NOTIFICATIONS_* (greenguard_notifications).
 const stage06dUsers = [];
+const controlEntitlementProjector = secret(
+  "CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD",
+);
+env.set(
+  "CONTROL_ENTITLEMENT_PROJECTOR_URL",
+  `postgresql://control_entitlement_projector:${controlEntitlementProjector}@${direct}/greenguard_control`,
+);
 for (const [prefix, role, db] of [
   ["JOBS", "jobs", "greenguard_jobs"],
   ["NOTIFICATIONS", "notifications", "greenguard_notifications"],
   // Stage 06b workflow-alerts owner (greenguard_alerts).
   ["ALERTS", "alerts", "greenguard_alerts"],
   ["SAGA", "saga", "greenguard_sagas"],
+  ["HARDWARE", "hardware", "greenguard_hardware"],
+  // Stage 09a tenant-control-plane owner (greenguard_control).
+  ["CONTROL", "control", "greenguard_control"],
+  ["BILLING", "billing", "greenguard_billing"],
 ]) {
   const app = secret(`${prefix}_DB_PASSWORD`);
   const owner = secret(`${prefix}_MIGRATOR_PASSWORD`);
@@ -134,3 +172,4 @@ run("npm", ["ci"]);
 run("go", ["mod", "download"], "services/telemetry-ingest");
 
 run("go", ["mod", "download"], "services/projection-builder");
+run("go", ["mod", "download"], "services/hardware-service");

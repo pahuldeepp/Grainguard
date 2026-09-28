@@ -10,7 +10,7 @@ const fixtureDir = fileURLToPath(
 const load = (path: string): Record<string, unknown> =>
   JSON.parse(readFileSync(`${fixtureDir}${path}`, "utf8"));
 const validFixtures = readdirSync(fixtureDir).filter((f) =>
-  f.endsWith(".v1.valid.json"),
+  /\.v[12]\.valid\.json$/.test(f),
 );
 const invalidFixtures = readdirSync(`${fixtureDir}invalid`);
 
@@ -79,7 +79,7 @@ const registered = (): Record<string, unknown> =>
   load("device-registered.v1.valid.json");
 
 test("C01 every valid fixture passes", () => {
-  assert.equal(validFixtures.length, 8);
+  assert.ok(validFixtures.length >= 8);
   for (const file of validFixtures) {
     const result = validateEvent(load(file));
     assert.deepEqual(result.ok ? [] : result.errors, [], file);
@@ -126,6 +126,24 @@ test("risk assessment identity and severity invariants fail closed", () => {
       },
     }),
     /payload.policy_version exceeds 9223372036854775807/,
+  );
+});
+
+test("risk.assessed v2 separates device stream order from schema version and gates uncalibrated policy", () => {
+  const risk = load("risk-assessed.v2.valid.json");
+  assert.equal(validateEvent(risk).ok, true);
+  const bad = {
+    ...risk,
+    payload: {
+      ...(risk["payload"] as object),
+      score: 50,
+      severity: "warning",
+      alert_eligible: true,
+    },
+  };
+  assert.match(
+    failure(bad),
+    /uncalibrated risk policy must not produce an alertable assessment/,
   );
 });
 

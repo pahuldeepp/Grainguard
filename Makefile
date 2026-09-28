@@ -1,4 +1,4 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke observability-up observability-down observability-validate observability-test-rules
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
@@ -15,11 +15,14 @@ db-logs:
 db-migrate: db-up build-otel
 	npm run migrate -w services/device-service
 	npm run migrate -w services/workflow-alerts
+	npm run migrate -w services/tenant-control-plane
+	npm run migrate -w @greenguard/billing-service
 	cd services/telemetry-ingest && go run ./cmd/migrate
 	$(MAKE) projection-migrate
 	$(MAKE) risk-migrate
 	$(MAKE) jobs-migrate
 	$(MAKE) saga-migrate
+	$(MAKE) hardware-migrate
 build-otel:
 	npm run build -w @greenguard/otel
 build:
@@ -27,7 +30,9 @@ build:
 	mkdir -p build
 	cd services/telemetry-ingest && go build -o ../../build/telemetry-ingest .
 	cd services/cdc-transformer && go build -o ../../build/cdc-transformer .
+	cd services/cache-invalidator && go build -o ../../build/cache-invalidator .
 	cd services/projection-builder && go build -o ../../build/projection-builder .
+	cd services/hardware-service && go build -o ../../build/hardware-worker ./cmd/worker
 dev: db-migrate build
 	npm run dev
 verify: check-plan db-migrate
@@ -36,6 +41,7 @@ verify: check-plan db-migrate
 	npm run lint
 	npm run typecheck
 	npm test
+	node --test scripts/contacts-schema.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...
@@ -51,6 +57,9 @@ verify: check-plan db-migrate
 	cd services/cdc-transformer && test -z "$$(gofmt -l .)"
 	cd services/cdc-transformer && go vet ./...
 	cd services/cdc-transformer && go test -race ./...
+	cd services/cache-invalidator && test -z "$$(gofmt -l .)"
+	cd services/cache-invalidator && go vet ./...
+	cd services/cache-invalidator && go test -race ./...
 	cd services/projection-builder && test -z "$$(gofmt -l .)"
 	cd services/projection-builder && go vet ./...
 	cd services/projection-builder && go test -race ./...
@@ -63,9 +72,16 @@ verify: check-plan db-migrate
 	cd services/saga-orchestrator && test -z "$$(gofmt -l .)"
 	cd services/saga-orchestrator && go vet ./...
 	$(MAKE) saga-test
+	cd services/hardware-service && test -z "$$(gofmt -l .)"
+	cd services/hardware-service && go vet ./...
+	cd services/hardware-service && go test -race ./...
 	$(MAKE) build
 check-plan:
 	python3 scripts/check_plan.py
+helm-validate:
+	bash scripts/helm-validate.sh
+kyverno-validate:
+	bash scripts/kyverno-validate.sh
 observability-up:
 	docker compose -f infra/observability/compose.yaml up -d
 observability-down:
@@ -191,10 +207,11 @@ cassandra-down:
 cassandra-test:
 	cd services/cassandra-writer && CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 go test -count=1 -race -run 'Live' -v ./...
 
-# Destructive, opt-in local fault gate: briefly stops and restarts Cassandra.
+# Destructive, opt-in local fault gate: stops/starts ONLY the Cassandra container
+# (startup-while-down and a CASSANDRA_OUTAGE_SECONDS outage, default 130).
 .PHONY: history-test
 history-test:
-	cd services/cassandra-writer && KAFKA_BROKERS=127.0.0.1:59092 CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 KAFKA_CASSANDRA_LIVE=1 KAFKA_CASSANDRA_FAULT_LIVE=1 go test -count=1 -race -run 'Live' -v .
+	cd services/cassandra-writer && KAFKA_BROKERS=127.0.0.1:59092 CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 KAFKA_CASSANDRA_LIVE=1 KAFKA_CASSANDRA_FAULT_LIVE=1 KAFKA_CASSANDRA_RESILIENCE_LIVE=1 go test -count=1 -race -timeout 20m -run 'Live' -v .
 	$(MAKE) cassandra-up
 	cd services/cassandra-writer && CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 go test -count=1 -race -run 'Live' -v ./history
 
@@ -209,17 +226,101 @@ search-test: search-up events-up
 	.local/search-venv/bin/pip install -r services/search-indexer/requirements.txt
 	SEARCH_KAFKA_LIVE=1 node scripts/search-test.mjs
 
+SEARCH_OPENSEARCH_COMPOSE = $(COMPOSE) -f infra/search/opensearch.compose.yaml
+.PHONY: search-opensearch-up search-opensearch-down search-opensearch-test
+search-opensearch-up:
+	$(SEARCH_OPENSEARCH_COMPOSE) up -d --wait opensearch
+search-opensearch-down:
+	$(SEARCH_OPENSEARCH_COMPOSE) stop opensearch
+search-opensearch-test: search-opensearch-up
+	python3 -m venv .local/search-venv
+	.local/search-venv/bin/pip install -r services/search-indexer/requirements.txt
+	python3 -m unittest discover -s services/search-indexer -v
+	ELASTICSEARCH_URL=http://127.0.0.1:29200 .local/search-venv/bin/python services/search-indexer/live_test.py
+
+DYNAMODB_COMPOSE = $(COMPOSE) -f infra/dynamodb/compose.yaml
+.PHONY: dynamodb-up dynamodb-down stage10b-dynamodb-test stage10b-kafka-test
+dynamodb-up:
+	$(DYNAMODB_COMPOSE) up -d dynamodb-local
+dynamodb-down:
+	$(DYNAMODB_COMPOSE) stop dynamodb-local
+stage10b-dynamodb-test: dynamodb-up
+	DYNAMODB_LIVE=1 DYNAMODB_ENDPOINT=http://127.0.0.1:28000 npm test -w @greenguard/feature-flags
+stage10b-kafka-test: dynamodb-up events-up
+	node scripts/kafka-topics.mjs
+	npm run build -w services/notification-service
+	STAGE10B_KAFKA_LIVE=1 DYNAMODB_ENDPOINT=http://127.0.0.1:28000 KAFKA_BROKERS=127.0.0.1:59092 node --test services/notification-service/dist/dynamodb-flag-feed.live.test.js
+
+CDK_VENV = .local/cdk-venv
+.PHONY: cdk-install cdk-test cdk-synth serverless-bridge-test stage10b-serverless-test
+cdk-install:
+	python3 -m venv $(CDK_VENV)
+	$(CDK_VENV)/bin/pip install -r infra/cdk/requirements.txt
+cdk-test: cdk-install
+	cd infra/cdk && ../../$(CDK_VENV)/bin/python -m unittest discover -s . -p 'test_*.py' -v
+cdk-synth: cdk-install
+	cd infra/cdk && ../../$(CDK_VENV)/bin/python app.py -c environment=dev
+serverless-bridge-test: cdk-install
+	$(CDK_VENV)/bin/pip install -r services/eventbridge-bridge/requirements.txt
+	PYTHONPATH=services/eventbridge-bridge $(CDK_VENV)/bin/python -m unittest discover -s services/eventbridge-bridge -p 'test_*.py' -v
+stage10b-serverless-test: cdk-test serverless-bridge-test
+
 # Stage 06d: jobs-worker (Go) and notification-service (TypeScript) ledgers.
 .PHONY: jobs-migrate
 jobs-migrate:
 	cd services/jobs-worker && go run ./cmd/migrate
 	npm run migrate -w services/notification-service
 
+# Stage 10d opt-in local live proof. Uses a one-run Kafka topic and never
+# publishes synthetic alert events to the canonical lifecycle topic.
+.PHONY: stage10d-routing-live-test
+stage10d-routing-live-test: db-up jobs-migrate
+	$(EVENTS_COMPOSE) up -d --wait kafka
+	@set -eu; . ./.env; topic="greenguard-test-stage10d-$$(date +%s)-$$$$"; \
+	  $(EVENTS_COMPOSE) exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --topic "$$topic" --partitions 1 --replication-factor 1; \
+	  cleanup() { $(EVENTS_COMPOSE) exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --delete --topic "$$topic" >/dev/null 2>&1 || true; }; \
+	  trap cleanup EXIT INT TERM; \
+	  cd services/jobs-worker; \
+	  JOBS_KAFKA_LIVE=1 KAFKA_BROKERS=127.0.0.1:59092 ALERTS_LIFECYCLE_TOPIC="$$topic" go test -count=1 -run TestKafkaAlertIntakeLive -v .
+
 .PHONY: saga-migrate saga-test
 saga-migrate:
 	cd services/saga-orchestrator && go run ./cmd/migrate
 saga-test:
 	cd services/saga-orchestrator && go test -race ./...
+
+.PHONY: inventory-saga-test
+inventory-saga-test:
+	npm run build -w @greenguard/device-service
+	node --test services/device-service/dist/saga/inventory.live.test.js
+
+.PHONY: device-test
+device-test:
+	npm test -w @greenguard/device-service
+
+.PHONY: inventory-saga-kafka-test
+inventory-saga-kafka-test:
+	npm run build -w @greenguard/device-service
+	INVENTORY_SAGA_KAFKA_LIVE=1 KAFKA_BROKERS=127.0.0.1:59092 node --test services/device-service/dist/saga/kafka.live.test.js
+
+.PHONY: stage07-e2e
+stage07-e2e: events-up
+	$(EVENTS_COMPOSE) up -d --wait mosquitto
+	npm run build -w @greenguard/device-service
+	node scripts/stage07-e2e.mjs
+
+.PHONY: hardware-migrate hardware-test
+hardware-migrate:
+	cd services/hardware-service && go run ./cmd/migrate
+hardware-test:
+	cd services/hardware-service && go test -race ./...
+.PHONY: hardware-mqtt-test
+hardware-mqtt-test:
+	cd services/hardware-service && MQTT_TEST_BROKER_URL=tcp://127.0.0.1:51883 go test -count=1 -race -run TestLiveMQTTConfigureAckReplay -v ./hardware
+
+.PHONY: hardware-kafka-test
+hardware-kafka-test:
+	cd services/hardware-service && HARDWARE_KAFKA_LIVE=1 KAFKA_BROKERS=127.0.0.1:59092 go test -count=1 -race -run TestLiveKafkaHardwareCommandResultAndReplay -v ./hardware
 
 # Opt-in RabbitMQ overlay (Stage 06d); never part of dev/verify/smoke.
 RABBITMQ_COMPOSE = $(COMPOSE) -f infra/rabbitmq/compose.yaml
@@ -233,7 +334,7 @@ rabbitmq-down:
 # Destructive: restarts the broker mid-flight and purges the notification queues.
 rabbitmq-test: rabbitmq-up jobs-migrate
 	cd services/jobs-worker && RABBITMQ_LIVE=1 RABBITMQ_RESTART_CMD='$(RABBITMQ_RESTART_CMD)' go test -count=1 -race -run 'Live' -v .
-	npm run live -w services/notification-service
+	npm run live:rabbit -w services/notification-service
 # Task records return to notifications.tasks with the same message id; dispatch-dead
 # records are redriven in greenguard_jobs. ARGS="-limit 10"
 dlq-replay:
@@ -241,3 +342,109 @@ dlq-replay:
 # Audited dead -> pending redrive from Postgres. ARGS="-reason 'broker restored' -limit 50 [-tenant UUID]"
 redrive-dead:
 	cd services/jobs-worker && go run . redrive-dead $(ARGS)
+
+# Opt-in Stage 08 OIDC proof (ADR-0014); never part of verify.
+.PHONY: oidc-up oidc-down oidc-test oidc-browser-test
+oidc-up:
+	docker compose --env-file .env -f infra/oidc/compose.yaml up -d --wait
+oidc-down:
+	docker compose --env-file .env -f infra/oidc/compose.yaml down
+oidc-test: oidc-up
+	npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
+	set -a; . ./.env; set +a; node scripts/oidc-live.mjs
+
+# Opt-in Redis Cluster for the Read API cache (ADR-0015); never part of verify.
+REDIS_COMPOSE = docker compose -f infra/redis/compose.yaml
+.PHONY: cache-invalidator-up cache-invalidator-down cache-invalidator-test
+cache-invalidator-up:
+	docker compose -f infra/cache-invalidator/compose.yaml up -d --build
+cache-invalidator-down:
+	docker compose -f infra/cache-invalidator/compose.yaml down
+cache-invalidator-test:
+	cd services/cache-invalidator && go test -race ./...
+.PHONY: redis-up redis-down redis-test redis-load
+redis-up:
+	$(REDIS_COMPOSE) up -d --wait redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6
+	$(REDIS_COMPOSE) up redis-cluster-init
+redis-down:
+	$(REDIS_COMPOSE) down
+redis-test: redis-up
+	npm run build -w @greenguard/read-api
+	node scripts/redis-test.mjs
+redis-load: redis-up
+	npm run build -w @greenguard/read-api
+	node scripts/redis-load.mjs
+oidc-browser-test: oidc-up
+	npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
+	set -a; . ./.env; set +a; node scripts/oidc-browser.mjs
+
+# Opt-in full Stage 08 browser gate. Uses the already-running local event,
+# database, Redis Cluster, and OIDC containers without restarting them.
+.PHONY: browser-e2e
+browser-e2e:
+	npm run build -w @greenguard/device-service -w @greenguard/read-api -w @greenguard/workflow-alerts -w @greenguard/bff -w @greenguard/gateway
+	VITE_OIDC_AUTHORITY=http://127.0.0.1:5556/dex VITE_OIDC_CLIENT_ID=greenguard-dashboard VITE_OIDC_AUDIENCE=greenguard-dashboard npm run build -w @greenguard/dashboard
+	node scripts/browser-e2e.mjs
+
+# Stage 09a: migrate infra/oidc/memberships.json into greenguard_control (idempotent).
+control-plane-seed:
+	npm run build -w @greenguard/tenant-control-plane
+	npm run seed -w @greenguard/tenant-control-plane
+control-plane-test:
+	npm test -w @greenguard/membership-client
+	npm test -w @greenguard/tenant-control-plane
+
+# Real local control-plane/Postgres + gateway/BFF/Read API machine-auth path.
+.PHONY: stage09b-machine-e2e
+stage09b-machine-e2e:
+	node --env-file=.env scripts/stage09b-machine-e2e.mjs
+
+.PHONY: billing-e2e
+billing-e2e:
+	set -a; . ./.env; set +a; npm run test -w @greenguard/billing-service
+
+# Starts the Stage 09f control plane and notification worker against live Kafka/RabbitMQ.
+.PHONY: stage09f-notifications-live
+stage09f-notifications-live:
+	bash scripts/stage09f-notifications-live.sh
+
+.PHONY: stage09f-e2e
+stage09f-e2e:
+	node scripts/stage09f-flags-e2e.mjs
+
+# Durable Stage 09e export worker (requires audit key material and owner DB URLs in .env).
+.PHONY: audit-export-worker
+audit-export-worker:
+	node --env-file=.env services/tenant-control-plane/dist/audit/worker.js
+
+# Opt-in local S3-compatible store for Stage 09e audit exports (MinIO); never part of dev/verify/smoke.
+OBJECTSTORE_COMPOSE = $(COMPOSE) -f infra/objectstore/compose.yaml
+.PHONY: objectstore-up objectstore-down audit-s3-test
+objectstore-up:
+	$(OBJECTSTORE_COMPOSE) up -d minio
+	node --env-file=.env infra/objectstore/init-bucket.mjs
+objectstore-down:
+	$(OBJECTSTORE_COMPOSE) stop minio
+audit-s3-test: objectstore-up
+	npm run build -w @greenguard/tenant-control-plane
+	cd services/tenant-control-plane && AUDIT_S3_LIVE=1 node --env-file=../../.env --test --test-concurrency=1 dist/audit/audit-s3.live.test.js
+
+# Opt-in Stage 10c partner MySQL snapshot/binlog profile. Credentials live only
+# in .local; the base dev/verify targets never load this overlay.
+MYSQL_CDC_COMPOSE = docker compose --env-file .env --env-file .local/mysql-cdc.env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml -f infra/mysql-cdc/compose.yaml
+.PHONY: mysql-cdc-test
+mysql-cdc-test: db-migrate
+	python3 labs/mysql-cdc/prepare_local.py
+	$(MYSQL_CDC_COMPOSE) up -d --wait mysql-cdc kafka schema-registry connect
+	python3 -m venv .local/mysql-cdc-venv
+	.local/mysql-cdc-venv/bin/python -m pip install -q -r labs/mysql-cdc/requirements.txt
+	npm run build -w services/device-service
+	.local/mysql-cdc-venv/bin/python labs/mysql-cdc/setup_local.py
+	.local/mysql-cdc-venv/bin/python -m unittest discover -s labs/mysql-cdc -p 'test_*.py' -v
+	.local/mysql-cdc-venv/bin/python labs/mysql-cdc/live_test.py
+
+# Design-system conformance (docs/DESIGN_SYSTEM.md); add ARGS=--strict to fail on missing files.
+.PHONY: design-check
+design-check:
+	node --test scripts/design-check.test.mjs
+	node scripts/design-check.mjs --report=evidence/design-check-latest.md $(ARGS)
