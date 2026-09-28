@@ -21,8 +21,20 @@
   (dict "name" "kafka-topics" "chart" "streaming-topics-chart" "wave" "12" "values" (dict "image" (index $images "kafka-topics")))
   (dict "name" "pgbouncer" "chart" "pgbouncer-chart" "wave" "22" "values" (dict "image" (index $images "pgbouncer") "rdsHost" $data.rdsHost "authSecret" (index $secrets "pgbouncerAuth") "caSecret" (index $secrets "rdsCa")))
   (dict "name" "kafka-connect" "chart" "kafka-connect-chart" "wave" "23" "values" (dict "image" (index $images "kafka-connect") "credentialSecret" (index $secrets "cdcCredentials") "caSecret" (index $secrets "rdsCa") "kafkaCaSecret" "greenguard-kafka-ca" "kafkaCredentialSecret" "greenguard-kafka-connect-auth"))
-  (dict "name" "connector-registration" "chart" "connector-registration" "wave" "24" "values" (dict "image" (index $images "connector-registration") "rdsHost" $data.rdsHost))
+  (dict "name" "connector-registration" "chart" "connector-registration" "wave" "24" "values" (dict "image" (index $images "connector-registration") "rdsHost" $data.rdsHost "credentialSecret" (index $secrets "cdcCredentials") "caSecret" (index $secrets "rdsCa") "rdsCIDRs" ($data.rdsCIDRs | default list) "centralRetirementReceiptSecret" ($data.centralRetirementReceiptSecret | default "") "centralRetirementReceiptRevision" ($data.centralRetirementReceiptRevision | default "")))
 }}
+{{- if $data.shards }}
+{{- $credentials := dict }}
+{{- $hosts := dict }}
+{{- range $id, $shard := $data.shards }}
+{{- $_ := set $credentials $id $shard.cdcSecret }}
+{{- $_ := set $hosts $id $shard.rdsHost }}
+{{- end }}
+{{- range $app := $apps }}
+{{- if eq $app.name "kafka-connect" }}{{- $_ := set $app.values "shardCredentials" $credentials }}{{- end }}
+{{- if eq $app.name "connector-registration" }}{{- $_ := set $app.values "shards" $hosts }}{{- end }}
+{{- end }}
+{{- end }}
 {{- range $index, $app := $apps }}
 {{- if gt $index 0 }}
 ---

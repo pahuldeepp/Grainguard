@@ -96,3 +96,6 @@ observability:
       app.kubernetes.io/name: prometheus
     mergeMetrics: true
     scrapePort: 15020
+
+postgresReadReplica:
+  caSecretName: ""

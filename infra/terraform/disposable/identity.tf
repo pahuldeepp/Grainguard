@@ -1,15 +1,100 @@
-# Dex remains the local/test issuer. For a disposable AWS cell with no
-# pre-existing production identity provider, Cognito supplies a durable OIDC
-# issuer without replacing GreenGuard's Authorization Code + PKCE clients or
-# its BFF-side issuer/client/membership validation. No user credentials or
-# membership records enter Terraform state.
+# Existing OIDC is the default. These inputs are public identifiers, never secrets.
+variable "identity_mode" {
+  type    = string
+  default = "existing-oidc"
+  validation {
+    condition     = contains(["existing-oidc", "cognito"], var.identity_mode)
+    error_message = "identity_mode must be existing-oidc or explicit cognito opt-in."
+  }
+}
+
+variable "existing_oidc" {
+  description = "Existing issuer must support discovery, Authorization Code + PKCE, and JWT access tokens with this audience. Register the exported web/mobile callbacks at that issuer."
+  type = object({
+    issuer                 = string
+    jwks_url               = string
+    authorization_endpoint = string
+    token_endpoint         = string
+    web_client_id          = string
+    mobile_client_id       = string
+    audience               = string
+    scopes                 = optional(list(string), ["openid", "profile", "email", "offline_access"])
+    token_mode             = optional(string, "audience")
+  })
+  default = null
+  validation {
+    condition = var.existing_oidc == null ? true : alltrue([
+      for endpoint in [var.existing_oidc.issuer, var.existing_oidc.jwks_url, var.existing_oidc.authorization_endpoint, var.existing_oidc.token_endpoint] :
+      can(regex("^https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?(/[^?#]*)?$", endpoint)) &&
+      !can(regex("^https://(localhost|127\\.0\\.0\\.1|([^/]+\\.)?example\\.com|[^/]+\\.invalid)([:/]|$)", endpoint))
+    ])
+    error_message = "OIDC endpoints must use deployed HTTPS hosts without credentials, query, fragment, or placeholders."
+  }
+  validation {
+    condition = var.existing_oidc == null ? true : (
+      alltrue([for id in [var.existing_oidc.web_client_id, var.existing_oidc.mobile_client_id] : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$", id))]) &&
+      length(trimspace(var.existing_oidc.audience)) > 0 && var.existing_oidc.audience == trimspace(var.existing_oidc.audience) && length(var.existing_oidc.audience) <= 200 &&
+      var.existing_oidc.token_mode == "audience" &&
+      toset(var.existing_oidc.scopes) == toset(["openid", "profile", "email", "offline_access"])
+    )
+    error_message = "Existing OIDC requires valid public client IDs, a nonempty access-token audience, audience token mode, and the scopes currently requested by the dashboard: openid profile email offline_access."
+  }
+}
+
+resource "terraform_data" "identity_contract" {
+  input = var.identity_mode
+  lifecycle {
+    precondition {
+      condition     = var.identity_mode == "cognito" || var.existing_oidc != null
+      error_message = "Supply existing_oidc for the default identity mode; Cognito requires explicit opt-in."
+    }
+  }
+}
+
 locals {
   cognito_prefix = "gg-${substr(sha1("${var.target_account_id}:${var.cluster_name}"), 0, 24)}"
-  cognito_issuer = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.cell.id}"
-  cognito_login  = "https://${aws_cognito_user_pool_domain.cell.domain}.auth.${var.aws_region}.amazoncognito.com"
+  cognito_issuer = var.identity_mode == "cognito" ? "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.cell[0].id}" : null
+  cognito_login  = var.identity_mode == "cognito" ? "https://${aws_cognito_user_pool_domain.cell[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
+  oidc_public = var.identity_mode == "cognito" ? {
+    issuer                 = local.cognito_issuer
+    jwks_url               = "${local.cognito_issuer}/.well-known/jwks.json"
+    authorization_endpoint = "${local.cognito_login}/oauth2/authorize"
+    token_endpoint         = "${local.cognito_login}/oauth2/token"
+    web_client_id          = aws_cognito_user_pool_client.web[0].id
+    mobile_client_id       = aws_cognito_user_pool_client.mobile[0].id
+    audience               = ""
+    scopes                 = ["openid", "profile", "email"]
+    token_mode             = "cognito-access"
+  } : var.existing_oidc
+  oidc_verifier_env = local.oidc_public == null ? [] : [
+    { name = "AUTH_TOKEN_MODE", value = local.oidc_public.token_mode },
+    { name = "AUTH_ISSUER", value = local.oidc_public.issuer },
+    { name = "AUTH_JWKS_URL", value = local.oidc_public.jwks_url },
+    { name = "AUTH_AUDIENCE", value = local.oidc_public.audience },
+    { name = "AUTH_COGNITO_CLIENT_IDS", value = var.identity_mode == "cognito" ? join(",", [local.oidc_public.web_client_id, local.oidc_public.mobile_client_id]) : "" },
+  ]
+  oidc_dashboard_values = local.oidc_public == null ? null : {
+    publicOidc = {
+      enabled        = true
+      authority      = local.oidc_public.issuer
+      clientId       = local.oidc_public.web_client_id
+      tokenMode      = local.oidc_public.token_mode
+      audience       = local.oidc_public.audience
+      resource       = ""
+      connectOrigins = distinct([for endpoint in [local.oidc_public.issuer, local.oidc_public.jwks_url, local.oidc_public.authorization_endpoint, local.oidc_public.token_endpoint] : regex("^https://[^/]+", endpoint)])
+    }
+  }
+  oidc_mobile_config = local.oidc_public == null ? null : merge({
+    authorizationEndpoint = local.oidc_public.authorization_endpoint
+    tokenEndpoint         = local.oidc_public.token_endpoint
+    bffEndpoint           = "https://${aws_cloudfront_distribution.api.domain_name}/graphql"
+    clientId              = local.oidc_public.mobile_client_id
+    scope                 = join(" ", local.oidc_public.scopes)
+  }, var.identity_mode == "existing-oidc" ? { audience = local.oidc_public.audience } : {})
 }
 
 resource "aws_cognito_user_pool" "cell" {
+  count                    = var.identity_mode == "cognito" ? 1 : 0
   name                     = "${local.edge_name}-users"
   deletion_protection      = "INACTIVE"
   user_pool_tier           = "LITE"
@@ -34,14 +119,16 @@ resource "aws_cognito_user_pool" "cell" {
 }
 
 resource "aws_cognito_user_pool_domain" "cell" {
+  count                 = var.identity_mode == "cognito" ? 1 : 0
   domain                = local.cognito_prefix
-  user_pool_id          = aws_cognito_user_pool.cell.id
+  user_pool_id          = aws_cognito_user_pool.cell[0].id
   managed_login_version = 1
 }
 
 resource "aws_cognito_user_pool_client" "web" {
+  count                                = var.identity_mode == "cognito" ? 1 : 0
   name                                 = "${local.edge_name}-web"
-  user_pool_id                         = aws_cognito_user_pool.cell.id
+  user_pool_id                         = aws_cognito_user_pool.cell[0].id
   generate_secret                      = false
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = ["code"]
@@ -56,8 +143,9 @@ resource "aws_cognito_user_pool_client" "web" {
 }
 
 resource "aws_cognito_user_pool_client" "mobile" {
+  count                                = var.identity_mode == "cognito" ? 1 : 0
   name                                 = "${local.edge_name}-mobile"
-  user_pool_id                         = aws_cognito_user_pool.cell.id
+  user_pool_id                         = aws_cognito_user_pool.cell[0].id
   generate_secret                      = false
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = ["code"]
@@ -72,49 +160,46 @@ resource "aws_cognito_user_pool_client" "mobile" {
 }
 
 output "oidc_public_configuration" {
-  description = "Public OIDC inputs for dashboard Helm and mobile release configuration; never contains user credentials or tokens."
-  value = {
-    issuer                 = local.cognito_issuer
-    jwks_url               = "${local.cognito_issuer}/.well-known/jwks.json"
-    authorize_endpoint     = "${local.cognito_login}/oauth2/authorize"
-    token_endpoint         = "${local.cognito_login}/oauth2/token"
-    hosted_login_origin    = local.cognito_login
-    web_client_id          = aws_cognito_user_pool_client.web.id
-    mobile_client_id       = aws_cognito_user_pool_client.mobile.id
+  description = "Public provider-neutral OIDC configuration; no credentials or tokens."
+  value = local.oidc_public == null ? null : merge(local.oidc_public, {
+    authorize_endpoint     = local.oidc_public.authorization_endpoint
     web_callback           = "https://${aws_cloudfront_distribution.web.domain_name}/auth/callback"
     mobile_callback        = "greenguard://auth/callback"
-    bff_allowed_client_ids = [aws_cognito_user_pool_client.web.id, aws_cognito_user_pool_client.mobile.id]
-    bff_token_mode         = "cognito-access"
-  }
+    bff_allowed_client_ids = var.identity_mode == "cognito" ? [local.oidc_public.web_client_id, local.oidc_public.mobile_client_id] : []
+    bff_token_mode         = local.oidc_public.token_mode
+    hosted_login_origin    = var.identity_mode == "cognito" ? local.cognito_login : null
+  })
 }
 
 output "cognito_user_pool_id" {
-  description = "Public pool identifier for account-guarded operator user invitation and first-admin enrollment."
-  value       = aws_cognito_user_pool.cell.id
+  description = "Public pool ID only when Cognito was explicitly selected."
+  value       = var.identity_mode == "cognito" ? aws_cognito_user_pool.cell[0].id : null
 }
 
 output "mobile_deployment_config" {
-  description = "Write `terraform output -json mobile_deployment_config > apps/mobile/shell/deployment.local.json`, then run the mobile configure script before an iPhone build. Public endpoints and client ID only."
-  value = {
-    authorizationEndpoint = "${local.cognito_login}/oauth2/authorize"
-    tokenEndpoint         = "${local.cognito_login}/oauth2/token"
-    bffEndpoint           = "https://${aws_cloudfront_distribution.api.domain_name}/graphql"
-    clientId              = aws_cognito_user_pool_client.mobile.id
-    scope                 = "openid email profile"
-  }
+  description = "Public mobile configuration for configure.mjs; register greenguard://auth/callback at the selected issuer."
+  value       = local.oidc_mobile_config
 }
 
 output "dashboard_helm_public_oidc_values" {
-  description = "Supply this map to the dashboard Helm release after CloudFront and Cognito exist. It renders public /config.json and the hosted-domain CSP connect origin."
-  value = {
-    publicOidc = {
-      enabled        = true
-      authority      = local.cognito_issuer
-      clientId       = aws_cognito_user_pool_client.web.id
-      tokenMode      = "cognito-access"
-      audience       = ""
-      resource       = ""
-      connectOrigins = [local.cognito_login]
-    }
-  }
+  description = "Public dashboard configuration and CSP connect origins for the selected issuer."
+  value       = local.oidc_dashboard_values
+}
+
+# Preserve existing disposable Cognito addresses when explicitly retaining Cognito.
+moved {
+  from = aws_cognito_user_pool.cell
+  to   = aws_cognito_user_pool.cell[0]
+}
+moved {
+  from = aws_cognito_user_pool_domain.cell
+  to   = aws_cognito_user_pool_domain.cell[0]
+}
+moved {
+  from = aws_cognito_user_pool_client.web
+  to   = aws_cognito_user_pool_client.web[0]
+}
+moved {
+  from = aws_cognito_user_pool_client.mobile
+  to   = aws_cognito_user_pool_client.mobile[0]
 }

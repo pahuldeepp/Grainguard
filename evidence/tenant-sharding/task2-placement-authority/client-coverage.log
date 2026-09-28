@@ -1,0 +1,30 @@
+✔ placement epochs preserve BIGINT precision and reject noncanonical/overflow input (0.797459ms)
+✔ lease validator rejects tenant mismatch, expiry, excessive TTL and caller hints (1.385125ms)
+✔ cache serves bounded leases; expiry plus authority outage fails closed (0.367834ms)
+✔ fresh lookup, stale epoch and quiescing admissions are explicit (0.136042ms)
+✔ invalidation prevents an in-flight response from recreating a cached route (0.092459ms)
+✔ concurrent cache misses share one authority fetch and both succeed (0.083375ms)
+✔ clear cancels all shared loads while a replacement can complete (0.119167ms)
+✔ cache has a bounded entry budget and clear invalidates all entries (0.163125ms)
+✔ local guard detects fresh-authority regression while its lease remains valid (0.236ms)
+✔ expiry, invalidation and eviction fetch primary authority without a lifetime tenant limit (0.449834ms)
+✔ authenticated HTTP fetcher carries only tenant context and bounds requests (11.058208ms)
+✔ placement fetcher preserves a configured path prefix (0.140667ms)
+✔ an expected epoch ahead of a cached lease refreshes the primary authority (0.092625ms)
+✔ initial placement ring is deterministic across ordering/version changes, includes every shard (3.669ms)
+✔ adding a shard moves only suggestions selecting that added shard (1.049ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.511916
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   98.95 |    96.72 |     100 |   98.95 |
+ placement-ring.ts |   96.15 |     93.1 |     100 |   96.15 | 60-62
+ placement.ts      |     100 |    97.84 |     100 |     100 | 94,160
+-------------------|---------|----------|---------|---------|-------------------

@@ -2,6 +2,8 @@
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" .Values.rdsHost) }}{{ fail "rdsHost must be an RDS DNS name" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.authSecret) }}{{ fail "authSecret must be a Kubernetes Secret name" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.caSecret) }}{{ fail "caSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (and (le (len .Values.name) 63) (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" .Values.name)) }}{{ fail "name must be a Kubernetes name" }}{{ end }}
+{{- if not (kindIs "bool" .Values.operationalOnly) }}{{ fail "operationalOnly must be boolean" }}{{ end }}
 {{- $config := printf `[databases]
 greenguard_read = host=%s port=5432 dbname=greenguard_read
 greenguard_inventory = host=%s port=5432 dbname=greenguard_inventory
@@ -28,11 +30,14 @@ server_tls_ca_file = /rds-ca/ca.pem
 ignore_startup_parameters = extra_float_digits,options
 admin_users =
 ` .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost }}
+{{- if .Values.operationalOnly }}
+{{- $config = regexReplaceAll "(?m)^greenguard_(control|billing) = .*\\n" $config "" }}
+{{- end }}
 {{- $revision := sha256sum (printf "%s\n%s" .Values.image $config) | trunc 12 }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: greenguard-pgbouncer-{{ $revision }}
+  name: {{ .Values.name }}-{{ $revision }}
 data:
   pgbouncer.ini: |
 {{ $config | indent 4 }}
@@ -40,25 +45,25 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: pgbouncer
+  name: {{ .Values.name }}
 spec:
   type: ClusterIP
-  selector: {app: pgbouncer}
+  selector: {app: {{ .Values.name }}}
   ports:
     - {name: postgres, port: 6432, targetPort: 6432}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pgbouncer
-  labels: {app: pgbouncer, greenguard.io/lifecycle: disposable}
+  name: {{ .Values.name }}
+  labels: {app: {{ .Values.name }}, greenguard.io/lifecycle: disposable}
 spec:
   replicas: 1
   selector:
-    matchLabels: {app: pgbouncer}
+    matchLabels: {app: {{ .Values.name }}}
   template:
     metadata:
-      labels: {app: pgbouncer, greenguard.io/lifecycle: disposable}
+      labels: {app: {{ .Values.name }}, greenguard.io/lifecycle: disposable}
       annotations:
         sidecar.istio.io/inject: "true"
     spec:
@@ -69,7 +74,7 @@ spec:
         runAsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
       containers:
-        - name: pgbouncer
+        - name: {{ .Values.name }}
           image: {{ .Values.image | quote }}
           imagePullPolicy: IfNotPresent
           command: ["pgbouncer", "/etc/pgbouncer/pgbouncer.ini"]
@@ -98,7 +103,7 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: config
-          configMap: {name: greenguard-pgbouncer-{{ $revision }}}
+          configMap: {name: {{ .Values.name }}-{{ $revision }}}
         - name: auth
           secret: {secretName: {{ .Values.authSecret | quote }}}
         - name: ca

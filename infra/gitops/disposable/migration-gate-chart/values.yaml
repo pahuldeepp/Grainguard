@@ -1,1 +1,8 @@
-ownerMigrationsReady: false
+revision: ""
+images: {}
+scopes: {}
+caSecret: ""
+gateImage: ""
+sqlImage: ""
+rdsCIDRs: []
+apiServerCIDR: ""

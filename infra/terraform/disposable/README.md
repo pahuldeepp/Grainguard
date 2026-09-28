@@ -19,7 +19,10 @@ it is not a full GreenGuard deployment. Leave it unset for normal use.
 ## Future start and stop workflow
 
 The following workflow is **not runnable as a full deployment yet**. Ordinary
-`terraform plan` and `terraform apply` fail the readiness gate today. Do not
+`terraform plan` and `terraform apply` fail the readiness gate today. The gate
+also calls out the audit-export mismatch: paid catalog tiers advertise the
+feature, while the exporter worker and signing-key/S3 runtime path are not
+deployed. Do not
 set the incomplete-foundation override for a GreenGuard end-to-end deployment.
 
 1. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace every
@@ -88,7 +91,7 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    disposable data StatefulSets and PVCs, then waits until
    controller-created load balancers are gone. It needs `aws` and `kubectl`
    on `PATH`, access to the private EKS API, and permissions for the CDK stack.
-   It checks the AWS account, refuses `environment = "prod"`, and stops network
+   It checks the AWS account, refuses `environment = "prod"` or `"production"`, and stops network
    teardown if cleanup fails. The Terraform destroy provisioner may run the
    same idempotent hook again when it exists in state. If raw Terraform was used,
    then run

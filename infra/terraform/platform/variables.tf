@@ -78,7 +78,7 @@ variable "cluster_endpoint_public_access_cidrs" {
   type        = list(string)
   default     = []
   validation {
-    condition     = (length(var.cluster_endpoint_public_access_cidrs) == 0 || alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0)) && try(tonumber(split("/", cidr)[1]), 0) > 0])) && (!var.cluster_endpoint_public_access || (var.environment != "prod" && length(var.cluster_endpoint_public_access_cidrs) > 0))
+    condition     = (length(var.cluster_endpoint_public_access_cidrs) == 0 || alltrue([for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0)) && try(tonumber(split("/", cidr)[1]), 0) > 0])) && (!var.cluster_endpoint_public_access || (!contains(["prod", "production"], lower(var.environment)) && length(var.cluster_endpoint_public_access_cidrs) > 0))
     error_message = "Public EKS API access is non-production only and requires explicit valid operator CIDRs; 0.0.0.0/0 and ::/0 are forbidden."
   }
 }

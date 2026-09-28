@@ -25,6 +25,7 @@ test("requires complete OIDC configuration and uses code flow", () => {
     client_id: "dashboard",
     response_type: "code",
     extraQueryParams: { audience: "greenguard-api" },
+    loadUserInfo: false,
   });
 });
 

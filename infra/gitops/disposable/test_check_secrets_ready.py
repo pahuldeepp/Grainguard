@@ -31,6 +31,7 @@ class PreflightTests(unittest.TestCase):
             {"name": "search-indexer", "secret": "search-indexer-config"},
             {"name": "cassandra-writer", "secret": "cassandra-writer-config"},
             {"name": "notification-service", "secret": "notification-service-config"},
+            {"name": "notification-contacts-projector", "secret": "notification-contacts-projector-config", "kafkaPrincipal": "notification-service"},
         ]}))
         self.sql = root / "init.sql"
         self.sql.write_text("\\getenv role_password ROLE_PASSWORD\n\\getenv other_password OTHER_PASSWORD\n\\getenv cdc_password CDC_DB_PASSWORD\n")
@@ -39,7 +40,8 @@ class PreflightTests(unittest.TestCase):
             "read-api-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
             "search-indexer-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "search-indexer", "KAFKA_SASL_PASSWORD": "dummy"},
             "cassandra-writer-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "cassandra-writer", "KAFKA_SASL_PASSWORD": "dummy"},
-            "notification-service-config": {"KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
+            "notification-service-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
+            "notification-contacts-projector-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "NOTIFICATION_STATE_TABLE": "greenguard-cell-state", "AWS_REGION": "us-east-1"},
             "greenguard-rds-bootstrap": {
                 "ROLE_PASSWORD": "dummy-role-password",
                 "OTHER_PASSWORD": "dummy-other-password",
@@ -134,7 +136,7 @@ class PreflightTests(unittest.TestCase):
     def test_complete_secrets_pass(self):
         status, output = self.run_preflight()
         self.assertEqual(status, 0)
-        self.assertIn("PASS 21 Secrets", output)
+        self.assertIn("PASS 22 Secrets", output)
 
     def test_mqtt_broker_secret_keys_must_be_exact(self):
         del self.values["greenguard-mqtt-broker"]["tls.key"]
@@ -147,6 +149,12 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("verified in-cluster HTTPS", output)
+
+    def test_contacts_projector_secret_excludes_notification_credentials(self):
+        self.values["notification-contacts-projector-config"]["SES_SECRET_ACCESS_KEY"] = "should-not-be-mounted"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact least-privilege Kafka, Registry and DynamoDB keys", output)
 
     def test_connect_jaas_must_match_scoped_password(self):
         self.values["greenguard-kafka-connect-auth"]["KAFKA_SASL_PASSWORD"] = "different"
@@ -165,6 +173,18 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("scoped Kafka SASL username/password", output)
+
+    def test_shared_runtime_secret_cannot_map_to_conflicting_principals(self):
+        contract = json.loads(self.contract.read_text())
+        contract["releases"].append({
+            "name": "unexpected-worker",
+            "secret": "notification-contacts-projector-config",
+            "kafkaPrincipal": "different-principal",
+        })
+        self.contract.write_text(json.dumps(contract))
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("runtime Secret is assigned to conflicting Kafka principals", output)
 
     def test_broker_jaas_must_match_runtime_client(self):
         self.values["greenguard-kafka-auth"]["broker-jaas"] = self.values["greenguard-kafka-auth"]["broker-jaas"].replace('user_read-api="dummy"', 'user_read-api="wrong"')

@@ -16,6 +16,19 @@
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $secrets . | default "")) }}{{ fail (printf "data plane Secret %s is missing or invalid" .) }}{{ end }}
 {{- end }}
 {{- end }}
+{{- if and $data.enabled $data.shards }}
+{{- $seenHosts := dict (lower $data.rdsHost) true }}
+{{- if ne (len $data.shards) 4 }}{{ fail "data plane requires exactly s1-s4" }}{{ end }}
+{{- range $id := list "s1" "s2" "s3" "s4" }}
+{{- $shard := index $data.shards $id | default dict }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($shard.rdsHost | default "")) }}{{ fail "shard RDS endpoint missing" }}{{ end }}
+{{- if hasKey $seenHosts (lower $shard.rdsHost) }}{{ fail "central and shard RDS endpoints must be distinct" }}{{ end }}
+{{- $_ := set $seenHosts (lower $shard.rdsHost) true }}
+{{- range $key := list "bootstrapSecret" "pgbouncerAuthSecret" "cdcSecret" }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $shard $key | default "")) }}{{ fail "shard Secret missing" }}{{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- $search := .Values.searchPlane | default dict }}
 {{- if and (hasKey $search "enabled") (not (kindIs "bool" $search.enabled)) }}{{ fail "searchPlane.enabled must be boolean" }}{{ end }}
 {{- if $search.enabled }}
@@ -71,6 +84,8 @@ spec:
 {{ toYaml .Values.cassandraPlane | indent 10 }}
         mqttPlane:
 {{ toYaml .Values.mqttPlane | indent 10 }}
+        ownerMigrations:
+{{ toYaml .Values.ownerMigrations | indent 10 }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

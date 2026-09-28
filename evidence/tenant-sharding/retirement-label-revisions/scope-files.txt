@@ -1,0 +1,14 @@
+infra/gitops/disposable/applications-chart/templates/_owner-migrations.tpl
+infra/gitops/disposable/applications-chart/templates/data-plane-applications.yaml
+infra/gitops/disposable/owner-migrations-chart/templates/_helpers.tpl
+infra/gitops/disposable/migration-gate-chart/templates/_helpers.tpl
+infra/gitops/disposable/owner-migrations-chart/README.md
+infra/gitops/disposable/namespace-chart/templates/namespace.yaml
+infra/gitops/disposable/test-namespace-label.rb
+infra/gitops/disposable/test-owner-migration-revisions.rb
+infra/gitops/disposable/connector-registration/files/register.py
+infra/gitops/disposable/connector-registration/test_register.py
+infra/gitops/disposable/connector-registration/templates/job.yaml
+infra/gitops/disposable/connector-registration/values.yaml
+infra/gitops/disposable/connector-registration/README.md
+infra/gitops/disposable/connector-registration/test-retirement-chart.rb

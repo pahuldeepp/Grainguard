@@ -1,27 +1,24 @@
-{{- $owners := list
-  (dict "name" "telemetry" "image" .Values.telemetryImage "secret" "telemetry-migrator-config" "key" "TELEMETRY_MIGRATION_URL")
-  (dict "name" "projection" "image" .Values.projectionImage "secret" "projection-migrator-config" "key" "PROJECTION_MIGRATION_URL")
-  (dict "name" "jobs" "image" .Values.jobsImage "secret" "jobs-migrator-config" "key" "JOBS_MIGRATION_URL")
-  (dict "name" "saga" "image" .Values.sagaImage "secret" "saga-migrator-config" "key" "SAGA_MIGRATION_URL")
-  (dict "name" "hardware" "image" .Values.hardwareImage "secret" "hardware-migrator-config" "key" "HARDWARE_MIGRATION_URL")
-  (dict "name" "inventory" "image" .Values.inventoryImage "secret" "inventory-migrator-config" "key" "INVENTORY_MIGRATION_URL" "node" true)
-  (dict "name" "alerts" "image" .Values.alertsImage "secret" "alerts-migrator-config" "key" "ALERTS_MIGRATION_URL" "node" true)
-  (dict "name" "control" "image" .Values.controlImage "secret" "control-migrator-config" "key" "CONTROL_MIGRATION_URL" "node" true)
-  (dict "name" "billing" "image" .Values.billingImage "secret" "billing-migrator-config" "key" "BILLING_MIGRATION_URL" "node" true)
-  (dict "name" "risk" "image" .Values.riskImage "secret" "risk-migrator-config" "key" "RISK_MIGRATION_URL" "python" true)
-  (dict "name" "notifications" "image" .Values.notificationsImage "secret" "notifications-migrator-config" "key" "NOTIFICATIONS_MIGRATION_URL" "node" true)
-}}
+{{- $owners := include "ownerMigration.targets" .Values | fromYamlArray -}}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (.Values.sqlImage | default "")) }}{{ fail "migration preflight requires pinned psql image" }}{{ end }}
 {{- range $owner := $owners }}
 {{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" $owner.image) }}{{ fail (printf "%s migration image must be an immutable OCI digest" $owner.name) }}{{ end }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: greenguard-{{ $owner.name }}-migrate-{{ sha256sum $owner.image | trunc 12 }}
+  name: {{ $owner.job }}
+  labels:
+    greenguard.io/migration-owner: {{ $owner.name }}
+    greenguard.io/migration-scope: {{ $owner.scope }}
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 900
   template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        greenguard.io/migration: "true"
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
@@ -31,6 +28,36 @@ spec:
         runAsGroup: {{ if $owner.node }}1000{{ else if $owner.python }}10001{{ else }}65532{{ end }}
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: target-identity
+          image: {{ $.Values.sqlImage | quote }}
+          command: [/bin/bash, -ec]
+          args:
+            - |
+{{ include "ownerMigration.uriCheck" $owner | indent 14 }}
+              psql -X --no-password "$MIGRATION_URL" -v ON_ERROR_STOP=1 <<'SQL'
+              DO $identity$
+              BEGIN
+                IF current_database() <> '{{ $owner.database }}' OR current_user <> '{{ $owner.migrator }}' THEN RAISE EXCEPTION 'migration database or role mismatch'; END IF;
+              END;
+              $identity$;
+              SQL
+          env:
+            - name: MIGRATION_URL
+              valueFrom:
+                secretKeyRef: {name: {{ $owner.secret }}, key: {{ $owner.key }}}
+            - {name: PGCONNECT_TIMEOUT, value: "10"}
+            - {name: PGOPTIONS, value: "-c statement_timeout=5000 -c lock_timeout=2000"}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: ca, mountPath: /rds-ca, readOnly: true}
       containers:
         - name: migrate
           image: {{ $owner.image | quote }}
@@ -71,6 +98,9 @@ spec:
         - name: ca
           secret:
             secretName: {{ $.Values.caSecret | quote }}
+            items:
+              - key: ca.pem
+                path: ca.pem
 {{- if $owner.node }}
         - name: tmp
           emptyDir:

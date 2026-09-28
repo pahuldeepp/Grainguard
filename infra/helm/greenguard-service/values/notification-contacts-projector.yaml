@@ -1,0 +1,28 @@
+nameOverride: notification-contacts-projector
+replicaCount: 1
+pdb: { enabled: false }
+service:
+  enabled: true
+  port: 8097
+  containerPort: 8097
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: schema-registry }, port: 8081 }
+container:
+  name: notification-contacts-projector
+  command: ["node"]
+  args: ["services/notification-service/dist/contacts-projector-main.js"]
+  envFrom:
+    - secretRef:
+        name: notification-contacts-projector-config
+  env:
+    - { name: CONTACTS_PROJECTOR_HTTP_HOST, value: "0.0.0.0" }
+    - { name: CONTACTS_PROJECTOR_HTTP_PORT, value: "8097" }
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+resources:
+  requests: { cpu: 100m, memory: 192Mi }
+  limits: { cpu: 500m, memory: 512Mi }

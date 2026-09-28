@@ -54,11 +54,16 @@ case "$1 $2" in
     if [ -f "$STUB_DIR/rds_error" ]; then
       echo 'An error occurred (AccessDenied)' >&2; exit 254
     fi
-    if [ -f "$STUB_DIR/rds_missing" ]; then
+    if [ -f "$STUB_DIR/rds_missing" ] && [[ "$*" == *--db-instance-identifier* ]]; then
       echo 'An error occurred (DBInstanceNotFound)' >&2; exit 254
     fi
-    cat "$STUB_DIR/rds_instances" 2>/dev/null || true ;;
-  "rds describe-db-snapshots") cat "$STUB_DIR/rds_snapshots" 2>/dev/null || true ;;
+    if [[ "$*" == *starts_with* ]]; then cat "$STUB_DIR/shard_instances" 2>/dev/null || true; else cat "$STUB_DIR/rds_instances" 2>/dev/null || true; fi ;;
+  "rds describe-db-snapshots") if [[ "$*" == *starts_with* ]]; then cat "$STUB_DIR/shard_snapshots" 2>/dev/null || true; else cat "$STUB_DIR/rds_snapshots" 2>/dev/null || true; fi ;;
+  "dynamodb describe-table")
+    if [ -f "$STUB_DIR/dynamodb_error" ]; then echo 'An error occurred (AccessDeniedException)' >&2; exit 254; fi
+    if [ -f "$STUB_DIR/notification_state_table" ]; then cat "$STUB_DIR/notification_state_table"; else
+      echo 'An error occurred (ResourceNotFoundException)' >&2; exit 254
+    fi ;;
   "s3api list-buckets") cat "$STUB_DIR/s3_buckets" 2>/dev/null || true ;;
   "elbv2 describe-load-balancers") cat "$STUB_DIR/edge_alb" 2>/dev/null || true ;;
   "cloudfront list-distributions")
@@ -125,7 +130,9 @@ echo "terraform $*" >>"$STUB_DIR/calls"
   if [ -f "$STUB_DIR/identity_error" ]; then
     printf '%s\n' '{}'; exit 0
   fi
-  if [ -f "$STUB_DIR/master_secret_output" ]; then
+  if [ -f "$STUB_DIR/shard_output" ]; then
+    printf '{"disposable_cell_identity":{"value":%s},"postgres_shards":{"value":%s}}\n' "$identity" "$(cat "$STUB_DIR/shard_output")"
+  elif [ -f "$STUB_DIR/master_secret_output" ]; then
     secret="$(cat "$STUB_DIR/master_secret_output")"
     printf '{"disposable_cell_identity":{"value":%s},"postgres_master_secret_arn":{"value":"%s"}}\n' "$identity" "$secret"
   else
@@ -147,7 +154,7 @@ setup() {
   : >"$GG_PV_INVENTORY_FILE"
 }
 ok() { pass=$((pass + 1)); echo "ok - $1"; }
-fail() { echo "not ok - $1" >&2; cat "$STUB_DIR/calls" >&2 2>/dev/null || true; exit 1; }
+fail() { echo "not ok - $1" >&2; cat "$STUB_DIR/out" >&2 2>/dev/null || true; cat "$STUB_DIR/calls" >&2 2>/dev/null || true; exit 1; }
 run_pre() {
   GG_PV_INVENTORY_FILE="$STUB_DIR/pv-ids" GG_CLUSTER=greenguard-sandbox-cell-1 GG_REGION=us-east-1 GG_ENVIRONMENT="${1:-sandbox}" GG_ACCOUNT=123456789012 \
     GG_WAIT_SECONDS="${2:-900}" "$here/pre-destroy.sh" >"$STUB_DIR/out" 2>&1
@@ -156,6 +163,12 @@ run_pre() {
 setup prod
 if run_pre prod; then fail "prod is refused"; fi
 grep -q "refusing" "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] && ok "prod is refused before any AWS call"
+if run_pre production; then fail "production is refused"; fi
+grep -q "refusing" "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] && ok "production alias is refused before any AWS call"
+
+setup production-inventory
+if "$here/check-teardown.sh" us-east-1 production greenguard-production 123456789012 >"$STUB_DIR/out" 2>&1; then fail "production inventory is refused"; fi
+grep -q "refusing production" "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] && ok "production inventory is refused before any AWS call"
 
 setup full
 echo GreenGuardServerless-sandbox >"$STUB_DIR/stack"
@@ -272,15 +285,23 @@ else
 fi
 postgres_name="gg-greenguard-sandbox-cell-1-${cell_hash}-postgres"
 audit_bucket="greenguard-sandbox-cell-1-${cell_hash}-123456789012-us-east-1-audit"
+notification_state_table="greenguard-sandbox-cell-1-${cell_hash}-notification-state"
 
 setup inventory-data
 echo "$postgres_name" >"$STUB_DIR/rds_instances"
 echo "${postgres_name}-manual-backup" >"$STUB_DIR/rds_snapshots"
 echo "$audit_bucket" >"$STUB_DIR/s3_buckets"
+echo "$notification_state_table" >"$STUB_DIR/notification_state_table"
 if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "data resources must fail the inventory"; fi
 grep -q "Disposable PostgreSQL instance" "$STUB_DIR/out" &&
   grep -q "Disposable PostgreSQL manual snapshots" "$STUB_DIR/out" &&
-  grep -q "Disposable audit export S3 bucket" "$STUB_DIR/out" && ok "exact RDS, snapshot, and S3 leftovers are reported"
+  grep -q "Disposable audit export S3 bucket" "$STUB_DIR/out" &&
+  grep -q "Disposable notification state DynamoDB table" "$STUB_DIR/out" && ok "exact RDS, snapshot, S3, and DynamoDB leftovers are reported"
+
+setup notification-table-inventory-error
+touch "$STUB_DIR/dynamodb_error"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "DynamoDB inventory API errors must fail closed"; fi
+grep -q 'notification state DynamoDB inventory failed' "$STUB_DIR/out" && ok "DynamoDB inventory errors fail closed"
 
 setup inventory-pv-volume
 echo vol-1234abcd >"$STUB_DIR/pv-ids"
@@ -456,5 +477,72 @@ if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/ou
 grep -q 'Terraform state outputs unavailable' "$STUB_DIR/out" &&
   ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper fails closed on state output read error"
 
-echo "teardown tests: $pass passed"
-[ "$pass" -eq 44 ]
+[ "$pass" -eq 47 ]
+
+setup shard_leftovers
+echo 'gg-greenguard-sandbox-cell-1-deadbeef-shard-s3-r1' >"$STUB_DIR/shard_instances"
+echo 'manual-s4-snapshot' >"$STUB_DIR/shard_snapshots"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "shard leftovers must fail"; fi
+grep -q 'Disposable shard primaries and read replicas' "$STUB_DIR/out" &&
+  grep -q 'Disposable shard manual snapshots' "$STUB_DIR/out" && ok "shard primary/replica and manual snapshot leftovers are reported without tags"
+
+setup shard_secret_leftover
+echo 'arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!s2' >"$STUB_DIR/master_secret"
+if GG_SHARD_MASTER_SECRET_ARNS="$(cat "$STUB_DIR/master_secret")" "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "shard secret leftover must fail"; fi
+grep -q 'RDS-managed shard master secret still exists' "$STUB_DIR/out" && ok "captured shard master secret leftovers are reported"
+
+setup foreign_shard_secret
+if GG_SHARD_MASTER_SECRET_ARNS='arn:aws:secretsmanager:us-east-1:999999999999:secret:rds!s2' "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "foreign shard secret must fail"; fi
+grep -q 'shard master secret ARN does not match region/account' "$STUB_DIR/out" && ok "foreign shard secret ARN refuses inventory"
+
+setup shard_wrapper
+python3 -c 'import json; print(json.dumps({f"s{i}": {"master_secret_arn":f"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!s{i}"} for i in range(1,5)}))' >"$STUB_DIR/shard_output"
+echo 'arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!s3' >"$STUB_DIR/master_secret"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "remaining captured shard master secrets must fail wrapper"; fi
+grep -q 'RDS-managed shard master secret still exists' "$STUB_DIR/out" &&
+  grep -q 'secret:rds!s4' "$STUB_DIR/calls" &&
+  grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper retains and checks all four managed shard master secrets"
+
+setup shard_secret_deduplicated
+python3 -c 'import json; print(json.dumps({f"s{i}": {"master_secret_arn":f"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!s{i}"} for i in range(1,5)}))' >"$STUB_DIR/shard_output"
+python3 - "$STUB_DIR/show_state" <<'PY'
+import json, sys
+resources = []
+for shard in range(1, 5):
+    resources.append({
+        "address": f'aws_db_instance.shard["s{shard}"]',
+        "type": "aws_db_instance",
+        "name": "shard",
+        "mode": "managed",
+        "values": {"master_user_secret": [{"secret_arn": f"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!s{shard}"}]},
+    })
+with open(sys.argv[1], "w") as output:
+    json.dump({"values": {"root_module": {"resources": resources}}}, output)
+PY
+if ! GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "duplicate shard secret inventory must be deduplicated"; fi
+grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
+  [ "$(grep -c 'secretsmanager describe-secret' "$STUB_DIR/calls")" -eq 4 ] &&
+  grep -q 'secret:rds!s4' "$STUB_DIR/calls" && ok "verified wrapper deduplicates full current-state ARNs and checks all four shard secrets"
+
+setup foreign_shard_wrapper
+python3 -c 'import json; print(json.dumps({f"s{i}": {"master_secret_arn":f"arn:aws:secretsmanager:us-east-1:999999999999:secret:rds!s{i}"} for i in range(1,5)}))' >"$STUB_DIR/shard_output"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "foreign shard registry must stop destroy"; fi
+grep -q 'shard master secret ARN does not match saved account/region' "$STUB_DIR/out" &&
+  ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper rejects foreign shard secret registry before deletion"
+
+setup stale_populated_shard_update
+python3 -c 'import json; print(json.dumps({f"s{i}": {"master_secret_arn":f"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!old-s{i}"} for i in range(1,5)}))' >"$STUB_DIR/shard_output"
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"aws_db_instance.shard[\"s2\"]","type":"aws_db_instance","name":"shard","mode":"managed","values":{"master_user_secret":[{"secret_arn":"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!new-s2"}]}}]}}}' >"$STUB_DIR/show_state"
+echo 'arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!new-s2' >"$STUB_DIR/master_secret"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "populated stale outputs must not hide current managed shard secrets"; fi
+grep -q 'RDS-managed shard master secret still exists' "$STUB_DIR/out" &&
+  grep -q 'secret:rds!new-s2' "$STUB_DIR/calls" &&
+  grep -q 'secret:rds!old-s4' "$STUB_DIR/calls" && ok "managed secret inventory unions populated stale outputs with current state"
+
+setup partial_shard_update
+printf '%s\n' '{"values":{"root_module":{"resources":[{"address":"aws_db_instance.shard[\"s2\"]","type":"aws_db_instance","name":"shard","mode":"managed","values":{"master_user_secret":[{"secret_arn":"arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!partial-s2"}]}}]}}}' >"$STUB_DIR/show_state"
+echo 'arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!partial-s2' >"$STUB_DIR/master_secret"
+if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "failed update shards hidden by old outputs must still fail secret inventory"; fi
+grep -q 'RDS-managed shard master secret still exists' "$STUB_DIR/out" &&
+  grep -q 'secret:rds!partial-s2' "$STUB_DIR/calls" && ok "failed update shards are inventoried from state despite stale root outputs"
+echo "all teardown checks: $pass passed"

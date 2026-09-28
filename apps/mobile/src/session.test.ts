@@ -33,6 +33,7 @@ function harness() {
   let refreshFailure: Response | null = null;
   let counter = 0;
   let membershipLookups = 0;
+  let currentNonce = "";
   const fetchFn = (async (_url: string, init: RequestInit) => {
     const body = new URLSearchParams(String(init.body));
     requests.push(body);
@@ -40,7 +41,7 @@ function harness() {
       return refreshFailure.clone();
     const grant = grants.shift() ?? {};
     counter += 1;
-    return jsonResponse(200, {
+    const response = {
       access_token: fakeJwt({
         ...(grant.noTenantClaim
           ? { iss: "http://127.0.0.1:5556/dex" }
@@ -50,7 +51,10 @@ function harness() {
       }),
       refresh_token: `rt-${counter}`,
       expires_in: grant.expiresIn ?? 300,
-    });
+    };
+    return jsonResponse(200, body.get("grant_type") === "authorization_code"
+      ? { ...response, id_token: fakeJwt({ nonce: currentNonce }) }
+      : response);
   }) as unknown as typeof fetch;
   const session = new MobileSession(config, store, {
     fetch: fetchFn,
@@ -61,6 +65,12 @@ function harness() {
       return { tenantId: "tenant-authoritative", subject: "user-1" };
     },
   });
+  const beginSignIn = session.beginSignIn.bind(session);
+  session.beginSignIn = async () => {
+    const authorizationUrl = await beginSignIn();
+    currentNonce = new URL(authorizationUrl).searchParams.get("nonce") ?? "";
+    return authorizationUrl;
+  };
   return {
     store,
     clock,
@@ -111,10 +121,12 @@ test("a token without a tenant claim uses the BFF membership for local tenant sc
 test("a token without a tenant claim rejects a mismatched BFF session", async () => {
   const h = harness();
   h.grants.push({ noTenantClaim: true });
+  let nonce = "";
   const verifying = new MobileSession(config, h.store, {
     fetch: (async () =>
       jsonResponse(200, {
         access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+        id_token: fakeJwt({ nonce }),
         expires_in: 300,
       })) as unknown as typeof fetch,
     now: h.clock.now,
@@ -125,6 +137,7 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
     }),
   });
   const url = new URL(await verifying.beginSignIn());
+  nonce = url.searchParams.get("nonce") ?? "";
   await assert.rejects(
     verifying.completeSignIn(
       `greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`,
@@ -135,16 +148,19 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
 
 test("a no-tenant token cannot enter offline state without a BFF membership resolver", async () => {
   const h = harness();
+  let nonce = "";
   const session = new MobileSession(config, h.store, {
     fetch: (async () =>
       jsonResponse(200, {
         access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+        id_token: fakeJwt({ nonce }),
         expires_in: 300,
       })) as unknown as typeof fetch,
     now: h.clock.now,
     crypto: defaultCrypto(),
   });
   const url = new URL(await session.beginSignIn());
+  nonce = url.searchParams.get("nonce") ?? "";
   await assert.rejects(
     session.completeSignIn(
       `greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`,
@@ -163,6 +179,7 @@ test("a token with neither tenant claim nor issuer is rejected", async () => {
     fetch: (async () =>
       jsonResponse(200, {
         access_token: fakeJwt({ sub: "user-1" }),
+        id_token: fakeJwt({ nonce: url.searchParams.get("nonce") ?? "" }),
         expires_in: 300,
       })) as unknown as typeof fetch,
     now: h.clock.now,

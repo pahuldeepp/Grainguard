@@ -1,0 +1,28 @@
+nameOverride: inventory-entitlement-projector
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+autoscaling:
+  hpa: { enabled: false }
+service:
+  enabled: false
+container:
+  name: inventory-entitlement-projector
+  command: ["node", "services/device-service/dist/entitlements/projector.js"]
+  envFrom:
+    - secretRef: { name: device-service-config }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  egressServices:
+    - {
+        name: tenant-control-plane,
+        namespace: greenguard,
+        release: tenant-control-plane,
+        port: 3010,
+      }
+  ingressSources: []
+probes:
+  startup: { enabled: false }
+  readiness: { enabled: false }
+  liveness: { enabled: false }

@@ -203,6 +203,20 @@ resource "aws_wafv2_web_acl" "edge" {
   }
 }
 
+resource "aws_cloudfront_cache_policy" "static_assets" {
+  name        = "${var.cluster_name}-static-assets"
+  min_ttl     = 0
+  default_ttl = 86400
+  max_ttl     = 31536000
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+    cookies_config { cookie_behavior = "none" }
+    headers_config { header_behavior = "none" }
+    query_strings_config { query_string_behavior = "none" }
+  }
+}
+
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   comment             = "${var.cluster_name} dashboard"
@@ -233,6 +247,16 @@ resource "aws_cloudfront_distribution" "web" {
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_except_host.id
     compress                 = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/assets/*"
+    target_origin_id       = "greenguard-private-edge"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.static_assets.id
+    compress               = true
   }
 
   restrictions {

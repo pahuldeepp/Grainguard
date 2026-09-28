@@ -45,7 +45,10 @@ func LoadShardRegistry(path, service, database, role string) (ShardRegistry, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 65536 {
+	// Kubernetes Secret projections mounted into non-root workloads need group
+	// read when fsGroup is used. Permit 0400/0440 only; reject group write/exec
+	// and every world permission so credentials remain private to the pod group.
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0037 != 0 || info.Size() > 65536 {
 		return registry, ErrShardRegistry
 	}
 	body, err := io.ReadAll(io.LimitReader(f, 65537))

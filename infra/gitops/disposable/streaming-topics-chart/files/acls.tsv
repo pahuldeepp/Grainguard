@@ -31,6 +31,7 @@ saga-worker|topic|literal|greenguard.saga.commands.v1,greenguard.saga.results.dl
 saga-worker|group|literal|greenguard-saga-orchestrator-v1|Read
 saga-worker|cluster|literal|kafka-cluster|IdempotentWrite
 billing-service|topic|literal|greenguard.inventory.tenant.v1,greenguard.telemetry.recorded.v1|Read,Describe
+billing-service|topic|literal|greenguard.billing.lifecycle.v1|Write,Describe
 billing-service|group|literal|greenguard-billing-v1|Read
 notification-service|topic|literal|greenguard.notifications.contacts.cdc.v1,greenguard.notifications.contacts.heartbeat.v2,greenguard.platform.config.v1|Read,Describe
 notification-service|topic|literal|greenguard.notifications.contacts.cdc.dlq.v1,greenguard.quarantine.v1|Write,Describe

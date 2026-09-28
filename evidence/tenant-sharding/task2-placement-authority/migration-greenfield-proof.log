@@ -1,0 +1,78 @@
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control_greenfield", schema "public" at "127.0.0.1:65439"
+
+20 migrations found in prisma/migrations
+
+Applying migration `20260925090000_control_plane`
+Applying migration `20260925110000_membership_revocation`
+Applying migration `20260925120000_membership_identity_lookup_index`
+Applying migration `20260925130000_machine_credentials`
+Applying migration `20260925131000_machine_lookup_policy`
+Applying migration `20260925140000_flag_configurations`
+Applying migration `20260925141000_global_flags`
+Applying migration `20260925150000_entitlements`
+Applying migration `20260925160000_audit_exports`
+Applying migration `20260925160000_identity_connections`
+Applying migration `20260925170000_audit_csv`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260925181000_identity_domain_expiry`
+Applying migration `20260925185000_oauth_client_tenant_binding`
+Applying migration `20260925190000_audit_export_failures`
+Applying migration `20260925200000_jit_seat_denial_audit`
+Applying migration `20260925210000_notification_contacts`
+Applying migration `20260925220000_notification_contacts_cdc`
+Applying migration `20260928010000_tenant_placement`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925090000_control_plane/
+    └─ migration.sql
+  └─ 20260925110000_membership_revocation/
+    └─ migration.sql
+  └─ 20260925120000_membership_identity_lookup_index/
+    └─ migration.sql
+  └─ 20260925130000_machine_credentials/
+    └─ migration.sql
+  └─ 20260925131000_machine_lookup_policy/
+    └─ migration.sql
+  └─ 20260925140000_flag_configurations/
+    └─ migration.sql
+  └─ 20260925141000_global_flags/
+    └─ migration.sql
+  └─ 20260925150000_entitlements/
+    └─ migration.sql
+  └─ 20260925160000_audit_exports/
+    └─ migration.sql
+  └─ 20260925160000_identity_connections/
+    └─ migration.sql
+  └─ 20260925170000_audit_csv/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260925181000_identity_domain_expiry/
+    └─ migration.sql
+  └─ 20260925185000_oauth_client_tenant_binding/
+    └─ migration.sql
+  └─ 20260925190000_audit_export_failures/
+    └─ migration.sql
+  └─ 20260925200000_jit_seat_denial_audit/
+    └─ migration.sql
+  └─ 20260925210000_notification_contacts/
+    └─ migration.sql
+  └─ 20260925220000_notification_contacts_cdc/
+    └─ migration.sql
+  └─ 20260928010000_tenant_placement/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+Greenfield proof: 4 offline seeds + first ring v1 all four; onboarding denied until operator fixture activation; 40 new tenants persisted across all four

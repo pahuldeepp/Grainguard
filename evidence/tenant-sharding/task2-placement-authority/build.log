@@ -1,0 +1,57 @@
+
+> @greenguard/tenant-control-plane@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/tenant-control-plane@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/feature-flags -w @greenguard/membership-client -w @greenguard/audit -w @greenguard/entitlements
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 10ms

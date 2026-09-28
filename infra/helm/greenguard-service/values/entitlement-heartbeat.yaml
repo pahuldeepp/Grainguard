@@ -1,0 +1,23 @@
+nameOverride: entitlement-heartbeat
+replicaCount: 1
+pdb: { enabled: false }
+service:
+  enabled: false
+networkPolicy:
+  ingressEnabled: false
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+container:
+  name: entitlement-heartbeat
+  command: ["node"]
+  args: ["packages/entitlements/dist/heartbeat.js"]
+  envFrom:
+    - secretRef:
+        name: billing-service-config
+probes:
+  startup: { enabled: false }
+  readiness: { enabled: false }
+  liveness: { enabled: false }
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }

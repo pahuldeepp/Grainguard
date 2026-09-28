@@ -9,7 +9,8 @@ acceptance. Existing replica/CDN edits remain candidates, not verified features.
 
 GreenGuard must scale reads and tenant-owned writes without weakening tenant
 isolation, changing working OAuth/OIDC, losing accepted commands or duplicating
-external effects. Start with one database replica; API pod count is independent.
+external effects. Start with one database read replica per physical shard (four
+operational replicas total); API pod count is independent.
 Keep Redis Cluster tenant hash tags and existing partitioning. A short tenant
 write pause is acceptable during migration. Production must not be touched.
 No real AWS apply occurs until the wider pre-deployment audit is green.
@@ -113,7 +114,9 @@ source/target, source incarnation, barriers, validation receipts and transition
 version. Existing routing_epoch is a monotonically increasing BIGINT serialized
 as a decimal string at API/event boundaries. Never decrement or reuse it.
 
-Trusted service resolution returns tenant ID, shard ID, epoch and admission state.
+Trusted service resolution returns tenant ID, shard ID, shard incarnation, epoch
+and admission state. The registry incarnation is shared with shard bootstrap and
+rotates when a shard is replaced or restored, invalidating old routes.
 Only verified tenant identity selects placement; client-provided shard/epoch
 headers cannot override authority. Database credentials come from a private
 endpoint registry, not from placement responses or user input.

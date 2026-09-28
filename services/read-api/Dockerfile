@@ -3,10 +3,16 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/tenant-auth/package.json packages/tenant-auth/package.json
 COPY packages/read-model/package.json packages/read-model/package.json
+COPY packages/membership-client/package.json packages/membership-client/package.json
+COPY packages/entitlements/package.json packages/entitlements/package.json
+COPY packages/kafka-security/package.json packages/kafka-security/package.json
 COPY services/read-api/package.json services/read-api/package.json
 RUN npm ci --ignore-scripts
 COPY packages/tenant-auth packages/tenant-auth
 COPY packages/read-model packages/read-model
+COPY packages/membership-client packages/membership-client
+COPY packages/entitlements packages/entitlements
+COPY packages/kafka-security packages/kafka-security
 COPY services/read-api services/read-api
 RUN npm run build -w @greenguard/read-api && npm prune --omit=dev
 
@@ -16,6 +22,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/packages/tenant-auth ./packages/tenant-auth
 COPY --from=build --chown=node:node /app/packages/read-model ./packages/read-model
+COPY --from=build --chown=node:node /app/packages/membership-client ./packages/membership-client
+COPY --from=build --chown=node:node /app/packages/entitlements ./packages/entitlements
+COPY --from=build --chown=node:node /app/packages/kafka-security ./packages/kafka-security
 COPY --from=build --chown=node:node /app/services/read-api ./services/read-api
 USER node
 EXPOSE 4001

@@ -1,14 +1,7 @@
-# Images are built with --target migration from each service Dockerfile.
-# Empty by default: Helm must reject a deployment without published digests.
-telemetryImage: ""
-projectionImage: ""
-jobsImage: ""
-sagaImage: ""
-hardwareImage: ""
-inventoryImage: ""
-alertsImage: ""
-controlImage: ""
-billingImage: ""
-riskImage: ""
-notificationsImage: ""
-caSecret: greenguard-rds-ca
+revision: ""
+images: {}
+scopes: {}
+caSecret: ""
+sqlImage: ""
+rdsCIDRs: []
+apiServerCIDR: ""

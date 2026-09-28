@@ -159,6 +159,11 @@ spec:
               mountPath: /etc/greenguard/kafka
               readOnly: true
             {{- end }}
+            {{- if .Values.postgresReadReplica.caSecretName }}
+            - name: rds-ca
+              mountPath: /etc/greenguard/rds
+              readOnly: true
+            {{- end }}
             {{- with .Values.container.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -172,6 +177,13 @@ spec:
             items:
               - {key: ca.crt, path: ca.crt}
               - {key: registry-ca.crt, path: registry-ca.crt}
+        {{- end }}
+        {{- if .Values.postgresReadReplica.caSecretName }}
+        - name: rds-ca
+          secret:
+            secretName: {{ .Values.postgresReadReplica.caSecretName | quote }}
+            items:
+              - {key: ca.pem, path: ca.pem}
         {{- end }}
         {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}

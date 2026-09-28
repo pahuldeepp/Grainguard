@@ -1,0 +1,22 @@
+nameOverride: control-entitlement-projector
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+autoscaling:
+  hpa: { enabled: false }
+service:
+  enabled: false
+container:
+  name: control-entitlement-projector
+  command:
+    ["node", "services/tenant-control-plane/dist/entitlements/projector.js"]
+  envFrom:
+    - secretRef: { name: tenant-control-plane-config }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  ingressSources: []
+probes:
+  startup: { enabled: false }
+  readiness: { enabled: false }
+  liveness: { enabled: false }

@@ -8,8 +8,9 @@ set -euo pipefail
 export AWS_REGION="$GG_REGION" AWS_PAGER=""
 WAIT_SECONDS="${GG_WAIT_SECONDS:-900}"
 
-if [ "$GG_ENVIRONMENT" = "prod" ]; then
-  echo "pre-destroy: refusing to tear down environment 'prod' from the disposable root" >&2
+environment_lower="$(printf '%s' "$GG_ENVIRONMENT" | tr '[:upper:]' '[:lower:]')"
+if [ "$environment_lower" = "prod" ] || [ "$environment_lower" = "production" ]; then
+  echo "pre-destroy: refusing to tear down a production environment from the disposable root" >&2
   exit 1
 fi
 for tool in aws kubectl python3; do

@@ -95,7 +95,13 @@ Each non-dashboard runtime Secret must contain `KAFKA_SASL_USERNAME` equal to
 its release name and a nonempty `KAFKA_SASL_PASSWORD`. The guarded preflight
 requires the broker JAAS to contain the exact matching user/password pair.
 `notification-service-config` must also contain the Registry Basic username
-and password for its HTTPS contacts projector. Runtime Helm values set
+and password plus Kafka bootstrap brokers for its HTTPS contacts projector.
+Terraform generates `notification-contacts-projector-config` by copying only
+`KAFKA_BROKERS`, that principal's SASL username/password and the three
+Schema Registry fields from `notification-service-config`, then adding the
+Terraform-owned DynamoDB table name and region. This separate Secret prevents
+the contacts projector from seeing notification database, SES/SNS or provider
+credentials. Runtime Helm values set
 `KAFKA_REQUIRE_TLS=true` and mount the CA-only Secret; missing credentials
 therefore stop startup rather than falling back to plaintext.
 PgBouncer requires exactly `userlist.txt`; the CDC

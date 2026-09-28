@@ -30,6 +30,29 @@ values = {
   'repositoryUrl' => 'https://github.com/pahuldeepp/Grainguard.git',
   'revision' => 'b' * 40,
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, digest] },
+  'ownerMigrations' => {
+    'revision' => 'b' * 40,
+    'images' => %w[control billing telemetry projection jobs saga hardware inventory alerts risk notifications].to_h { |name| [name, digest] },
+    'gateImage' => digest,
+    'sqlImage' => digest,
+    'caSecret' => 'greenguard-rds-ca',
+    'rdsCIDRs' => %w[10.60.128.0/20 10.60.144.0/20],
+    'apiServerCIDR' => '10.100.0.1/32',
+    'scopes' => {
+      'central' => {
+        'rdsHost' => 'central.example.rds.amazonaws.com',
+        'secrets' => { 'control' => 'greenguard-control-migration', 'billing' => 'greenguard-billing-migration' }
+      },
+      **%w[s1 s2 s3 s4].to_h do |shard|
+        [shard, {
+          'rdsHost' => "#{shard}.example.rds.amazonaws.com",
+          'secrets' => %w[telemetry projection jobs saga hardware inventory alerts risk notifications].to_h do |owner|
+            [owner, "greenguard-#{shard}-#{owner}-migration"]
+          end
+        }]
+      end
+    }
+  },
   'releases' => releases.map do |release|
     extra = case release.fetch('name')
             when 'dashboard'
@@ -64,7 +87,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   abort "application chart failed: #{error}" unless status.success?
   apps = YAML.safe_load_stream(rendered).compact
   actual = apps.map { |app| app.fetch('metadata').fetch('name').delete_prefix('greenguard-') }
-  expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'migration-gate']
+  expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate']
   abort "application inventory drift: #{actual.sort} != #{expected.sort}" unless actual.sort == expected.sort
   apps.each do |app|
     spec = app.fetch('spec')
@@ -86,6 +109,10 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
     elsif app.fetch('metadata').fetch('name') == 'greenguard-migration-gate'
       abort 'migration gate Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/migration-gate-chart'
       abort 'migration gate Application sync wave drift' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '25'
+    elsif app.fetch('metadata').fetch('name') == 'greenguard-owner-migrations'
+      abort 'owner migration Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/owner-migrations-chart'
+      abort 'owner migration Application sync wave drift' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '24'
+      abort 'owner migration contract was not propagated' unless source.dig('helm', 'valuesObject') == values.fetch('ownerMigrations')
     else
       object = source.fetch('helm').fetch('valuesObject')
       abort 'mutable image' unless object.fetch('image') == digest
@@ -110,6 +137,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   root_app = YAML.safe_load_stream(root_rendered).compact.fetch(0)
   abort 'root does not point to applications chart' unless root_app.fetch('spec').fetch('source').fetch('path') == 'infra/gitops/disposable/applications-chart'
   abort 'root does not pass every release' unless root_app.fetch('spec').fetch('source').fetch('helm').fetch('valuesObject').fetch('releases').length == releases.length
+  abort 'root does not pass the owner migration contract' unless root_app.fetch('spec').fetch('source').fetch('helm').fetch('valuesObject').fetch('ownerMigrations') == values.fetch('ownerMigrations')
   reject_values = values.merge('revision' => 'main')
   file.rewind
   file.truncate(0)
@@ -149,5 +177,5 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
       item['kind'] == 'Deployment' && item.dig('spec', 'template', 'metadata', 'labels', 'sidecar.istio.io/inject') == 'true'
     }
   end
-puts "Argo CD tree renders #{releases.length} digest-pinned runtime Applications plus data, observability, RDS bootstrap, and migration gate Applications."
+puts "Argo CD tree renders #{releases.length} digest-pinned runtime Applications plus data, observability, RDS bootstrap, 38-owner migration Jobs, and SQL migration gate Applications."
 end

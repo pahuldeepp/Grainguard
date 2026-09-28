@@ -1,6 +1,6 @@
 # Go tenant placement and pools
 
-`SHARD_REGISTRY_FILE` enables placement routing. The file must be a private regular file (0600 or stricter), contain exactly `s1` through `s4`, and match the service, database and runtime role. Example shape (substitute private credentials):
+`SHARD_REGISTRY_FILE` enables placement routing. The file must be a regular file with mode `0400` or `0440`, contain exactly `s1` through `s4`, and match the service, database and runtime role. Kubernetes Secret volumes use `0440` with the pod's `fsGroup` so the non-root application user can read credentials; the volume is mounted only into the application container. Group write/execute and all world permissions are rejected. Example shape (substitute private credentials):
 
 ```json
 {"formatVersion":1,"service":"projection-builder","database":"greenguard_read","shards":{"s1":{"incarnation":"11111111-1111-4111-8111-111111111111","primaryUrl":"postgres://projection_app:REDACTED@read-s1.internal/greenguard_read?sslmode=verify-full","replicaUrls":[]},"s2":{"incarnation":"22222222-2222-4222-8222-222222222222","primaryUrl":"postgres://projection_app:REDACTED@read-s2.internal/greenguard_read?sslmode=verify-full","replicaUrls":[]},"s3":{"incarnation":"33333333-3333-4333-8333-333333333333","primaryUrl":"postgres://projection_app:REDACTED@read-s3.internal/greenguard_read?sslmode=verify-full","replicaUrls":[]},"s4":{"incarnation":"44444444-4444-4444-8444-444444444444","primaryUrl":"postgres://projection_app:REDACTED@read-s4.internal/greenguard_read?sslmode=verify-full","replicaUrls":[]}}}

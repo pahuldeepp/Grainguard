@@ -200,8 +200,8 @@ containers** and there is no External Secrets controller or manifest that
 materializes their values as Kubernetes Secrets. These Secret values, sync,
 network
 reachability and live membership lookup remain deployment blockers. A real
-Cognito account still needs the first-admin enrollment workflow in
-`docs/runbooks/disposable-cognito-first-admin.md` before tenant APIs can be used.
+OIDC account still needs the first-admin enrollment workflow in
+`docs/runbooks/disposable-oidc-first-admin.md` before tenant APIs can be used.
 
 ## Data-plane Argo children
 

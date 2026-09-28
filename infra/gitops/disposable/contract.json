@@ -2,34 +2,323 @@
   "schemaVersion": 1,
   "namespace": "greenguard",
   "phases": [
-    {"id": "controllers", "requires": ["EKS API reachable", "pinned Argo CD, Istio, KEDA and Argo Rollouts controllers and CRDs healthy"]},
-    {"id": "data", "requires": ["PostgreSQL/PgBouncer", "Kafka/Connect/schema registry", "RabbitMQ", "Redis", "Cassandra", "OpenSearch", "MQTT", "object storage", "OIDC issuer and JWKS over HTTPS"]},
-    {"id": "migrations", "requires": ["all PostgreSQL owner-role migrations applied", "Kafka topics and connectors registered", "Cassandra keyspace/schema applied", "OpenSearch templates/indexes applied", "real tenant membership seeded"]},
-    {"id": "applications", "requires": ["every image digest resolved", "every secret reference exists", "NetworkPolicy peers and mesh principals rendered"]},
-    {"id": "acceptance", "requires": ["all workloads Available/Ready", "web and iPhone OAuth/API journeys", "telemetry to projection and alerts", "ACK and live updates"]}
+    {
+      "id": "controllers",
+      "requires": [
+        "EKS API reachable",
+        "pinned Argo CD, Istio, KEDA and Argo Rollouts controllers and CRDs healthy"
+      ]
+    },
+    {
+      "id": "data",
+      "requires": [
+        "PostgreSQL/PgBouncer",
+        "Kafka/Connect/schema registry",
+        "RabbitMQ",
+        "Redis",
+        "Cassandra",
+        "OpenSearch",
+        "MQTT",
+        "object storage",
+        "OIDC issuer and JWKS over HTTPS"
+      ]
+    },
+    {
+      "id": "migrations",
+      "requires": [
+        "all PostgreSQL owner-role migrations applied",
+        "Kafka topics and connectors registered",
+        "Cassandra keyspace/schema applied",
+        "OpenSearch templates/indexes applied",
+        "real tenant membership seeded"
+      ]
+    },
+    {
+      "id": "applications",
+      "requires": [
+        "every image digest resolved",
+        "every secret reference exists",
+        "NetworkPolicy peers and mesh principals rendered"
+      ]
+    },
+    {
+      "id": "acceptance",
+      "requires": [
+        "all workloads Available/Ready",
+        "web and iPhone OAuth/API journeys",
+        "telemetry to projection and alerts",
+        "ACK and live updates"
+      ]
+    }
   ],
   "releases": [
-    {"name":"dashboard","chart":"greenguard-dashboard","image":"dashboard","phase":"applications","secret":"dashboard-public-config","health":"/healthz"},
-    {"name":"bff","chart":"greenguard-bff","image":"bff","phase":"applications","secret":"bff-config","health":"/readyz"},
-    {"name":"gateway","chart":"greenguard-service","profile":"gateway","image":"gateway","phase":"applications","secret":"gateway-config","health":"/readyz"},
-    {"name":"device-service","chart":"greenguard-service","profile":"device-service","image":"device-service","phase":"applications","secret":"device-service-config","health":"/readyz"},
-    {"name":"read-api","chart":"greenguard-service","profile":"read-api","image":"read-api","phase":"applications","secret":"read-api-config","health":"/readyz"},
-    {"name":"workflow-alerts","chart":"greenguard-service","profile":"workflow-alerts","image":"workflow-alerts","phase":"applications","secret":"workflow-alerts-config","health":"/readyz"},
-    {"name":"telemetry-ingest","chart":"greenguard-service","profile":"telemetry-ingest","image":"telemetry-ingest","phase":"applications","secret":"telemetry-ingest-config","health":"/readyz"},
-    {"name":"cdc-transformer","chart":"greenguard-service","profile":"cdc-transformer","image":"cdc-transformer","phase":"applications","secret":"cdc-transformer-config","health":"/readyz"},
-    {"name":"projection-builder","chart":"greenguard-service","profile":"projection-builder","image":"projection-builder","phase":"applications","secret":"projection-builder-config","health":"/readyz"},
-    {"name":"cache-invalidator","chart":"greenguard-service","profile":"cache-invalidator","image":"cache-invalidator","phase":"applications","secret":"cache-invalidator-config","health":"/readyz"},
-    {"name":"risk-engine","chart":"greenguard-service","profile":"risk-engine","image":"risk-engine","phase":"applications","secret":"risk-engine-config","health":"/readyz"},
-    {"name":"hardware-service-worker","chart":"greenguard-service","profile":"hardware-service-worker","image":"hardware-service","phase":"applications","secret":"hardware-service-config","health":null},
-    {"name":"eventbridge-bridge","chart":"greenguard-service","profile":"eventbridge-bridge","image":"eventbridge-bridge","phase":"applications","secret":"eventbridge-bridge-config","health":null},
-    {"name":"saga-api","chart":"greenguard-service","profile":"saga-api","image":"saga-orchestrator","phase":"applications","secret":"saga-api-config","health":"tcp:8092"},
-    {"name":"saga-worker","chart":"greenguard-service","profile":"saga-worker","image":"saga-orchestrator","phase":"applications","secret":"saga-worker-config","health":null},
-    {"name":"tenant-control-plane","chart":"greenguard-service","profile":"tenant-control-plane","image":"tenant-control-plane","phase":"applications","secret":"tenant-control-plane-config","health":"/readyz"},
-    {"name":"billing-service","chart":"greenguard-service","profile":"billing-service","image":"billing-service","phase":"applications","secret":"billing-service-config","health":"/readyz"},
-    {"name":"notification-service","chart":"greenguard-service","profile":"notification-service","image":"notification-service","phase":"applications","secret":"notification-service-config","health":"/readyz/notification-history"},
-    {"name":"jobs-worker","chart":"greenguard-service","profile":"jobs-worker","image":"jobs-worker","phase":"applications","secret":"jobs-worker-config","health":"/readyz"},
-    {"name":"cassandra-writer","chart":"greenguard-service","profile":"cassandra-writer","image":"cassandra-writer","phase":"applications","secret":"cassandra-writer-config","health":"/readyz"},
-    {"name":"search-indexer","chart":"greenguard-service","profile":"search-indexer","image":"search-indexer","phase":"applications","secret":"search-indexer-config","health":null}
+    {
+      "name": "dashboard",
+      "chart": "greenguard-dashboard",
+      "image": "dashboard",
+      "phase": "applications",
+      "secret": "dashboard-public-config",
+      "health": "/healthz"
+    },
+    {
+      "name": "bff",
+      "chart": "greenguard-bff",
+      "image": "bff",
+      "phase": "applications",
+      "secret": "bff-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "gateway",
+      "chart": "greenguard-service",
+      "profile": "gateway",
+      "image": "gateway",
+      "phase": "applications",
+      "secret": "gateway-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "device-service",
+      "chart": "greenguard-service",
+      "profile": "device-service",
+      "image": "device-service",
+      "phase": "applications",
+      "secret": "device-service-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "read-api",
+      "chart": "greenguard-service",
+      "profile": "read-api",
+      "image": "read-api",
+      "phase": "applications",
+      "secret": "read-api-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "workflow-alerts",
+      "chart": "greenguard-service",
+      "profile": "workflow-alerts",
+      "image": "workflow-alerts",
+      "phase": "applications",
+      "secret": "workflow-alerts-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "telemetry-ingest",
+      "chart": "greenguard-service",
+      "profile": "telemetry-ingest",
+      "image": "telemetry-ingest",
+      "phase": "applications",
+      "secret": "telemetry-ingest-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "cdc-transformer",
+      "chart": "greenguard-service",
+      "profile": "cdc-transformer",
+      "image": "cdc-transformer",
+      "phase": "applications",
+      "secret": "cdc-transformer-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "projection-builder",
+      "chart": "greenguard-service",
+      "profile": "projection-builder",
+      "image": "projection-builder",
+      "phase": "applications",
+      "secret": "projection-builder-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "cache-invalidator",
+      "chart": "greenguard-service",
+      "profile": "cache-invalidator",
+      "image": "cache-invalidator",
+      "phase": "applications",
+      "secret": "cache-invalidator-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "risk-engine",
+      "chart": "greenguard-service",
+      "profile": "risk-engine",
+      "image": "risk-engine",
+      "phase": "applications",
+      "secret": "risk-engine-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "hardware-service-worker",
+      "chart": "greenguard-service",
+      "profile": "hardware-service-worker",
+      "image": "hardware-service",
+      "phase": "applications",
+      "secret": "hardware-service-config",
+      "health": null
+    },
+    {
+      "name": "eventbridge-bridge",
+      "chart": "greenguard-service",
+      "profile": "eventbridge-bridge",
+      "image": "eventbridge-bridge",
+      "phase": "applications",
+      "secret": "eventbridge-bridge-config",
+      "health": null
+    },
+    {
+      "name": "saga-api",
+      "chart": "greenguard-service",
+      "profile": "saga-api",
+      "image": "saga-orchestrator",
+      "phase": "applications",
+      "secret": "saga-api-config",
+      "health": "tcp:8092"
+    },
+    {
+      "name": "saga-worker",
+      "chart": "greenguard-service",
+      "profile": "saga-worker",
+      "image": "saga-orchestrator",
+      "phase": "applications",
+      "secret": "saga-worker-config",
+      "health": null
+    },
+    {
+      "name": "tenant-control-plane",
+      "chart": "greenguard-service",
+      "profile": "tenant-control-plane",
+      "image": "tenant-control-plane",
+      "phase": "applications",
+      "secret": "tenant-control-plane-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "billing-service",
+      "chart": "greenguard-service",
+      "profile": "billing-service",
+      "image": "billing-service",
+      "phase": "applications",
+      "secret": "billing-service-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "notification-service",
+      "chart": "greenguard-service",
+      "profile": "notification-service",
+      "image": "notification-service",
+      "phase": "applications",
+      "secret": "notification-service-config",
+      "health": "/readyz/notification-history"
+    },
+    {
+      "name": "jobs-worker",
+      "chart": "greenguard-service",
+      "profile": "jobs-worker",
+      "image": "jobs-worker",
+      "phase": "applications",
+      "secret": "jobs-worker-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "cassandra-writer",
+      "chart": "greenguard-service",
+      "profile": "cassandra-writer",
+      "image": "cassandra-writer",
+      "phase": "applications",
+      "secret": "cassandra-writer-config",
+      "health": "/readyz"
+    },
+    {
+      "name": "search-indexer",
+      "chart": "greenguard-service",
+      "profile": "search-indexer",
+      "image": "search-indexer",
+      "phase": "applications",
+      "secret": "search-indexer-config",
+      "health": null
+    },
+    {
+      "name": "device-saga-worker",
+      "chart": "greenguard-service",
+      "profile": "device-saga-worker",
+      "image": "device-service",
+      "phase": "applications",
+      "secret": "device-service-config",
+      "kafkaPrincipal": "device-service",
+      "health": null
+    },
+    {
+      "name": "device-tenant-projector",
+      "chart": "greenguard-service",
+      "profile": "device-tenant-projector",
+      "image": "device-service",
+      "phase": "applications",
+      "secret": "device-service-config",
+      "kafkaPrincipal": "device-service",
+      "health": null
+    },
+    {
+      "name": "inventory-entitlement-projector",
+      "chart": "greenguard-service",
+      "profile": "inventory-entitlement-projector",
+      "image": "device-service",
+      "phase": "applications",
+      "secret": "device-service-config",
+      "kafkaPrincipal": "device-service",
+      "health": null
+    },
+    {
+      "name": "telemetry-entitlement-projector",
+      "chart": "greenguard-service",
+      "profile": "telemetry-entitlement-projector",
+      "image": "telemetry-ingest",
+      "phase": "applications",
+      "secret": "telemetry-ingest-config",
+      "kafkaPrincipal": "telemetry-ingest",
+      "health": null
+    },
+    {
+      "name": "control-entitlement-projector",
+      "chart": "greenguard-service",
+      "profile": "control-entitlement-projector",
+      "image": "tenant-control-plane",
+      "phase": "applications",
+      "secret": "tenant-control-plane-config",
+      "kafkaPrincipal": "tenant-control-plane",
+      "health": null
+    },
+    {
+      "name": "read-entitlement-projector",
+      "chart": "greenguard-service",
+      "profile": "read-entitlement-projector",
+      "image": "read-api",
+      "phase": "applications",
+      "secret": "read-api-config",
+      "kafkaPrincipal": "read-api",
+      "health": null
+    },
+    {
+      "name": "entitlement-heartbeat",
+      "chart": "greenguard-service",
+      "profile": "entitlement-heartbeat",
+      "image": "device-service",
+      "phase": "applications",
+      "secret": "billing-service-config",
+      "kafkaPrincipal": "billing-service",
+      "health": null
+    },
+    {
+      "name": "notification-contacts-projector",
+      "chart": "greenguard-service",
+      "profile": "notification-contacts-projector",
+      "image": "notification-service",
+      "phase": "applications",
+      "secret": "notification-contacts-projector-config",
+      "kafkaPrincipal": "notification-service",
+      "health": "/readyz"
+    }
   ],
   "blockingGaps": [
     "Terraform owns seven locally archived controller releases with checked SHA-256 locks and an optional GitOps root, but the default private EKS API is unreachable from an external Terraform runner; live CRD/webhook/application health remain unproven",

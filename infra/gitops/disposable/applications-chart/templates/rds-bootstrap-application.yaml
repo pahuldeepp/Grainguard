@@ -18,6 +18,11 @@ spec:
     repoURL: {{ .Values.repositoryUrl | quote }}
     targetRevision: {{ .Values.revision | quote }}
     path: infra/gitops/disposable/rds-bootstrap-chart
+{{- if .Values.dataPlane.enabled }}
+    helm:
+      valuesObject:
+        rdsHost: {{ .Values.dataPlane.rdsHost | quote }}
+{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: greenguard

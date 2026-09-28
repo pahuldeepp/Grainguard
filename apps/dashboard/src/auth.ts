@@ -59,6 +59,10 @@ export function oidcConfiguration() {
     // PKCE verifier/state/nonce stay in sessionStorage for the redirect round trip.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
     stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
+    // The dashboard uses only signed ID-token claims (issuer/sub/session).
+    // Avoid a separate UserInfo fetch whose provider origin might be omitted
+    // from the constrained disposable CloudFront CSP.
+    loadUserInfo: false,
     automaticSilentRenew: false,
   } as const;
 }

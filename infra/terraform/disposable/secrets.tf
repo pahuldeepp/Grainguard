@@ -1,18 +1,16 @@
-# Create containers for approved secret values only. External Secrets can
-# later sync them into the cluster; values are written out of band and never
-# enter Terraform state. A zero-day recovery window requests immediate deletion
-# for this disposable environment during terraform destroy.
+# Terraform owns approved containers and runtime-secret versions. A zero-day
+# recovery window requests immediate deletion for this disposable environment.
 resource "aws_secretsmanager_secret" "runtime" {
   for_each = var.secret_names
 
   name                    = "greenguard/${var.environment}/${each.value}"
   recovery_window_in_days = 0
 
-  tags = { Cell = var.cluster_name }
+  tags = { Cell = var.cluster_name, RuntimeSecretOwner = "greenguard-disposable-secret-sync" }
 }
 
 variable "secret_names" {
-  description = "Approved secret names to create, excluding values. Values must be written through an operator secret workflow."
+  description = "Approved secret container names; runtime_secret_values supplies Terraform-owned values."
   type        = set(string)
   default     = []
   validation {

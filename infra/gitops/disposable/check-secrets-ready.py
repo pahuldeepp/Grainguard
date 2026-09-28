@@ -76,7 +76,15 @@ def expected_secrets(args):
         raise RuntimeError("RDS master AWSCURRENT version is missing")
 
     releases = json.loads(CONTRACT.read_text())["releases"]
-    runtime_secrets = {release["secret"]: release["name"] for release in releases if release["name"] != "dashboard"}
+    runtime_secrets = {}
+    for release in releases:
+        if release["name"] == "dashboard":
+            continue
+        secret = release["secret"]
+        principal = release.get("kafkaPrincipal", release["name"])
+        if secret in runtime_secrets and runtime_secrets[secret] != principal:
+            raise ValueError(f"{secret}: runtime Secret is assigned to conflicting Kafka principals")
+        runtime_secrets[secret] = principal
     names = sorted(runtime_secrets)
     role_keys = set(re.findall(r"^\\getenv\s+\S+\s+(\S+)\s*$", SQL.read_text(), re.MULTILINE))
     if not role_keys:
@@ -112,10 +120,24 @@ def expected_secrets(args):
             if re.search(r'["\\\r\n]', source["KAFKA_SASL_PASSWORD"]):
                 raise ValueError(f"{name}: Kafka password contains JAAS syntax characters")
             if name == "notification-service-config":
+                if not source.get("KAFKA_BROKERS"):
+                    raise ValueError(f"{name}: Kafka bootstrap brokers are required")
                 if not source.get("SCHEMA_REGISTRY_USERNAME") or not source.get("SCHEMA_REGISTRY_PASSWORD"):
                     raise ValueError(f"{name}: Schema Registry Basic credentials are required")
                 if source.get("SCHEMA_REGISTRY_URL") != "https://schema-registry.greenguard.svc.cluster.local:8081":
                     raise ValueError(f"{name}: Schema Registry URL must use the verified in-cluster HTTPS endpoint")
+            if name == "notification-contacts-projector-config":
+                expected_keys = {
+                    "KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD",
+                    "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD",
+                    "NOTIFICATION_STATE_TABLE", "AWS_REGION",
+                }
+                if set(source) != expected_keys:
+                    raise ValueError(f"{name}: exact least-privilege Kafka, Registry and DynamoDB keys are required")
+                if source.get("KAFKA_SASL_USERNAME") != "notification-service":
+                    raise ValueError(f"{name}: Kafka identity must remain notification-service")
+                if not source.get("NOTIFICATION_STATE_TABLE") or not source.get("AWS_REGION"):
+                    raise ValueError(f"{name}: Terraform-derived DynamoDB table and region are required")
             if name == "hardware-service-config":
                 if source.get("MQTT_USERNAME") != "greenguard-hardware-worker" or not source.get("MQTT_PASSWORD"):
                     raise ValueError(f"{name}: exact MQTT worker username and password are required")

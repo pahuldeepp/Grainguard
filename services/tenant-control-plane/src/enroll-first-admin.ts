@@ -9,33 +9,36 @@ import {
 } from "./domain/store.js";
 import { currentTraceparent } from "./trace.js";
 
-export interface CognitoEnrollment {
+export interface FirstAdminEnrollment {
   issuer: string;
   subject: string;
   tenantId: string;
   role: "admin";
 }
 
-// Bootstrap is deliberately limited to the first admin of a NEW tenant. Existing
-// tenants must use the authenticated invitation workflow; a CLI cannot grant a
-// role merely because its operator knows an issuer and subject.
-export function validateCognitoEnrollment(
+// Bootstrap is deliberately limited to the first admin of a NEW tenant. The
+// caller must supply an access token verified against the configured OIDC
+// issuer/JWKS/audience before these claims reach this database operation.
+export function validateFirstAdminEnrollment(
   input: Record<string, unknown>,
-): CognitoEnrollment {
+): FirstAdminEnrollment {
   const { issuer, subject, tenantId, role } = input;
   if (
     typeof issuer !== "string" ||
-    !/^https:\/\/cognito-idp\.[a-z0-9-]+\.amazonaws\.com\/[a-z0-9-]+_[A-Za-z0-9]+$/.test(
-      issuer,
-    )
+    !/^https:\/\/[^/?#@\s]+(?:\/[^?#\s]*)?$/.test(issuer) ||
+    issuer.length > 512
   )
-    throw new Error(
-      "ENROLL_ISSUER must be an exact Cognito user-pool issuer URL",
-    );
-  if (typeof subject !== "string" || !UUID.test(subject))
-    throw new Error(
-      "ENROLL_SUBJECT must be the verified Cognito user's lowercase UUID sub",
-    );
+    throw new Error("ENROLL_ISSUER must be the exact configured HTTPS OIDC issuer");
+  // OIDC `sub` is provider-defined. Auth0, Dex and many other providers use
+  // non-UUID subjects, so accept bounded opaque values but reject whitespace
+  // and control characters before using it as an identity key.
+  if (
+    typeof subject !== "string" ||
+    !subject ||
+    subject.length > 512 ||
+    /[\s\u0000-\u001f\u007f]/.test(subject)
+  )
+    throw new Error("ENROLL_SUBJECT must be the verified, bounded OIDC sub claim");
   if (typeof tenantId !== "string" || !UUID.test(tenantId))
     throw new Error("ENROLL_TENANT_ID must be a lowercase UUID");
   if (role !== "admin")
@@ -43,9 +46,9 @@ export function validateCognitoEnrollment(
   return { issuer, subject, tenantId, role };
 }
 
-export async function enrollFirstCognitoAdmin(
+export async function enrollFirstAdmin(
   db: Db,
-  input: CognitoEnrollment,
+  input: FirstAdminEnrollment,
 ): Promise<"created" | "existing"> {
   const current = await lookupMembership(db, input.issuer, input.subject);
   if (current && current.tenantId !== input.tenantId)
@@ -54,7 +57,7 @@ export async function enrollFirstCognitoAdmin(
   const seedActor = nameId("identity", "greenguard", "seed");
   return inScope(db, { tenantId: input.tenantId }, async (tx) => {
     const cmd = {
-      idempotencyKey: "cognito-first-admin",
+      idempotencyKey: "oidc-first-admin",
       correlationId: randomUUID(),
       traceparent: currentTraceparent(),
     };

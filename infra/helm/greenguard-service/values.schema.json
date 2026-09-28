@@ -3,6 +3,7 @@
   "type": "object",
   "required": ["image", "replicaCount", "terminationGracePeriodSeconds", "autoscaling", "pdb", "service", "container", "volumes", "probes", "resources", "scheduling", "networkPolicy", "mesh", "observability"],
   "properties": {
+    "postgresReadReplica": { "type": "object", "properties": { "caSecretName": { "type": "string", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" } } },
     "image": { "type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$" },
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },

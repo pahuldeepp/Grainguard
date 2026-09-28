@@ -1,0 +1,11 @@
+Command: ruby infra/terraform/disposable/identity-contract-test.rb
+
+Run options: --seed 54258
+
+# Running:
+
+......
+
+Finished in 0.001611s, 3724.3948 runs/s, 60211.0490 assertions/s.
+
+6 runs, 97 assertions, 0 failures, 0 errors, 0 skips

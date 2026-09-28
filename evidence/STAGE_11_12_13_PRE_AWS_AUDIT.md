@@ -1,5 +1,10 @@
 # Stage 11–13 pre-AWS deployment audit
 
+> **Update (2026-09-28):** For the latest offline findings, exact current
+> application/test counts, and remaining blockers, see
+> [the audit update](STAGE_11_12_13_AUDIT_UPDATE_2026-09-28.md). Historical
+> counts and configuration descriptions below reflect earlier audit points.
+
 Status: **open**. This is a source and local-evidence audit, not an AWS or
 physical-iPhone acceptance record. No real `terraform apply` is authorized by
 this record. The deployment gap register is in

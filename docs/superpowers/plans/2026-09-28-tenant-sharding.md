@@ -33,7 +33,7 @@
 ## File and Interface Map
 
 - `packages/read-model/src/index.ts`, `services/read-api/src/{backends.ts,main.ts,replicas.ts,cache.ts}`: PostgreSQL read transactions and replica selection. Add a replica provider interface exposing `acquire(minimumWatermark, deadline) -> ReadConnection` and bounded readiness/health reporting.
-- `services/tenant-control-plane/prisma/schema.prisma`, `prisma/migrations/**`, `src/domain/**`, `src/api/**`: authoritative shard registry, placement CAS, route lookup, move ledger and admission lease API. Stable contract returns `{tenantId, shardId, placementEpoch, state, expiresAt}`.
+- `services/tenant-control-plane/prisma/schema.prisma`, `prisma/migrations/**`, `src/domain/**`, `src/api/**`: authoritative shard registry, placement CAS, route lookup, move ledger and admission lease API. Stable contract returns `{tenantId, shardId, shardIncarnation, placementEpoch, state, expiresAt}`; bootstrap uses the same registered incarnation.
 - `packages/go-common/**`, `packages/read-model/**`, Go services' `tenant.go`, and relevant Python tenant DB modules: shared write admission requiring `{tenantId, shardId, placementEpoch, admissionClass}` on the same transaction/connection as business SQL.
 - `infra/compose/**`, `infra/gitops/disposable/rds-bootstrap-chart/**`, `infra/kafka/connectors/**`, `infra/gitops/disposable/connector-registration/**`: four independent local bundles and source-scoped CDC configuration.
 - Owner service migrations and runtime services: durable ownership rows/triggers in every tenant-owned owner DB; projectors, workers, exporters, notifications, hardware, saga and provider intent paths resolve and fence placement.
@@ -41,7 +41,7 @@
 - New `services/tenant-migrator/**` or a bounded control-plane worker (decision in Task 5 after inspecting runtime conventions): durable move state machine and receipts.
 - `infra/terraform/disposable/{read-replicas.tf,gitops.tf}`, `infra/helm/greenguard-service/**`, `docs/runbooks/**`, `evidence/**`: disposable AWS configuration, health and operational evidence.
 
-## Task 1: Make the single replica safe and independently healthy
+## Task 1: Make each shard's initial replica safe and independently healthy
 
 **Files:**
 - Modify: `services/read-api/src/replicas.ts`, `services/read-api/src/main.ts`, `services/read-api/src/backends.ts`

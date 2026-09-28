@@ -1,0 +1,270 @@
+ Volume greenguard-sharding-final_postgres-s3-data Creating
+ Volume greenguard-sharding-final_postgres-s4-data Creating
+ Volume greenguard-sharding-final_postgres-s1-data Creating
+ Volume greenguard-sharding-final_postgres-s1-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s3-data Creating
+ Volume greenguard-sharding-final_postgres-s2-data Creating
+ Volume greenguard-sharding-final_postgres-s2-data Creating
+ Volume greenguard-sharding-final_postgres-s4-data Creating
+ Volume greenguard-sharding-final_postgres-s1-data Creating
+ Volume greenguard-sharding-final_postgres-s1-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s2-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s2-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s4-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s4-replica-data Creating
+ Network greenguard-sharding-final_default Creating
+ Network greenguard-sharding-final_default Creating
+ Volume greenguard-sharding-final_postgres-s3-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s3-replica-data Creating
+ Volume greenguard-sharding-final_postgres-s3-data Created
+ Volume greenguard-sharding-final_postgres-s3-data Created
+ Volume greenguard-sharding-final_postgres-s4-replica-data Created
+ Volume greenguard-sharding-final_postgres-s4-replica-data Created
+ Volume greenguard-sharding-final_postgres-s1-replica-data Created
+ Volume greenguard-sharding-final_postgres-s1-replica-data Created
+ Volume greenguard-sharding-final_postgres-s2-replica-data Created
+ Volume greenguard-sharding-final_postgres-s2-replica-data Created
+ Volume greenguard-sharding-final_postgres-s3-replica-data Created
+ Volume greenguard-sharding-final_postgres-s3-replica-data Created
+ Volume greenguard-sharding-final_postgres-s4-data Created
+ Volume greenguard-sharding-final_postgres-s4-data Created
+ Volume greenguard-sharding-final_postgres-s2-data Created
+ Volume greenguard-sharding-final_postgres-s2-data Created
+ Volume greenguard-sharding-final_postgres-s1-data Created
+ Volume greenguard-sharding-final_postgres-s1-data Created
+ Network greenguard-sharding-final_default Created
+ Network greenguard-sharding-final_default Created
+ Container greenguard-sharding-final-postgres-s1-1 Creating
+ Container greenguard-sharding-final-postgres-s4-1 Creating
+ Container greenguard-sharding-final-postgres-s3-1 Creating
+ Container greenguard-sharding-final-postgres-s2-1 Creating
+ Container greenguard-sharding-final-postgres-s2-1 Created
+ Container greenguard-sharding-final-postgres-s2-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s3-1 Created
+ Container greenguard-sharding-final-postgres-s3-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s4-1 Created
+ Container greenguard-sharding-final-postgres-s4-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s1-1 Created
+ Container greenguard-sharding-final-postgres-s1-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s2-replica-1 Created
+ Container greenguard-sharding-final-postgres-s3-replica-1 Created
+ Container greenguard-sharding-final-postgres-s1-replica-1 Created
+ Container greenguard-sharding-final-postgres-s4-replica-1 Created
+ Container greenguard-sharding-final-postgres-s4-1 Starting
+ Container greenguard-sharding-final-postgres-s1-1 Starting
+ Container greenguard-sharding-final-postgres-s3-1 Starting
+ Container greenguard-sharding-final-postgres-s2-1 Starting
+ Container greenguard-sharding-final-postgres-s4-1 Started
+ Container greenguard-sharding-final-postgres-s4-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Started
+ Container greenguard-sharding-final-postgres-s1-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Started
+ Container greenguard-sharding-final-postgres-s3-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-1 Started
+ Container greenguard-sharding-final-postgres-s2-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s2-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s3-replica-1 Started
+ Container greenguard-sharding-final-postgres-s2-replica-1 Started
+ Container greenguard-sharding-final-postgres-s4-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s1-1 Healthy
+ Container greenguard-sharding-final-postgres-s1-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s4-replica-1 Started
+ Container greenguard-sharding-final-postgres-s1-replica-1 Started
+ Container greenguard-sharding-final-postgres-s1-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Waiting
+ Container greenguard-sharding-final-postgres-s4-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s4-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-1 Healthy
+ Container greenguard-sharding-final-postgres-s1-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s1-replica-1 Healthy
+
+Completion-marker and streaming/replay health restart validation:
+ Network greenguard-sharding-final_default Creating
+ Network greenguard-sharding-final_default Creating
+ Network greenguard-sharding-final_default Created
+ Network greenguard-sharding-final_default Created
+ Container greenguard-sharding-final-postgres-s4-1 Creating
+ Container greenguard-sharding-final-postgres-s1-1 Creating
+ Container greenguard-sharding-final-postgres-s2-1 Creating
+ Container greenguard-sharding-final-postgres-s3-1 Creating
+ Container greenguard-sharding-final-postgres-s2-1 Created
+ Container greenguard-sharding-final-postgres-s3-1 Created
+ Container greenguard-sharding-final-postgres-s1-1 Created
+ Container greenguard-sharding-final-postgres-s4-1 Created
+ Container greenguard-sharding-final-postgres-s1-1 Starting
+ Container greenguard-sharding-final-postgres-s3-1 Starting
+ Container greenguard-sharding-final-postgres-s4-1 Starting
+ Container greenguard-sharding-final-postgres-s2-1 Starting
+ Container greenguard-sharding-final-postgres-s1-1 Started
+ Container greenguard-sharding-final-postgres-s3-1 Started
+ Container greenguard-sharding-final-postgres-s4-1 Started
+ Container greenguard-sharding-final-postgres-s2-1 Started
+ Container greenguard-sharding-final-postgres-s2-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Waiting
+ Container greenguard-sharding-final-postgres-s4-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-1 Healthy
+psql:/bootstrap/init-databases.sql:22: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/bootstrap/init-databases.sql:45: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+ pg_create_physical_replication_slot
+-------------------------------------
+(0 rows)
+
+psql:/docker-entrypoint-initdb.d/001-shard.sql:15: NOTICE:  relation "greenguard_shard_identity" already exists, skipping
+ ?column?
+----------
+        1
+(1 row)
+
+ pg_reload_conf
+----------------
+ t
+(1 row)
+
+psql:/bootstrap/init-databases.sql:22: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/bootstrap/init-databases.sql:45: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+ pg_create_physical_replication_slot
+-------------------------------------
+(0 rows)
+
+psql:/docker-entrypoint-initdb.d/001-shard.sql:15: NOTICE:  relation "greenguard_shard_identity" already exists, skipping
+ ?column?
+----------
+        1
+(1 row)
+
+ pg_reload_conf
+----------------
+ t
+(1 row)
+
+psql:/bootstrap/init-databases.sql:22: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/bootstrap/init-databases.sql:45: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+ pg_create_physical_replication_slot
+-------------------------------------
+(0 rows)
+
+psql:/docker-entrypoint-initdb.d/001-shard.sql:15: NOTICE:  relation "greenguard_shard_identity" already exists, skipping
+ ?column?
+----------
+        1
+(1 row)
+
+ pg_reload_conf
+----------------
+ t
+(1 row)
+
+psql:/bootstrap/init-databases.sql:22: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/bootstrap/init-databases.sql:45: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+ pg_create_physical_replication_slot
+-------------------------------------
+(0 rows)
+
+psql:/docker-entrypoint-initdb.d/001-shard.sql:15: NOTICE:  relation "greenguard_shard_identity" already exists, skipping
+ ?column?
+----------
+        1
+(1 row)
+
+ pg_reload_conf
+----------------
+ t
+(1 row)
+
+ Container greenguard-sharding-final-postgres-s2-1 Running
+ Container greenguard-sharding-final-postgres-s3-1 Running
+ Container greenguard-sharding-final-postgres-s4-1 Running
+ Container greenguard-sharding-final-postgres-s1-1 Running
+ Container greenguard-sharding-final-postgres-s4-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s2-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s3-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s1-replica-1 Creating
+ Container greenguard-sharding-final-postgres-s4-replica-1 Created
+ Container greenguard-sharding-final-postgres-s1-replica-1 Created
+ Container greenguard-sharding-final-postgres-s2-replica-1 Created
+ Container greenguard-sharding-final-postgres-s3-replica-1 Created
+ Container greenguard-sharding-final-postgres-s4-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Waiting
+ Container greenguard-sharding-final-postgres-s4-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s3-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s1-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s1-replica-1 Starting
+ Container greenguard-sharding-final-postgres-s4-replica-1 Started
+ Container greenguard-sharding-final-postgres-s3-replica-1 Started
+ Container greenguard-sharding-final-postgres-s2-replica-1 Started
+ Container greenguard-sharding-final-postgres-s1-replica-1 Started
+ Container greenguard-sharding-final-postgres-s4-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-1 Waiting
+ Container greenguard-sharding-final-postgres-s4-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s1-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-replica-1 Waiting
+ Container greenguard-sharding-final-postgres-s3-1 Waiting
+ Container greenguard-sharding-final-postgres-s2-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-1 Healthy
+ Container greenguard-sharding-final-postgres-s1-1 Healthy
+ Container greenguard-sharding-final-postgres-s2-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s1-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s4-replica-1 Healthy
+ Container greenguard-sharding-final-postgres-s3-replica-1 Healthy
+
+Final fixture shutdown (volumes retained):
+ Container greenguard-sharding-final-postgres-s2-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s4-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s3-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s1-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s2-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s2-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s2-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s2-1 Stopping
+ Container greenguard-sharding-final-postgres-s4-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s4-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s4-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s4-1 Stopping
+ Container greenguard-sharding-final-postgres-s1-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s1-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s3-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s3-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s1-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s1-1 Stopping
+ Container greenguard-sharding-final-postgres-s3-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s3-1 Stopping
+ Container greenguard-sharding-final-postgres-s2-1 Stopped
+ Container greenguard-sharding-final-postgres-s2-1 Removing
+ Container greenguard-sharding-final-postgres-s4-1 Stopped
+ Container greenguard-sharding-final-postgres-s4-1 Removing
+ Container greenguard-sharding-final-postgres-s2-1 Removed
+ Container greenguard-sharding-final-postgres-s4-1 Removed
+ Container greenguard-sharding-final-postgres-s1-1 Stopped
+ Container greenguard-sharding-final-postgres-s1-1 Removing
+ Container greenguard-sharding-final-postgres-s3-1 Stopped
+ Container greenguard-sharding-final-postgres-s3-1 Removing
+ Container greenguard-sharding-final-postgres-s1-1 Removed
+ Container greenguard-sharding-final-postgres-s3-1 Removed
+ Network greenguard-sharding-final_default Removing
+ Network greenguard-sharding-final_default Removed

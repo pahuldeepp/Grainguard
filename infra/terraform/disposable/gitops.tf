@@ -41,6 +41,36 @@ variable "deployment_image_digests" {
   }
 }
 
+variable "migration_image_digests" {
+  description = "Exactly eleven immutable migration-target images, separately built from runtime images. Keys are control, billing, telemetry, projection, jobs, saga, hardware, inventory, alerts, risk and notifications."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition     = alltrue([for digest in values(var.migration_image_digests) : can(regex("^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$", digest))])
+    error_message = "Every owner migration image must be a full immutable OCI digest reference."
+  }
+}
+
+variable "migration_gate_image_digest" {
+  description = "Digest-pinned kubectl image with /bin/sh, used only by the read-only owner migration completion gate."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.migration_gate_image_digest == "" || can(regex("^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$", var.migration_gate_image_digest))
+    error_message = "migration_gate_image_digest must be a full immutable OCI digest reference."
+  }
+}
+
+variable "migration_sql_image_digest" {
+  description = "Digest-pinned PostgreSQL client image with psql and bash, used only by owner migration and SQL acceptance Jobs."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.migration_sql_image_digest == "" || can(regex("^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$", var.migration_sql_image_digest))
+    error_message = "migration_sql_image_digest must be a full immutable OCI digest reference."
+  }
+}
+
 variable "observability_image_digests" {
   description = "Exactly five immutable image references for the disposable OTel Collector, Prometheus, Grafana, Tempo and Loki stack."
   type        = map(string)
@@ -104,22 +134,36 @@ locals {
     for release in local.deployment_contract.releases : release.secret if release.name != "dashboard"
   ])
   required_bootstrap_secret_names = toset(["greenguard-rds-bootstrap", "greenguard-rds-ca"])
-  required_observability_images   = toset(["otel-collector", "prometheus", "grafana", "tempo", "loki"])
-  required_data_plane_images      = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"])
-  required_data_plane_secrets     = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls", "greenguard-mqtt-broker"])
-  # These are public OIDC identifiers, never credentials. Sensitive runtime
-  # inputs (database URLs, CONTROL_LOOKUP_TOKEN, broker credentials, etc.)
-  # remain in the per-release Kubernetes Secret named by contract.json.
-  cognito_verifier_env = [
-    { name = "AUTH_TOKEN_MODE", value = "cognito-access" },
-    { name = "AUTH_ISSUER", value = local.cognito_issuer },
-    { name = "AUTH_JWKS_URL", value = "${local.cognito_issuer}/.well-known/jwks.json" },
-    { name = "AUTH_COGNITO_CLIENT_IDS", value = join(",", [aws_cognito_user_pool_client.web.id, aws_cognito_user_pool_client.mobile.id]) },
-    # Explicitly clear any legacy audience inherited from a Secret. Cognito
-    # access tokens without resource binding have no aud claim.
-    { name = "AUTH_AUDIENCE", value = "" },
-  ]
-  cognito_membership_env = concat(local.cognito_verifier_env, [
+  migration_owner_names           = toset(["control", "billing", "telemetry", "projection", "jobs", "saga", "hardware", "inventory", "alerts", "risk", "notifications"])
+  required_migration_secret_names = toset(concat(
+    ["greenguard-control-migration", "greenguard-billing-migration"],
+    flatten([for shard_id in local.postgres_shard_ids : [for owner in ["telemetry", "projection", "jobs", "saga", "hardware", "inventory", "alerts", "risk", "notifications"] : "greenguard-${shard_id}-${owner}-migration"]])
+  ))
+  required_observability_images = toset(["otel-collector", "prometheus", "grafana", "tempo", "loki"])
+  required_data_plane_images    = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"])
+  required_data_plane_secrets   = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls", "greenguard-mqtt-broker"])
+  shard_registry_by_release = {
+    "device-service"                  = { service = "device-service", secret = "device-service", env = "SHARD_REGISTRY_FILE" }
+    "telemetry-ingest"                = { service = "telemetry-ingest", secret = "telemetry-ingest", env = "SHARD_REGISTRY_FILE" }
+    "projection-builder"              = { service = "projection-builder", secret = "projection-builder", env = "SHARD_REGISTRY_FILE" }
+    "risk-engine"                     = { service = "risk-engine", secret = "risk-engine", env = "SHARD_REGISTRY_FILE" }
+    "workflow-alerts"                 = { service = "workflow-alerts", secret = "workflow-alerts", env = "SHARD_REGISTRY_FILE" }
+    "jobs-worker"                     = { service = "jobs-worker", secret = "jobs-worker", env = "SHARD_REGISTRY_FILE" }
+    "notification-service"            = { service = "notification-service", secret = "notification-service", env = "SHARD_REGISTRY_FILE" }
+    "saga-api"                        = { service = "saga-orchestrator", secret = "saga-orchestrator", env = "SHARD_REGISTRY_FILE" }
+    "saga-worker"                     = { service = "saga-orchestrator", secret = "saga-orchestrator", env = "SHARD_REGISTRY_FILE" }
+    "hardware-service-worker"         = { service = "hardware-service", secret = "hardware-service", env = "SHARD_REGISTRY_FILE" }
+    "tenant-control-plane"            = { service = "device-service", secret = "device-service", env = "INVENTORY_SHARD_REGISTRY_FILE" }
+    "read-api"                        = { service = "read-api", secret = "read-api", env = "READ_SHARD_REGISTRY_FILE" }
+    "device-saga-worker"              = { service = "device-service", secret = "device-service", env = "SHARD_REGISTRY_FILE" }
+    "device-tenant-projector"         = { service = "device-service", secret = "inventory-projector", env = "SHARD_REGISTRY_FILE" }
+    "inventory-entitlement-projector" = { service = "device-service", secret = "inventory-projector", env = "SHARD_REGISTRY_FILE" }
+    "telemetry-entitlement-projector" = { service = "telemetry-ingest", secret = "telemetry-entitlement-projector", env = "SHARD_REGISTRY_FILE" }
+    "read-entitlement-projector"      = { service = "read-entitlement-projector", secret = "read-entitlement-projector", env = "SHARD_REGISTRY_FILE" }
+  }
+  # Public identifiers come from the selected existing OIDC provider or the
+  # explicitly opted-in disposable Cognito pool. Credentials remain in Secrets.
+  oidc_membership_env = concat(local.oidc_verifier_env, [
     { name = "AUTH_MEMBERSHIP_SOURCE", value = "control-plane" },
     { name = "CONTROL_PLANE_URL", value = "http://tenant-control-plane.greenguard.svc.cluster.local:3010" },
   ])
@@ -139,38 +183,50 @@ locals {
     name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
     value = "http://otel-collector.greenguard.svc.cluster.local:4318"
   }]
-  application_releases = [for release in local.deployment_contract.releases : {
-    name        = release.name
-    chart       = release.chart
-    profile     = try(release.profile, null)
-    imageDigest = lookup(var.deployment_image_digests, release.image, "")
+  application_release_inputs = [for release in local.deployment_contract.releases : merge(release, {
+    # A missing profile resolves through try() to a path that does not exist,
+    # yielding {} without a conditional between structurally different types.
+    baseValues    = try(yamldecode(file("${path.module}/../../helm/${release.chart}/values/${try(release.profile, "no-profile")}.yaml")), {})
+    shardRegistry = lookup(local.shard_registry_by_release, release.name, null)
+  })]
+  application_releases = [for release in local.application_release_inputs : {
+    name          = release.name
+    chart         = release.chart
+    profile       = try(release.profile, null)
+    baseValues    = release.baseValues
+    shardRegistry = release.shardRegistry
+    imageDigest   = lookup(var.deployment_image_digests, release.image, "")
     extraValues = merge(
       { for key, value in {
-        publicOidc = {
-          enabled        = true
-          authority      = local.cognito_issuer
-          clientId       = aws_cognito_user_pool_client.web.id
-          tokenMode      = "cognito-access"
-          audience       = ""
-          resource       = ""
-          connectOrigins = [local.cognito_login]
-        }
-      } : key => value if release.name == "dashboard" },
+        publicOidc = local.oidc_dashboard_values.publicOidc
+      } : key => value if release.name == "dashboard" && local.oidc_dashboard_values != null },
       { for key, value in {
-        env = concat(local.cognito_membership_env, [
+        env = concat(local.oidc_membership_env, [
           { name = "KAFKA_REQUIRE_TLS", value = "true" },
           { name = "KAFKA_SECURITY_PROTOCOL", value = "SASL_SSL" },
           { name = "KAFKA_SASL_MECHANISM", value = "PLAIN" },
           { name = "KAFKA_TLS_CA_FILE", value = "/etc/greenguard/kafka/ca.crt" },
         ])
-        envFrom = [{ secretRef = { name = release.secret } }]
-        kafka   = { caSecretName = "greenguard-kafka-ca" }
+        envFrom             = [{ secretRef = { name = release.secret } }]
+        postgresReadReplica = { caSecretName = "greenguard-rds-ca" }
+        kafka               = { caSecretName = "greenguard-kafka-ca" }
       } : key => value if release.name == "bff" },
       { for key, value in {
         container = merge(
-          { envFrom = [{ secretRef = { name = release.secret } }] },
+          try(release.baseValues.container, {}),
+          { envFrom = concat(try(release.baseValues.container.envFrom, []), [{ secretRef = { name = release.secret } }]) },
+          { volumeMounts = concat(
+            try(release.baseValues.container.volumeMounts, []),
+            release.shardRegistry != null ? [{ name = "shard-registry", mountPath = "/run/greenguard-shards", readOnly = true }] : [],
+            release.name == "hardware-service-worker" ? [{ name = "mqtt-ca", mountPath = "/etc/greenguard/mqtt", readOnly = true }] : []
+          ) },
           { env = concat(
-            contains(local.membership_verifier_releases, release.name) ? local.cognito_membership_env : release.name == "tenant-control-plane" ? local.cognito_verifier_env : [],
+            try(release.baseValues.container.env, []),
+            contains(local.membership_verifier_releases, release.name) ? (release.shardRegistry != null ? concat(local.oidc_verifier_env, [{ name = "AUTH_MEMBERSHIP_SOURCE", value = "control-plane" }]) : local.oidc_membership_env) : release.name == "tenant-control-plane" ? local.oidc_verifier_env : [],
+            release.shardRegistry != null ? [
+              { name = "CONTROL_PLANE_URL", value = "http://tenant-control-plane.greenguard.svc.cluster.local:3010" },
+              { name = "CONTROL_PLANE_MESH_MTLS", value = "true" },
+            ] : [],
             contains(local.otel_http_releases, release.name) ? local.otel_http_env : [],
             contains(local.mesh_http_releases, release.name) ? [{ name = "GG_MESH_INTERNAL_HTTP", value = "1" }] : [],
             [
@@ -179,16 +235,23 @@ locals {
               { name = "KAFKA_SASL_MECHANISM", value = "PLAIN" },
               { name = "KAFKA_TLS_CA_FILE", value = "/etc/greenguard/kafka/ca.crt" },
             ],
+            release.shardRegistry != null ? [
+              { name = release.shardRegistry.env, value = "/run/greenguard-shards/registry.json" },
+            ] : [],
             release.name == "hardware-service-worker" ? [
               { name = "MQTT_BROKER_URL", value = "tls://mqtt.greenguard.svc.cluster.local:8883" },
               { name = "MQTT_CA_FILE", value = "/etc/greenguard/mqtt/ca.crt" },
               { name = "MQTT_CLIENT_ID", value = "greenguard-hardware-worker" },
             ] : []
           ) },
-          release.name == "hardware-service-worker" ? { volumeMounts = [{ name = "mqtt-ca", mountPath = "/etc/greenguard/mqtt", readOnly = true }] } : {}
         )
-        kafka   = { caSecretName = "greenguard-kafka-ca" }
-        volumes = release.name == "hardware-service-worker" ? [{ name = "mqtt-ca", secret = { secretName = "greenguard-mqtt-broker", items = [{ key = "ca.crt", path = "ca.crt" }] } }] : []
+        postgresReadReplica = { caSecretName = "greenguard-rds-ca" }
+        kafka               = { caSecretName = "greenguard-kafka-ca" }
+        volumes = concat(
+          try(release.baseValues.volumes, []),
+          release.name == "hardware-service-worker" ? [{ name = "mqtt-ca", secret = { secretName = "greenguard-mqtt-broker", items = [{ key = "ca.crt", path = "ca.crt" }] } }] : [],
+          release.shardRegistry != null ? [{ name = "shard-registry", secret = { secretName = "greenguard-shard-routing-${release.shardRegistry.secret}", defaultMode = 288, items = [{ key = "registry.json", path = "registry.json" }] } }] : []
+        )
       } : key => value if release.chart == "greenguard-service" },
       { for key, value in { mesh = { enabled = true, strictMtls = true } } : key => value if contains(
         toset(["greenguard-dashboard", "greenguard-bff", "greenguard-service"]),
@@ -209,7 +272,10 @@ locals {
           scrapePort        = 15020
           allowedPrincipals = []
         }
-      } }
+      } },
+      { for key, value in { networkPolicy = {
+        egressCIDRs = var.enable_application_tree ? [for cidr in data.aws_prefix_list.dynamodb[0].cidr_blocks : { cidr = cidr, port = 443 }] : []
+      } } : key => value if release.name == "notification-contacts-projector" }
     )
   }]
 }
@@ -223,15 +289,44 @@ resource "helm_release" "gitops_bootstrap" {
   wait      = true
   timeout   = 900
   values = [yamlencode({
-    cell                = var.cluster_name
-    repositoryUrl       = var.gitops_repository_url
-    revision            = var.gitops_revision
-    releases            = local.application_releases
+    cell          = var.cluster_name
+    repositoryUrl = var.gitops_repository_url
+    revision      = var.gitops_revision
+    releases      = local.application_releases
+    ownerMigrations = {
+      images    = var.migration_image_digests
+      gateImage = var.migration_gate_image_digest
+      sqlImage  = var.migration_sql_image_digest
+      caSecret  = "greenguard-rds-ca"
+      scopes = merge({
+        central = {
+          rdsHost = aws_db_instance.postgres.address
+          secrets = {
+            control = "greenguard-control-migration"
+            billing = "greenguard-billing-migration"
+          }
+        }
+        }, { for shard_id, shard in aws_db_instance.shard : shard_id => {
+          rdsHost = shard.address
+          secrets = {
+            for owner in ["telemetry", "projection", "jobs", "saga", "hardware", "inventory", "alerts", "risk", "notifications"] :
+            owner => "greenguard-${shard_id}-${owner}-migration"
+          }
+      } })
+      rdsCIDRs      = [for subnet in aws_subnet.private : subnet.cidr_block]
+      apiServerCIDR = "${cidrhost(aws_eks_cluster.cell.kubernetes_network_config[0].service_ipv4_cidr, 1)}/32"
+    }
     observabilityImages = var.observability_image_digests
     dataPlane = {
       enabled = true
       rdsHost = aws_db_instance.postgres.address
       images  = var.data_plane_image_digests
+      shards = { for shard_id, shard in aws_db_instance.shard : shard_id => {
+        rdsHost             = shard.address
+        bootstrapSecret     = "greenguard-${shard_id}-rds-bootstrap"
+        pgbouncerAuthSecret = "greenguard-${shard_id}-pgbouncer-auth"
+        cdcSecret           = "greenguard-${shard_id}-cdc-credentials"
+      } }
       secrets = {
         pgbouncerAuth  = "greenguard-pgbouncer-auth"
         rdsCa          = "greenguard-rds-ca"
@@ -266,8 +361,12 @@ resource "helm_release" "gitops_bootstrap" {
       error_message = "Application tree needs an exact Git commit and one immutable digest for every and only every published image in contract.json."
     }
     precondition {
-      condition     = length(setsubtract(setunion(local.required_runtime_secret_names, local.required_bootstrap_secret_names, local.required_data_plane_secrets, toset(["grafana-admin"])), var.secret_names)) == 0
-      error_message = "Application tree needs Secrets Manager containers for runtime, bootstrap, data-plane credentials and grafana-admin; populate and materialize values out of band before deployment."
+      condition     = length(setsubtract(setunion(local.required_runtime_secret_names, local.required_bootstrap_secret_names, local.required_data_plane_secrets, local.required_migration_secret_names, toset(["grafana-admin"])), var.secret_names)) == 0
+      error_message = "Application tree needs Secrets Manager containers for runtime, bootstrap, migration, data-plane credentials and grafana-admin; Terraform must materialize complete values before deployment."
+    }
+    precondition {
+      condition     = toset(keys(var.migration_image_digests)) == local.migration_owner_names && var.migration_gate_image_digest != "" && var.migration_sql_image_digest != ""
+      error_message = "Application tree needs exactly eleven separately built immutable owner-migration images plus digest-pinned kubectl and psql tool images."
     }
     precondition {
       condition     = length(setsubtract(local.required_observability_images, toset(keys(var.observability_image_digests)))) == 0 && length(setsubtract(toset(keys(var.observability_image_digests)), local.required_observability_images)) == 0
@@ -291,5 +390,37 @@ resource "helm_release" "gitops_bootstrap" {
     }
   }
 
-  depends_on = [helm_release.argocd]
+  depends_on = [helm_release.argocd, helm_release.greenguard_namespace, terraform_data.runtime_secret_sync, aws_eks_pod_identity_association.notification_contacts_projector]
+}
+
+# Argo applies the child Applications asynchronously after this Helm release
+# installs the root Application. Keep the technical health gate separate from
+# the Helm resource so a readiness timeout does not taint/recreate bootstrap.
+resource "terraform_data" "deployed_workload_acceptance" {
+  count = var.enable_application_tree ? 1 : 0
+  input = {
+    cell_identity = {
+      account_id   = var.target_account_id
+      region       = var.aws_region
+      environment  = var.environment
+      cluster_name = var.cluster_name
+    }
+    release = {
+      gitops_revision          = var.gitops_revision
+      deployment_image_digests = var.deployment_image_digests
+    }
+  }
+  # Helm revision changes for any root Application value update, including
+  # OIDC, Secret references, shard routing and infrastructure endpoints.
+  triggers_replace = helm_release.gitops_bootstrap[0].metadata.revision
+  depends_on       = [helm_release.gitops_bootstrap]
+
+  provisioner "local-exec" {
+    command = "python3 ${path.module}/../../gitops/disposable/run-deployed-workloads.py"
+    environment = {
+      GG_DISPOSABLE_CELL_IDENTITY  = jsonencode(self.input.cell_identity)
+      GG_DISPOSABLE_RELEASE_INPUTS = jsonencode(self.input.release)
+    }
+    quiet = true
+  }
 }

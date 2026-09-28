@@ -28,22 +28,21 @@ targets; the edge is unavailable until TargetGroupBinding, Istio Gateway,
 VirtualService header routes, and healthy pod endpoints are proven live. The
 ingress gateway then uses mesh mTLS to reach strict dashboard and BFF pods.
 
-For an AWS cell with no existing production identity provider, Terraform owns
-a disposable Cognito user pool and hosted prefix domain. This keeps the
-existing OIDC Authorization Code + PKCE protocol. It registers separate public
-web and native clients. The web callback is derived from the created CloudFront
-hostname in the same Terraform graph; the native callback is the app's
-`greenguard://auth/callback`. Both clients have no secret and permit only the
-authorization code grant. Cognito user credentials and GreenGuard tenant
-memberships are **not** stored in Terraform state. An invited, verified user
-must be mapped to a tenant through GreenGuard's trusted membership store
-before tenant APIs will authorize them. A user pool alone does not create a
-usable tenant account. The account-guarded `enroll-first-admin.sh` verifies
-the invited user's status and email in the Terraform-owned pool before it
-calls the control-plane first-admin enrollment CLI. It requires a private
-operator database connection and never stores credentials in Terraform.
-See [the enrollment runbook](../../../docs/runbooks/disposable-cognito-first-admin.md)
-and [Cognito callback URI rules](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-client-apps.html).
+The default identity mode preserves the supplied OIDC provider; Cognito is an
+explicit disposable-cell opt-in only. The provider must support public web and
+native Authorization Code + PKCE clients and issue JWT access tokens for the
+configured API audience. Register the web callback from Terraform output and
+the app's `greenguard://auth/callback` with the provider. No provider secret or
+user credential is stored in Terraform. A valid login still needs an
+authoritative GreenGuard tenant membership. The account-guarded
+`enroll-first-admin.sh` verifies a signed access token against the selected
+issuer/JWKS/audience (or the explicit Cognito client allowlist), then creates
+only the first admin membership for a new tenant. It requires explicit
+operator confirmation, the exact disposable Terraform cell and matching
+current AWS account, plus a private operator database connection. The token
+enters through an owner-only file and standard input; it is not logged or
+stored in state. See the
+[provider-neutral enrollment runbook](../../../docs/runbooks/disposable-oidc-first-admin.md).
 
 The following Terraform outputs are public deployment configuration:
 
@@ -64,11 +63,12 @@ The following Terraform outputs are public deployment configuration:
   contains no password, token or client secret. The physical iPhone build and
   its login/API journey still require a live device acceptance run.
 
-For BFF verification with this pool, set `AUTH_TOKEN_MODE=cognito-access`,
-`AUTH_ISSUER`, `AUTH_JWKS_URL`, and `AUTH_COGNITO_CLIENT_IDS` from the public
-output. Configure the tenant membership store separately and fail closed when
-it has no mapping for a verified `(issuer, subject)` pair. Dashboard Helm must
-consume the runtime public OIDC values after both CloudFront and Cognito exist.
+For the default existing OIDC provider, set `AUTH_TOKEN_MODE=audience`,
+`AUTH_ISSUER`, `AUTH_JWKS_URL`, and `AUTH_AUDIENCE` from the public output.
+Configure the tenant membership store separately and fail closed when it has
+no mapping for a verified `(issuer, subject)` pair. Dashboard Helm must
+consume the runtime public OIDC values after the CloudFront hostnames exist.
+The explicit Cognito mode uses `cognito-access` and the public client allowlist.
 
 The post-destroy inventory checks exact ALB, CloudFront distribution, VPC
 origin, WAF ACL, Cognito pool, and hosted-domain names in addition to regional

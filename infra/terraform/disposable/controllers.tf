@@ -124,7 +124,14 @@ resource "helm_release" "argocd" {
       "resource.customizations.health.argoproj.io_Application" = <<-LUA
         hs = {}
         hs.status = "Progressing"
-        hs.message = "Waiting for child Application health"
+        hs.message = "Waiting for child Application to sync its declared revision"
+        if obj.status == nil or obj.status.sync == nil or obj.status.sync.status ~= "Synced" then
+          return hs
+        end
+        if obj.status.sync.revision ~= nil and obj.spec.source ~= nil and obj.spec.source.targetRevision ~= nil and obj.status.sync.revision ~= obj.spec.source.targetRevision then
+          hs.message = "Child Application is not at its declared revision"
+          return hs
+        end
         if obj.status ~= nil and obj.status.health ~= nil then
           hs.status = obj.status.health.status
           if obj.status.health.message ~= nil then
@@ -136,4 +143,19 @@ resource "helm_release" "argocd" {
     } }
   })]
   depends_on = [helm_release.istio_ingressgateway, helm_release.keda, helm_release.argo_rollouts]
+}
+
+# Create and own the target namespace before Argo, secret materialization,
+# migrations, and runtime Applications can reference it. An explicit chart
+# keeps namespace teardown in Terraform's dependency graph.
+resource "helm_release" "greenguard_namespace" {
+  name             = "greenguard-namespace"
+  namespace        = "argocd"
+  chart            = "${path.module}/../../gitops/disposable/namespace-chart"
+  atomic           = true
+  wait             = true
+  timeout          = 300
+  create_namespace = false
+  values           = [yamlencode({ cell = var.cluster_name })]
+  depends_on       = [helm_release.argocd]
 }

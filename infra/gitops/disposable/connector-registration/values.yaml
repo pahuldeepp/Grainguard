@@ -1,3 +1,13 @@
 image: ""
 rdsHost: ""
 connectUrl: http://connect.greenguard.svc.cluster.local:8083
+shards: {}
+# Set only after all tenants leave the legacy operational owner, source writes
+# are fenced and transfer/CDC verification has completed. Empty preserves sources.
+centralRetirementReceiptSecret: ""
+centralRetirementReceiptRevision: ""
+
+# Used only by the approved legacy-central retirement path.
+credentialSecret: greenguard-cdc-credentials
+caSecret: greenguard-rds-ca
+rdsCIDRs: []

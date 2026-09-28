@@ -320,21 +320,32 @@ export async function finishPlacementMove(
 }
 
 function requireReceipts(row: MoveRow, keys: string[]) {
-  if (
-    keys.some(
-      (key) =>
-        !Object.hasOwn(row.receipts, key) ||
-        !row.receipts[key] ||
-        typeof row.receipts[key] !== "object" ||
-        Array.isArray(row.receipts[key]) ||
-        (row.receipts[key] as Record<string, unknown>).verified !== true,
-    )
-  )
-    throw new PlacementConflictError("verified move receipts are missing");
+  const evidenceMatches = (key: string, receipt: Record<string, unknown>) => {
+    if (receipt.phase !== key || receipt.tenantId !== row.tenant_id || receipt.operationId !== row.operation_id) return false;
+    if (receipt.sourceShardId !== row.source_shard_id || receipt.targetShardId !== row.target_shard_id ||
+        receipt.sourceEpoch !== row.expected_epoch.toString() || receipt.targetEpoch !== (row.expected_epoch + 1n).toString() ||
+        typeof receipt.sourceIncarnation !== "string" || !UUID.test(receipt.sourceIncarnation) ||
+        typeof receipt.targetIncarnation !== "string" || !UUID.test(receipt.targetIncarnation)) return false;
+    if (key === "source_fenced") return receipt.shardId === row.source_shard_id && receipt.incarnation === receipt.sourceIncarnation && receipt.epoch === row.expected_epoch.toString() && receipt.state === "fenced";
+    if (key === "target_prepared") return receipt.shardId === row.target_shard_id && receipt.incarnation === receipt.targetIncarnation && receipt.epoch === (row.expected_epoch + 1n).toString() && receipt.state === "prepared";
+    if (key === "copy_verified" || key === "baseline_copied") return typeof receipt.sourceSha256 === "string" && /^[0-9a-f]{64}$/.test(receipt.sourceSha256) && receipt.sourceSha256 === receipt.targetSha256 && typeof receipt.rowCount === "string" && /^[0-9]+$/.test(receipt.rowCount) && (key !== "copy_verified" || (Number.isSafeInteger(receipt.tableCount) && Number(receipt.tableCount) > 0));
+    if (key === "target_activated") return receipt.shardId === row.target_shard_id && receipt.incarnation === receipt.targetIncarnation && receipt.epoch === (row.expected_epoch + 1n).toString() && receipt.state === "active";
+    if (key === "targets_unactivated") return receipt.shardId === row.target_shard_id && receipt.state === "absent";
+    if (key === "source_reactivated") return receipt.shardId === row.source_shard_id && receipt.incarnation === receipt.sourceIncarnation && receipt.epoch === (row.expected_epoch + 1n).toString() && receipt.state === "active";
+    return false;
+  };
+  const valid = (key: string, value: unknown): boolean => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const receipt = value as Record<string, unknown>;
+    return evidenceMatches(key, receipt);
+  };
+  if (keys.some((key) => !valid(key, row.receipts[key])))
+    throw new PlacementConflictError("operation-bound placement evidence is missing or invalid");
 }
 
-/** The trusted controller stores positive verified database receipts, never inferred
- * success after a timeout. Receipt values are immutable and secret-free. */
+/** The internal move controller stores operation-bound evidence produced by owner
+ * adapters after querying committed database state. Callers cannot submit a boolean
+ * success marker; cutover requires typed identities, epochs, and matching digests. */
 export async function recordPlacementMoveReceipt(
   db: Db,
   tenantId: string,
@@ -347,7 +358,10 @@ export async function recordPlacementMoveReceipt(
     !/^[a-z][a-z0-9_]{0,63}$/.test(key) ||
     !receipt ||
     typeof receipt !== "object" ||
-    Array.isArray(receipt)
+    Array.isArray(receipt) ||
+    receipt.tenantId !== tenantId ||
+    receipt.operationId !== operationId ||
+    receipt.phase !== key
   )
     throw new InvalidInputError("invalid placement receipt");
   const serialized = JSON.stringify(receipt);

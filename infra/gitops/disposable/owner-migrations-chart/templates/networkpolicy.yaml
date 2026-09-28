@@ -1,0 +1,25 @@
+{{- $_ := include "ownerMigration.targets" .Values -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gg-owner-migration-egress
+spec:
+  podSelector:
+    matchLabels:
+      greenguard.io/migration: "true"
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+{{- range .Values.rdsCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 5432}]

@@ -79,7 +79,7 @@ func testShardRegistry() ShardRegistry {
 func TestPrivateShardRegistryAndPoolShutdown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shards.json")
 	body, _ := json.Marshal(testShardRegistry())
-	if err := os.WriteFile(path, body, 0600); err != nil {
+	if err := os.WriteFile(path, body, 0440); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := LoadShardRegistry(path, "test", "greenguard_test", "test_app")
@@ -94,6 +94,14 @@ func TestPrivateShardRegistryAndPoolShutdown(t *testing.T) {
 	}
 	if _, err := LoadShardRegistry(path, "test", "greenguard_test", "test_app"); err == nil {
 		t.Fatal("public credentials file accepted")
+	}
+	for _, mode := range []os.FileMode{0620, 0404, 0444} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadShardRegistry(path, "test", "greenguard_test", "test_app"); err == nil {
+			t.Fatalf("unsafe mode %04o accepted", mode)
+		}
 	}
 	s := NewShardedDB(registry, fixedPlacement{TenantPlacement{TenantID: tenantID, ShardID: "s2", Incarnation: tenantID, PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Second)}, nil})
 	pool, err := s.Primary(context.Background(), "s2")

@@ -33,7 +33,9 @@ outputs_json="$("$terraform_bin" output -json)" || {
   exit 1
 }
 identity_file="$(mktemp)"
-trap 'rm -f "$identity_file"' EXIT
+shard_secrets_file="$(mktemp)"
+partial_state_json=""
+trap 'rm -f "$identity_file" "$shard_secrets_file"' EXIT
 if printf '%s' "$outputs_json" | python3 -c '
 import json, re, sys
 outputs = json.load(sys.stdin)
@@ -72,7 +74,8 @@ else
   # Root outputs do not exist until apply completes. The scope resource is a
   # prerequisite of the VPC, so even a pre-EKS partial apply has a saved cell
   # identity. Older partial states can still recover from the exact EKS ARN.
-  "$terraform_bin" show -json | python3 -c '
+  partial_state_json="$("$terraform_bin" show -json)"
+  printf '%s' "$partial_state_json" | python3 -c '
 import json, re, sys
 try:
     state = json.load(sys.stdin)
@@ -140,7 +143,8 @@ except (KeyError, TypeError, IndexError, ValueError) as exc:
   }
 fi
 read -r region environment cluster account master_secret_arn <"$identity_file"
-if [ "$environment" = prod ]; then
+environment_lower="$(printf '%s' "$environment" | tr '[:upper:]' '[:lower:]')"
+if [ "$environment_lower" = prod ] || [ "$environment_lower" = production ]; then
   echo "destroy-verified: refusing production" >&2
   exit 1
 fi
@@ -157,6 +161,47 @@ if [ -n "$master_secret_arn" ] && [[ ! "$master_secret_arn" =~ ^arn:aws[a-z-]*:s
   exit 1
 fi
 
+# A failed update can leave older root outputs while new shard instances already
+# exist in state. Always inspect the latest state when the recovery branch did
+# not already read it; stale outputs alone cannot inventory managed secrets.
+if [ -z "$partial_state_json" ]; then
+  partial_state_json="$("$terraform_bin" show -json)" || {
+    echo "destroy-verified: cannot inspect state for shard master secrets" >&2
+    exit 1
+  }
+fi
+
+# Retain all managed shard master secret ARNs before destroy erases outputs.
+# Successful applies expose the registry; partial applies are recovered from
+# the already-read state, with account/region validation before any deletion.
+printf '%s\n%s' "$outputs_json" "${partial_state_json:-}" | python3 -c '
+import json, re, sys
+stream = sys.stdin.read()
+outputs, offset = json.JSONDecoder().raw_decode(stream)
+partial = json.loads(stream[offset:].strip() or "{}")
+region, account = sys.argv[1:]
+arns = []
+if "postgres_shards" in outputs:
+    registry = outputs["postgres_shards"].get("value")
+    if not isinstance(registry, dict) or set(registry) != {"s1", "s2", "s3", "s4"}:
+        raise SystemExit("destroy-verified: invalid shard registry output")
+    for shard_id, shard in registry.items():
+        if not isinstance(shard, dict):
+            raise SystemExit("destroy-verified: invalid shard registry entry")
+        arns.append(shard.get("master_secret_arn"))
+resources = partial.get("values", {}).get("root_module", {}).get("resources", [])
+for resource in resources:
+    if resource.get("mode") == "managed" and resource.get("type") == "aws_db_instance" and resource.get("name") == "shard":
+        secrets = resource.get("values", {}).get("master_user_secret")
+        if not isinstance(secrets, list) or len(secrets) != 1:
+            raise SystemExit("destroy-verified: shard master secret unavailable in partial state")
+        arns.append(secrets[0].get("secret_arn"))
+for arn in arns:
+    if not isinstance(arn, str) or not re.fullmatch(r"arn:aws[a-z-]*:secretsmanager:" + re.escape(region) + ":" + account + ":secret:.+", arn):
+        raise SystemExit("destroy-verified: shard master secret ARN does not match saved account/region")
+print("\n".join(dict.fromkeys(arns)))
+' "$region" "$account" >"$shard_secrets_file" || exit 1
+
 # Run this idempotent hook before Terraform destroy: an interrupted apply may
 # not yet have created terraform_data.pre_destroy_cleanup, so relying on its
 # destroy provisioner alone can strand controller-owned LBs and EBS volumes.
@@ -166,4 +211,4 @@ GG_CLUSTER="$cluster" GG_REGION="$region" GG_ENVIRONMENT="$environment" GG_ACCOU
   GG_PV_INVENTORY_FILE="${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}" \
   "$here/pre-destroy.sh"
 "$terraform_bin" destroy
-"$here/check-teardown.sh" "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}"
+GG_SHARD_MASTER_SECRET_ARNS="$(cat "$shard_secrets_file")" "$here/check-teardown.sh" "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}"

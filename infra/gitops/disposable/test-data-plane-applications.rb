@@ -14,6 +14,12 @@ values = {
     'enabled' => true,
     'rdsHost' => 'db.example.us-east-1.rds.amazonaws.com',
     'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name, digest] },
+    'shards' => {
+      's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth'},
+      's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth'},
+      's3' => {'rdsHost' => 'shard3.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard3-cdc', 'bootstrapSecret' => 'greenguard-s3-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s3-pgbouncer-auth'},
+      's4' => {'rdsHost' => 'shard4.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard4-cdc', 'bootstrapSecret' => 'greenguard-s4-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s4-pgbouncer-auth'}
+    },
     'secrets' => {
       'pgbouncerAuth' => 'greenguard-pgbouncer-auth',
       'rdsCa' => 'greenguard-rds-ca',
@@ -67,6 +73,18 @@ abort 'PgBouncer source values drifted' unless apps.find { |item| item.dig('meta
   }
 abort 'Connect source Secret drifted' unless apps.find { |item| item.dig('metadata', 'name') == 'greenguard-kafka-connect' }
   .dig('spec', 'source', 'helm', 'valuesObject', 'credentialSecret') == 'greenguard-cdc-credentials'
+connect_values = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-kafka-connect' }
+  .dig('spec', 'source', 'helm', 'valuesObject')
+abort 'Connect shard credentials were not attached by Application name' unless connect_values['shardCredentials'] == {
+  's1' => 'greenguard-shard1-cdc', 's2' => 'greenguard-shard2-cdc',
+  's3' => 'greenguard-shard3-cdc', 's4' => 'greenguard-shard4-cdc'
+}
+registration_values = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-connector-registration' }
+  .dig('spec', 'source', 'helm', 'valuesObject')
+abort 'Connector registration shard hosts were not attached by Application name' unless registration_values['shards'] == {
+  's1' => 'shard1.example.us-east-1.rds.amazonaws.com', 's2' => 'shard2.example.us-east-1.rds.amazonaws.com',
+  's3' => 'shard3.example.us-east-1.rds.amazonaws.com', 's4' => 'shard4.example.us-east-1.rds.amazonaws.com'
+}
 
 root_output, root_error, root_status = render.call('bootstrap-chart', values)
 abort "root data-plane render failed: #{root_error}" unless root_status.success?

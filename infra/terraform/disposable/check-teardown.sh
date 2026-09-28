@@ -11,7 +11,8 @@ master_secret_arn="${5:-}"
 pv_inventory="${6:-${GG_PV_INVENTORY_FILE:-$(dirname "$0")/.last-destroy-pvs}}"
 export AWS_REGION="$region" AWS_PAGER=""
 command -v aws >/dev/null || { echo "check-teardown: aws is required" >&2; exit 1; }
-if [ "$environment" = prod ] || [[ ! "$account" =~ ^[0-9]{12}$ ]]; then
+environment_lower="$(printf '%s' "$environment" | tr '[:upper:]' '[:lower:]')"
+if [ "$environment_lower" = prod ] || [ "$environment_lower" = production ] || [[ ! "$account" =~ ^[0-9]{12}$ ]]; then
   echo "check-teardown: refusing production or invalid account ID" >&2
   exit 1
 fi
@@ -44,6 +45,7 @@ if [ "$bucket_prefix_length" -lt 1 ]; then
   exit 1
 fi
 audit_bucket="${data_prefix:0:bucket_prefix_length}-${cell_hash}-${account}-${region}-audit"
+notification_state_table="${data_prefix:0:42}-${cell_hash}-notification-state"
 
 # Terraform's edge_name is a normalized prefix plus the first eight hex
 # digits of SHA-1(cluster_name). Exact names catch global resources that the
@@ -105,6 +107,23 @@ else
 fi
 postgres_snapshots="$(aws rds describe-db-snapshots --snapshot-type manual \
   --filters "Name=db-instance-id,Values=$postgres_name" --query 'DBSnapshots[].DBSnapshotIdentifier' --output text)"
+# Query exact normalized shard namespace independent of tags/state. Includes
+# all stable primaries and any configured replicas, including lost-state ones.
+shard_prefix="gg-${data_prefix:0:36}-${cell_hash}-shard-"
+shard_instances="$(aws rds describe-db-instances \
+  --query "DBInstances[?starts_with(DBInstanceIdentifier, '$shard_prefix')].DBInstanceIdentifier" --output text)"
+shard_snapshots="$(aws rds describe-db-snapshots --snapshot-type manual \
+  --query "DBSnapshots[?starts_with(DBInstanceIdentifier, '$shard_prefix')].DBSnapshotIdentifier" --output text)"
+if notification_state_table_found="$(aws dynamodb describe-table --table-name "$notification_state_table" \
+  --query 'Table.TableName' --output text 2>&1)"; then
+  :
+elif [[ "$notification_state_table_found" == *ResourceNotFoundException* ]]; then
+  notification_state_table_found=""
+else
+  echo "check-teardown: notification state DynamoDB inventory failed: $notification_state_table_found" >&2
+  exit 1
+fi
+
 s3_buckets="$(aws s3api list-buckets --query 'Buckets[].Name' --output text)"
 edge_albs="$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='$edge_name'].LoadBalancerArn" --output text)"
 web_distributions="$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='$cluster dashboard'].ARN" --output text)"
@@ -164,10 +183,13 @@ $dispatch_log"
 report "Unreleased Elastic IPs tagged Environment=$environment" \
   "$elastic_ips"
 report "Disposable PostgreSQL instance" "$postgres_instances"
+report "Disposable shard primaries and read replicas" "$shard_instances"
+report "Disposable shard manual snapshots" "$shard_snapshots"
 report "Disposable PostgreSQL manual snapshots" \
   "$postgres_snapshots"
 report "Disposable audit export S3 bucket" \
   "$(printf '%s\n' "$s3_buckets" | tr '\t' '\n' | grep -Fx "$audit_bucket" || true)"
+report "Disposable notification state DynamoDB table" "$notification_state_table_found"
 report "Disposable private edge ALB" "$edge_albs"
 report "Disposable CloudFront distributions" "$web_distributions
 $api_distributions"
@@ -184,6 +206,22 @@ if [ -n "$master_secret_arn" ]; then
     exit 1
   fi
 fi
+
+# The verified wrapper captures these RDS-managed secret ARNs before deleting
+# state. RDS secret deletion is managed by RDS, so verify every shard explicitly.
+while IFS= read -r shard_secret; do
+  [ -n "$shard_secret" ] || continue
+  if [[ ! "$shard_secret" =~ ^arn:aws[a-z-]*:secretsmanager:${region}:${account}:secret: ]]; then
+    echo "check-teardown: shard master secret ARN does not match region/account" >&2
+    exit 1
+  fi
+  if metadata="$(aws secretsmanager describe-secret --secret-id "$shard_secret" --query ARN --output text 2>&1)"; then
+    report "RDS-managed shard master secret still exists" "$metadata"
+  elif [[ "$metadata" != *ResourceNotFoundException* ]]; then
+    echo "check-teardown: shard master secret inventory failed: $metadata" >&2
+    exit 1
+  fi
+done <<< "${GG_SHARD_MASTER_SECRET_ARNS:-}"
 
 for key in $(printf '%s\n' "$project_resources" | tr '\t' '\n' | grep ':kms:' || true); do
   if ! state="$(aws kms describe-key --key-id "$key" --query 'KeyMetadata.KeyState' --output text)"; then

@@ -1,0 +1,46 @@
+﹣ live Kafka event invalidates two Redis-backed verifier replicas (0.2785ms) # SKIP
+membership lookup failed or was stale; bounded last good entry applies
+✔ shared Redis version floor rejects an older lookup on another replica and ignores reordered events (15.862208ms)
+✔ identity keys are deterministic hashes of issuer|subject, distinct per issuer (0.236167ms)
+✔ a verified identity is mapped from the store and IdP tenant claims are ignored (M08) (23.541291ms)
+✔ a token that fails verification never triggers a membership lookup (77.175417ms)
+✔ revoke -> event -> entry gone -> next request 403, never the stale role (23.554583ms)
+✔ revoke while the consumer is down: still denied within the 30 s TTL bound (15.360959ms)
+✔ duplicate and out-of-order events are no-ops once the cache holds a newer version (21.023667ms)
+membership lookup failed or was stale; bounded last good entry applies
+✔ a lookup that answers older than an event already seen is not trusted (41.79725ms)
+✔ a newer event for another tenant invalidates the identity; reordered events do not (15.460209ms)
+✔ negative results are cached for 5 s so a new invitee is admitted soon (49.095667ms)
+✔ malformed event payload cannot crash the verifier (16.879542ms)
+membership lookup failed or was stale; bounded last good entry applies
+membership lookup failed or was stale; bounded last good entry applies
+membership lookup failed or was stale; bounded last good entry applies
+✔ lookup outage keeps the last good entry until 5 minutes, then fails closed (M07) (28.812833ms)
+membership lookup failed or was stale; bounded last good entry applies
+✔ an outage with no cached entry denies instead of allowing (11.09875ms)
+✔ the HTTP fetcher maps 200 active/revoked and 404, and rejects every other answer (14.653708ms)
+✔ the HTTP fetcher rejects a malformed membership body (1.049292ms)
+✔ the env switch keeps the file source by default and validates the control-plane source (49.186583ms)
+✔ placement epochs preserve BIGINT precision and reject noncanonical/overflow input (1.121667ms)
+✔ lease validator rejects tenant mismatch, expiry, excessive TTL and caller hints (3.15775ms)
+✔ cache serves bounded leases; expiry plus authority outage fails closed (0.65375ms)
+✔ fresh lookup, stale epoch and quiescing admissions are explicit (0.311417ms)
+✔ invalidation prevents an in-flight response from recreating a cached route (0.173875ms)
+✔ concurrent cache misses share one authority fetch and both succeed (0.142292ms)
+✔ clear cancels all shared loads while a replacement can complete (0.133042ms)
+✔ cache has a bounded entry budget and clear invalidates all entries (0.401834ms)
+✔ local guard detects fresh-authority regression while its lease remains valid (0.271917ms)
+✔ expiry, invalidation and eviction fetch primary authority without a lifetime tenant limit (0.590292ms)
+✔ authenticated HTTP fetcher carries only tenant context and bounds requests (13.377625ms)
+✔ placement fetcher preserves a configured path prefix (0.186542ms)
+✔ an expected epoch ahead of a cached lease refreshes the primary authority (0.089166ms)
+✔ initial placement ring is deterministic across ordering/version changes, includes every shard (5.787375ms)
+✔ adding a shard moves only suggestions selecting that added shard (1.25575ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 671.205291

@@ -60,7 +60,7 @@ spec:
             - {name: CONNECT_TOPIC_CREATION_ENABLE, value: "false"}
             - {name: CONNECT_CONFIG_PROVIDERS, value: env}
             - {name: CONNECT_CONFIG_PROVIDERS_ENV_CLASS, value: org.apache.kafka.common.config.provider.EnvVarConfigProvider}
-            - {name: CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN, value: "CDC_DB_PASSWORD|SCHEMA_REGISTRY_URL|SCHEMA_REGISTRY_BASIC_USER_INFO"}
+            - {name: CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN, value: "CDC_DB_PASSWORD|CDC_DB_PASSWORD_S[1-4]|SCHEMA_REGISTRY_URL|SCHEMA_REGISTRY_BASIC_USER_INFO"}
             - {name: SCHEMA_REGISTRY_URL, value: https://schema-registry.greenguard.svc.cluster.local:8081}
             - name: SCHEMA_REGISTRY_BASIC_USER_INFO
               valueFrom:
@@ -73,6 +73,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.credentialSecret | quote }}
                   key: CDC_DB_PASSWORD
+{{- if .Values.shardCredentials }}
+{{- if ne (len .Values.shardCredentials) 4 }}{{ fail "shardCredentials requires s1-s4" }}{{ end }}
+{{- range $id := list "s1" "s2" "s3" "s4" }}
+{{- $secret := index $.Values.shardCredentials $id | default "" }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $secret) }}{{ fail "shard CDC Secret missing" }}{{ end }}
+            - name: CDC_DB_PASSWORD_{{ upper $id }}
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: CDC_DB_PASSWORD}
+{{- end }}
+{{- end }}
           ports: [{name: rest, containerPort: 8083}]
           startupProbe:
             httpGet: {path: /connectors, port: 8083}

@@ -1,0 +1,10 @@
+{
+  "status": "blocked",
+  "findings": [
+    {
+      "id": "raw_destroy_no_post_inventory",
+      "file": "teardown.tf",
+      "remediation": "Use destroy-verified.sh for final inventory. Raw terraform destroy has no supported guaranteed post-destroy inventory; an executable graph or external orchestration contract and failure fixtures are required to close this finding."
+    }
+  ]
+}

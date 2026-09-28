@@ -1,0 +1,48 @@
+✔ health probes answer without a token (175.232042ms)
+✔ M08: IdP-asserted tenant and roles are ignored; the store decides (32.7035ms)
+✔ M01: an admin of tenant B cannot list or change tenant A over HTTP (46.094625ms)
+✔ role change needs If-Match: missing 428, stale 412 with ETag, current 200 (37.9725ms)
+✔ requests are validated: no key 400, unknown body field 400, bad token 401, viewer 403, last admin 409 (47.206041ms)
+✔ the internal lookup needs the service credential and answers 200 or 404 (17.710333ms)
+revocation-to-403-ms(outbox read + apply + verify)=44.6
+✔ M05/M06: revoke -> outbox event -> cache entry gone -> next request 403, measured; without the event denied at the TTL (157.724ms)
+✔ verified membership binds tenant placement and rejects forged claims (163.642666ms)
+✔ internal endpoint requires service authentication; callers cannot supply shard/epoch routing (23.836333ms)
+✔ registry seeds four stable IDs; legacy organizations retain s1 and all metadata is protected (148.353ms)
+✔ editing the onboarding ring affects only new tenants and immutable history preserves prior decisions (64.189ms)
+✔ onboarding persists one ring suggestion and runtime resolution never rehashes (55.653625ms)
+✔ trusted onboarding override persists provenance without a public routing hint (14.069958ms)
+✔ resolver serializes epochs beyond JS precision and rejects offline shard ownership (36.126458ms)
+✔ registry incarnation is authoritative; replacements rotate only offline with the next version (60.925ms)
+✔ move CAS advances once, requires receipts, blocks admission until activated and replays durably (53.698833ms)
+✔ baseline preparation is durable while writes stay active; quiescing starts only for cutover (31.989625ms)
+✔ empty or negative receipts never permit ownership switch or runtime reactivation (56.09325ms)
+✔ only one concurrent move per tenant wins and conflicting operation reuse is rejected (19.026666ms)
+✔ pre-switch abort requires positive receipts and fences old epochs (29.283ms)
+✔ immutable receipts and forced RLS isolate move ledgers (65.312584ms)
+✔ database enforces registry references, epoch monotonicity, and one live move (53.5725ms)
+✔ creating an organization makes the caller admin and writes audit and outbox in one transaction (M09) (81.983625ms)
+✔ M02: replaying an invitation token gives one membership; another identity cannot reuse it (65.424125ms)
+✔ M03: expired, malformed and wrong-tenant tokens are rejected (52.4225ms)
+✔ M01: only active admins manage members and other tenants look absent (33.636292ms)
+✔ member listing uses a bounded keyset cursor without repeats (39.849125ms)
+✔ concurrent role changes on one version: exactly one wins, the other gets a version conflict (39.942209ms)
+✔ M04: the last admin cannot be demoted or removed, and concurrent removals leave one admin (36.784958ms)
+✔ lookup maps an identity to its one active membership and forgets it after revocation (51.05525ms)
+✔ a fresh invitation reactivates a revoked membership at the next version and clears revocation metadata (55.680041ms)
+✔ an identity with active memberships in two tenants is ambiguous and never guessed (41.65925ms)
+✔ M20: a forwarded invitation token is bound to the invited verified email (53.090959ms)
+✔ every tenant table has tenant_id and forced RLS; identities is the one documented exception (24.936625ms)
+✔ notification contacts CDC is table-scoped, read-only, RLS-visible and published for inserts/updates (17.343167ms)
+✔ notification contact migration keeps format checks and permits a versioned cleared row (48.444ms)
+✔ M12: control_app has no DELETE anywhere and cannot UPDATE audit, outbox or receipts (35.513291ms)
+✔ RLS: a tenant sees and writes only its own rows (29.667833ms)
+✔ composite tenant keys and role checks are enforced by the database (43.748959ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3637.26125

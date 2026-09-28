@@ -21,7 +21,7 @@ resource "terraform_data" "deployment_readiness_gate" {
   lifecycle {
     precondition {
       condition     = var.allow_incomplete_foundation_plan
-      error_message = "This disposable root does not yet deploy GreenGuard end to end. Controller and data-service bootstrap, populated Secrets, migrations, application health, Stage 11 telemetry, real-user tenant enrollment and web/iPhone acceptance need live proof. Do not apply it as a complete cell."
+      error_message = "This disposable root does not yet deploy GreenGuard end to end. Controller and data-service bootstrap, populated Secrets, migrations, application health, Stage 11 telemetry, real-user tenant enrollment and web/iPhone acceptance need live proof. Audit export is an additional first-cell blocker: Standard/Enterprise advertise audit_export, but the exporter worker, signing-key contract, and end-to-end S3 path are not deployed. Do not apply it as a complete cell."
     }
   }
 }

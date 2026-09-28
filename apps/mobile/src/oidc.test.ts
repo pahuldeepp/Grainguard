@@ -62,6 +62,14 @@ test("code exchange rejects an id token with the wrong nonce", async () => {
   );
 });
 
+test("openid code exchange rejects a missing id token", async () => {
+  const ctx = deps(() => jsonResponse(200, { access_token: "at", expires_in: 60 }));
+  await assert.rejects(
+    exchangeCode(config, { code: "c", verifier: "v", nonce: "n1" }, ctx.deps),
+    /no id_token/,
+  );
+});
+
 test("refresh keeps the old refresh token when none is rotated", async () => {
   const ctx = deps(() =>
     jsonResponse(200, { access_token: "at2", expires_in: 60 }),

@@ -11,8 +11,8 @@ resource "terraform_data" "cell_scope" {
 
   lifecycle {
     precondition {
-      condition     = var.environment != "prod"
-      error_message = "The disposable root cannot manage a prod environment."
+      condition     = !contains(["prod", "production"], lower(var.environment))
+      error_message = "The disposable root cannot manage a production environment."
     }
   }
 }
@@ -28,8 +28,8 @@ resource "terraform_data" "cell_scope" {
 resource "terraform_data" "pre_destroy_cleanup" {
   lifecycle {
     precondition {
-      condition     = var.environment != "prod"
-      error_message = "The disposable root cannot manage a prod environment."
+      condition     = !contains(["prod", "production"], lower(var.environment))
+      error_message = "The disposable root cannot manage a production environment."
     }
   }
 
@@ -43,6 +43,11 @@ resource "terraform_data" "pre_destroy_cleanup" {
   }
 
   depends_on = [
+    aws_db_instance.postgres,
+    aws_db_instance.shard,
+    aws_db_instance.read_replica,
+    aws_secretsmanager_secret.shard,
+    aws_secretsmanager_secret.shard_routing,
     aws_eks_node_group.general,
     aws_eks_node_group.compute,
     aws_eks_addon.core,
