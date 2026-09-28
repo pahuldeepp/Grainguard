@@ -412,6 +412,18 @@ try {
     assert.equal(copy.evidence.sourceSha256, copy.evidence.targetSha256);
     assert.ok(BigInt(copy.evidence.rowCount) >= 1n);
     const copyProof = copy.receipt;
+    const preparedReceiptReplay = await prepareRiskMoveTarget(
+      adminTarget,
+      tenantId,
+      operationId,
+      sourceIdentity,
+      targetIdentity,
+    );
+    assert.deepEqual(
+      preparedReceiptReplay,
+      preparedReceipt,
+      "Risk prepare replay must return the original owner-tagged target_prepared receipt after copy_verified",
+    );
     for (const [key, proof] of [
       ["source_fenced", sourceFencedReceipt],
       ["target_prepared", preparedReceipt],

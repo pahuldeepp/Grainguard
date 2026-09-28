@@ -20,12 +20,14 @@ CREATE TABLE greenguard_internal.tenant_move_operations (
 );
 REVOKE ALL ON greenguard_internal.tenant_move_operations FROM PUBLIC;
 GRANT USAGE ON SCHEMA greenguard_internal TO inventory_migrator;
--- SECURITY DEFINER source-fence checks must see historical CDC rows under FORCE RLS.
--- This is a read-only migration role policy; it is not granted to runtime roles.
+-- SECURITY DEFINER source-fence checks must see only the requested tenant's
+-- historical CDC rows under FORCE RLS. The owner function sets app.tenant_id
+-- transaction-locally before checking history.
 GRANT SELECT ON public.outbox_events, public.inventory_saga_result_outbox TO inventory_migrator;
 DROP POLICY IF EXISTS inventory_migrator_move_scan ON public.outbox_events;
 CREATE POLICY inventory_migrator_move_scan ON public.outbox_events
-  FOR SELECT TO inventory_migrator USING (true);
+  FOR SELECT TO inventory_migrator
+  USING (tenant_id::text = NULLIF(current_setting('app.tenant_id',true),''));
 
 CREATE FUNCTION greenguard_internal.tenant_move_status(
   p_tenant uuid,p_operation uuid,p_endpoint_role text
@@ -129,6 +131,7 @@ BEGIN
   -- CDC observes inserts into outbox_events, so copying any historical event
   -- would replay external effects on the target; block until a dedup-aware
   -- outbox migration protocol exists. Pending saga outcomes are likewise unsafe.
+  PERFORM set_config('app.tenant_id',p_tenant::text,true);
   IF EXISTS (SELECT 1 FROM public.outbox_events WHERE tenant_id=p_tenant) THEN
     RAISE EXCEPTION 'inventory move blocked: CDC outbox history must be migrated with a deduplication-aware protocol';
   END IF;

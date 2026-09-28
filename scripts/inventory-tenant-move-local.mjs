@@ -224,6 +224,29 @@ try {
   const cdcTenant = randomUUID();
   const cdcOperation = randomUUID();
   await seedTenant(inventoryAdminUrl, cdcTenant, { withOutbox: true });
+  await withClient(sourceUrl, async (db) => {
+    await db.query("BEGIN");
+    try {
+      // The migration role's RLS policy must not let a caller scope itself to
+      // another tenant and discover that tenant's CDC history.
+      await db.query("SELECT set_config('app.tenant_id',$1,true)", [randomUUID()]);
+      const hidden = await db.query(
+        "SELECT count(*)::int AS n FROM public.outbox_events WHERE tenant_id=$1::uuid",
+        [cdcTenant],
+      );
+      assert.equal(hidden.rows[0].n, 0);
+      await db.query("SELECT set_config('app.tenant_id',$1,true)", [cdcTenant]);
+      const visible = await db.query(
+        "SELECT count(*)::int AS n FROM public.outbox_events WHERE tenant_id=$1::uuid",
+        [cdcTenant],
+      );
+      assert.equal(visible.rows[0].n, 1);
+      await db.query("COMMIT");
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => {});
+      throw error;
+    }
+  });
   await prepareInventoryMoveTarget(targetPool, cdcTenant, cdcOperation, source, target);
   await assert.rejects(assertInventoryMoveEffectsDrained(sourcePool, cdcTenant), /CDC outbox history/);
   await assertFunctionFenceRejected(sourceUrl, cdcTenant, cdcOperation, /CDC outbox history/);

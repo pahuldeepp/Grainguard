@@ -178,7 +178,8 @@ class IndexerTests(unittest.TestCase):
 
             kafka = SimpleNamespace(Consumer=Consumer, TopicPartition=lambda *args: args)
             elastic = SimpleNamespace(bootstrap_index=lambda index: calls.append("index"))
-            with patch.dict(sys.modules, {"confluent_kafka": kafka}), patch.object(MODULE, "Indexer", Indexer):
+            with patch.dict("os.environ", {"HEALTH_PORT": "0"}, clear=False), \
+                 patch.dict(sys.modules, {"confluent_kafka": kafka}), patch.object(MODULE, "Indexer", Indexer):
                 with self.assertRaises(RuntimeError):
                     MODULE.consume(elastic, 1, "test-group", "broker", "quarantine")
             self.assertIn("process", calls)

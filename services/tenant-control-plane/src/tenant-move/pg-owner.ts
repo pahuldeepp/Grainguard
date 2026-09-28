@@ -23,6 +23,7 @@ interface TenantTable {
   name: string;
   columns: string[];
   types: Map<string, string>;
+  primaryKeyTypes: Map<string, string>;
   primaryKey: string[];
   dependencies: Set<string>;
 }
@@ -68,12 +69,16 @@ async function inspectTables(client: PoolClient): Promise<TenantTable[]> {
       name: row.table_name,
       columns: [],
       types: new Map<string, string>(),
+      primaryKeyTypes: new Map<string, string>(),
       primaryKey: [],
       dependencies: new Set<string>(),
     };
     table.columns.push(row.column_name);
     table.types.set(row.column_name, row.data_type);
-    if (row.is_primary_key) table.primaryKey.push(row.column_name);
+    if (row.is_primary_key) {
+      table.primaryKey.push(row.column_name);
+      table.primaryKeyTypes.set(row.column_name, row.data_type);
+    }
     byName.set(row.table_name, table);
   }
   const fk = await client.query<{
@@ -418,12 +423,14 @@ export async function copyTenantSnapshot(
   const targetClient = await targetPool.connect();
   try {
     await sourceClient.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await sourceClient.query("SET LOCAL TIME ZONE 'UTC'");
     await sourceClient.query("SELECT set_config('app.tenant_id',$1,true)", [
       tenantId,
     ]);
     await assertOwner(sourceClient, tenantId, source, "fenced");
     const tables = await inspectTables(sourceClient);
     await targetClient.query("BEGIN");
+    await targetClient.query("SET LOCAL TIME ZONE 'UTC'");
     await targetClient.query("SELECT set_config('app.tenant_id',$1,true)", [
       tenantId,
     ]);
@@ -448,14 +455,33 @@ export async function copyTenantSnapshot(
     let sourceRowCount = 0n;
     let targetRowCount = 0n;
     const pageSize = 500;
-    const selectedColumns = (table: TenantTable) =>
-      table.columns
-        .map((column) =>
-          table.types.get(column)?.startsWith("json")
-            ? `${identifier(column)}::text AS ${identifier(column)}`
-            : identifier(column),
-        )
-        .join(",");
+    const isTimestamp = (type: string | undefined) =>
+      type !== undefined &&
+      /^timestamp(?:\(\d+\))? (?:without|with) time zone$/.test(type);
+    const tableCursorIndex = new Map<string, number>();
+    const cursorColumn = (column: string) =>
+      `__greenguard_move_cursor_${tableCursorIndex.get(column)}`;
+    const selectedColumns = (table: TenantTable) => {
+      const selected = table.columns.map((column) => {
+        const type = table.types.get(column);
+        // node-postgres parses timestamps into JavaScript Date (millisecond
+        // precision). Keep their exact PostgreSQL text for hashing and import.
+        if (isTimestamp(type))
+          return `${identifier(column)}::text AS ${identifier(column)}`;
+        if (type?.startsWith("json"))
+          return `${identifier(column)}::text AS ${identifier(column)}`;
+        return identifier(column);
+      });
+      tableCursorIndex.clear();
+      table.primaryKey.forEach((column, index) => {
+        if (!isTimestamp(table.primaryKeyTypes.get(column))) return;
+        tableCursorIndex.set(column, index);
+        selected.push(
+          `${identifier(column)}::text AS ${identifier(cursorColumn(column))}`,
+        );
+      });
+      return selected.join(",");
+    };
     const readPage = async (
       client: PoolClient,
       table: TenantTable,
@@ -465,7 +491,13 @@ export async function copyTenantSnapshot(
       const values: unknown[] = [tenantId];
       let after = "";
       if (cursor) {
-        values.push(...table.primaryKey.map((column) => cursor[column]));
+        values.push(
+          ...table.primaryKey.map((column) =>
+            isTimestamp(table.primaryKeyTypes.get(column))
+              ? cursor[cursorColumn(column)]
+              : cursor[column],
+          ),
+        );
         after = ` AND (${keyColumns}) > (${table.primaryKey.map((_, index) => `$${index + 2}`).join(",")})`;
       }
       values.push(pageSize);
@@ -489,7 +521,9 @@ export async function copyTenantSnapshot(
       for (;;) {
         const page = await readPage(sourceClient, table, cursor);
         for (const row of page.rows) {
-          sourceHash.update(canonical(row));
+          sourceHash.update(canonical(Object.fromEntries(
+            table.columns.map((column) => [column, row[column]]),
+          )));
           sourceHash.update("\n");
           sourceRowCount++;
           sourceTableRowCount++;
@@ -511,7 +545,9 @@ export async function copyTenantSnapshot(
       for (;;) {
         const page = await readPage(targetClient, table, cursor);
         for (const row of page.rows) {
-          targetHash.update(canonical(row));
+          targetHash.update(canonical(Object.fromEntries(
+            table.columns.map((column) => [column, row[column]]),
+          )));
           targetHash.update("\n");
           targetTableRowCount++;
           targetRowCount++;

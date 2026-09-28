@@ -168,22 +168,41 @@ export async function assertInventoryMoveEffectsDrained(
   tenantId: string,
 ): Promise<void> {
   if (!UUID.test(tenantId)) throw new Error("invalid inventory move tenant id");
-  const result = await pool.query<{
-    has_cdc_history: boolean;
-    has_pending_saga_effects: boolean;
-  }>(
-    `SELECT EXISTS(SELECT 1 FROM public.outbox_events WHERE tenant_id=$1::uuid) AS has_cdc_history,
-      EXISTS(SELECT 1 FROM public.inventory_saga_result_outbox WHERE tenant_id=$1::uuid AND published_at IS NULL) AS has_pending_saga_effects`,
-    [tenantId],
-  );
-  const effects = result.rows[0];
-  if (!effects) throw new Error("inventory move effect preflight returned no result");
-  if (effects.has_cdc_history)
-    throw new Error(
-      "inventory move blocked: CDC outbox history needs a deduplication-aware migration protocol",
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Both owner tables use FORCE RLS. Scope this read in a transaction so the
+    // tenant setting is local to this checked-out connection and cannot leak to
+    // the next pool borrower.
+    await client.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
+    const result = await client.query<{
+      has_cdc_history: boolean;
+      has_pending_saga_effects: boolean;
+    }>(
+      `SELECT EXISTS(SELECT 1 FROM public.outbox_events WHERE tenant_id=$1::uuid) AS has_cdc_history,
+        EXISTS(SELECT 1 FROM public.inventory_saga_result_outbox WHERE tenant_id=$1::uuid AND published_at IS NULL) AS has_pending_saga_effects`,
+      [tenantId],
     );
-  if (effects.has_pending_saga_effects)
-    throw new Error("inventory move blocked: pending saga result effects must be drained");
+    const effects = result.rows[0];
+    if (!effects) throw new Error("inventory move effect preflight returned no result");
+    if (effects.has_cdc_history)
+      throw new Error(
+        "inventory move blocked: CDC outbox history needs a deduplication-aware migration protocol",
+      );
+    if (effects.has_pending_saga_effects)
+      throw new Error("inventory move blocked: pending saga result effects must be drained");
+    await client.query("COMMIT");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the original preflight error. Pool release handles a broken
+      // connection according to pg's normal behavior.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function fenceInventoryMoveSource(

@@ -133,6 +133,13 @@
   tests 4/4, shell typecheck, Terraform validation, and formatting. Real IdP
   discovery, provider callback registration, and physical-iPhone acceptance
   remain pending.
+- The scoped CodeRabbit review found four valid issues; all four were fixed:
+  preserve Risk's original prepared receipt across retries, retain PostgreSQL
+  microseconds during paged copies, scope inventory CDC reads through tenant
+  RLS, and make worker readiness tests bind an ephemeral port. Focused tests
+  and disposable PostgreSQL owner acceptances passed after those fixes. The
+  EventBridge readiness test used a test-only `boto3` stub because this host
+  lacks that package; no real AWS calls were made.
 - Stage 12 AWS apply remains correctly blocked by the Terraform readiness
   gate. The root is a partial foundation; managed data-plane services,
   populated secrets, real migrations and service health, immutable application

@@ -41,6 +41,10 @@ class FakePool {
   tables: { table_name: string; relkind: string; is_partition: boolean }[] = [];
   effects = { has_cdc_history: false, has_pending_saga_effects: false };
 
+  async connect() {
+    return { query: this.query.bind(this), release() {} };
+  }
+
   async query(sql: string, values?: unknown[]) {
     this.calls.push({ sql, values });
     if (sql.includes("FROM pg_class")) return { rows: this.tables };
@@ -88,7 +92,10 @@ test("inventory adapter calls owner-local procedures and validates their receipt
     target,
   );
   assert.equal(fenced.phase, "source_fenced");
-  assert.match(sourcePool.calls[1]!.sql, /fence_tenant_move_source/);
+  assert.match(
+    sourcePool.calls.find((call) => call.sql.includes("fence_tenant_move_source"))!.sql,
+    /fence_tenant_move_source/,
+  );
 
   const activationPool = pool({
     ...identities,
@@ -214,7 +221,11 @@ test("inventory move preflight refuses historical CDC and pending saga effects",
     assertInventoryMoveEffectsDrained(historical as unknown as Pool, tenant),
     /CDC outbox history/,
   );
-  assert.match(historical.calls[0]!.sql, /public\.outbox_events/);
+  assert.match(historical.calls[0]!.sql, /BEGIN/);
+  assert.match(historical.calls[1]!.sql, /set_config\('app\.tenant_id'/);
+  assert.deepEqual(historical.calls[1]!.values, [tenant]);
+  assert.match(historical.calls[2]!.sql, /public\.outbox_events/);
+  assert.match(historical.calls.at(-1)!.sql, /ROLLBACK/);
 
   const pending = new FakePool();
   pending.effects.has_pending_saga_effects = true;
@@ -222,8 +233,10 @@ test("inventory move preflight refuses historical CDC and pending saga effects",
     assertInventoryMoveEffectsDrained(pending as unknown as Pool, tenant),
     /pending saga result effects/,
   );
-  assert.match(pending.calls[0]!.sql, /published_at IS NULL/);
+  assert.match(pending.calls[2]!.sql, /published_at IS NULL/);
+  assert.match(pending.calls.at(-1)!.sql, /ROLLBACK/);
 
   const drained = new FakePool();
   await assertInventoryMoveEffectsDrained(drained as unknown as Pool, tenant);
+  assert.match(drained.calls.at(-1)!.sql, /COMMIT/);
 });

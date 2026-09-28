@@ -78,7 +78,7 @@ class BridgeTests(unittest.TestCase):
             clients.append(name)
             return object()
 
-        env = {"KAFKA_BROKERS": "broker:9092", "EVENT_BUS_NAME": "alerts", "BRIDGE_QUARANTINE_QUEUE_URL": "https://sqs.example/q"}
+        env = {"KAFKA_BROKERS": "broker:9092", "EVENT_BUS_NAME": "alerts", "BRIDGE_QUARANTINE_QUEUE_URL": "https://sqs.example/q", "HEALTH_PORT": "0"}
         with patch.dict(os.environ, env, clear=False), \
              patch.object(MODULE.signal, "getsignal", return_value=None), \
              patch.object(MODULE.signal, "signal", side_effect=lambda sig, handler: handlers.__setitem__("SIGTERM", handler)):
