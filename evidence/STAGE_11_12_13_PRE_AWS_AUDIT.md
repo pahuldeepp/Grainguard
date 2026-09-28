@@ -251,3 +251,35 @@ needed event schema files that have since been committed. A clean all-service
 test with its Compose database environment and clean deploy build is still
 unproved. The worktree retains substantial other Stage 11–13 changes, so a
 fresh archive typecheck alone does not establish deployability.
+
+The subsequent source audit committed the BFF, device, workflow-alerts,
+notification, hardware and EventBridge runtimes and migrations. A clean
+archive builds the four TypeScript services, all ten audited Go modules pass
+their tests, and search-indexer passes 22 tests. EventBridge passes six tests
+in an isolated venv with its pinned requirements. Fresh-checkout verification
+found and fixed missing notification auth dependency builds, missing linked
+documentation, and a lint error in the mobile scope regression test.
+
+The isolated Compose rehearsal also found that a missing generated PgBouncer
+user list became an empty Docker bind-mount directory. Compose now uses
+`create_host_path: false` for that credential file. The archive rehearsal
+receives the existing local `.env` and matching generated user list as
+restricted local inputs; neither is committed. This setup does not provide
+AWS secrets or live authentication evidence. Latest independent checks pass:
+44 teardown stubs, 32 release/Secret fixtures, six live-evidence checker tests,
+Kafka runtime render checks, and Terraform fmt/validate.
+
+The committed-source Compose gate subsequently passed with exit status 0 in
+`/tmp/greenguard-clean-gate-nlc_8ooi`, exported from Git and updated only with
+the committed fixes above. It ran `npm ci --ignore-scripts --offline`, then
+the isolated `make verify` sequence with matching local `.env` and generated
+PgBouncer credentials: migrations, 89 risk tests, formatting/lint/typecheck,
+workspace tests, contract checks, Go vet/race tests and final builds completed.
+The isolated containers/network were stopped without deleting volumes. The
+run log is `/tmp/greenguard-clean-gate-nlc_8ooi-verify.log`; it is local evidence,
+not AWS or full Kafka/Cassandra/OpenSearch integration acceptance.
+
+The reviewed EventBridge Pod Identity trust now scopes the role to the exact
+cluster ARN, namespace and service account request tags, following the AWS
+Pod Identity trust/session-tag contract. Terraform validation passes; actual
+STS credentials and EventBridge delivery still require EKS acceptance.
