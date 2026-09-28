@@ -1,3 +1,7 @@
+import {
+  admitOwnerPlacement,
+  resolveOwnerDatabase,
+} from "@greenguard/membership-client/owner-db";
 import { Prisma } from "../generated/prisma/client.js";
 import type { Db } from "./client.js";
 import {
@@ -36,15 +40,19 @@ export async function withTenant<T>(
 ): Promise<T> {
   assertTenantId(tenantId);
   try {
-    return await db.$transaction(
+    const owner = await resolveOwnerDatabase(db, tenantId);
+    return await owner.database.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-        if (options.lockTimeoutMs !== undefined) {
-          const lockTimeout = `${options.lockTimeoutMs}ms`;
-          await tx.$executeRaw`SELECT set_config('lock_timeout', ${lockTimeout}, true)`;
-        }
+        const lockTimeout = `${options.lockTimeoutMs ?? 2000}ms`;
+        await tx.$executeRaw`SELECT set_config('lock_timeout', ${lockTimeout}, true)`;
         const statementTimeout = `${options.statementTimeoutMs ?? 5000}ms`;
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${statementTimeout}, true)`;
+        if (owner.route)
+          await admitOwnerPlacement(tenantId, owner.route, (sql, params) =>
+            tx.$executeRawUnsafe(sql, ...params),
+          );
+        else
+          await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         return work(tx);
       },
       { isolationLevel: options.isolationLevel, timeout: options.timeoutMs },

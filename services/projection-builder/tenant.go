@@ -22,7 +22,12 @@ func WithTenantSchema(ctx context.Context, db TxStarter, tenantID, schema string
 	if schema != "public" && !versionSchemaPattern.MatchString(schema) {
 		return ErrInvalidProjectionSchema
 	}
-	return common.WithTenantSchema(ctx, db, tenantID, schema, fn)
+	return common.WithTenantSchema(ctx, db, tenantID, schema, func(ctx context.Context, tx pgx.Tx) error {
+		if err := admitProjectionTenant(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		return fn(ctx, tx)
+	})
 }
 
 func rollback(tx pgx.Tx) error { return common.Rollback(tx) }

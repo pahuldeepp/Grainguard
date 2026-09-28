@@ -1,36 +1,180 @@
-# Proposed Stage 05e contract; Apollo BFF implementation belongs to Stage 08.
-scalar DateTime
-
+# Read slice of services/bff/src/schema.ts. PostgreSQL projection minima are
+# requested per field; tenant authority comes from the verified bearer.
 type DeviceView {
-  id: ID!
-  siteId: ID!
-  binId: ID
-  serialNumber: String!
-  status: String!
-  inventoryVersion: String!
-}
-
-type Reading {
-  id: ID!
+  consistencyToken: String
   deviceId: ID!
-  observedAt: DateTime!
-  receivedAt: DateTime!
+  siteId: ID
+  binId: ID
+  name: String
+  status: String
+  projectedAt: String
+}
+type DevicePage {
+  consistencyToken: String
+  items: [DeviceView!]!
+  nextCursor: String
+}
+type ReadingView {
+  consistencyToken: String
+  readingId: ID!
+  deviceId: ID!
+  eventId: ID
+  observedAt: String!
+  receivedAt: String!
+  projectedAt: String
   temperatureC: Float
   relativeHumidityPercent: Float
+  streamVersion: String
+  inventoryEnrichment: String
 }
-
-type DeviceFreshness {
+type RollupView {
+  consistencyToken: String
+  bucketStart: String!
+  sampleCount: Int!
+  avgTemperatureC: Float
+  avgRelativeHumidityPercent: Float
+}
+type BinView {
+  binId: ID!
+  siteId: ID!
+  name: String!
+  siteName: String
+  projectedAt: String
+}
+type BinDevice {
   deviceId: ID!
+  status: String!
+  serialNumber: String
+}
+type BinMetricReading {
+  deviceId: ID!
+  metric: String!
+  unit: String!
+  value: Float!
+  observedAt: String!
+  receivedAt: String!
+  projectedAt: String
   readingId: ID!
-  selectedObservedAt: DateTime!
-  projectedAt: DateTime!
+  ageSeconds: Float
+  stale: Boolean
+}
+type SensorPlacement {
+  deviceId: ID!
+  cableId: ID!
+  cableVersion: String!
+  sensorId: ID!
+  position: Int!
+  depthM: Float
+  label: String!
+}
+type SensorReading {
+  deviceId: ID!
+  sensorId: ID!
+  cableId: ID!
+  layoutVersion: String!
+  position: Int!
+  depthM: Float
+  label: String
+  metric: String!
+  unit: String!
+  value: Float!
+  observedAt: String!
+  receivedAt: String!
+  readingId: ID!
+  ageSeconds: Float
+  stale: Boolean
+}
+type BinPolicy {
+  policyId: ID!
+  policyVersion: String!
+  grainType: String!
+  effectiveFrom: String!
+  effectiveTo: String
+  measurementThresholds: String!
+  riskThresholds: String!
+  calibrated: Boolean!
+  status: String!
+  provenance: String!
+  calibrationEvidence: String
+}
+type BinReadings {
+  consistencyToken: String
+  bin: BinView!
+  devices: [BinDevice!]!
+  devicesTruncated: Boolean!
+  readings: [BinMetricReading!]!
+  layout: [SensorPlacement!]!
+  sensorReadings: [SensorReading!]!
+  policies: [BinPolicy!]!
+  freshness: String!
+}
+type BinTrendBucket {
+  bucketAt: String!
+  metric: String!
+  unit: String!
+  minValue: Float
+  averageValue: Float
+  maxValue: Float
+  sampleCount: Int!
+  deviceCount: Int!
+}
+type BinTrend {
+  consistencyToken: String
+  bin: BinView
+  window: String!
+  resolution: String!
+  bucketSeconds: Int!
+  from: String!
+  to: String!
+  buckets: [BinTrendBucket!]!
+  source: String!
+}
+type DeviceChange {
+  consistencyToken: String
+  deviceId: ID!
+  readingId: ID
+  projectedAt: String
+  streamVersion: String
 }
 
 type Query {
-  device(id: ID!): DeviceView
-  devicesBySite(siteId: ID!, limit: Int = 100): [DeviceView!]!
-  latestReading(deviceId: ID!): Reading
-  reading(id: ID!): Reading
-  readings(deviceId: ID!, from: DateTime!, to: DateTime!, limit: Int = 100): [Reading!]!
-  deviceFreshness(deviceId: ID!): DeviceFreshness
+  device(id: ID!, minimumConsistency: String): DeviceView
+  reading(id: ID!, minimumConsistency: String): ReadingView
+  siteDevices(
+    siteId: ID!
+    limit: Int!
+    after: String
+    minimumConsistency: String
+  ): DevicePage!
+  latestReading(deviceId: ID!, minimumConsistency: String): ReadingView
+  readingHistory(
+    deviceId: ID!
+    from: String!
+    to: String!
+    limit: Int!
+    minimumConsistency: String
+  ): [ReadingView!]!
+  searchDevices(
+    query: String!
+    limit: Int!
+    minimumConsistency: String
+  ): [DeviceView!]!
+  readingRollups(
+    deviceId: ID!
+    from: String!
+    to: String!
+    limit: Int!
+    bucket: String!
+    minimumConsistency: String
+  ): [RollupView!]!
+  binReadingsLatest(binId: ID!, minimumConsistency: String): BinReadings
+  binReadingsTrend(
+    binId: ID!
+    window: String!
+    resolution: String = "AUTO"
+    minimumConsistency: String
+  ): BinTrend!
+}
+type Subscription {
+  deviceChanged(deviceId: ID!): DeviceChange!
 }

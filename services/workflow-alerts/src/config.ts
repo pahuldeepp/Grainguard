@@ -79,7 +79,9 @@ export function readConfig(env: NodeJS.ProcessEnv): AlertsConfig {
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new Error("PORT must be an integer from 0 to 65535");
   return {
-    databaseUrl: required(env, "ALERTS_DATABASE_URL"),
+    databaseUrl: env.SHARD_REGISTRY_FILE
+      ? (env.ALERTS_DATABASE_URL ?? "")
+      : required(env, "ALERTS_DATABASE_URL"),
     host: env.HOST || "127.0.0.1",
     port,
     auth,

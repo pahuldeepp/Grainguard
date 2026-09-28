@@ -1,0 +1,302 @@
+true up -d --wait --build
+true exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
+npm run build -w @greenguard/otel
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+npm run migrate -w services/device-service
+
+> @greenguard/device-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_inventory", schema "public" at "127.0.0.1:55592"
+
+21 migrations found in prisma/migrations
+
+Applying migration `20260923000000_inventory_foundation`
+Applying migration `20260924000000_cdc_access`
+Applying migration `20260924010000_facility_versions`
+Applying migration `20260924020000_grain_lots`
+Applying migration `20260924030000_lot_fk_names`
+Applying migration `20260924040000_grain_lot_tenant_fk`
+Applying migration `20260924050000_saga_inventory`
+Applying migration `20260924060000_saga_owner`
+Applying migration `20260924070000_saga_owner_grant`
+Applying migration `20260924080000_saga_result_tenant_selector`
+Applying migration `20260925090000_saga_result_trace`
+Applying migration `20260925110000_tenant_projection`
+Applying migration `20260925130000_entitlements`
+Applying migration `20260925170000_audit_export_read`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260926010000_mysql_import_admission`
+Applying migration `20260926120000_sensor_cable_layout`
+Applying migration `20260928120000_tenant_ownership_fence`
+Applying migration `20260928140000_tenant_ownership_null_guard`
+Applying migration `20260928150000_tenant_ownership_schema_grants`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260923000000_inventory_foundation/
+    └─ migration.sql
+  └─ 20260924000000_cdc_access/
+    └─ migration.sql
+  └─ 20260924010000_facility_versions/
+    └─ migration.sql
+  └─ 20260924020000_grain_lots/
+    └─ migration.sql
+  └─ 20260924030000_lot_fk_names/
+    └─ migration.sql
+  └─ 20260924040000_grain_lot_tenant_fk/
+    └─ migration.sql
+  └─ 20260924050000_saga_inventory/
+    └─ migration.sql
+  └─ 20260924060000_saga_owner/
+    └─ migration.sql
+  └─ 20260924070000_saga_owner_grant/
+    └─ migration.sql
+  └─ 20260924080000_saga_result_tenant_selector/
+    └─ migration.sql
+  └─ 20260925090000_saga_result_trace/
+    └─ migration.sql
+  └─ 20260925110000_tenant_projection/
+    └─ migration.sql
+  └─ 20260925130000_entitlements/
+    └─ migration.sql
+  └─ 20260925170000_audit_export_read/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260926010000_mysql_import_admission/
+    └─ migration.sql
+  └─ 20260926120000_sensor_cable_layout/
+    └─ migration.sql
+  └─ 20260928120000_tenant_ownership_fence/
+    └─ migration.sql
+  └─ 20260928140000_tenant_ownership_null_guard/
+    └─ migration.sql
+  └─ 20260928150000_tenant_ownership_schema_grants/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w services/workflow-alerts
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55592"
+
+6 migrations found in prisma/migrations
+
+Applying migration `20260924100000_alert_lifecycle`
+Applying migration `20260924110000_assessment_invalidation`
+Applying migration `20260926100000_alert_actor_identity`
+Applying migration `20260928120000_tenant_ownership_fence`
+Applying migration `20260928140000_tenant_ownership_null_guard`
+Applying migration `20260928150000_tenant_ownership_schema_grants`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260924100000_alert_lifecycle/
+    └─ migration.sql
+  └─ 20260924110000_assessment_invalidation/
+    └─ migration.sql
+  └─ 20260926100000_alert_actor_identity/
+    └─ migration.sql
+  └─ 20260928120000_tenant_ownership_fence/
+    └─ migration.sql
+  └─ 20260928140000_tenant_ownership_null_guard/
+    └─ migration.sql
+  └─ 20260928150000_tenant_ownership_schema_grants/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w services/tenant-control-plane
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:55592"
+
+21 migrations found in prisma/migrations
+
+Applying migration `20260925090000_control_plane`
+Applying migration `20260925110000_membership_revocation`
+Applying migration `20260925120000_membership_identity_lookup_index`
+Applying migration `20260925130000_machine_credentials`
+Applying migration `20260925131000_machine_lookup_policy`
+Applying migration `20260925140000_flag_configurations`
+Applying migration `20260925141000_global_flags`
+Applying migration `20260925150000_entitlements`
+Applying migration `20260925160000_audit_exports`
+Applying migration `20260925160000_identity_connections`
+Applying migration `20260925170000_audit_csv`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260925181000_identity_domain_expiry`
+Applying migration `20260925185000_oauth_client_tenant_binding`
+Applying migration `20260925190000_audit_export_failures`
+Applying migration `20260925200000_jit_seat_denial_audit`
+Applying migration `20260925210000_notification_contacts`
+Applying migration `20260925220000_notification_contacts_cdc`
+Applying migration `20260928010000_tenant_placement`
+Applying migration `20260928130000_read_admission_leases`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925090000_control_plane/
+    └─ migration.sql
+  └─ 20260925110000_membership_revocation/
+    └─ migration.sql
+  └─ 20260925120000_membership_identity_lookup_index/
+    └─ migration.sql
+  └─ 20260925130000_machine_credentials/
+    └─ migration.sql
+  └─ 20260925131000_machine_lookup_policy/
+    └─ migration.sql
+  └─ 20260925140000_flag_configurations/
+    └─ migration.sql
+  └─ 20260925141000_global_flags/
+    └─ migration.sql
+  └─ 20260925150000_entitlements/
+    └─ migration.sql
+  └─ 20260925160000_audit_exports/
+    └─ migration.sql
+  └─ 20260925160000_identity_connections/
+    └─ migration.sql
+  └─ 20260925170000_audit_csv/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260925181000_identity_domain_expiry/
+    └─ migration.sql
+  └─ 20260925185000_oauth_client_tenant_binding/
+    └─ migration.sql
+  └─ 20260925190000_audit_export_failures/
+    └─ migration.sql
+  └─ 20260925200000_jit_seat_denial_audit/
+    └─ migration.sql
+  └─ 20260925210000_notification_contacts/
+    └─ migration.sql
+  └─ 20260925220000_notification_contacts_cdc/
+    └─ migration.sql
+  └─ 20260928010000_tenant_placement/
+    └─ migration.sql
+  └─ 20260928130000_read_admission_leases/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w @greenguard/billing-service
+
+> @greenguard/billing-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_billing", schema "public" at "127.0.0.1:55592"
+
+9 migrations found in prisma/migrations
+
+Applying migration `20260925140000_billing`
+Applying migration `20260925150000_billing_command_work`
+Applying migration `20260925160000_billing_conflict_grants`
+Applying migration `20260925170000_audit_export_read`
+Applying migration `20260925170000_billing_source_rejections`
+Applying migration `20260925180000_billing_due_work`
+Applying migration `20260925190000_billing_hardening`
+Applying migration `20260925200000_billing_queue_id_selectors`
+Applying migration `20260925210000_billing_queue_write_procedures`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925140000_billing/
+    └─ migration.sql
+  └─ 20260925150000_billing_command_work/
+    └─ migration.sql
+  └─ 20260925160000_billing_conflict_grants/
+    └─ migration.sql
+  └─ 20260925170000_audit_export_read/
+    └─ migration.sql
+  └─ 20260925170000_billing_source_rejections/
+    └─ migration.sql
+  └─ 20260925180000_billing_due_work/
+    └─ migration.sql
+  └─ 20260925190000_billing_hardening/
+    └─ migration.sql
+  └─ 20260925200000_billing_queue_id_selectors/
+    └─ migration.sql
+  └─ 20260925210000_billing_queue_write_procedures/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+cd services/telemetry-ingest && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make projection-migrate
+cd services/projection-builder && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-migrate
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m risk_engine.migrate
+risk migrations applied: 000001, 000002, 000003, 000004, 000005, 000006, 000007, 000008
+/Applications/Xcode.app/Contents/Developer/usr/bin/make jobs-migrate
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/notification-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+notification migrations applied: 6
+/Applications/Xcode.app/Contents/Developer/usr/bin/make saga-migrate
+cd services/saga-orchestrator && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make hardware-migrate
+cd services/hardware-service && go run ./cmd/migrate

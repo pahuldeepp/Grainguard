@@ -47,6 +47,7 @@ const TENANT_A = "tenant-a";
 const DEVICE = "device";
 function backend(device: (tenant: string) => Promise<unknown>): ReadBackends {
   return {
+    deviceCurrent: async () => ({ device: null, latestReading: null }),
     device,
     devices: async () => [],
     sites: async (_t, ids) => ids,

@@ -1,5 +1,7 @@
 import { assertSeatCapacity } from "./entitlements.js";
 import { randomBytes } from "node:crypto";
+import { suggestInitialShard } from "@greenguard/membership-client";
+import { PlacementUnavailableError } from "./placement.js";
 import type { Db, Tx } from "../db/client.js";
 import { inScope, UUID } from "../db/session.js";
 import {
@@ -268,10 +270,53 @@ export async function insertOrganization(
   name: string,
   createdBy: string,
   cmd: Command,
+  trustedPlacementOverride?: { shardId: string },
 ) {
+  const existing = await tx.$queryRaw<
+    unknown[]
+  >`SELECT 1 FROM organizations WHERE tenant_id=${tenantId}::uuid`;
+  if (existing.length) return false;
+  const [policy] = await tx.$queryRaw<
+    {
+      ring_version: bigint;
+      algorithm: "sha256-v1";
+      virtual_nodes: number;
+      shard_ids: string[];
+    }[]
+  >`
+    SELECT r.ring_version,r.algorithm,r.virtual_nodes,r.shard_ids FROM placement_policy p
+      JOIN placement_ring_versions r ON r.ring_version=p.ring_version WHERE p.policy_id='default'`;
+  if (!policy)
+    throw new PlacementUnavailableError(
+      "initial placement policy is unavailable",
+    );
+  if (!trustedPlacementOverride) {
+    const activeMembers = await tx.$queryRaw<
+      { shard_id: string }[]
+    >`SELECT shard_id FROM shard_registry WHERE shard_id=ANY(${policy.shard_ids}::text[]) AND state='active'`;
+    if (activeMembers.length !== policy.shard_ids.length)
+      throw new PlacementUnavailableError(
+        "initial placement ring is not ready",
+      );
+  }
+  const shardId =
+    trustedPlacementOverride?.shardId ??
+    suggestInitialShard(tenantId, {
+      version: policy.ring_version.toString(),
+      algorithm: policy.algorithm,
+      virtualNodes: policy.virtual_nodes,
+      shardIds: policy.shard_ids,
+    });
+  const registered = await tx.$queryRaw<
+    unknown[]
+  >`SELECT 1 FROM shard_registry WHERE shard_id=${shardId} AND state='active'`;
+  if (!registered.length)
+    throw new PlacementUnavailableError(
+      "initial placement target is unavailable",
+    );
   const inserted =
-    await tx.$executeRaw`INSERT INTO organizations (tenant_id, name, created_by)
-    VALUES (${tenantId}::uuid, ${name}, ${createdBy}::uuid) ON CONFLICT DO NOTHING`;
+    await tx.$executeRaw`INSERT INTO organizations (tenant_id, name, created_by, shard_id, initial_placement_ring_version, initial_placement_method)
+    VALUES (${tenantId}::uuid, ${name}, ${createdBy}::uuid, ${shardId}, ${trustedPlacementOverride ? null : policy.ring_version}, ${trustedPlacementOverride ? "override" : "ring"}) ON CONFLICT DO NOTHING`;
   if (inserted === 0) return false;
   await appendEvent(
     tx,

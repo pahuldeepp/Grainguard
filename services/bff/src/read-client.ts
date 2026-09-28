@@ -1,3 +1,20 @@
+import {
+  parseWatermark,
+  serializeWatermark,
+  WATERMARK_REQUEST_HEADER,
+  READ_BUDGET_HEADER,
+  WATERMARK_RESPONSE_HEADER,
+} from "@greenguard/membership-client";
+
+export interface ReadConsistency {
+  tenantId: string;
+  minimumConsistency?: string;
+  onWatermark?: (token: string) => void;
+  /** Original operation deadline; retries never extend it. */
+  deadline?: number;
+  signal?: AbortSignal;
+}
+
 import { allowedInternalUrl } from "./internal-url.js";
 
 export class ReadUpstreamError extends Error {
@@ -78,9 +95,13 @@ function exactVersion(value: unknown): string | null {
   throw new ReadUpstreamError(502, "invalid_stream_version");
 }
 
-function device(row: WireRow | null): Record<string, unknown> | null {
+function device(
+  row: WireRow | null,
+  consistencyToken: string | null = null,
+): Record<string, unknown> | null {
   if (!row) return null;
   return {
+    consistencyToken,
     deviceId: row.device_id ?? row.resource_id,
     siteId: row.site_id ?? null,
     binId: row.bin_id ?? null,
@@ -90,9 +111,13 @@ function device(row: WireRow | null): Record<string, unknown> | null {
   };
 }
 
-function reading(row: WireRow | null): Record<string, unknown> | null {
+function reading(
+  row: WireRow | null,
+  consistencyToken: string | null = null,
+): Record<string, unknown> | null {
   if (!row) return null;
   return {
+    consistencyToken,
     readingId: row.reading_id,
     deviceId: row.device_id,
     eventId: row.event_id ?? null,
@@ -160,6 +185,10 @@ export class ReadClient {
     }
   }
 
+  private cancelled(call: CircuitCall): void {
+    if (call.epoch === this.epoch && call.probe) this.probing = false;
+  }
+
   private failed(call: CircuitCall): void {
     if (call.epoch !== this.epoch) return;
     this.failures++;
@@ -174,16 +203,57 @@ export class ReadClient {
     path: string,
     authorization: string,
     requestBody?: unknown,
-  ): Promise<{ data: T; nextCursor?: string | null }> {
+    consistency?: ReadConsistency,
+  ): Promise<{
+    data: T;
+    nextCursor?: string | null;
+    consistencyToken: string | null;
+  }> {
+    let minimum: string | undefined;
+    try {
+      if (consistency?.minimumConsistency !== undefined)
+        minimum = serializeWatermark(
+          parseWatermark(consistency.minimumConsistency, consistency.tenantId),
+        );
+    } catch {
+      throw new ReadUpstreamError(400, "invalid_consistency_token");
+    }
+    const deadline = Math.min(
+      this.policy.now() + this.policy.overallTimeoutMs,
+      consistency?.deadline ?? Infinity,
+    );
+    const remaining = deadline - this.policy.now();
+    if (
+      !Number.isFinite(remaining) ||
+      remaining <= 0 ||
+      consistency?.signal?.aborted
+    )
+      throw new ReadUpstreamError(504, "read_timeout");
     const call = this.startCall();
-    const overall = AbortSignal.timeout(this.policy.overallTimeoutMs);
+    const overall = AbortSignal.any([
+      AbortSignal.timeout(Math.max(1, Math.ceil(remaining))),
+      ...(consistency?.signal ? [consistency.signal] : []),
+    ]);
     const safeRead = requestBody === undefined;
     const attempts = safeRead && !call.probe ? 3 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
+      if (overall.aborted || deadline <= this.policy.now()) {
+        if (consistency?.signal?.aborted) this.cancelled(call);
+        else this.failed(call);
+        throw new ReadUpstreamError(504, "read_timeout");
+      }
       let classified = false;
+      const attemptBudget = Math.max(
+        1,
+        Math.min(
+          4000,
+          this.policy.perAttemptTimeoutMs,
+          Math.ceil(deadline - this.policy.now()),
+        ),
+      );
       const signal = AbortSignal.any([
         overall,
-        AbortSignal.timeout(this.policy.perAttemptTimeoutMs),
+        AbortSignal.timeout(attemptBudget),
       ]);
       try {
         const response = await abortable(
@@ -191,6 +261,8 @@ export class ReadClient {
             method: safeRead ? "GET" : "POST",
             headers: {
               Authorization: authorization,
+              [READ_BUDGET_HEADER]: String(attemptBudget),
+              ...(minimum ? { [WATERMARK_REQUEST_HEADER]: minimum } : {}),
               ...(safeRead ? {} : { "Content-Type": "application/json" }),
             },
             ...(safeRead ? {} : { body: JSON.stringify(requestBody) }),
@@ -211,7 +283,9 @@ export class ReadClient {
             await pause(this.policy.backoffMs * (attempt + 1), overall);
             continue;
           }
-          if (retryable) this.failed(call);
+          if (retryable)
+            if (consistency?.signal?.aborted) this.cancelled(call);
+            else this.failed(call);
           else this.succeeded(call);
           classified = true;
           const body = (await abortable(
@@ -232,7 +306,33 @@ export class ReadClient {
         this.succeeded(call);
         if (!("data" in body))
           throw new ReadUpstreamError(502, "invalid_read_response");
-        return { data: body.data as T, nextCursor: body.nextCursor };
+        const header = response.headers.get(WATERMARK_RESPONSE_HEADER);
+        let consistencyToken: string | null = null;
+        try {
+          if (header !== null)
+            consistencyToken = serializeWatermark(
+              parseWatermark(header, consistency?.tenantId),
+            );
+        } catch {
+          throw new ReadUpstreamError(502, "invalid_consistency_response");
+        }
+        if (minimum) {
+          const wanted = parseWatermark(minimum);
+          const actual = consistencyToken && parseWatermark(consistencyToken);
+          if (
+            !actual ||
+            wanted.shardIncarnation !== actual.shardIncarnation ||
+            wanted.placementEpoch !== actual.placementEpoch ||
+            BigInt(actual.sequence) < BigInt(wanted.sequence)
+          )
+            throw new ReadUpstreamError(502, "consistency_minimum_unsatisfied");
+        }
+        if (consistencyToken) consistency?.onWatermark?.(consistencyToken);
+        return {
+          data: body.data as T,
+          nextCursor: body.nextCursor,
+          consistencyToken,
+        };
       } catch (error) {
         if (classified) throw error;
         if (error instanceof ReadUpstreamError && error.code !== "read_timeout")
@@ -245,47 +345,89 @@ export class ReadClient {
           try {
             await pause(this.policy.backoffMs * (attempt + 1), overall);
           } catch (deadline) {
-            this.failed(call);
+            if (consistency?.signal?.aborted) this.cancelled(call);
+            else this.failed(call);
             throw deadline;
           }
           continue;
         }
-        this.failed(call);
+        if (consistency?.signal?.aborted) this.cancelled(call);
+        else this.failed(call);
         throw failure;
       }
     }
     throw new ReadUpstreamError(503, "read_unavailable");
   }
 
-  private async request<T>(path: string, authorization: string): Promise<T> {
-    return (await this.response<T>(path, authorization)).data;
-  }
-
-  async device(authorization: string, id: string) {
-    const row = await this.request<WireRow | null>(
+  async device(
+    authorization: string,
+    id: string,
+    consistency?: ReadConsistency,
+  ) {
+    const { data: row, consistencyToken } = await this.response<WireRow | null>(
       `/api/v1/read/devices/${pathSegment(id)}`,
       authorization,
+      undefined,
+      consistency,
     );
-    return device(row);
+    return device(row, consistencyToken);
   }
 
-  async devices(authorization: string, ids: readonly string[]) {
-    const rows = (
-      await this.response<WireRow[]>(
-        "/api/v1/read/devices/batch",
-        authorization,
-        { deviceIds: ids },
-      )
-    ).data;
-    return rows.map((row) => device(row)).filter((row) => row !== null);
+  async deviceCurrent(
+    authorization: string,
+    id: string,
+    consistency?: ReadConsistency,
+  ) {
+    const { data, consistencyToken } = await this.response<{
+      device: WireRow | null;
+      latestReading: WireRow | null;
+    }>(
+      `/api/v1/read/devices/${pathSegment(id)}/current`,
+      authorization,
+      undefined,
+      consistency,
+    );
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !("device" in data) ||
+      !("latestReading" in data)
+    )
+      throw new ReadUpstreamError(502, "invalid_read_response");
+    return {
+      device: device(data.device, consistencyToken),
+      latestReading: reading(data.latestReading, consistencyToken),
+    };
   }
 
-  async reading(authorization: string, id: string) {
-    const row = await this.request<WireRow | null>(
+  async devices(
+    authorization: string,
+    ids: readonly string[],
+    consistency?: ReadConsistency,
+  ) {
+    const { data: rows, consistencyToken } = await this.response<WireRow[]>(
+      "/api/v1/read/devices/batch",
+      authorization,
+      { deviceIds: ids },
+      consistency,
+    );
+    return rows
+      .map((row) => device(row, consistencyToken))
+      .filter((row) => row !== null);
+  }
+
+  async reading(
+    authorization: string,
+    id: string,
+    consistency?: ReadConsistency,
+  ) {
+    const { data: row, consistencyToken } = await this.response<WireRow | null>(
       `/api/v1/read/readings/${pathSegment(id)}`,
       authorization,
+      undefined,
+      consistency,
     );
-    return reading(row);
+    return reading(row, consistencyToken);
   }
 
   async siteDevices(
@@ -293,15 +435,23 @@ export class ReadClient {
     siteId: string,
     limit: number,
     after?: string,
+    consistency?: ReadConsistency,
   ) {
     const params = new URLSearchParams({ limit: String(limit) });
     if (after) params.set("after", after);
-    const { data: rows, nextCursor } = await this.response<WireRow[]>(
+    const {
+      data: rows,
+      nextCursor,
+      consistencyToken,
+    } = await this.response<WireRow[]>(
       `/api/v1/read/sites/${pathSegment(siteId)}/devices?${params}`,
       authorization,
+      undefined,
+      consistency,
     );
     return {
-      items: rows.map((row) => device(row)),
+      consistencyToken,
+      items: rows.map((row) => device(row, consistencyToken)),
       nextCursor: nextCursor ?? null,
     };
   }
@@ -315,6 +465,7 @@ export class ReadClient {
       limit: number;
       bucket: "hour" | "day";
     },
+    consistency?: ReadConsistency,
   ) {
     const params = new URLSearchParams({
       from: args.from,
@@ -322,11 +473,14 @@ export class ReadClient {
       limit: String(args.limit),
       bucket: args.bucket,
     });
-    const rows = await this.request<WireRow[]>(
+    const { data: rows, consistencyToken } = await this.response<WireRow[]>(
       `/api/v1/read/devices/${pathSegment(args.deviceId)}/rollups?${params}`,
       authorization,
+      undefined,
+      consistency,
     );
     return rows.map((row) => ({
+      consistencyToken,
       bucketStart: row.bucket_start,
       sampleCount: row.sample_count,
       avgTemperatureC: row.avg_temperature_c,
@@ -334,19 +488,32 @@ export class ReadClient {
     }));
   }
 
-  async latest(authorization: string, id: string) {
-    const row = await this.request<WireRow | null>(
+  async latest(
+    authorization: string,
+    id: string,
+    consistency?: ReadConsistency,
+  ) {
+    const { data: row, consistencyToken } = await this.response<WireRow | null>(
       `/api/v1/read/devices/${pathSegment(id)}/latest`,
       authorization,
+      undefined,
+      consistency,
     );
-    return reading(row);
+    return reading(row, consistencyToken);
   }
 
-  async binReadingsLatest(authorization: string, binId: string) {
-    const value = await this.request<WireRow | null>(
-      `/api/v1/read/bins/${pathSegment(binId)}/readings/latest`,
-      authorization,
-    );
+  async binReadingsLatest(
+    authorization: string,
+    binId: string,
+    consistency?: ReadConsistency,
+  ) {
+    const { data: value, consistencyToken } =
+      await this.response<WireRow | null>(
+        `/api/v1/read/bins/${pathSegment(binId)}/readings/latest`,
+        authorization,
+        undefined,
+        consistency,
+      );
     if (!value) return null;
     const bin = value.bin as WireRow | undefined;
     const mapRow = (row: WireRow) => ({
@@ -362,6 +529,7 @@ export class ReadClient {
       stale: row.stale ?? null,
     });
     return {
+      consistencyToken,
       bin: bin
         ? {
             binId: bin.bin_id,
@@ -422,14 +590,18 @@ export class ReadClient {
     binId: string,
     window: string,
     resolution = "AUTO",
+    consistency?: ReadConsistency,
   ) {
     const params = new URLSearchParams({ window, resolution });
-    const result = await this.request<WireRow>(
+    const { data: result, consistencyToken } = await this.response<WireRow>(
       `/api/v1/read/bins/${pathSegment(binId)}/readings/trend?${params}`,
       authorization,
+      undefined,
+      consistency,
     );
     const data = result;
     return {
+      consistencyToken,
       bin: data.bins
         ? {
             binId: (data.bins as WireRow).bin_id,
@@ -460,27 +632,37 @@ export class ReadClient {
   async history(
     authorization: string,
     args: { deviceId: string; from: string; to: string; limit: number },
+    consistency?: ReadConsistency,
   ) {
     const params = new URLSearchParams({
       from: args.from,
       to: args.to,
       limit: String(args.limit),
     });
-    const rows = await this.request<WireRow[]>(
+    const { data: rows, consistencyToken } = await this.response<WireRow[]>(
       `/api/v1/read/devices/${pathSegment(args.deviceId)}/readings?${params}`,
       authorization,
+      undefined,
+      consistency,
     );
-    return rows.map((row) => reading(row));
+    return rows.map((row) => reading(row, consistencyToken));
   }
 
-  async search(authorization: string, query: string, limit: number) {
+  async search(
+    authorization: string,
+    query: string,
+    limit: number,
+    consistency?: ReadConsistency,
+  ) {
     const params = new URLSearchParams({ q: query, limit: String(limit) });
-    const rows = await this.request<WireRow[]>(
+    const { data: rows, consistencyToken } = await this.response<WireRow[]>(
       `/api/v1/read/search?${params}`,
       authorization,
+      undefined,
+      consistency,
     );
     return rows
       .filter((row) => row.resource_type === "device")
-      .map((row) => device(row));
+      .map((row) => device(row, consistencyToken));
   }
 }

@@ -208,7 +208,10 @@ function readAuditConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig["audit"] {
       "AUDIT_EXPORT_DIRECTORY, AUDIT_EXPORT_PUBLIC_KEY_PEM and AUDIT_EXPORT_LINK_SECRET must be set together",
     );
   const enabled = Boolean(s3) || set === 3;
-  if (enabled && (!inventoryUrl || !billingUrl))
+  if (
+    enabled &&
+    ((!inventoryUrl && !env.INVENTORY_SHARD_REGISTRY_FILE) || !billingUrl)
+  )
     throw new Error(
       "INVENTORY_DATABASE_URL and BILLING_DATABASE_URL are required when audit export is enabled",
     );
@@ -217,7 +220,7 @@ function readAuditConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig["audit"] {
   if (!enabled) return undefined;
   const owners = {
     publicKeyPem: publicKey!,
-    inventoryDatabaseUrl: inventoryUrl!,
+    inventoryDatabaseUrl: inventoryUrl ?? "",
     billingDatabaseUrl: billingUrl!,
   };
   return s3

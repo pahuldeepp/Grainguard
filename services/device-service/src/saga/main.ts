@@ -1,13 +1,14 @@
+import { closeOwnerDatabase } from "@greenguard/membership-client/owner-db";
 import { createDb } from "../db/client.js";
 import { rejectTenantList, startInventorySagaWorker } from "./worker.js";
 
 async function main() {
   const url = process.env.INVENTORY_DATABASE_URL;
   const brokerList = process.env.KAFKA_BROKERS;
-  if (!url || !brokerList)
+  if ((!url && !process.env.SHARD_REGISTRY_FILE) || !brokerList)
     throw new Error("INVENTORY_DATABASE_URL and KAFKA_BROKERS are required");
   rejectTenantList(process.env);
-  const db = createDb(url);
+  const db = createDb(url ?? "");
   const stop = await startInventorySagaWorker(
     db,
     brokerList.split(","),
@@ -18,7 +19,9 @@ async function main() {
     },
   );
   const shutdown = () => {
-    void stop().finally(() => db.$disconnect());
+    void stop().finally(() =>
+      closeOwnerDatabase(db, 5000, (client) => client.$disconnect()),
+    );
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

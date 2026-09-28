@@ -251,3 +251,10 @@ test("tracing is enabled only by a collector endpoint and validates its settings
     /http\(s\)/,
   );
 });
+
+test("private shard registry config requires no legacy database URL", () => {
+  assert.equal(
+    readConfig({ SHARD_REGISTRY_FILE: "/private/owners.json" }).databaseUrl,
+    "",
+  );
+});

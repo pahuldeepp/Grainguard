@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  postgresReads,
   CassandraHistory,
   ElasticSearch,
   type HistoryQuery,
@@ -144,4 +145,56 @@ test("search HTTPS requires credentials and a Node startup CA", () => {
       }),
     /NODE_EXTRA_CA_CERTS/,
   );
+});
+
+test("device current uses one tenant-filtered statement and preserves exact versions and canonical dates", async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const current = await postgresReads({
+    withTenant: async (
+      tenant: string,
+      read: (tx: unknown) => Promise<unknown>,
+    ) => {
+      assert.equal(tenant, q.tenantId);
+      return read({
+        query: async (sql: string, values: unknown[]) => {
+          calls.push({ sql, values });
+          return {
+            rows: [
+              {
+                device: {
+                  inventory_version: "9007199254740993",
+                  updated_at: "2026-09-27T12:34:56.123456-05:00",
+                },
+                latest_reading: {
+                  stream_version: "9007199254740995",
+                  observed_at: "2026-09-27T12:34:56.123456-05:00",
+                  received_at: "2026-09-27T12:34:56.123456-05:00",
+                  projected_at: "2026-09-27T12:34:56.123456-05:00",
+                  age_seconds: "12.345678",
+                  temperature_c: 23.5,
+                },
+              },
+            ],
+          };
+        },
+      });
+    },
+  } as never).deviceCurrent(q.tenantId, q.deviceId);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].values, [q.tenantId, q.deviceId]);
+  assert.equal(
+    (calls[0].sql.match(/tenant_id=\$1 AND device_id=\$2/g) ?? []).length,
+    2,
+  );
+  assert.match(calls[0].sql, /inventory_version::text/);
+  assert.match(calls[0].sql, /->>'stream_version'/);
+  assert.match(calls[0].sql, /->>'age_seconds'/);
+  assert.equal(current.device?.inventory_version, "9007199254740993");
+  assert.equal(current.latestReading?.stream_version, "9007199254740995");
+  assert.equal(current.device?.updated_at, "2026-09-27T17:34:56.123Z");
+  assert.equal(current.latestReading?.observed_at, "2026-09-27T17:34:56.123Z");
+  assert.equal(current.latestReading?.received_at, "2026-09-27T17:34:56.123Z");
+  assert.equal(current.latestReading?.projected_at, "2026-09-27T17:34:56.123Z");
+  assert.equal(current.latestReading?.age_seconds, "12.345678");
+  assert.equal(current.latestReading?.temperature_c, 23.5);
 });

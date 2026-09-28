@@ -115,3 +115,18 @@ source-specific AuthorizationPolicy, and default-deny NetworkPolicy with
 explicit service peers. The live acceptance gate must verify those policies and
 show plaintext/unauthorized pod traffic is denied. A successful Helm render
 does not prove that gate.
+
+PostgreSQL read fields accept `minimumConsistency: String` and expose the admitted
+Read API watermark as `consistencyToken`. Validation binds minima to the verified
+principal tenant before forwarding; tokens cannot authorize or choose a route.
+Each request/alias carries its own minimum through retries. Live hints with
+projection identity and sequence raise the subscription's minimum before latest
+is read. Higher epochs advance identity and lower hints are discarded; controlled
+409 identity mismatches permit one authoritative reset. Empty results retain the
+actual request-local GraphQL response certificate. Persisted DeviceCurrent shares
+one aggregate HTTP request and one device/latest SQL snapshot. Reads share the
+request deadline and disconnect signal; cancellation does not count as circuit
+failure. `streamVersion`
+remains the independent event stream version. History/search keep their owning
+store semantics and reject unsupported strict PostgreSQL minima. See the
+[consistency contract](../../docs/api/bff-read-consistency.md).

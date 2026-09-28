@@ -11,7 +11,7 @@ import { identityIdOf } from "../domain/ids.js";
 import { once, type Actor, type Command } from "../domain/store.js";
 import { limit } from "../domain/entitlements.js";
 import { RateLimitedError } from "../api/rate-limited.js";
-import type { AuditSources } from "./owners.js";
+import type { AuditSources, AuditReader } from "./owners.js";
 
 type AuditRecord = {
   audit_id: string;
@@ -127,7 +127,7 @@ async function readAllRows(
   to: Date,
   cursor: { at: string; id: string } | null,
   limit: number,
-  sources?: AuditSources,
+  sources?: AuditReader,
 ) {
   const [control, inventory, billing] = await Promise.all([
     readRows(tx, tenantId, from, to, cursor, limit),
@@ -336,6 +336,7 @@ export async function* auditJobRows(
   job: JobRecord,
   sources?: AuditSources,
 ): AsyncGenerator<AuditEnvelope> {
+  const session = await sources?.session(job.tenant_id);
   let cursor: { at: string; id: string } | null = null;
   for (;;) {
     const current: { at: string; id: string } | null = cursor;
@@ -350,7 +351,7 @@ export async function* auditJobRows(
           job.to_at,
           current,
           500,
-          sources,
+          session,
         ),
     );
     if (!rows.length) return;

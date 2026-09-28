@@ -30,7 +30,10 @@ type promotionTx struct {
 	commits, rollbacks int
 }
 
-func (t *promotionTx) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+func (t *promotionTx) QueryRow(_ context.Context, q string, args ...any) pgx.Row {
+	if strings.Contains(q, "RETURNING shard_incarnation::text") {
+		return rowResult{values: []any{testTenant, "1", "1"}}
+	}
 	if len(args) == 0 {
 		return routeRow{definition: "SELECT * FROM read.device_latest JOIN public.consumer_inbox AS i ON true LEFT JOIN read.reading_history AS h ON true"}
 	}
@@ -105,15 +108,15 @@ func TestPromotionSecureViewsAndIdempotence(t *testing.T) {
 
 func assertSecurePromotion(t *testing.T, tx *promotionTx) {
 	t.Helper()
-	if tx.commits != 1 || len(tx.queries) != len(promotionViews)+23 {
+	if tx.commits != 1 || len(tx.queries) != len(promotionViews)+27 {
 		t.Fatalf("unexpected transaction: %+v", tx)
 	}
-	for _, q := range tx.queries[2 : 2+len(promotionViews)] {
+	for _, q := range tx.queries[3 : 3+len(promotionViews)] {
 		if !strings.Contains(q, "security_invoker=true, security_barrier=true") || !strings.Contains(q, "SELECT * FROM read_v2.") {
 			t.Fatalf("insecure view: %s", q)
 		}
 	}
-	if q := tx.queries[2+len(promotionViews)+4]; !strings.Contains(q, "JOIN read_v2.consumer_inbox") || !strings.Contains(q, "security_invoker=true, security_barrier=true") {
+	if q := tx.queries[3+len(promotionViews)+5]; !strings.Contains(q, "JOIN read_v2.consumer_inbox") || !strings.Contains(q, "security_invoker=true, security_barrier=true") {
 		t.Fatalf("latest view not routed to promoted inbox: %s", q)
 	}
 	if !strings.Contains(tx.queries[len(tx.queries)-2], "public.consumer_inbox") || !strings.Contains(tx.queries[len(tx.queries)-1], "promotion_changed") {

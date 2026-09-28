@@ -92,3 +92,14 @@ sensor readings for a bin, transition history and the notification log need new
 BFF queries; see `evidence/STAGE_UI_DASHBOARD_VALIDATION.md`.
 `node evidence/stage-ui-dashboard/contrast-check.mjs` verifies every token pair
 against WCAG AA.
+
+ReadApi retains the greatest observed PostgreSQL consistency token on its own
+instance and supplies it to refreshes of supported read fields. Live DeviceChange
+tokens are observed before refetch. Higher epochs advance the identity; late
+lower epochs are discarded. Controlled identity409 permits one tenant-bound fresh
+snapshot reset within the original deadline, including empty responses certified
+by GraphQL response extensions. Outages retain the old minimum. App creates a fresh instance for every
+`sessionId` change; `clearConsistency()` invalidates pending context responses.
+Cassandra history and search remain eventual unless the caller explicitly
+requests a minimum, which unsupported stores reject. See the
+[consistency contract](../../docs/api/bff-read-consistency.md).

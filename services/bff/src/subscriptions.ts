@@ -1,8 +1,12 @@
+import {
+  parseWatermark,
+  serializeWatermark,
+} from "@greenguard/membership-client";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import type { Principal } from "@greenguard/tenant-auth";
 import { WebSocketServer, WebSocket } from "ws";
-import { ReadClient } from "./read-client.js";
+import { ReadClient, ReadUpstreamError } from "./read-client.js";
 import { operations, resolvePersistedOperation } from "./query-policy.js";
 import type { LiveFeed } from "./live-feed.js";
 import { boundedRateCheck, type RateLimiter } from "./rate-limit.js";
@@ -295,6 +299,7 @@ export function attachSubscriptions(
           const device = await options.read.device(
             identity.authorization,
             deviceId,
+            { tenantId: identity.principal.tenantId },
           );
           if (!isCurrent()) return;
           if (!device) {
@@ -309,8 +314,53 @@ export function attachSubscriptions(
           }
           return;
         }
+        let minimumConsistency: string | undefined;
+        const observe = (token: unknown, hint = false) => {
+          if (token == null) return;
+          if (typeof token !== "string")
+            throw new ReadUpstreamError(502, "invalid_consistency_response");
+          const incoming = parseWatermark(token, identity.principal.tenantId);
+          if (minimumConsistency) {
+            const current = parseWatermark(
+              minimumConsistency,
+              identity.principal.tenantId,
+            );
+            if (
+              hint &&
+              BigInt(incoming.placementEpoch) < BigInt(current.placementEpoch)
+            )
+              return false;
+            if (
+              hint &&
+              BigInt(incoming.placementEpoch) > BigInt(current.placementEpoch)
+            ) {
+              minimumConsistency = serializeWatermark(incoming);
+              return;
+            }
+            if (
+              current.shardIncarnation !== incoming.shardIncarnation ||
+              current.placementEpoch !== incoming.placementEpoch
+            )
+              throw new ReadUpstreamError(409, "consistency_identity_mismatch");
+            if (BigInt(current.sequence) > BigInt(incoming.sequence)) return;
+          }
+          minimumConsistency = serializeWatermark(incoming);
+        };
+        const failRead = (error: unknown) => {
+          if (isCurrent()) {
+            subscriptions.get(id)?.();
+            subscriptions.delete(id);
+            fail(
+              id,
+              error instanceof ReadUpstreamError
+                ? error.code
+                : "read_unavailable",
+            );
+          }
+        };
         let fingerprint: string | undefined;
         let busy = false;
+        let activeRead: AbortController | undefined;
         let initialPollComplete = false;
         let rerun = false;
         let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -338,12 +388,125 @@ export function attachSubscriptions(
           }
           busy = true;
           inFlightPolls++;
+          const controller = new AbortController();
+          activeRead = controller;
+          const deadline = Date.now() + 8000;
           try {
-            const reading = (await options.read.latest(
-              identity.authorization,
-              deviceId,
-            )) as Record<string, unknown> | null;
-            const next = JSON.stringify(reading ?? null);
+            let reading: Record<string, unknown> | null;
+            let responseWatermark: string | undefined;
+            const onWatermark = (token: string) => {
+              responseWatermark = token;
+            };
+            const requestedMinimum = minimumConsistency;
+            try {
+              reading = (await options.read.latest(
+                identity.authorization,
+                deviceId,
+                {
+                  tenantId: identity.principal.tenantId,
+                  minimumConsistency: requestedMinimum,
+                  onWatermark,
+                  deadline,
+                  signal: controller.signal,
+                },
+              )) as Record<string, unknown> | null;
+            } catch (error) {
+              if (
+                !requestedMinimum ||
+                !(error instanceof ReadUpstreamError) ||
+                error.status !== 409 ||
+                error.code !== "consistency_identity_mismatch"
+              )
+                throw error;
+              // Exactly one authenticated admitted snapshot discovers current identity.
+              responseWatermark = undefined;
+              reading = (await options.read.latest(
+                identity.authorization,
+                deviceId,
+                {
+                  tenantId: identity.principal.tenantId,
+                  onWatermark,
+                  deadline,
+                  signal: controller.signal,
+                },
+              )) as Record<string, unknown> | null;
+              const actualToken =
+                responseWatermark ?? reading?.consistencyToken;
+              if (typeof actualToken !== "string")
+                throw new ReadUpstreamError(
+                  502,
+                  "invalid_consistency_response",
+                );
+              const previous = parseWatermark(
+                requestedMinimum,
+                identity.principal.tenantId,
+              );
+              const actual = parseWatermark(
+                actualToken,
+                identity.principal.tenantId,
+              );
+              if (
+                BigInt(actual.placementEpoch) <
+                  BigInt(previous.placementEpoch) ||
+                (actual.shardIncarnation === previous.shardIncarnation &&
+                  actual.placementEpoch === previous.placementEpoch)
+              )
+                throw new ReadUpstreamError(
+                  409,
+                  "consistency_identity_mismatch",
+                );
+              const current =
+                minimumConsistency &&
+                parseWatermark(minimumConsistency, identity.principal.tenantId);
+              if (
+                current &&
+                (BigInt(current.placementEpoch) >
+                  BigInt(actual.placementEpoch) ||
+                  ((current.shardIncarnation !== previous.shardIncarnation ||
+                    current.placementEpoch !== previous.placementEpoch) &&
+                    (current.shardIncarnation !== actual.shardIncarnation ||
+                      current.placementEpoch !== actual.placementEpoch)))
+              )
+                throw new ReadUpstreamError(
+                  409,
+                  "consistency_identity_mismatch",
+                );
+              if (
+                current &&
+                current.shardIncarnation === actual.shardIncarnation &&
+                current.placementEpoch === actual.placementEpoch &&
+                BigInt(current.sequence) > BigInt(actual.sequence)
+              )
+                throw new ReadUpstreamError(
+                  502,
+                  "consistency_minimum_unsatisfied",
+                );
+              minimumConsistency = serializeWatermark(actual);
+            }
+            const actualToken = responseWatermark ?? reading?.consistencyToken;
+            if (minimumConsistency && typeof actualToken === "string") {
+              const wanted = parseWatermark(
+                minimumConsistency,
+                identity.principal.tenantId,
+              );
+              const actual = parseWatermark(
+                actualToken,
+                identity.principal.tenantId,
+              );
+              // A hint can advance while an older admitted snapshot is in flight.
+              // Do not publish that stale result; rerun under the newer demand.
+              if (
+                BigInt(wanted.placementEpoch) > BigInt(actual.placementEpoch) ||
+                (wanted.shardIncarnation === actual.shardIncarnation &&
+                  wanted.placementEpoch === actual.placementEpoch &&
+                  BigInt(wanted.sequence) > BigInt(actual.sequence))
+              ) {
+                rerun = true;
+                return;
+              }
+            }
+            observe(actualToken);
+            const next = JSON.stringify([reading ?? null, actualToken ?? null]);
             if (isCurrent() && next !== fingerprint) {
               fingerprint = next;
               send({
@@ -356,18 +519,16 @@ export function attachSubscriptions(
                       readingId: reading?.readingId ?? null,
                       projectedAt: reading?.projectedAt ?? null,
                       streamVersion: reading?.streamVersion ?? null,
+                      consistencyToken: actualToken ?? null,
                     },
                   },
                 },
               });
             }
-          } catch {
-            if (isCurrent()) {
-              subscriptions.get(id)?.();
-              subscriptions.delete(id);
-              fail(id, "read_unavailable");
-            }
+          } catch (error) {
+            failRead(error);
           } finally {
+            if (activeRead === controller) activeRead = undefined;
             busy = false;
             inFlightPolls--;
             if (rerun) {
@@ -391,12 +552,27 @@ export function attachSubscriptions(
         const offHint = options.feed?.onHint(
           identity.principal.tenantId,
           deviceId,
-          () => {
-            void poll();
+          (hint) => {
+            try {
+              if (
+                hint.scope !== "epoch" &&
+                observe(hint.consistencyToken, true) === false
+              )
+                return;
+              void poll();
+            } catch (error) {
+              if (
+                error instanceof ReadUpstreamError &&
+                error.code === "consistency_identity_mismatch"
+              )
+                void poll();
+              else failRead(error);
+            }
           },
         );
         const offStatus = options.feed?.onStatus(status);
         cleanup = () => {
+          activeRead?.abort();
           if (timer) clearInterval(timer);
           if (retryTimer) clearTimeout(retryTimer);
           offHint?.();

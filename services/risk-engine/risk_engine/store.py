@@ -8,6 +8,8 @@ also filter by tenant explicitly (defence in depth over forced RLS).
 from __future__ import annotations
 
 import json
+import threading
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -318,7 +320,7 @@ def _connect(conninfo: str) -> Any:
     import psycopg  # imported lazily so pure-logic tests need no driver
 
     # prepare_threshold=None: no server-side prepared statements behind PgBouncer.
-    return psycopg.connect(conninfo, autocommit=True, prepare_threshold=None)
+    return psycopg.connect(conninfo, autocommit=True, prepare_threshold=None, connect_timeout=3)
 
 
 def _driver_error() -> type[BaseException]:
@@ -334,6 +336,7 @@ class PgDatabase:
                  driver_error: Callable[[], type[BaseException]] = _driver_error):
         self._conninfo, self._connect, self._driver_error = conninfo, connect, driver_error
         self._conn: Any = None
+        self._lock = threading.RLock()
 
     def _connection(self) -> Any:
         if self._conn is None or self._conn.closed:
@@ -343,20 +346,44 @@ class PgDatabase:
     @contextmanager
     def _guard(self) -> Iterator[None]:
         driver_error = self._driver_error()
-        try:
-            yield
-        except driver_error as exc:
-            state = getattr(exc, "sqlstate", None)
-            if state is None and self._conn is not None:
-                self._conn.close()
-            raise StoreError(state, str(exc).strip()) from exc
+        with self._lock:
+            try:
+                yield
+            except driver_error as exc:
+                state = getattr(exc, "sqlstate", None)
+                if state is None and self._conn is not None:
+                    self._conn.close()
+                raise StoreError(state, str(exc).strip()) from exc
 
     @contextmanager
-    def transaction(self, tenant_id: str) -> Iterator[PgTx]:
+    def transaction(self, tenant_id: str, placement: Mapping[str, str] | None = None) -> Iterator[PgTx]:
         with self._guard():
             conn = self._connection()
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
+                if placement is not None:
+                    expires = datetime.fromisoformat(placement["expiresAt"].replace("Z", "+00:00"))
+                    if expires.timestamp() <= time.time():
+                        raise StoreError(None, "placement lease expired before database admission")
+                    cur.execute("SET LOCAL statement_timeout = '4s'")
+                    cur.execute("SET LOCAL lock_timeout = '2s'")
+                    for name, value in (("app.shard_id", placement["shardId"]),
+                                        ("app.shard_incarnation", placement["shardIncarnation"]),
+                                        ("app.placement_epoch", placement["placementEpoch"])):
+                        cur.execute("SELECT set_config(%s, %s, true)", (name, value))
+                    try:
+                        cur.execute("SELECT greenguard_internal.admit_tenant_placement"
+                                    "(%s::uuid,%s::text,%s::uuid,%s::bigint)",
+                                    (tenant_id, placement["shardId"], placement["shardIncarnation"],
+                                     placement["placementEpoch"]))
+                    except self._driver_error() as exc:
+                        # Only the admission function's precise stale-owner denial
+                        # is retryable. Business RLS/permissions still stop the worker.
+                        if (getattr(exc, "sqlstate", None) == "42501"
+                                and getattr(getattr(exc, "diag", None), "message_primary", None)
+                                == "tenant placement is missing, stale, or fenced"):
+                            raise StoreError("55P03", "tenant placement changed before admission") from None
+                        raise
                 yield PgTx(cur, tenant_id)
 
     def quarantine(self, consumer_name: str, topic: str, partition: int, offset: int,
@@ -379,5 +406,6 @@ class PgDatabase:
             return False
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()

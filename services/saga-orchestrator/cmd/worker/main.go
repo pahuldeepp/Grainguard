@@ -20,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 	"greenguard.local/saga-orchestrator/saga"
 )
@@ -60,7 +61,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if getenv("SAGA_TENANT_IDS") != "" {
 		return config{}, errors.New("SAGA_TENANT_IDS is retired: workers take leased shards (ADR-0013)")
 	}
-	if cfg.url == "" || len(cfg.brokers) == 0 {
+	if (cfg.url == "" && getenv("SHARD_REGISTRY_FILE") == "") || len(cfg.brokers) == 0 {
 		return config{}, errors.New("SAGA_DATABASE_URL and KAFKA_BROKERS are required")
 	}
 	if raw := getenv("SAGA_LEASE_TTL_SECONDS"); raw != "" {
@@ -97,6 +98,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	cfg, err := loadConfig(getenv)
 	if err != nil {
 		return err
+	}
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		return runSharded(ctx, getenv, cfg)
 	}
 	pool, err := pgxpool.New(ctx, cfg.url)
 	if err != nil {
@@ -142,7 +146,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		stopMetrics := serveMetrics(workerCtx, cfg.metrics, saga.Handler(metrics, pool), results)
 		defer stopMetrics()
 	}
-	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics,
+	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics, cursors: map[int]string{},
 		publish: func(ctx context.Context, key, value []byte) error {
 			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
 		}}
@@ -150,11 +154,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 
 type worker struct {
-	db      *pgxpool.Pool
+	db      common.TxStarter
 	store   saga.Store
 	leases  *saga.Leases
 	publish saga.PublishCommand
 	metrics *saga.Metrics
+	cursors map[int]string
 }
 
 // commandHeaders copies the command's trace context into Kafka headers.
@@ -256,29 +261,35 @@ func (w worker) eachTenant(ctx context.Context, fn func(string) error) error {
 }
 
 func (w worker) eachTenantInShard(ctx context.Context, shard int, fn func(string) error) error {
-	after := ""
-	for {
-		ids, err := saga.TenantsWithWork(ctx, w.db, shard, after, tenantPage)
-		if err != nil {
-			return err
-		}
-		lost, err := visit(ids, fn)
-		if err != nil {
-			return err
-		}
-		if lost {
-			w.metrics.LeaseLost.Add(1)
-		}
-		if lost || len(ids) < tenantPage {
-			return nil
-		}
-		after = ids[len(ids)-1]
+	after := w.cursors[shard]
+	ids, err := saga.TenantsWithWork(ctx, w.db, shard, after, tenantPage)
+	if err != nil {
+		return err
 	}
+	lost, err := visit(ids, fn)
+	if err != nil {
+		return err
+	}
+	if lost {
+		w.metrics.LeaseLost.Add(1)
+	}
+	if w.cursors != nil {
+		if lost || len(ids) < tenantPage {
+			w.cursors[shard] = ""
+		} else {
+			w.cursors[shard] = ids[len(ids)-1]
+		}
+	}
+	return nil
 }
 
 func visit(ids []string, fn func(string) error) (bool, error) {
 	for _, id := range ids {
-		if err := fn(id); errors.Is(err, saga.ErrLeaseLost) {
+		err := fn(id)
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
+		}
+		if errors.Is(err, saga.ErrLeaseLost) {
 			slog.Warn("saga shard lease lost; side effect refused", "shard", saga.ShardFor(id))
 			return true, nil
 		} else if err != nil {

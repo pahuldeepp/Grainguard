@@ -163,8 +163,8 @@ function readOtel(env: NodeJS.ProcessEnv): OtelConfig | undefined {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): Config {
-  const databaseUrl = env.INVENTORY_DATABASE_URL;
-  if (!databaseUrl)
+  const databaseUrl = env.INVENTORY_DATABASE_URL ?? "";
+  if (!databaseUrl && !env.SHARD_REGISTRY_FILE)
     throw new Error(
       "INVENTORY_DATABASE_URL is required. Run make bootstrap and make dev.",
     );

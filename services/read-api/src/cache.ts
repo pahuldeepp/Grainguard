@@ -386,6 +386,7 @@ export function cacheBackends(
   return {
     cache,
     devices: backends.devices,
+    deviceCurrent: backends.deviceCurrent,
     sites: (tenant, ids) =>
       cache.get(
         tenant,

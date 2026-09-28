@@ -1,3 +1,4 @@
+import { PlacementError } from "@greenguard/membership-client";
 import { ArgumentsHost, Catch, HttpException } from "@nestjs/common";
 import type { ServerResponse } from "node:http";
 import { AuthError } from "@greenguard/tenant-auth";
@@ -56,6 +57,8 @@ const RULES: Rule[] = [
 ];
 
 export function toProblem(error: unknown): ProblemDetail {
+  if (error instanceof PlacementError)
+    return { status: 503, code: error.code, headers: { "Retry-After": "1" } };
   const rule = RULES.find(([type]) => error instanceof type);
   if (rule) return rule[1](error as Error);
   if (error instanceof HttpException)

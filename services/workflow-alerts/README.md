@@ -122,3 +122,11 @@ requires `AUTH_MEMBERSHIP_SOURCE=control-plane`, `CONTROL_PLANE_URL`,
 shared membership client. The token's issuer and subject are mapped to tenant
 roles by the control plane; tokens with no membership are denied. The default
 Dex audience mode remains unchanged.
+
+## Tenant placement routing
+
+Set `SHARD_REGISTRY_FILE` to the private version 1 `workflow-alerts` / `greenguard_alerts` registry with all four `s1`–`s4` primaries, incarnation UUIDs and `alerts_app` credentials. Set `CONTROL_PLANE_URL` / `CONTROL_LOOKUP_TOKEN` for authenticated placement authority. Production PostgreSQL URLs require `sslmode=verify-full` and `sslrootcert`; local loopback manifests require `SHARD_LOCAL_LOOPBACK=true`. `ALERTS_DATABASE_URL` is required only for the legacy runtime when no registry is supplied.
+
+HTTP operations, risk-event consumption and explicit tenant escalation all resolve the tenant owner and admit its exact incarnation and epoch inside the existing Prisma transaction, before business SQL. Inbox/effect/position/episode/transition/outbox atomicity and receipt/event IDs stay unchanged. No request or event route field selects a database endpoint; inactive, unknown or locally stale placement fails closed. HTTP placement failures return a retryable 503 problem. Risk handlers do not commit an offset on placement failure.
+
+Readiness checks all owner primaries concurrently with a one-second caller timeout. Consumer shutdown still precedes database closure; closing all shard pools has a five-second caller bound.

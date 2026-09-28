@@ -38,7 +38,13 @@ func envOrSkip(t *testing.T, key string) string {
 
 func dbPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := openPool(context.Background(), envOrSkip(t, "JOBS_DIRECT_URL"))
+	cfg, err := pgxpool.ParseConfig(envOrSkip(t, "JOBS_DIRECT_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	configureFixturePlacement(t, cfg)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

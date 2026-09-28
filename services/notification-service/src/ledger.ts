@@ -225,8 +225,9 @@ export async function finishDelivery(
   pool: Pool,
   task: Task,
   outcome: Outcome,
+  admittedClient?: PoolClient,
 ): Promise<Status | "stale"> {
-  return withTenant(pool, task.tenant_id, async (client) => {
+  const finish = async (client: PoolClient): Promise<Status | "stale"> => {
     const { rows } = await client.query<Row>(
       `SELECT status, delivery_generation FROM deliveries WHERE tenant_id = $1 AND intent_id = $2 FOR UPDATE`,
       [task.tenant_id, task.intent_id],
@@ -251,7 +252,10 @@ export async function finishDelivery(
       outcome.error ?? null,
     );
     return outcome.status;
-  });
+  };
+  return admittedClient
+    ? finish(admittedClient)
+    : withTenant(pool, task.tenant_id, finish);
 }
 
 /** Optimistic preference update: returns false on a stale expectedVersion (HTTP 409). */

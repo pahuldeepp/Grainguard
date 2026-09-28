@@ -1,7 +1,16 @@
 import pg from "pg";
+import { readContext, assertReadActive } from "./consistency.js";
+import { parseWatermark } from "@greenguard/membership-client";
+import {
+  ReadAdmissionMetrics,
+  instrumentReadAuthority,
+} from "./read-metrics.js";
 import cassandra from "cassandra-driver";
 import { readFileSync } from "node:fs";
-import { startMembershipRuntime } from "@greenguard/membership-client";
+import {
+  startMembershipRuntime,
+  httpReadLeaseAuthority,
+} from "@greenguard/membership-client";
 import {
   createMachineControlPlaneVerifier,
   machineAwareVerifier,
@@ -15,20 +24,74 @@ import { connectRedisBounded, redisStartupWaitMs } from "./redis-startup.js";
 import { bulkheadBackends } from "./bulkhead.js";
 import { createCassandraReadiness } from "./cassandra-readiness.js";
 import { cassandraSecurity } from "./cassandra-security.js";
+import { createReadReplicas } from "./replicas.js";
+import {
+  contextualReplicaProvider,
+  createShardReadRegistry,
+} from "./shards.js";
+import { watermarkCacheBackends } from "./watermark-cache.js";
+import { postgresCachePolicy } from "./cache-policy.js";
 
-for (const key of [
-  "READ_QUERY_DATABASE_URL",
-  "CASSANDRA_HOSTS",
-  "ELASTICSEARCH_URL",
-]) {
+for (const key of ["CASSANDRA_HOSTS", "ELASTICSEARCH_URL"]) {
   if (!process.env[key]) throw new Error(`${key} is required`);
 }
-const pool = new pg.Pool({
-  connectionString: process.env.READ_QUERY_DATABASE_URL!,
-  max: 10,
-  connectionTimeoutMillis: 5000,
-  query_timeout: 5000,
-});
+if (
+  process.env.READ_SHARD_DATABASE_URLS &&
+  process.env.READ_SHARD_REGISTRY_FILE
+)
+  throw new Error("choose one read shard registry source");
+const shardConfig = process.env.READ_SHARD_REGISTRY_FILE
+  ? readFileSync(process.env.READ_SHARD_REGISTRY_FILE, "utf8")
+  : process.env.READ_SHARD_DATABASE_URLS;
+if (!shardConfig && !process.env.READ_QUERY_DATABASE_URL)
+  throw new Error("read database configuration is required");
+if (
+  shardConfig &&
+  (process.env.READ_REPLICA_DATABASE_URLS || process.env.READ_REPLICA_HOSTS)
+)
+  throw new Error("shard registry cannot be combined with legacy replicas");
+const shards = shardConfig
+  ? createShardReadRegistry(shardConfig, {
+      allowLoopback: process.env.READ_SHARD_LOCAL_LOOPBACK === "true",
+      poolMax: Number(process.env.READ_SHARD_POOL_MAX ?? 5),
+    })
+  : undefined;
+const pool = shards
+  ? undefined
+  : new pg.Pool({
+      connectionString: process.env.READ_QUERY_DATABASE_URL!,
+      max: 10,
+      connectionTimeoutMillis: 5000,
+      query_timeout: 5000,
+    });
+const replicas = pool
+  ? createReadReplicas(
+      process.env.READ_REPLICA_DATABASE_URLS,
+      process.env.READ_REPLICA_HOSTS,
+      process.env.READ_QUERY_DATABASE_URL!,
+      {
+        primaryPool: pool,
+        allowPrimaryOnly: true,
+        requireWatermark: process.env.READ_WATERMARK_ENABLED === "true",
+      },
+    )
+  : undefined;
+if (
+  shards &&
+  (!process.env.CONTROL_PLANE_URL || !process.env.CONTROL_LOOKUP_TOKEN)
+)
+  throw new Error("sharded reads require placement authority configuration");
+const readAdmissionMetrics = new ReadAdmissionMetrics();
+const readAuthority = shards
+  ? instrumentReadAuthority(
+      httpReadLeaseAuthority({
+        baseUrl: process.env.CONTROL_PLANE_URL!,
+        token: process.env.CONTROL_LOOKUP_TOKEN!,
+        meshMtls: process.env.CONTROL_PLANE_MESH_MTLS === "true",
+      }),
+      readAdmissionMetrics,
+    )
+  : undefined;
 const contactPoints = process.env
   .CASSANDRA_HOSTS!.split(",")
   .map((value) => value.trim())
@@ -71,8 +134,40 @@ const machine =
       })
     : undefined;
 const verify = machineAwareVerifier(verifier.verify, machine, "read:telemetry");
+const readSnapshots = contextualReplicaProvider(shards ?? replicas!);
+const postgresBackends = postgresReads(readSnapshots);
+const guardedPostgres =
+  shards && redis && readAuthority
+    ? watermarkCacheBackends(postgresBackends, redis, {
+        authority: readAuthority,
+        primaryWatermark: async (tenantId) => {
+          const context = readContext.getStore();
+          assertReadActive(context);
+          const snapshot = await readSnapshots.acquire({
+            tenantId,
+            primaryOnly: true,
+            certify: false,
+            deadline: context!.deadline,
+            signal: context!.signal,
+          });
+          try {
+            if (!snapshot.watermark)
+              throw new Error("primary_watermark_unavailable");
+            const watermark = parseWatermark(
+              JSON.stringify({ v: 1, tenantId, ...snapshot.watermark }),
+              tenantId,
+            );
+            await snapshot.commit();
+            return watermark;
+          } catch (error) {
+            await snapshot.rollback().catch(() => {});
+            throw error;
+          }
+        },
+      })
+    : postgresBackends;
 const backends = {
-  ...postgresReads(pool),
+  ...guardedPostgres,
   history,
   search: new ElasticSearch(
     process.env.ELASTICSEARCH_URL!,
@@ -95,21 +190,47 @@ const protectedBackends = bulkheadBackends(backends, {
   searchPerTenant: Number(process.env.READ_SEARCH_TENANT_CONCURRENCY ?? 8),
 });
 const cached = redis ? cacheBackends(protectedBackends, redis) : null;
+// Unleased legacy replica results bypass Redis. Sharded results use a separate
+// placement/watermark guard; shared-store caches retain their own eventual policy.
+const effectiveBackends = cached
+  ? postgresCachePolicy(
+      cached,
+      Object.fromEntries(
+        Object.keys(postgresBackends).map((name) => [
+          name,
+          protectedBackends[name as keyof typeof protectedBackends],
+        ]),
+      ) as typeof postgresBackends,
+      Boolean(
+        shards ||
+        process.env.READ_REPLICA_DATABASE_URLS ||
+        process.env.READ_REPLICA_HOSTS ||
+        process.env.READ_WATERMARK_ENABLED === "true",
+      ),
+    )
+  : protectedBackends;
 let stopping = false;
 const app = createApp({
   verify,
-  backends: cached ?? protectedBackends,
-  entitlements: postgresHistoryEntitlements(pool, (tenantId) =>
-    console.error("read-api entitlement missing or stale", tenantId),
+  backends: effectiveBackends,
+  readAuthority,
+  entitlements: postgresHistoryEntitlements(
+    shards ? (tenantId) => shards.primary(tenantId) : pool!,
+    (tenantId) =>
+      console.error("read-api entitlement missing or stale", tenantId),
+    readSnapshots,
   ),
   ready: async () => {
     if (stopping) return false;
     cassandraReady.ensureConnected();
     if (!cassandraReady.connected()) return false;
     // The pool's configured query_timeout and connectionTimeoutMillis bound this probe.
-    await pool.query("SELECT 1");
+    await (shards ?? replicas)?.ready();
     return !stopping;
   },
+});
+app.get("/metrics/read", (_req, res) => {
+  res.type("text/plain").send(readAdmissionMetrics.prometheus());
 });
 app.get("/metrics/cache", (_req, res) => {
   res.type("text/plain").send(cached?.cache.metrics.prometheus() ?? "");
@@ -130,7 +251,9 @@ const shutdown = () => {
   setTimeout(() => {
     server.close(async (serverError) => {
       const results = await Promise.allSettled([
-        pool.end(),
+        pool?.end(),
+        replicas?.close(),
+        shards?.close(),
         history.close(),
         redis?.close(),
         verifier.close(),

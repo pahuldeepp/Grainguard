@@ -49,6 +49,9 @@ type server struct {
 
 func main() {
 	for _, key := range []string{"SAGA_DIRECT_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL"} {
+		if key == "SAGA_DIRECT_URL" && os.Getenv("SHARD_REGISTRY_FILE") != "" {
+			continue
+		}
 		if os.Getenv(key) == "" {
 			log.Fatalf("%s is required", key)
 		}
@@ -58,13 +61,28 @@ func main() {
 		log.Fatal("AUTH_JWKS_URL must be https or loopback http")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, os.Getenv("SAGA_DIRECT_URL"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatal(err)
+	var db common.TxStarter
+	var metrics http.Handler
+	if os.Getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(os.Getenv, "saga-orchestrator", "greenguard_sagas", "saga_app")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer shards.Close()
+		db, metrics = shards, saga.ShardedHandler(nil, shards)
+		if err := shards.Ping(ctx); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		pool, err := pgxpool.New(ctx, os.Getenv("SAGA_DIRECT_URL"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer pool.Close()
+		if err := pool.Ping(ctx); err != nil {
+			log.Fatal(err)
+		}
+		db, metrics = pool, saga.Handler(nil, pool)
 	}
 	source := os.Getenv("AUTH_MEMBERSHIP_SOURCE")
 	if source == "" {
@@ -90,7 +108,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	s := server{store: saga.Store{DB: pool}, auth: auth, metrics: saga.Handler(nil, pool)}
+	s := server{store: saga.Store{DB: db}, auth: auth, metrics: metrics}
 	addr := os.Getenv("SAGA_API_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8092"

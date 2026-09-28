@@ -24,6 +24,19 @@ load measurements. Saturated requests return HTTP 503 `read_busy` with
 `Retry-After: 1`; the slot is released even if the backend fails. This is a
 concurrency ceiling, not a distributed request-rate quota.
 
+PostgreSQL reads share a fair per-tenant queue (32 active per process, four per
+tenant; bounded queued work). In sharded mode, `READ_SHARD_POOL_MAX` sets the
+maximum connections per endpoint, default five and valid from one to 32. With
+four shards and one replica each, a pod can use up to eight times this setting.
+Budget the total across autoscaled pods against PostgreSQL connection capacity.
+Local pool saturation returns `read_busy` and does not mark an endpoint failed.
+
+`GET /api/v1/read/devices/:deviceId/current` reads device and latest reading in
+one SQL snapshot. Request-scoped placement leases are reused within that request;
+final admission still fences the response against tenant moves. The original
+read budget includes authentication and admission and is capped at four seconds.
+See `docs/READ_ADMISSION_AUDIT.md` for guarantees and live-validation limits.
+
 Run `npm test -w @greenguard/read-api` for focused tests. The live database
 test additionally needs `READ_API_LIVE=1` and running PostgreSQL, Cassandra,
 and Elasticsearch. Stage 08 remains in progress until the browser, CI,

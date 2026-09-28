@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	common "greenguard.local/go-common"
 )
 
@@ -335,6 +336,9 @@ func (s Store) ClaimPendingConfigurations(ctx context.Context, limit int) ([]Dis
 			d, err = claimTx(ctx, tx, key[0], key[1])
 			return err
 		})
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -380,6 +384,31 @@ func claimTx(ctx context.Context, tx pgx.Tx, tenant, commandID string) (*Dispatc
 
 // idPairs runs an ID-only SECURITY DEFINER selector and returns its key pairs.
 func (s Store) idPairs(ctx context.Context, query string, args ...any) ([][2]string, error) {
+	if shards, ok := s.DB.(*common.ShardedDB); ok {
+		var keys [][2]string
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			tx, err := shards.InfrastructureDB(shard).BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+			if err != nil {
+				return err
+			}
+			defer common.Rollback(tx)
+			rows, err := tx.Query(ctx, query, args...)
+			if err != nil {
+				return err
+			}
+			page, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+				var key [2]string
+				err := row.Scan(&key[0], &key[1])
+				return key, err
+			})
+			keys = append(keys, page...)
+			if err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		})
+		return keys, err
+	}
 	db, ok := s.DB.(interface {
 		Query(context.Context, string, ...any) (pgx.Rows, error)
 	})
@@ -430,7 +459,7 @@ func (s Store) UnpublishedResults(ctx context.Context) ([]Result, error) {
 		err = common.WithTenantSchema(ctx, s.DB, k[0], "", func(ctx context.Context, tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT tenant_id,saga_id,command_id,result_id,step,saga_version,fencing_token,outcome,COALESCE(traceparent,'') FROM hardware_result_outbox WHERE tenant_id=$1 AND result_id=$2 AND published_at IS NULL`, k[0], k[1]).Scan(&r.TenantID, &r.SagaID, &r.CommandID, &r.ResultID, &r.Step, &r.SagaVersion, &r.FencingToken, &r.Outcome, &r.Traceparent)
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, common.ErrTenantQuiescing) {
 			continue
 		}
 		if err != nil {

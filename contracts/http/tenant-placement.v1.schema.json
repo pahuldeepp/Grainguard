@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://greenguard.invalid/contracts/tenant-placement.v1",
+  "title": "Authenticated control-plane placement lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tenantId",
+    "shardId",
+    "shardIncarnation",
+    "placementEpoch",
+    "state",
+    "expiresAt"
+  ],
+  "properties": {
+    "tenantId": { "type": "string", "format": "uuid" },
+    "shardId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "shardIncarnation": { "type": "string", "format": "uuid" },
+    "placementEpoch": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+    "state": { "enum": ["active", "quiescing", "activating"] },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

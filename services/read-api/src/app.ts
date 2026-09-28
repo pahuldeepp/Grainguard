@@ -1,4 +1,27 @@
-import express, { type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Response } from "express";
+import {
+  parseWatermark,
+  serializeWatermark,
+  WatermarkError,
+  PlacementError,
+  READ_BUDGET_HEADER,
+  WATERMARK_REQUEST_HEADER,
+  WATERMARK_RESPONSE_HEADER,
+  type ReadLeaseAuthority,
+} from "@greenguard/membership-client";
+import {
+  readContext,
+  assertReadActive,
+  readWithinBudget,
+  requireEventualStore,
+  ConsistencyStoreUnsupported,
+  type ReadContext,
+} from "./consistency.js";
+import {
+  FreshnessUnavailable,
+  ReadPoolBusy,
+  ConsistencyIdentityMismatch,
+} from "./replicas.js";
 import {
   AuthError,
   requireRole,
@@ -13,6 +36,11 @@ import {
   type HistoryEntitlements,
 } from "./entitlements/history.js";
 
+class ResponseTooLarge extends Error {
+  constructor() {
+    super("response_too_large");
+  }
+}
 export class InputError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -65,6 +93,7 @@ export interface AppOptions {
   hotBoundaryMarginMs?: number;
   ready?: () => Promise<boolean>;
   entitlements?: HistoryEntitlements;
+  readAuthority?: ReadLeaseAuthority;
 }
 export function createApp(options: AppOptions) {
   const margin = options.hotBoundaryMarginMs ?? 300_000;
@@ -73,6 +102,37 @@ export function createApp(options: AppOptions) {
   const safeHotStart = (now: Date) =>
     now.getTime() - (options.hotWindowMs ?? 86_400_000) + margin;
   const app = express();
+  const sendJson = async (res: Response, value: unknown) => {
+    const ctx = readContext.getStore();
+    if (!ctx) throw new FreshnessUnavailable();
+    assertReadActive(ctx);
+    if (ctx.minimum && !ctx.watermark) throw new FreshnessUnavailable();
+    if (
+      ctx.minimum &&
+      ctx.watermark &&
+      (ctx.minimum.tenantId !== ctx.watermark.tenantId ||
+        ctx.minimum.shardIncarnation !== ctx.watermark.shardIncarnation ||
+        ctx.minimum.placementEpoch !== ctx.watermark.placementEpoch ||
+        BigInt(ctx.watermark.sequence) < BigInt(ctx.minimum.sequence))
+    )
+      throw new FreshnessUnavailable();
+    if (ctx.lease)
+      await readWithinBudget(
+        () =>
+          options.readAuthority!.admit(ctx.lease!, {
+            deadline: ctx.deadline,
+            signal: ctx.signal,
+          }),
+        ctx.signal,
+      );
+    assertReadActive(ctx);
+    if (ctx.watermark)
+      res.setHeader(
+        WATERMARK_RESPONSE_HEADER,
+        serializeWatermark(ctx.watermark),
+      );
+    res.json(value);
+  };
   app.disable("x-powered-by");
   app.get("/healthz", (_req, res) => {
     res.status(204).end();
@@ -86,15 +146,106 @@ export function createApp(options: AppOptions) {
   });
   const router = express.Router();
   router.use(async (req, res, next) => {
+    let cleanup: (() => void) | undefined;
     try {
-      const principal = await options.verify(req.header("Authorization"));
+      const rawBudget = req.header(READ_BUDGET_HEADER);
+      if (rawBudget !== undefined && !/^[1-9][0-9]{0,9}$/.test(rawBudget))
+        throw new InputError("invalid_read_budget");
+      // Relative budgets avoid trusting a caller's clock. They can only shorten
+      // the server cap and include authentication and authority admission time.
+      const deadline =
+        Date.now() +
+        Math.min(4000, rawBudget === undefined ? 4000 : Number(rawBudget));
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const timer = setTimeout(abort, Math.max(1, deadline - Date.now()));
+      const disconnect = () => {
+        if (!res.writableFinished) abort();
+      };
+      req.once("aborted", abort);
+      res.once("close", disconnect);
+      cleanup = () => {
+        clearTimeout(timer);
+        req.off("aborted", abort);
+        res.off("close", disconnect);
+      };
+      res.once("finish", cleanup);
+      res.once("close", cleanup);
+      const active = () => {
+        if (
+          controller.signal.aborted ||
+          req.aborted ||
+          res.destroyed ||
+          deadline <= Date.now()
+        )
+          throw new FreshnessUnavailable();
+      };
+      active();
+      const principal = await readWithinBudget(
+        () => options.verify(req.header("Authorization")),
+        controller.signal,
+      );
+      active();
       if (principal.principalType === "service") {
         if (!principal.scopes?.includes("read:telemetry"))
           throw new AuthError(403, "insufficient_role");
       } else requireRole(principal, "viewer", "operator", "admin");
       res.locals.tenantId = principal.tenantId;
-      next();
+      res.setHeader("Cache-Control", "no-store");
+      const raw = req.header(WATERMARK_REQUEST_HEADER);
+      const minimum =
+        raw === undefined ? undefined : parseWatermark(raw, principal.tenantId);
+      const lease = options.readAuthority
+        ? await readWithinBudget(
+            () =>
+              options.readAuthority!.acquire(principal.tenantId, {
+                deadline,
+                signal: controller.signal,
+              }),
+            controller.signal,
+            (late) => {
+              void options.readAuthority!.release(late).catch(() => {});
+            },
+          )
+        : undefined;
+      let released = false;
+      const release = () => {
+        if (!lease || released) return;
+        released = true;
+        void options.readAuthority!.release(lease).catch(() => {});
+      };
+      res.once("finish", release);
+      res.once("close", release);
+      // A client can disconnect while acquisition is in flight. The late lease
+      // is released here instead of waiting for an already-emitted close event.
+      try {
+        active();
+      } catch (error) {
+        release();
+        throw error;
+      }
+      if (
+        minimum &&
+        lease &&
+        (minimum.shardIncarnation !== lease.route.shardIncarnation ||
+          minimum.placementEpoch !== lease.route.placementEpoch)
+      ) {
+        release();
+        throw new ConsistencyIdentityMismatch();
+      }
+      const context: ReadContext = {
+        tenantId: principal.tenantId,
+        minimum,
+        lease,
+        signal: controller.signal,
+        deadline: Math.min(
+          deadline,
+          lease ? Date.parse(lease.expiresAt) : Infinity,
+        ),
+      };
+      readContext.run(context, next);
     } catch (error) {
+      cleanup?.();
       next(error);
     }
   });
@@ -103,7 +254,17 @@ export function createApp(options: AppOptions) {
       res.locals.tenantId,
       uuid(req.params.deviceId as string),
     );
-    res.json({ data });
+    await sendJson(res, { data });
+  });
+  router.get("/devices/:deviceId/current", async (req, res) => {
+    const data = await options.backends.deviceCurrent(
+      res.locals.tenantId,
+      uuid(req.params.deviceId as string),
+    );
+    // Singular device + reading only; never turn the aggregate into an unbounded export.
+    if (Buffer.byteLength(JSON.stringify(data), "utf8") > 256 * 1024)
+      throw new ResponseTooLarge();
+    await sendJson(res, { data, source: "postgres" });
   });
   router.post(
     "/devices/batch",
@@ -119,7 +280,7 @@ export function createApp(options: AppOptions) {
         throw new InputError("invalid_ids");
       const unique = [...new Set(ids.map((id) => uuid(id as string)))];
       const data = await options.backends.devices(res.locals.tenantId, unique);
-      res.json({ data });
+      await sendJson(res, { data });
     },
   );
   for (const [kind, method] of [
@@ -142,7 +303,7 @@ export function createApp(options: AppOptions) {
         const data = await method.call(options.backends, res.locals.tenantId, [
           ...new Set(ids.map((id) => uuid(id as string))),
         ]);
-        res.json({ data });
+        await sendJson(res, { data });
       },
     );
   }
@@ -151,7 +312,7 @@ export function createApp(options: AppOptions) {
       res.locals.tenantId,
       uuid(req.params.readingId as string),
     );
-    res.json({ data, source: "postgres" });
+    await sendJson(res, { data, source: "postgres" });
   });
   router.get("/sites/:siteId/devices", async (req, res) => {
     const after = req.query.after;
@@ -165,7 +326,7 @@ export function createApp(options: AppOptions) {
       after === undefined ? undefined : uuid(after),
     );
     const data = rows.slice(0, size);
-    res.json({
+    await sendJson(res, {
       data,
       nextCursor:
         rows.length > size
@@ -178,7 +339,7 @@ export function createApp(options: AppOptions) {
       res.locals.tenantId,
       uuid(req.params.deviceId as string),
     );
-    res.json({ data });
+    await sendJson(res, { data });
   });
   router.get("/bins/:binId/readings/latest", async (req, res) => {
     const asOf = (options.now ?? (() => new Date()))();
@@ -204,7 +365,11 @@ export function createApp(options: AppOptions) {
         };
       });
     }
-    res.json({ data, source: "postgres", freshness: "not_configured" });
+    await sendJson(res, {
+      data,
+      source: "postgres",
+      freshness: "not_configured",
+    });
   });
   router.get("/bins/:binId/readings/trend", async (req, res) => {
     const window = req.query.window;
@@ -257,7 +422,7 @@ export function createApp(options: AppOptions) {
       to,
       bucketSeconds,
     });
-    res.json({
+    await sendJson(res, {
       data: { ...data, window, resolution: requested, bucketSeconds, from, to },
       source: "postgres",
     });
@@ -265,6 +430,9 @@ export function createApp(options: AppOptions) {
   router.get("/devices/:deviceId/readings", async (req, res) => {
     const now = (options.now ?? (() => new Date()))();
     const { from, to } = range(req.query.from, req.query.to, now);
+    const source =
+      from.getTime() >= safeHotStart(now) ? "postgres" : "cassandra";
+    if (source === "cassandra") requireEventualStore();
     await assertHistoryRange(
       options.entitlements ?? defaultHistoryEntitlements,
       res.locals.tenantId,
@@ -284,13 +452,11 @@ export function createApp(options: AppOptions) {
     if (req.query.cursor !== undefined) throw new InputError("invalid_cursor");
     // Pruning is not aligned to now - window. The margin also sends crossing ranges
     // to Cassandra, which retains the full requested range.
-    const source =
-      from.getTime() >= safeHotStart(now) ? "postgres" : "cassandra";
     const data =
       source === "postgres"
         ? await options.backends.hotReadings(q)
         : await options.backends.history.list(q);
-    res.json({ data, source, truncated: data.length === q.limit });
+    await sendJson(res, { data, source, truncated: data.length === q.limit });
   });
   router.get("/devices/:deviceId/rollups", async (req, res) => {
     const now = (options.now ?? (() => new Date()))();
@@ -316,9 +482,10 @@ export function createApp(options: AppOptions) {
       },
       bucket,
     );
-    res.json({ data, source: "postgres" });
+    await sendJson(res, { data, source: "postgres" });
   });
   router.get("/search", async (req, res) => {
+    requireEventualStore();
     const q = req.query.q;
     if (typeof q !== "string" || !q.trim() || q.length > 200)
       throw new InputError("invalid_query");
@@ -327,12 +494,40 @@ export function createApp(options: AppOptions) {
       q.trim(),
       limit(req.query.limit),
     );
-    res.json({ data, source: "elasticsearch" });
+    await sendJson(res, { data, source: "elasticsearch" });
   });
   app.use("/api/v1/read", router);
   // Express recognises an error handler only by its four declared parameters.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
+    if (error instanceof ResponseTooLarge) {
+      res.status(422).json({ code: error.message });
+      return;
+    }
+    if (error instanceof ConsistencyIdentityMismatch) {
+      res.status(409).json({ code: error.message });
+      return;
+    }
+    if (error instanceof WatermarkError) {
+      res.status(400).json({ code: error.code });
+      return;
+    }
+    if (error instanceof ConsistencyStoreUnsupported) {
+      res.status(409).json({ code: error.message });
+      return;
+    }
+    if (error instanceof ReadPoolBusy) {
+      res.setHeader("Retry-After", "1");
+      res.status(503).json({ code: "read_busy" });
+      return;
+    }
+    if (
+      error instanceof FreshnessUnavailable ||
+      error instanceof PlacementError
+    ) {
+      res.status(503).json({ code: "read_freshness_unavailable" });
+      return;
+    }
     if (error instanceof AuthError) {
       res.status(error.status).json({ code: error.code });
       return;

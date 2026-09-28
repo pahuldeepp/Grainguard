@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"net"
 	"net/http"
@@ -13,6 +15,87 @@ import (
 	"testing"
 	"time"
 )
+
+type placementTestTx struct {
+	pgx.Tx
+	statements []string
+	arguments  [][]any
+	execErr    error
+	commitErr  error
+	commits    int
+	rollbacks  int
+}
+
+func (t *placementTestTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	t.statements = append(t.statements, sql)
+	t.arguments = append(t.arguments, args)
+	if strings.Contains(sql, "admit_tenant_placement") {
+		return pgconn.CommandTag{}, t.execErr
+	}
+	return pgconn.CommandTag{}, nil
+}
+func (t *placementTestTx) Commit(context.Context) error   { t.commits++; return t.commitErr }
+func (t *placementTestTx) Rollback(context.Context) error { t.rollbacks++; return nil }
+
+type placementTestDB struct {
+	tx     *placementTestTx
+	begins int
+}
+
+func (d *placementTestDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	d.begins++
+	return d.tx, nil
+}
+
+func TestWithTenantPlacementSetsRouteAndAdmitsBeforeCallback(t *testing.T) {
+	tx := &placementTestTx{}
+	db := &placementTestDB{tx: tx}
+	route := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s3", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "9223372036854775807", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	called := false
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error {
+		called = true
+		if len(tx.statements) != 5 || !strings.Contains(tx.statements[4], "admit_tenant_placement") {
+			t.Fatalf("callback ran before placement admission: %v", tx.statements)
+		}
+		return nil
+	})
+	if err != nil || !called || db.begins != 1 || tx.commits != 1 || tx.rollbacks != 0 {
+		t.Fatalf("err=%v called=%v begins=%d commits=%d rollbacks=%d", err, called, db.begins, tx.commits, tx.rollbacks)
+	}
+	if len(tx.arguments) != 5 || tx.arguments[0][1] != route.TenantID || tx.arguments[1][1] != route.ShardID || tx.arguments[2][1] != route.Incarnation || tx.arguments[3][1] != route.PlacementEpoch {
+		t.Fatalf("route context arguments mismatch: %#v", tx.arguments)
+	}
+}
+
+func TestWithTenantPlacementRejectsInvalidAndInactiveRoutesBeforeBegin(t *testing.T) {
+	base := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s1", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	cases := []TenantPlacement{base, base, base, base, base, base, base}
+	cases[0].ShardID = "s5"
+	cases[1].PlacementEpoch = "9223372036854775808"
+	cases[2].PlacementEpoch = "01"
+	cases[3].State = "quiescing"
+	cases[4].Incarnation = ""
+	cases[5].ExpiresAt = time.Time{}
+	cases[6].ExpiresAt = time.Now().Add(-time.Second)
+	for _, route := range cases {
+		db := &placementTestDB{tx: &placementTestTx{}}
+		if err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("callback unexpectedly ran"); return nil }); !errors.Is(err, ErrInvalidTenantPlacement) || db.begins != 0 {
+			t.Fatalf("route=%+v err=%v begins=%d", route, err, db.begins)
+		}
+	}
+}
+
+func TestWithTenantPlacementRollsBackWhenDatabaseRejectsAdmission(t *testing.T) {
+	denied := errors.New("stale placement")
+	tx := &placementTestTx{execErr: denied}
+	db := &placementTestDB{tx: tx}
+	route := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s1", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	called := false
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { called = true; return nil })
+	if !errors.Is(err, denied) || called || tx.commits != 0 || tx.rollbacks != 1 {
+		t.Fatalf("err=%v called=%v commits=%d rollbacks=%d", err, called, tx.commits, tx.rollbacks)
+	}
+}
 
 func TestCanonicalEnvelopeHelpers(t *testing.T) {
 	value, err := Decode([]byte(`{"n":9223372036854775807}`))

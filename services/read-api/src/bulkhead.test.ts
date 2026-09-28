@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { bulkheadBackends, BulkheadFull } from "./bulkhead.js";
 import type { ReadBackends } from "./backends.js";
 import { createApp } from "./app.js";
+import { readContext } from "./consistency.js";
 import type { AddressInfo } from "node:net";
 
 const q = (tenantId: string) => ({
@@ -26,6 +27,7 @@ test("cold history protects global and tenant capacity and releases slots", asyn
     second = deferred<unknown[]>();
   let loads = 0;
   const backends: ReadBackends = {
+    deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
     sites: async () => [],
@@ -66,6 +68,7 @@ test("search has an independent pool and errors release its slot", async () => {
   const pending = deferred<unknown[]>();
   let calls = 0;
   const backends: ReadBackends = {
+    deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
     sites: async () => [],
@@ -101,6 +104,7 @@ test("HTTP returns a retry hint when Cassandra has no origin capacity", async ()
   const started = deferred<void>();
   const pending = deferred<unknown[]>();
   const backends: ReadBackends = {
+    deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
     sites: async () => [],
@@ -164,6 +168,7 @@ test("bin read admission queues per tenant and schedules another tenant before a
     third = deferred<unknown>();
   const started: string[] = [];
   const backends: ReadBackends = {
+    deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
     sites: async () => [],
@@ -204,4 +209,42 @@ test("bin read admission queues per tenant and schedules another tenant before a
   assert.deepEqual(started, ["tenant-a", "tenant-b", "tenant-a"]);
   third.resolve({});
   await a2;
+});
+
+test("queued aggregate reads retain request context and cancelled work never starts", async () => {
+  const first = deferred<{ device: null; latestReading: null }>();
+  const seen: string[] = [];
+  const wrapped = bulkheadBackends(
+    {
+      history: { list: async () => [] },
+      search: { search: async () => [] },
+      deviceCurrent: async (tenant: string) => {
+        assert.equal(readContext.getStore()?.tenantId, tenant);
+        seen.push(tenant);
+        return tenant === "a"
+          ? first.promise
+          : { device: null, latestReading: null };
+      },
+    } as unknown as ReadBackends,
+    { readGlobal: 1, readPerTenant: 1, readWaitMs: 1000 },
+  );
+  const controller = new AbortController();
+  const a = readContext.run(
+    { tenantId: "a", deadline: Date.now() + 1000 },
+    () => wrapped.deviceCurrent("a", "device"),
+  );
+  const b = readContext.run(
+    { tenantId: "b", deadline: Date.now() + 1000, signal: controller.signal },
+    () => wrapped.deviceCurrent("b", "device"),
+  );
+  const c = readContext.run(
+    { tenantId: "c", deadline: Date.now() + 1000 },
+    () => wrapped.deviceCurrent("c", "device"),
+  );
+  controller.abort();
+  await assert.rejects(b, /read_freshness_unavailable/);
+  first.resolve({ device: null, latestReading: null });
+  await a;
+  await c;
+  assert.deepEqual(seen, ["a", "c"]);
 });

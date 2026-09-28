@@ -2,6 +2,7 @@ import type { Policy } from "./worker.js";
 import type { NotificationProviderConfig } from "./providers.js";
 
 export interface Config {
+  ownerEnvironment?: NodeJS.ProcessEnv;
   kafkaBrokers?: string[];
   flagSnapshot?: { url: string; token: string; allowInsecureHttp?: boolean };
   controlPlaneMeshHttp?: boolean;
@@ -50,8 +51,10 @@ function positive(getenv: Getenv, key: string, fallback: number): number {
 export function loadConfig(getenv: Getenv): Config {
   const databaseUrl = getenv("NOTIFICATIONS_DATABASE_URL") ?? "";
   const rabbitUrl = getenv("RABBITMQ_URL") ?? "";
-  if (!databaseUrl || !rabbitUrl)
-    throw new Error("NOTIFICATIONS_DATABASE_URL and RABBITMQ_URL are required");
+  if ((!databaseUrl && !getenv("SHARD_REGISTRY_FILE")) || !rabbitUrl)
+    throw new Error(
+      "RABBITMQ_URL and either NOTIFICATIONS_DATABASE_URL or SHARD_REGISTRY_FILE are required",
+    );
   const provider = getenv("NOTIFICATIONS_PROVIDER") ?? "local";
   if (
     provider !== "local" &&
@@ -122,6 +125,16 @@ export function loadConfig(getenv: Getenv): Config {
       "live notification providers require CONTROL_PLANE_URL, CONTROL_LOOKUP_TOKEN, SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER",
     );
   return {
+    ownerEnvironment: Object.fromEntries(
+      [
+        "SHARD_REGISTRY_FILE",
+        "SHARD_LOCAL_LOOPBACK",
+        "CONTROL_PLANE_URL",
+        "CONTROL_LOOKUP_TOKEN",
+        "CONTROL_PLANE_MESH_MTLS",
+        "GG_MESH_INTERNAL_HTTP",
+      ].map((key) => [key, getenv(key)]),
+    ),
     kafkaBrokers: getenv("KAFKA_BROKERS")
       ?.split(",")
       .map((x) => x.trim())

@@ -21,6 +21,7 @@ type Store struct {
 	Schema             string // empty uses the live public schema
 	HistoryWindow      time.Duration
 	Lease              *writerLease
+	ShardLeases        map[string]*writerLease
 	HistoryOutOfWindow atomic.Uint64
 }
 
@@ -57,17 +58,21 @@ func (s *Store) historyWindow() time.Duration {
 // applyInTx keeps the inbox, effect, notification and checkpoint in one transaction.
 func (s *Store) applyInTx(ctx context.Context, tx pgx.Tx, m Message, e map[string]any, skipped, duplicate *bool) error {
 	tenant := e[fieldTenant].(string)
-	if err := s.Lease.check(ctx, tx); err != nil {
+	if err := s.checkLease(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'"); err != nil {
 		return err
 	}
 	if err := insertInbox(ctx, tx, m, e); err != nil {
-		if errors.Is(err, ErrDuplicate) && s.Lease != nil {
+		if errors.Is(err, ErrDuplicate) && s.hasWriterLease() {
 			*duplicate = true
 			return saveVersionFrontier(ctx, tx, m, tenant)
 		}
+		return err
+	}
+	watermark, err := advanceProjectionWatermark(ctx, tx, tenant)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1)", history.LockID); err != nil {
@@ -76,13 +81,17 @@ func (s *Store) applyInTx(ctx context.Context, tx pgx.Tx, m Message, e map[strin
 	if err := applyEffect(ctx, tx, e, s.historyWindow(), skipped); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose) VALUES($1,$2,'device',$3,$2,'projection_changed')`, tenant, e[fieldEvent], e[fieldAggregate]); err != nil {
+	if err := saveProjectionCompletions(ctx, tx, e, watermark); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,shard_incarnation,placement_epoch,projection_sequence)
+ VALUES($1,$2,'device',$3,$2,'projection_changed',$4,$5,$6)`, tenant, e[fieldEvent], e[fieldAggregate], watermark.ShardIncarnation, watermark.PlacementEpoch, watermark.Sequence); err != nil {
 		return err
 	}
 	if err := saveCheckpoint(ctx, tx, m, e); err != nil {
 		return err
 	}
-	if s.Lease != nil {
+	if s.hasWriterLease() {
 		return saveVersionFrontier(ctx, tx, m, tenant)
 	}
 	return nil
@@ -467,6 +476,9 @@ func saveVersionFrontier(ctx context.Context, tx pgx.Tx, m Message, eventTenant 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", infrastructureTenant); err != nil {
 		return err
 	}
+	if err := admitProjectionTenant(ctx, tx, infrastructureTenant); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO projection_replay_tenants(tenant_id,event_tenant) VALUES($1,$2) ON CONFLICT DO NOTHING`, infrastructureTenant, eventTenant); err != nil {
 		return err
 	}
@@ -475,6 +487,8 @@ func saveVersionFrontier(ctx context.Context, tx pgx.Tx, m Message, eventTenant 
  WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.Topic, m.Partition, m.Offset); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", eventTenant)
-	return err
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", eventTenant); err != nil {
+		return err
+	}
+	return admitProjectionTenant(ctx, tx, eventTenant)
 }

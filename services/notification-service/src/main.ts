@@ -1,10 +1,8 @@
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
-import {
-  registerPostgresPool,
-  renderPostgresPoolMetrics,
-} from "@greenguard/otel";
+import { closeOwnerDatabase } from "@greenguard/membership-client/owner-db";
+import { createNotificationPool } from "./tenant.js";
+import { renderPostgresPoolMetrics } from "@greenguard/otel";
 import {
   LocalTestAdapter,
   UnconfiguredAdapter,
@@ -157,11 +155,11 @@ export function metricsServer(
 
 /** Starts the consumer; returns a stop function for graceful shutdown. */
 export async function start(config: Config): Promise<() => Promise<void>> {
-  const pool = new pg.Pool({
-    connectionString: config.databaseUrl,
-    max: config.prefetch + 2,
-  });
-  registerPostgresPool(pool, "notification_service");
+  const pool = createNotificationPool(
+    config.databaseUrl,
+    config.prefetch + 2,
+    config.ownerEnvironment,
+  );
   const connection = await connectBroker(config.rabbitUrl);
   const metrics = new Metrics();
   const providers = new Semaphore(config.providerConcurrency);
@@ -256,7 +254,7 @@ export async function start(config: Config): Promise<() => Promise<void>> {
       () => stopFlagFeed(),
       () => stopDynamoFlagFeed(),
       () => dynamoFlagStore?.close(),
-      () => pool.end(),
+      () => closeOwnerDatabase(pool, 5000, (pool) => pool.end()),
       () => verifier?.close(),
     ];
     const failures: unknown[] = [];

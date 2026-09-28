@@ -77,7 +77,7 @@ func (w Worker) process(ctx context.Context, m transport.Message) error {
 	if err != nil {
 		return err
 	}
-	if err := transport.Publish(ctx, w.Client, ResultTopic, m.Key, data, resultHeaders(result)); err != nil {
+	if err := w.Store.WithExternalAdmission(ctx, result.TenantID, func() error { return transport.Publish(ctx, w.Client, ResultTopic, m.Key, data, resultHeaders(result)) }); err != nil {
 		return fmt.Errorf("publish result: %w", err)
 	}
 	if err := w.Store.MarkPublished(ctx, result); err != nil {

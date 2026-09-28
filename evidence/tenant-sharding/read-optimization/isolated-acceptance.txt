@@ -1,0 +1,132 @@
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:58054"
+
+21 migrations found in prisma/migrations
+
+Applying migration `20260925090000_control_plane`
+Applying migration `20260925110000_membership_revocation`
+Applying migration `20260925120000_membership_identity_lookup_index`
+Applying migration `20260925130000_machine_credentials`
+Applying migration `20260925131000_machine_lookup_policy`
+Applying migration `20260925140000_flag_configurations`
+Applying migration `20260925141000_global_flags`
+Applying migration `20260925150000_entitlements`
+Applying migration `20260925160000_audit_exports`
+Applying migration `20260925160000_identity_connections`
+Applying migration `20260925170000_audit_csv`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260925181000_identity_domain_expiry`
+Applying migration `20260925185000_oauth_client_tenant_binding`
+Applying migration `20260925190000_audit_export_failures`
+Applying migration `20260925200000_jit_seat_denial_audit`
+Applying migration `20260925210000_notification_contacts`
+Applying migration `20260925220000_notification_contacts_cdc`
+Applying migration `20260928010000_tenant_placement`
+Applying migration `20260928130000_read_admission_leases`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925090000_control_plane/
+    └─ migration.sql
+  └─ 20260925110000_membership_revocation/
+    └─ migration.sql
+  └─ 20260925120000_membership_identity_lookup_index/
+    └─ migration.sql
+  └─ 20260925130000_machine_credentials/
+    └─ migration.sql
+  └─ 20260925131000_machine_lookup_policy/
+    └─ migration.sql
+  └─ 20260925140000_flag_configurations/
+    └─ migration.sql
+  └─ 20260925141000_global_flags/
+    └─ migration.sql
+  └─ 20260925150000_entitlements/
+    └─ migration.sql
+  └─ 20260925160000_audit_exports/
+    └─ migration.sql
+  └─ 20260925160000_identity_connections/
+    └─ migration.sql
+  └─ 20260925170000_audit_csv/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260925181000_identity_domain_expiry/
+    └─ migration.sql
+  └─ 20260925185000_oauth_client_tenant_binding/
+    └─ migration.sql
+  └─ 20260925190000_audit_export_failures/
+    └─ migration.sql
+  └─ 20260925200000_jit_seat_denial_audit/
+    └─ migration.sql
+  └─ 20260925210000_notification_contacts/
+    └─ migration.sql
+  └─ 20260925220000_notification_contacts_cdc/
+    └─ migration.sql
+  └─ 20260928010000_tenant_placement/
+    └─ migration.sql
+  └─ 20260928130000_read_admission_leases/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+✔ quiesce closes new leases, existing responses drain before epoch CAS (104.977333ms)
+✔ expired/lost leases cannot admit a response or indefinitely block cutover (45.628625ms)
+✔ lease RLS prevents another tenant from reading, releasing or using it (50.678875ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 499.057625
+✔ verified membership binds tenant placement and rejects forged claims (204.196959ms)
+✔ internal endpoint requires service authentication; callers cannot supply shard/epoch routing (26.430375ms)
+✔ read lease endpoints require service auth, reject hints and never permit caching (36.451583ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 790.342416
+risk migrations applied: 000001, 000002, 000003, 000004, 000005, 000006, 000007, 000008
+test_matching_admission_rls_stale_epoch_and_lock_drain (test_shards_live.ShardAdmissionLiveTest.test_matching_admission_rls_stale_epoch_and_lock_drain) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.204s
+
+OK
+✔ real PG snapshot selects current ownership despite retained higher old-epoch watermark (2103.146833ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2261.03775
+✔ real Redis rejects stale fills, missing guards, wrong epochs and expired locks with exact BIGINT comparisons (12.977666ms)
+✔ real cache wrapper rebuilds recovery guards from primary, preserves strict minima and fences init races (15.922166ms)
+✔ real Redis atomically checks revision, recovery, canonical identities and lock capabilities (32.014375ms)
+✔ real wrapper fences invalidation between metadata and hit and rejects the stale namespace fill (10.957042ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 238.609875
+ok  	greenguard.local/cache-invalidator	0.500s
+Isolated read lease and Redis watermark acceptance passed; scratch containers will be removed.

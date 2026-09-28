@@ -139,13 +139,19 @@ if (
   const publicKeyId = process.env.AUDIT_EXPORT_PUBLIC_KEY_ID;
   const inventoryUrl = process.env.INVENTORY_DATABASE_URL;
   const billingUrl = process.env.BILLING_DATABASE_URL;
-  if (!url || !pem || !publicKeyId || !inventoryUrl || !billingUrl)
+  if (
+    !url ||
+    !pem ||
+    !publicKeyId ||
+    (!inventoryUrl && !process.env.INVENTORY_SHARD_REGISTRY_FILE) ||
+    !billingUrl
+  )
     throw new Error(
       "audit worker requires database URL, Ed25519 key and key ID",
     );
   const backend = workerStorageFromEnv(process.env);
   const db = createDb(url);
-  const sources = new AuditSources(inventoryUrl, billingUrl);
+  const sources = new AuditSources(inventoryUrl ?? "", billingUrl);
   const key = createPrivateKey(pem.replaceAll("\\n", "\n"));
   let stopping = false;
   process.once("SIGTERM", () => {

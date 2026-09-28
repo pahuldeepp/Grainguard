@@ -85,3 +85,10 @@ test("Cognito access mode requires mapped users and public client IDs", () => {
     /AUTH_COGNITO_CLIENT_IDS/,
   );
 });
+
+test("private shard registry config requires no legacy database URL", () => {
+  assert.equal(
+    readConfig({ SHARD_REGISTRY_FILE: "/private/owners.json" }).databaseUrl,
+    "",
+  );
+});

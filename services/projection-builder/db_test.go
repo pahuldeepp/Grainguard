@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 	"greenguard.local/projection-builder/migrations"
 	"net/url"
 	"os"
@@ -48,6 +49,7 @@ func dbPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	configureFixturePlacement(t, cfg)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +82,7 @@ func TestDatabaseMigrations(t *testing.T) {
 	}
 	defer conn.Close(ctx)
 	var count int
-	if err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p') AND NOT relispartition AND relrowsecurity AND relforcerowsecurity`).Scan(&count); err != nil || count != 19 {
+	if err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p') AND NOT relispartition AND relrowsecurity AND relforcerowsecurity`).Scan(&count); err != nil || count != 21 {
 		t.Fatal(count, err)
 	}
 }
@@ -100,7 +102,9 @@ func dbEvent(t *testing.T, tenant, device string, v int) map[string]any {
 func dbCount(t *testing.T, pool *pgxpool.Pool, tenant, query string, args ...any) int {
 	t.Helper()
 	var n int
-	err := WithTenant(context.Background(), pool, tenant, func(ctx context.Context, tx pgx.Tx) error { return tx.QueryRow(ctx, query, args...).Scan(&n) })
+	// Read-only census fixtures also use the read_query role, which has tenant
+	// RLS access but no runtime writer admission grant.
+	err := common.WithTenantSchema(context.Background(), pool, tenant, "public", func(ctx context.Context, tx pgx.Tx) error { return tx.QueryRow(ctx, query, args...).Scan(&n) })
 	if err != nil {
 		t.Fatal(err)
 	}

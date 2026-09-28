@@ -17,6 +17,16 @@ class Metrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
+        self._placement_sum = 0.0
+        self._placement_buckets = {bound: 0 for bound in (0.01, 0.05, 0.1, 0.5, 1.0, 2.0, float("inf"))}
+
+    def observe_placement(self, seconds: float, failed: bool) -> None:
+        self.inc("greenguard_risk_placement_requests_total", outcome="error" if failed else "ok")
+        with self._lock:
+            self._placement_sum += seconds
+            for bound in self._placement_buckets:
+                if seconds <= bound:
+                    self._placement_buckets[bound] += 1
 
     def inc(self, name: str, **labels: str) -> None:
         if _FORBIDDEN_LABELS.intersection(labels):
@@ -31,6 +41,12 @@ class Metrics:
     def render(self) -> str:
         lines = []
         with self._lock:
+            if self._placement_buckets[float("inf")]:
+                for bound, count in self._placement_buckets.items():
+                    label = "+Inf" if bound == float("inf") else str(bound)
+                    lines.append(f'greenguard_risk_placement_request_seconds_bucket{{le="{label}"}} {count}')
+                lines.append(f"greenguard_risk_placement_request_seconds_sum {self._placement_sum}")
+                lines.append(f'greenguard_risk_placement_request_seconds_count {self._placement_buckets[float("inf")]}')
             for (name, labels), count in sorted(self._counters.items()):
                 rendered = ",".join(f'{key}="{value}"' for key, value in labels)
                 lines.append(f"{name}{{{rendered}}} {count}" if rendered else f"{name} {count}")

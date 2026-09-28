@@ -1,3 +1,4 @@
+import { adminTenantQuery } from "../testing/fixtures.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -71,7 +72,8 @@ test("ENT-05 tenant B cannot spend tenant A limit; pending saga obeys same lock"
 test("ENT-10 a paid plan applied an hour ago is still honored while the feed is healthy", async () => {
   const t = await seedTenant(db);
   await setLimit(t.tenantId, 2, 1); // seedTenant already owns one device
-  await adminQuery(
+  await adminTenantQuery(
+    t.tenantId,
     "UPDATE tenant_entitlements SET applied_at=now()-interval '1 hour' WHERE tenant_id=$1",
     [t.tenantId],
   );

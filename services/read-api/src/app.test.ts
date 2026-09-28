@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApp } from "./app.js";
+import { ReadPoolBusy } from "./replicas.js";
 import type { ReadBackends } from "./backends.js";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import {
@@ -12,6 +13,38 @@ import {
   identityKey,
 } from "@greenguard/membership-client";
 import type { Principal } from "@greenguard/tenant-auth";
+
+test("local PostgreSQL saturation returns read_busy with bounded retry advice", async () => {
+  const api = createApp({
+    verify: async () =>
+      ({
+        tenantId: A,
+        roles: ["viewer"],
+        subject: "fixture",
+        expiresAt: new Date(Date.now() + 60000),
+      }) as Principal,
+    backends: {
+      ...backends,
+      device: async () => {
+        throw new ReadPoolBusy();
+      },
+    },
+  }).listen(0);
+  try {
+    const address = api.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/v1/read/devices/${DEVICE}`,
+      {
+        headers: { authorization: "Bearer fixture" },
+      },
+    );
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), "1");
+    assert.deepEqual(await response.json(), { code: "read_busy" });
+  } finally {
+    await new Promise<void>((resolve) => api.close(() => resolve()));
+  }
+});
 
 test("a still-valid JWT loses Read API access after membership.changed", async () => {
   const issuer = await createTestIssuer();
@@ -65,6 +98,7 @@ const calls: Array<[string, string]> = [];
 let siteRows: Array<{ device_id: string }> = [];
 let siteRequest: { limit: number; after?: string } | undefined;
 const backends: ReadBackends = {
+  deviceCurrent: async () => ({ device: null, latestReading: null }),
   device: async (tenant) => {
     calls.push(["device", tenant]);
     return { tenant_id: tenant };

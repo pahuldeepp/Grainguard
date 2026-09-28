@@ -2,6 +2,9 @@
 // partial unique indexes, grants and CHECK constraints live in the hand-written SQL
 // migrations (prisma/migrations); runtime code uses the generated client with typed
 // raw SQL ($queryRaw) inside withTenant, so no model mapping is duplicated here.
+// Tenant placement uses organizations.shard_id/routing_epoch, shard_registry,
+// placement_policy + immutable placement_ring_versions, and placement_moves. BIGINT epochs
+// are serialized as decimal strings by domain/placement.ts, never JS numbers.
 
 generator client {
   provider            = "prisma-client"

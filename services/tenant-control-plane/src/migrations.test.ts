@@ -117,15 +117,25 @@ test("notification contact migration keeps format checks and permits a versioned
   assert.deepEqual(rows.rows, [{ email_to: null, sms_to: null, version: "2" }]);
 });
 
-test("M12: control_app has no DELETE anywhere and cannot UPDATE audit, outbox or receipts", async () => {
+test("M12: only ephemeral read leases permit DELETE; audit, outbox and receipts remain immutable", async () => {
   const grants = await adminQuery<{
+    table_schema: string;
     table_name: string;
     privilege_type: string;
   }>(
-    `SELECT table_name, privilege_type FROM information_schema.role_table_grants
-      WHERE grantee = 'control_app' AND privilege_type IN ('DELETE', 'TRUNCATE', 'UPDATE')`,
+    `SELECT table_schema, table_name, privilege_type FROM information_schema.role_table_grants
+      WHERE grantee = 'control_app' AND privilege_type IN ('DELETE', 'TRUNCATE', 'UPDATE')
+      ORDER BY table_schema, table_name, privilege_type`,
   );
-  assert.deepEqual(grants, []);
+  // Leases are ephemeral admission capabilities; releasing them requires DELETE.
+  // The exact allowlist still rejects DELETE/TRUNCATE/table UPDATE elsewhere.
+  assert.deepEqual(grants, [
+    {
+      table_schema: "public",
+      table_name: "placement_read_leases",
+      privilege_type: "DELETE",
+    },
+  ]);
   const columns = await adminQuery<{ table_name: string }>(
     `SELECT DISTINCT table_name FROM information_schema.column_privileges
       WHERE grantee = 'control_app' AND privilege_type = 'UPDATE' ORDER BY table_name`,

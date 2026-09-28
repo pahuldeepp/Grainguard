@@ -1,3 +1,7 @@
+import {
+  closeOwnerDatabase,
+  ownerDatabases,
+} from "@greenguard/membership-client/owner-db";
 import "reflect-metadata";
 import {
   Controller,
@@ -47,7 +51,24 @@ class ProbeController {
   @Get("readyz") async ready() {
     if (!this.consumerHealth.ready) throw new ServiceUnavailableException();
     try {
-      await this.db.$queryRaw`SELECT 1`;
+      await Promise.all(
+        ownerDatabases(this.db).map(async (db) => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              db.$queryRaw`SELECT 1`,
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () => reject(new ServiceUnavailableException()),
+                  1000,
+                );
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }),
+      );
     } catch {
       throw new ServiceUnavailableException();
     }
@@ -67,7 +88,7 @@ class Shutdown implements OnApplicationShutdown {
     const failures: unknown[] = [];
     for (const close of [
       () => this.consumer.close?.(),
-      () => this.db.$disconnect(),
+      () => closeOwnerDatabase(this.db, 5000, (db) => db.$disconnect()),
       () => this.tracing?.shutdown(),
       () => this.verifier?.close?.(),
     ]) {

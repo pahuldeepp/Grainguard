@@ -346,3 +346,490 @@ test("silent peers lose their connection slots and subscription polling stops", 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("live notification demands its projection watermark and discards late old placement hints", async () => {
+  const shard = "22222222-2222-4222-8222-222222222222";
+  const token = (sequence: string, epoch = "2") =>
+    JSON.stringify({
+      v: 1,
+      tenantId: principal.tenantId,
+      shardIncarnation: shard,
+      placementEpoch: epoch,
+      sequence,
+    });
+  const demands: (string | undefined)[] = [];
+  const redis = new EventEmitter() as EventEmitter & {
+    subscribe: (
+      channel: string,
+      listener: (message: string) => void,
+    ) => Promise<void>;
+  };
+  let receive: (message: string) => void = () => {};
+  redis.subscribe = async (_channel, listener) => {
+    receive = listener;
+  };
+  const feed = new LiveFeed(redis);
+  await feed.start();
+  const server = createServer();
+  const stop = attachSubscriptions(server, {
+    verify: async () => principal,
+    feed,
+    read: {
+      async device() {
+        return { deviceId };
+      },
+      async latest(_auth, _device, consistency) {
+        assert.equal(consistency?.tenantId, principal.tenantId);
+        demands.push(consistency?.minimumConsistency);
+        return {
+          deviceId,
+          readingId: String(demands.length),
+          consistencyToken: consistency?.minimumConsistency ?? token("5"),
+        };
+      },
+    },
+  });
+  server.listen(0);
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${address.port}/graphql`,
+    "graphql-transport-ws",
+    { headers: { Authorization: "Bearer one" } },
+  );
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    const ack = next(ws);
+    ws.send(JSON.stringify({ type: "connection_init" }));
+    await ack;
+    const initial = next(ws);
+    ws.send(
+      JSON.stringify({
+        type: "subscribe",
+        id: "1",
+        payload: {
+          extensions: {
+            persistedQuery: {
+              sha256Hash: operationHash(operations.deviceChanged),
+            },
+          },
+          variables: { deviceId },
+        },
+      }),
+    );
+    const initialMessage = await initial;
+    assert.equal(
+      (
+        initialMessage.payload.data.deviceChanged as unknown as {
+          consistencyToken: string;
+        }
+      ).consistencyToken,
+      token("5"),
+    );
+    const refreshed = next(ws);
+    receive(
+      JSON.stringify({
+        scope: "device",
+        tenant: principal.tenantId,
+        device: deviceId,
+        shard_incarnation: shard,
+        placement_epoch: "2",
+        projection_sequence: "9",
+      }),
+    );
+    const refreshedMessage = await refreshed;
+    assert.equal(
+      (
+        refreshedMessage.payload.data.deviceChanged as unknown as {
+          consistencyToken: string;
+        }
+      ).consistencyToken,
+      token("9"),
+    );
+    assert.deepEqual(demands, [undefined, token("9")]);
+    const legacyRefresh = next(ws);
+    receive(
+      JSON.stringify({
+        scope: "device",
+        tenant: principal.tenantId,
+        device: deviceId,
+      }),
+    );
+    await legacyRefresh;
+    assert.equal(
+      demands[2],
+      token("9"),
+      "legacy hint must preserve the observed minimum",
+    );
+    const malformedRefresh = next(ws);
+    receive(
+      JSON.stringify({
+        scope: "device",
+        tenant: principal.tenantId,
+        device: deviceId,
+        shard_incarnation: shard,
+        placement_epoch: "2",
+        projection_sequence: 9,
+      }),
+    );
+    await malformedRefresh;
+    assert.equal(
+      demands[3],
+      token("9"),
+      "invalid optional hint proof must preserve the observed minimum",
+    );
+    receive(
+      JSON.stringify({
+        scope: "device",
+        tenant: principal.tenantId,
+        device: deviceId,
+        shard_incarnation: shard,
+        placement_epoch: "1",
+        projection_sequence: "100",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(
+      demands.length,
+      4,
+      "late older epoch must not poll or downgrade the observed minimum",
+    );
+  } finally {
+    ws.close();
+    await stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+async function recoverySubscription(
+  actual: string | undefined,
+  failure?: "outage" | "fresh" | "empty",
+) {
+  const { ReadUpstreamError } = await import("./read-client.js");
+  const initialToken = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "11111111-1111-4111-8111-111111111111",
+    placementEpoch: "2",
+    sequence: "90",
+  });
+  const calls: Array<string | undefined> = [];
+  let changed = false;
+  let nextGate: { started: () => void; promise: Promise<void> } | undefined;
+  let receive: (message: string) => void = () => {};
+  const redis = new EventEmitter() as EventEmitter & {
+    subscribe: (
+      channel: string,
+      listener: (message: string) => void,
+    ) => Promise<void>;
+  };
+  redis.subscribe = async (_channel, listener) => {
+    receive = listener;
+  };
+  const feed = new LiveFeed(redis);
+  await feed.start();
+  const server = createServer();
+  const stop = attachSubscriptions(server, {
+    verify: async () => principal,
+    feed,
+    read: {
+      device: async () => ({ deviceId }),
+      latest: async (_authorization, _device, consistency) => {
+        calls.push(consistency?.minimumConsistency);
+        if (
+          changed &&
+          consistency?.minimumConsistency &&
+          consistency.minimumConsistency !== actual
+        )
+          throw new ReadUpstreamError(
+            failure === "outage" ? 503 : 409,
+            failure === "outage"
+              ? "read_freshness_unavailable"
+              : "consistency_identity_mismatch",
+          );
+        if (changed && failure === "fresh")
+          throw new ReadUpstreamError(503, "read_freshness_unavailable");
+        const snapshotToken = changed ? actual : initialToken;
+        const empty = changed && failure === "empty";
+        const gate = nextGate;
+        nextGate = undefined;
+        if (gate) {
+          gate.started();
+          await gate.promise;
+        }
+        if (snapshotToken) consistency?.onWatermark?.(snapshotToken);
+        if (empty) return null;
+        return {
+          deviceId,
+          readingId: String(calls.length),
+          consistencyToken: snapshotToken,
+        };
+      },
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("port missing");
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${address.port}/graphql`,
+    "graphql-transport-ws",
+    { headers: { Authorization: "Bearer one" } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+  });
+  let message = next(ws);
+  ws.send(JSON.stringify({ type: "connection_init" }));
+  await message;
+  message = next(ws);
+  ws.send(
+    JSON.stringify({
+      type: "subscribe",
+      id: "recovery",
+      payload: {
+        extensions: {
+          persistedQuery: {
+            sha256Hash: operationHash(operations.deviceChanged),
+          },
+        },
+        variables: { deviceId },
+      },
+    }),
+  );
+  await message;
+  return {
+    calls,
+    initialToken,
+    ws,
+    receive,
+    deferNext: () => {
+      let started!: () => void;
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      nextGate = { started, promise };
+      receive(
+        JSON.stringify({
+          scope: "device",
+          tenant: principal.tenantId,
+          device: deviceId,
+        }),
+      );
+      return { ready, release };
+    },
+    trigger: (hintToken?: string) => {
+      changed = true;
+      const hint =
+        hintToken &&
+        (JSON.parse(hintToken) as {
+          shardIncarnation: string;
+          placementEpoch: string;
+          sequence: string;
+        });
+      const pending = next(ws);
+      receive(
+        JSON.stringify({
+          scope: "device",
+          tenant: principal.tenantId,
+          device: deviceId,
+          ...(hint
+            ? {
+                shard_incarnation: hint.shardIncarnation,
+                placement_epoch: hint.placementEpoch,
+                projection_sequence: hint.sequence,
+              }
+            : {}),
+        }),
+      );
+      return pending;
+    },
+    close: async () => {
+      ws.close();
+      await stop();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+test("subscription foreground mismatch resets once for a move or same-epoch incarnation restore", async () => {
+  for (const epoch of ["2", "3"]) {
+    const actual = JSON.stringify({
+      v: 1,
+      tenantId: principal.tenantId,
+      shardIncarnation: "22222222-2222-4222-8222-222222222222",
+      placementEpoch: epoch,
+      sequence: "1",
+    });
+    const h = await recoverySubscription(actual);
+    try {
+      const result = await h.trigger(epoch === "2" ? actual : undefined);
+      assert.equal(result.type, "next");
+      assert.deepEqual(h.calls, [undefined, h.initialToken, undefined]);
+      assert.equal(
+        (
+          result.payload.data.deviceChanged as unknown as {
+            consistencyToken: string;
+          }
+        ).consistencyToken,
+        actual,
+      );
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test("newer hint advances minimum directly and late older hints are discarded", async () => {
+  const actual = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "22222222-2222-4222-8222-222222222222",
+    placementEpoch: "3",
+    sequence: "1",
+  });
+  const h = await recoverySubscription(actual);
+  try {
+    const result = await h.trigger(actual);
+    assert.equal(result.type, "next");
+    assert.deepEqual(h.calls, [undefined, actual]);
+    h.receive(
+      JSON.stringify({
+        scope: "device",
+        tenant: principal.tenantId,
+        device: deviceId,
+        shard_incarnation: "11111111-1111-4111-8111-111111111111",
+        placement_epoch: "2",
+        projection_sequence: "999",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(h.calls.length, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+test("subscription reset is bounded and rejects lower/unchanged/missing identity or outage", async () => {
+  for (const scenario of [
+    { actual: undefined },
+    {
+      actual: JSON.stringify({
+        v: 1,
+        tenantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        shardIncarnation: "22222222-2222-4222-8222-222222222222",
+        placementEpoch: "3",
+        sequence: "1",
+      }),
+    },
+    {
+      actual: JSON.stringify({
+        v: 1,
+        tenantId: principal.tenantId,
+        shardIncarnation: "11111111-1111-4111-8111-111111111111",
+        placementEpoch: "2",
+        sequence: "1",
+      }),
+    },
+    {
+      actual: JSON.stringify({
+        v: 1,
+        tenantId: principal.tenantId,
+        shardIncarnation: "22222222-2222-4222-8222-222222222222",
+        placementEpoch: "1",
+        sequence: "1",
+      }),
+    },
+    {
+      actual: JSON.stringify({
+        v: 1,
+        tenantId: principal.tenantId,
+        shardIncarnation: "22222222-2222-4222-8222-222222222222",
+        placementEpoch: "3",
+        sequence: "1",
+      }),
+      failure: "outage" as const,
+    },
+    {
+      actual: JSON.stringify({
+        v: 1,
+        tenantId: principal.tenantId,
+        shardIncarnation: "22222222-2222-4222-8222-222222222222",
+        placementEpoch: "3",
+        sequence: "1",
+      }),
+      failure: "fresh" as const,
+    },
+  ]) {
+    const h = await recoverySubscription(scenario.actual, scenario.failure);
+    try {
+      const result = await h.trigger();
+      assert.equal(result.type, "error");
+      assert.equal(h.calls.length, scenario.failure === "outage" ? 2 : 3);
+      assert.equal(h.calls[1], h.initialToken);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test("subscription retains the certificate when a fresh admitted reading is empty", async () => {
+  const actual = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "22222222-2222-4222-8222-222222222222",
+    placementEpoch: "3",
+    sequence: "1",
+  });
+  const h = await recoverySubscription(actual, "empty");
+  try {
+    const result = await h.trigger();
+    assert.equal(result.type, "next");
+    assert.deepEqual(h.calls, [undefined, h.initialToken, undefined]);
+    const change = result.payload.data.deviceChanged as unknown as {
+      readingId: string | null;
+      consistencyToken: string;
+    };
+    assert.equal(change.readingId, null);
+    assert.equal(change.consistencyToken, actual);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a newer hint during an old snapshot discards that snapshot and reruns at the new minimum", async () => {
+  const actual = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "22222222-2222-4222-8222-222222222222",
+    placementEpoch: "3",
+    sequence: "1",
+  });
+  const h = await recoverySubscription(actual);
+  try {
+    const gate = h.deferNext();
+    await gate.ready;
+    const result = h.trigger(actual);
+    gate.release();
+    const change = await result;
+    assert.equal(change.type, "next");
+    assert.equal(
+      (
+        change.payload.data.deviceChanged as unknown as {
+          consistencyToken: string;
+        }
+      ).consistencyToken,
+      actual,
+    );
+    assert.deepEqual(h.calls, [undefined, h.initialToken, actual]);
+  } finally {
+    await h.close();
+  }
+});

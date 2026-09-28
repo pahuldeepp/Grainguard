@@ -22,6 +22,7 @@ type ingestConfig struct {
 	Policy              QualityPolicy
 	APIKeyEndpoint      string
 	APIKeyLookupToken   string
+	ControlMeshMTLS     bool
 	TrustedProxyCIDRs   []netip.Prefix
 }
 
@@ -41,6 +42,11 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 		return ingestConfig{}, errors.New("INGEST_TELEMETRY_V2_ENABLED must be 0 or 1")
 	}
 	cfg.APIKeyEndpoint, cfg.APIKeyLookupToken = getenv("CONTROL_PLANE_URL"), getenv("CONTROL_LOOKUP_TOKEN")
+	mesh := getenv("CONTROL_PLANE_MESH_MTLS")
+	if mesh != "" && mesh != "true" && mesh != "false" {
+		return ingestConfig{}, errors.New("CONTROL_PLANE_MESH_MTLS must be true or false")
+	}
+	cfg.ControlMeshMTLS = mesh == "true"
 	if cfg.TrustedProxyCIDRs, err = loadTrustedProxyCIDRs(getenv("INGEST_TRUSTED_PROXY_CIDRS")); err != nil {
 		return ingestConfig{}, err
 	}
@@ -48,7 +54,7 @@ func loadIngestConfig(getenv func(string) string) (ingestConfig, error) {
 		return ingestConfig{}, errors.New("CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together")
 	}
 	if cfg.APIKeyEndpoint != "" {
-		if _, err := NewAPIKeyVerifier(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken); err != nil {
+		if _, err := NewAPIKeyVerifierWithMesh(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken, cfg.ControlMeshMTLS); err != nil {
 			return ingestConfig{}, err
 		}
 	}

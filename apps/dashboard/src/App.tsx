@@ -132,7 +132,7 @@ export function App({
   );
   const readApi = useMemo(
     () => (getAccessToken ? new ReadApi(getAccessToken) : null),
-    [getAccessToken],
+    [getAccessToken, sessionId],
   );
   const alertsApi = useMemo(
     () => (getAccessToken ? new AlertsApi(getAccessToken) : null),

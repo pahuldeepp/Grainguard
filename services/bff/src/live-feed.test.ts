@@ -60,3 +60,37 @@ test("cluster connection events restore live feed subscriptions after reconnect"
   assert.equal(feed.isReady(), true);
   assert.equal(subscriptions, 2);
 });
+
+test("live hints carry bounded projection identity and sequence without converting stream versions", () => {
+  const tenant = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const shard = "11111111-1111-4111-8111-111111111111";
+  const payload = {
+    scope: "device",
+    tenant,
+    device: "sensor-A",
+    shard_incarnation: shard,
+    placement_epoch: "2",
+    projection_sequence: "9007199254740993",
+  };
+  const hint = parseLiveHint(JSON.stringify(payload));
+  assert.deepEqual(hint, {
+    scope: "device",
+    tenant,
+    device: "sensor-A",
+    consistencyToken: JSON.stringify({
+      v: 1,
+      tenantId: tenant,
+      shardIncarnation: shard,
+      placementEpoch: "2",
+      sequence: "9007199254740993",
+    }),
+  });
+  const invalidation = { scope: "device", tenant, device: "sensor-A" };
+  for (const invalid of [
+    { ...payload, projection_sequence: 9 },
+    { ...payload, projection_sequence: "9223372036854775808" },
+    { ...payload, shard_incarnation: undefined },
+    { ...payload, placement_epoch: "0" },
+  ])
+    assert.deepEqual(parseLiveHint(JSON.stringify(invalid)), invalidation);
+});

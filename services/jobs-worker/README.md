@@ -102,3 +102,7 @@ cd services/jobs-worker && go test -race ./...   # unit + live Postgres tests (v
 make rabbitmq-test                    # live RabbitMQ tests; restarts the broker, purges queues
 cd services/jobs-worker && JOBS_KAFKA_LIVE=1 KAFKA_BROKERS=127.0.0.1:59092 go test -count=1 -run TestKafkaAlertIntakeLive -v .
 ```
+
+## Placement routing
+
+With `SHARD_REGISTRY_FILE`, API tenants, validated alert events, receipts, dispatch, dead-letter publication, redrive and DLQ replay resolve current placement before tenant transactions. ID-only scans visit all four primaries sequentially with `JOBS_DISPATCH_BATCH` as a per-shard cap; dispatch concurrency retains its configured global worker bound. An operator redrive remains globally capped by `-limit`. Poison transport records have no authenticated tenant and use the explicit `s1` infrastructure quarantine ledger; it stores only source coordinates/hash/reason. A required unavailable shard fails the scan. See [Go sharding contract](../../packages/go-common/SHARDING.md).

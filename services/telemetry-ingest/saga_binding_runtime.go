@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 )
 
@@ -71,6 +74,25 @@ const (
 // bindingResultTenants asks the ID-only SECURITY DEFINER selector which tenants
 // have unpublished results after the cursor. It never reads row data.
 func bindingResultTenants(ctx context.Context, db TxStarter, after string) ([]string, error) {
+	if shards, ok := db.(*common.ShardedDB); ok {
+		unique := map[string]bool{}
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			page, err := bindingResultTenants(ctx, shards.InfrastructureDB(shard), after)
+			for _, id := range page {
+				unique[id] = true
+			}
+			return err
+		})
+		ids := make([]string, 0, len(unique))
+		for id := range unique {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		if len(ids) > maxBindingTenantsPerPass {
+			ids = ids[:maxBindingTenantsPerPass]
+		}
+		return ids, err
+	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err

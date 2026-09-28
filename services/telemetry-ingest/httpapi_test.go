@@ -294,7 +294,7 @@ func TestUnboundAndDisabledDevicesAreRefused(t *testing.T) {
 	token := f.token(tenant, "operator-1", RoleOperator)
 	resp, data := f.post(token, randomUUID(), apiBody("m-1", 20))
 	apiProblem(t, resp, data, http.StatusConflict, ReasonDeviceNotReady)
-	if _, err := adminConn(t, "greenguard_telemetry").Exec(context.Background(),
+	if _, err := fixtureAdminExec(t, adminConn(t, "greenguard_telemetry"), tenant,
 		"UPDATE device_bindings SET status = 'disabled' WHERE device_id = $1", device); err != nil {
 		t.Fatal(err)
 	}

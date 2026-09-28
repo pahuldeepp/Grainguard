@@ -1,7 +1,8 @@
+import { fixtureDb } from "../testing/fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { createDb, type Db } from "../db/client.js";
+import { type Db } from "../db/client.js";
 import { withTenant } from "../db/tenant.js";
 import { applyInventoryCommand, type InventoryResult } from "./inventory.js";
 import {
@@ -39,7 +40,7 @@ test("ID-only tenant discovery is bounded, fair and never crosses tenants", asyn
     t.skip("INVENTORY_DATABASE_URL is required");
     return;
   }
-  const db = createDb(url);
+  const db = fixtureDb(url);
   t.after(() => db.$disconnect());
   const ours = Array.from({ length: MAX_TENANTS_PER_PASS + 20 }, () =>
     randomUUID(),

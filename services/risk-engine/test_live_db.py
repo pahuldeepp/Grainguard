@@ -1,6 +1,7 @@
 """Live PostgreSQL tests for greenguard_risk (run `make risk-migrate` first).
 
-They run when RISK_DIRECT_URL and RISK_MIGRATION_URL are set (`set -a; . ./.env`).
+They run when RISK_DIRECT_URL, RISK_MIGRATION_URL and POSTGRES_ADMIN_URL are set.
+The admin URL registers fresh fixture ownership; runtime writes use real admission.
 Every test uses fresh random tenant IDs, so no cleanup (and no DELETE) is needed.
 """
 
@@ -8,7 +9,7 @@ import json
 import os
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from risk_engine import events
 from risk_engine.apply import APPLIED, DUPLICATE, STALE, Applier
@@ -22,6 +23,8 @@ from test_fakes import binding_changed, lot_changed, new_id, record, registered,
 APP_URL = os.environ.get("RISK_DIRECT_URL")
 POOLED_URL = os.environ.get("RISK_DATABASE_URL")
 OWNER_URL = os.environ.get("RISK_MIGRATION_URL")
+ADMIN_URL = os.environ.get("POSTGRES_ADMIN_URL")
+FIXTURE_PLACEMENTS = {}
 LATE = datetime(2030, 1, 1, tzinfo=timezone.utc)
 TENANT_TABLES = ("consumer_inbox", "device_bindings", "bin_lot_intervals", "device_risk_streams",
                  "risk_assessments", "outbox_events", "grain_policies")
@@ -32,10 +35,39 @@ except ImportError:  # the pinned dev requirements provide it
     psycopg = None
 
 
+
+def fixture_placement(tenant):
+    """Register only fresh test tenants through the privileged bootstrap connection."""
+    if tenant not in FIXTURE_PLACEMENTS:
+        placement = {"tenantId": tenant, "shardId": "s2",
+                     "shardIncarnation": str(uuid.uuid4()), "placementEpoch": "1", "state": "active"}
+        from urllib.parse import urlsplit, urlunsplit
+        admin = urlsplit(ADMIN_URL)
+        risk = urlsplit(OWNER_URL)
+        risk_admin = urlunsplit((admin.scheme, admin.netloc, risk.path, admin.query, admin.fragment))
+        with psycopg.connect(risk_admin, autocommit=True) as conn:
+            conn.execute("INSERT INTO greenguard_internal.tenant_ownership"
+                         "(tenant_id,shard_id,shard_incarnation,placement_epoch,state)"
+                         " VALUES(%s,%s,%s,1,'active')",
+                         (tenant, placement["shardId"], placement["shardIncarnation"]))
+        FIXTURE_PLACEMENTS[tenant] = placement
+    return dict(FIXTURE_PLACEMENTS[tenant],
+                expiresAt=(datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat())
+
+
+class FixtureDatabase(PgDatabase):
+    """Supply trusted fixture routing metadata through the real transaction API."""
+    def transaction(self, tenant_id, placement=None):
+        return super().transaction(tenant_id, placement or fixture_placement(tenant_id))
+
 def sql(url, statement, params=(), tenant=None):
     with psycopg.connect(url, autocommit=True, prepare_threshold=None) as conn, conn.transaction():
         if tenant:
-            conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+            placement = fixture_placement(tenant)
+            for name, value in (("app.tenant_id", tenant), ("app.shard_id", placement["shardId"]),
+                                ("app.shard_incarnation", placement["shardIncarnation"]),
+                                ("app.placement_epoch", placement["placementEpoch"])):
+                conn.execute("SELECT set_config(%s, %s, true)", (name, value))
         cur = conn.execute(statement, params)
         return cur.fetchall() if cur.description else None
 
@@ -59,10 +91,10 @@ class _Expect:
         return True
 
 
-@unittest.skipUnless(APP_URL and OWNER_URL and psycopg, "live risk database not configured")
+@unittest.skipUnless(APP_URL and OWNER_URL and ADMIN_URL and psycopg, "live risk database not configured")
 class LiveRiskDatabaseTest(unittest.TestCase):
     def setUp(self):
-        self.db = PgDatabase(APP_URL)
+        self.db = FixtureDatabase(APP_URL)
         self.addCleanup(self.db.close)
         self.applier = Applier(self.db, "risk-live", lambda: LATE)
         self.tenant, self.site, self.bin, self.device = new_id(), new_id(), new_id(), new_id()
@@ -191,7 +223,7 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         first = self.apply(reading)
         self.assertEqual(first.outcome, APPLIED)
         self.assertEqual(self.apply(reading).outcome, DUPLICATE)  # crash after commit: redelivery
-        pooled = PgDatabase(POOLED_URL or APP_URL)  # replay through PgBouncer when configured
+        pooled = FixtureDatabase(POOLED_URL or APP_URL)  # replay through PgBouncer when configured
         self.addCleanup(pooled.close)
         replay = self.apply(reading, Applier(pooled, "risk-replay", lambda: LATE))
         self.assertEqual((replay.outcome, replay.event_id), (DUPLICATE, first.event_id))

@@ -65,6 +65,8 @@ func (s *scriptedTx) QueryRow(_ context.Context, q string, args ...any) pgx.Row 
 }
 func standardRow(q string) rowResult {
 	switch {
+	case strings.Contains(q, "RETURNING shard_incarnation::text"):
+		return rowResult{values: []any{testTenant, "1", "1"}}
 	case strings.Contains(q, "SELECT max_seen"):
 		return rowResult{values: []any{int64(0)}}
 	case strings.Contains(q, "SELECT COALESCE"):
@@ -154,7 +156,7 @@ func TestInboxSemanticDuplicateAndCollision(t *testing.T) {
 		if equal {
 			want = ErrDuplicate
 		}
-		if !errors.Is(err, want) || tx.commits != 0 || tx.rollbacks != 1 || len(tx.queries) != 4 {
+		if !errors.Is(err, want) || tx.commits != 0 || tx.rollbacks != 1 || len(tx.queries) != 5 {
 			t.Fatal(err, tx.queries)
 		}
 	}

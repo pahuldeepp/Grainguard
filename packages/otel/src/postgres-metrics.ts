@@ -1,6 +1,8 @@
 import type pg from "pg";
 
-const pools = new Map<string, pg.Pool>();
+const pools = new Map<string, Set<pg.Pool>>();
+const closeCallbacks = new WeakMap<pg.Pool, Set<() => void>>();
+const registrations = new WeakMap<pg.Pool, Map<string, number>>();
 const allowedPoolNames = new Set([
   "device_service",
   "workflow_alerts",
@@ -30,8 +32,49 @@ export function recordPostgresQueryDuration(durationMs: number) {
 export function registerPostgresPool(pool: pg.Pool, poolName: string) {
   if (!allowedPoolNames.has(poolName))
     throw new Error("Postgres metric poolName must be a bounded identifier");
-  pools.set(poolName, pool);
-  return () => pools.delete(poolName);
+  const members = pools.get(poolName) ?? new Set<pg.Pool>();
+  members.add(pool);
+  pools.set(poolName, members);
+  const counts = registrations.get(pool) ?? new Map<string, number>();
+  counts.set(poolName, (counts.get(poolName) ?? 0) + 1);
+  registrations.set(pool, counts);
+  let removed = false;
+  const unregister = () => {
+    if (removed) return;
+    removed = true;
+    closeCallbacks.get(pool)?.delete(unregister);
+    const remaining = (counts.get(poolName) ?? 1) - 1;
+    if (remaining > 0) {
+      counts.set(poolName, remaining);
+      return;
+    }
+    counts.delete(poolName);
+    members.delete(pool);
+    if (members.size === 0 && pools.get(poolName) === members)
+      pools.delete(poolName);
+  };
+  let callbacks = closeCallbacks.get(pool);
+  if (!callbacks) {
+    callbacks = new Set();
+    closeCallbacks.set(pool, callbacks);
+    const end = pool.end.bind(pool);
+    const cleanup = () => {
+      callbacks!.forEach((remove) => remove());
+      callbacks!.clear();
+    };
+    // pg.Pool emits no "end" event. Preserve its Promise and callback overloads
+    // while removing metrics after either form of pool shutdown completes.
+    pool.end = ((callback?: (error?: Error) => void) => {
+      if (callback)
+        return end((error?: Error) => {
+          if (!error) cleanup();
+          callback(error);
+        });
+      return end().then(cleanup);
+    }) as pg.Pool["end"];
+  }
+  callbacks.add(unregister);
+  return unregister;
 }
 
 export function renderPostgresPoolMetrics() {
@@ -53,13 +96,22 @@ export function renderPostgresPoolMetrics() {
     "# HELP postgres_query_duration_seconds PostgreSQL client query duration; SQL and parameters are not retained.",
     "# TYPE postgres_query_duration_seconds histogram",
   ];
-  for (const [name, pool] of pools) {
+  for (const [name, members] of pools) {
     const labels = `pool="${name}"`;
+    const values = [...members].reduce(
+      (sum, pool) => ({
+        max: sum.max + (pool.options.max ?? 10),
+        total: sum.total + pool.totalCount,
+        idle: sum.idle + pool.idleCount,
+        waiting: sum.waiting + pool.waitingCount,
+      }),
+      { max: 0, total: 0, idle: 0, waiting: 0 },
+    );
     lines.push(
-      `postgres_pool_size{${labels}} ${pool.options.max}`,
-      `postgres_pool_total_connections{${labels}} ${pool.totalCount}`,
-      `postgres_pool_idle_connections{${labels}} ${pool.idleCount}`,
-      `postgres_pool_waiting_requests{${labels}} ${pool.waitingCount}`,
+      `postgres_pool_size{${labels}} ${values.max}`,
+      `postgres_pool_total_connections{${labels}} ${values.total}`,
+      `postgres_pool_idle_connections{${labels}} ${values.idle}`,
+      `postgres_pool_waiting_requests{${labels}} ${values.waiting}`,
     );
   }
   queryBounds.forEach((bound, index) =>

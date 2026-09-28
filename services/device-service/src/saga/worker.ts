@@ -1,3 +1,5 @@
+import { ownerDatabases } from "@greenguard/membership-client/owner-db";
+import { PlacementError } from "@greenguard/membership-client";
 import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { createRequire } from "node:module";
 import kafkaJs, { type EachMessagePayload } from "kafkajs";
@@ -35,9 +37,34 @@ export async function tenantsWithPendingResults(
   after: string | null,
   limit = MAX_TENANTS_PER_PASS,
 ): Promise<string[]> {
-  const rows = await db.$queryRaw<{ tenant_id: string }[]>`
-    SELECT tenant_id::text FROM inventory_saga_result_tenants(${after}::uuid, ${limit}::int)`;
-  return rows.map((row) => row.tenant_id);
+  return (await discoverResultTenants(db, after, limit)).tenants;
+}
+
+async function discoverResultTenants(
+  db: Db,
+  after: string | null,
+  limit = MAX_TENANTS_PER_PASS,
+) {
+  const pages = await Promise.allSettled(
+    ownerDatabases(db).map(
+      (owner) => owner.$queryRaw<{ tenant_id: string }[]>`
+    SELECT tenant_id::text FROM inventory_saga_result_tenants(${after}::uuid, ${limit}::int)`,
+    ),
+  );
+  let complete = true;
+  const tenants: string[] = [];
+  pages.forEach((page, index) => {
+    if (page.status === "fulfilled")
+      tenants.push(...page.value.map((row) => row.tenant_id));
+    else {
+      complete = false;
+      // Do not log database credentials, row data or a tenant identifier.
+      console.error("inventory saga result discovery unavailable", {
+        ownerIndex: index,
+      });
+    }
+  });
+  return { tenants: [...new Set(tenants)].sort().slice(0, limit), complete };
 }
 
 // One bounded, round-robin pass: at most MAX_TENANTS_PER_PASS tenants after the
@@ -50,17 +77,22 @@ export async function publishResultsPass(
   publish: (key: string, value: string) => Promise<void>,
   include: (tenant: string) => boolean = () => true,
 ): Promise<string | null> {
-  const tenants = await tenantsWithPendingResults(db, cursor);
+  const { tenants, complete } = await discoverResultTenants(db, cursor);
   for (const tenant of tenants) {
     if (!include(tenant)) continue;
-    let sent = 0;
-    while (
-      sent < MAX_RESULTS_PER_TENANT &&
-      (await publishPendingResult(db, tenant, publish))
-    )
-      sent++;
+    try {
+      let sent = 0;
+      while (
+        sent < MAX_RESULTS_PER_TENANT &&
+        (await publishPendingResult(db, tenant, publish))
+      )
+        sent++;
+    } catch (error) {
+      // Leave durable results pending while placement is unavailable/quiescing.
+      if (!(error instanceof PlacementError)) throw error;
+    }
   }
-  return tenants.length < MAX_TENANTS_PER_PASS
+  return !complete || tenants.length < MAX_TENANTS_PER_PASS
     ? null
     : (tenants.at(-1) ?? null);
 }

@@ -5,7 +5,12 @@ import { handleRiskEvent } from "../consumer/handler.js";
 import { escalateIfStillUnacknowledged } from "../alerts/lifecycle.js";
 import { defaultRule } from "../alerts/policy.js";
 import { startApi } from "../testing/api.js";
-import { adminQuery, newStream, riskEvent } from "../testing/fixtures.js";
+import {
+  adminTenantQuery,
+  adminQuery,
+  newStream,
+  riskEvent,
+} from "../testing/fixtures.js";
 let api: Awaited<ReturnType<typeof startApi>>;
 before(async () => {
   api = await startApi();
@@ -181,7 +186,8 @@ test("lifecycle history respects version order, exact final pages, diagnostics, 
     actor_issuer: api.issuer.issuer,
     outbox_issuer: api.issuer.issuer,
   });
-  await adminQuery(
+  await adminTenantQuery(
+    a.tenantId,
     "DELETE FROM alert_transitions WHERE tenant_id=$1 AND episode_id=$2 AND episode_version=2",
     [a.tenantId, a.id],
   );
@@ -214,11 +220,13 @@ test("issuer collision, other member, legacy actor and all old DTOs have redacte
     actor((h.json.items as Record<string, unknown>[])[1]).isYou,
     false,
   );
-  await adminQuery(
+  await adminTenantQuery(
+    a.tenantId,
     "UPDATE alert_episodes SET acknowledged_by_issuer=NULL WHERE tenant_id=$1 AND episode_id=$2",
     [a.tenantId, a.id],
   );
-  await adminQuery(
+  await adminTenantQuery(
+    a.tenantId,
     "UPDATE alert_transitions SET actor_issuer=NULL WHERE tenant_id=$1 AND episode_id=$2 AND actor_type='user'",
     [a.tenantId, a.id],
   );
@@ -321,7 +329,8 @@ test("microsecond/time/id ties page correctly and suppressed rows cannot repair 
   const token = await api.token(a.tenantId, ["admin"]);
   const transitionIds = [randomUUID(), randomUUID(), randomUUID()].sort();
   for (const [i, id] of transitionIds.entries())
-    await adminQuery(
+    await adminTenantQuery(
+      a.tenantId,
       `INSERT INTO alert_transitions (tenant_id, transition_id, episode_id, episode_version, transition_type, from_state, to_state, actor_type, actor_id, cause_id, event_id, occurred_at) VALUES ($1,$2,$3,1,'escalation_suppressed','open','open','system','internal',$4,NULL,$5)`,
       [
         a.tenantId,
@@ -349,7 +358,8 @@ test("microsecond/time/id ties page correctly and suppressed rows cannot repair 
   } while (cursor);
   assert.equal(got.length, 4);
   assert.deepEqual(got.slice(1), transitionIds);
-  await adminQuery(
+  await adminTenantQuery(
+    a.tenantId,
     "DELETE FROM alert_transitions WHERE tenant_id=$1 AND episode_id=$2 AND transition_type='opened'",
     [a.tenantId, a.id],
   );

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 var ErrInvalidTenant = errors.New("tenant identifier must be a lowercase UUID")
@@ -23,6 +25,9 @@ func WithTenant(ctx context.Context, db TxStarter, tenantID string, fn func(cont
 	if !uuidPattern.MatchString(tenantID) || tenantID == "00000000-0000-0000-0000-000000000000" {
 		return ErrInvalidTenant
 	}
+	if routed, ok := db.(common.TenantTransactionRouter); ok {
+		return routed.WithTenantSchema(ctx, tenantID, "", fn)
+	}
 	return inTx(ctx, db, "app.tenant_id", tenantID, fn)
 }
 
@@ -30,6 +35,11 @@ func WithTenant(ctx context.Context, db TxStarter, tenantID string, fn func(cont
 // row; it is used only to call the ID-only selectors (migration 000005) and to write the
 // non-tenant quarantine table.
 func withoutTenant(ctx context.Context, db TxStarter, fn func(context.Context, pgx.Tx) error) error {
+	if shards, ok := db.(*common.ShardedDB); ok {
+		// Poison transport records have no authenticated customer tenant. The
+		// explicit s1 infrastructure ledger owns these source coordinates.
+		return inTx(ctx, shards.InfrastructureDB("s1"), "", "", fn)
+	}
 	return inTx(ctx, db, "", "", fn)
 }
 
@@ -75,6 +85,15 @@ const selectorMax = 1000
 
 // selectRefs calls one ID-only selector with no tenant context and scans its rows.
 func selectRefs[T any](ctx context.Context, db TxStarter, sql string, limit int, scan func(pgx.CollectableRow) (T, error)) ([]T, error) {
+	if shards, ok := db.(*common.ShardedDB); ok {
+		var refs []T
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			page, err := selectRefs(ctx, shards.InfrastructureDB(shard), sql, limit, scan)
+			refs = append(refs, page...)
+			return err
+		})
+		return refs, err
+	}
 	var refs []T
 	err := withoutTenant(ctx, db, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sql, min(max(limit, 1), selectorMax))

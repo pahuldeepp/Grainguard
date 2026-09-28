@@ -1,3 +1,4 @@
+import { withTenant } from "./tenant.js";
 import type { Pool } from "pg";
 import type { ProviderAdapter } from "./adapters.js";
 import type { Broker, IncomingTask, Settlement } from "./broker.js";
@@ -56,13 +57,20 @@ function providerCall<T>(
   deps: Deps,
   fn: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  return deps.providers.run(() =>
-    withTimeout(deps.policy.providerTimeoutMs, fn),
-  );
+  return withTimeout(deps.policy.providerTimeoutMs, fn);
 }
 
 /** One provider send with the intent ID as idempotency key; timeout => unknown. */
-export async function attemptSend(
+export function attemptSend(
+  deps: Deps,
+  task: Task,
+  attempt: number,
+): Promise<Outcome> {
+  return deps.providers.run(() => sendUnderPermit(deps, task, attempt));
+}
+
+/** Private call site: caller owns capacity through owner admission and finish. */
+async function sendUnderPermit(
   deps: Deps,
   task: Task,
   attempt: number,
@@ -87,10 +95,11 @@ export async function attemptSend(
 }
 
 /** Asks the provider whether the idempotency key was delivered. */
-export async function attemptReconcile(
-  deps: Deps,
-  task: Task,
-): Promise<Outcome> {
+export function attemptReconcile(deps: Deps, task: Task): Promise<Outcome> {
+  return deps.providers.run(() => reconcileUnderPermit(deps, task));
+}
+
+async function reconcileUnderPermit(deps: Deps, task: Task): Promise<Outcome> {
   try {
     const result = await providerCall(deps, (signal) =>
       deps.adapter(task.channel).reconcile(task.intent_id, signal),
@@ -126,8 +135,8 @@ function attemptOf(task: IncomingTask): number {
 }
 
 /**
- * Handles one RabbitMQ task: begin (locked, committed) -> provider call outside any
- * transaction -> record outcome (committed) -> broker follow-up with confirms -> ack.
+ * Handles one RabbitMQ task: begin (locked, committed) -> provider call under a separate owner admission
+ * -> record outcome (committed) -> broker follow-up with confirms -> ack.
  */
 export async function handleTask(
   deps: Deps,
@@ -199,11 +208,25 @@ export async function handleTask(
     deps.metrics.inc("duplicates");
     return "ack";
   }
-  const outcome =
-    plan.action === "send"
-      ? await attemptSend(deps, task, plan.attempt)
-      : await attemptReconcile(deps, task);
-  const final = await finishDelivery(deps.pool, task, outcome);
+  // The intent remains committed before the call. This separate admission holds
+  // the owner fence through the external effect and ledger completion, so a move
+  // must wait for an admitted provider call to finish. Redelivery keeps intent_id.
+  // Queued provider work waits without a pinned database connection. Keep the
+  // acquired permit and owner fence through the effect and ledger completion.
+  const final = await deps.providers.run(() =>
+    withTenant(
+      deps.pool,
+      task.tenant_id,
+      async (client) => {
+        const outcome =
+          plan.action === "send"
+            ? await sendUnderPermit(deps, task, plan.attempt)
+            : await reconcileUnderPermit(deps, task);
+        return finishDelivery(deps.pool, task, outcome, client);
+      },
+      { freshPlacement: true },
+    ),
+  );
   if (final === "stale") return "ack";
   deps.metrics.inc(`outcome_${final}`);
   await route(deps, incoming, task, final, plan);

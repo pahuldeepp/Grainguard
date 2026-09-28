@@ -62,6 +62,38 @@ Deterministic identity: `event_id` and `assessment_id` are UUIDv5 of `(tenant, s
 
 ## Run
 
+### Tenant shard routing
+
+Set `SHARD_REGISTRY_FILE` to the private `risk-engine` registry from
+`scripts/shards-local.mjs registry` (format version 1, `s1`–`s4`, owner database
+`greenguard_risk`). Configure `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN`;
+internal HTTP requires explicit `CONTROL_PLANE_MESH_MTLS=true` when protected by
+Istio. Local loopback PostgreSQL is enabled only by `SHARD_LOCAL_LOOPBACK=true`.
+Production endpoints require certificate verification with `sslmode=verify-full`
+and `sslrootcert`. The legacy URL is ignored when a registry is configured.
+
+Every risk application or policy transaction resolves the verified tenant through
+the authenticated authority, chooses that shard's primary, installs tenant/shard/
+incarnation/epoch context, and takes durable SQL ownership admission before
+business statements. Expired, foreign, quiescing or mismatched routes do not use
+another shard. A short pause or a stale-owner admission race retries the pending
+Kafka event; business RLS and permission errors remain hard failures. These
+transactions retain the existing inbox, tenant filters and atomic outbox.
+
+Each database handle has at most one connection per shard; consumer, health and
+optional policy handles therefore reserve at most 12 connections per process.
+Connection access is serialized per handle. The readiness probe checks all four
+configured primaries. The bounded, payload-free `quarantine_samples` transport
+ledger is explicitly stored on `s1`; this is independent of customer placement.
+Authority requests expose bounded outcome counters and a latency histogram,
+without tenant labels. Routing does not use stale cache entries during an outage.
+
+`test_shards.py` covers all-four selection and fail-closed cases. The scratch
+acceptance harness `node scripts/read-freshness-local.mjs` applies real risk
+migrations and proves admitted writes, shared-lock drain, cross-tenant denial,
+stale epoch rejection and fenced-owner rejection against PostgreSQL 16. These
+checks do not prove a tenant migration, broker replay or AWS deployment.
+
 ```bash
 make risk-migrate      # forward-only migrations
 make risk-test         # unit tests + live DB tests (live tests skip without RISK_* env)

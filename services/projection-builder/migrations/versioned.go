@@ -84,7 +84,12 @@ func applyVersionFiles(ctx context.Context, tx pgx.Tx, schema string) error {
 			return fmt.Errorf("provision %s: %w", file, err)
 		}
 	}
-	return nil
+	_, err := tx.Exec(ctx, "SELECT greenguard_internal.provision_projection_watermarks($1)", schema)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "UPDATE greenguard_internal.tenant_ownership SET updated_at=updated_at WHERE state='active'")
+	return err
 }
 
 func versionSQL(sql, schema string) string {

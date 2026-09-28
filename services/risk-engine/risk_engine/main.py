@@ -23,6 +23,7 @@ from risk_engine.policy_api import PolicyAPI
 from risk_engine.policy_auth import OIDCVerifier
 from risk_engine.policy_service import PolicyService
 from risk_engine.store import PgDatabase
+from risk_engine.shards import ShardedDatabase
 
 log = logging.getLogger("risk_engine")
 
@@ -41,7 +42,7 @@ class Config:
 def load_config(getenv: Callable[[str], str | None]) -> Config:
     database_url = getenv("RISK_DATABASE_URL")
     brokers = getenv("KAFKA_BROKERS")
-    if not database_url or not brokers:
+    if (not database_url and not getenv("SHARD_REGISTRY_FILE")) or not brokers:
         raise ValueError("RISK_DATABASE_URL and KAFKA_BROKERS are required")
     gate = getenv("RISK_LOT_FEED_GATE") or "checkpoint"
     if gate not in ("checkpoint", "off"):
@@ -50,7 +51,7 @@ def load_config(getenv: Callable[[str], str | None]) -> Config:
     max_wait = float(getenv("RISK_NOT_READY_MAX_WAIT_S") or "300")
     if not 0 < port < 65536 or not 1 <= max_wait <= 86400:
         raise ValueError("RISK_HEALTH_PORT or RISK_NOT_READY_MAX_WAIT_S out of range")
-    return Config(database_url, brokers, getenv("RISK_KAFKA_GROUP") or "greenguard.risk-engine.v1",
+    return Config(database_url or "", brokers, getenv("RISK_KAFKA_GROUP") or "greenguard.risk-engine.v1",
                   getenv("RISK_KAFKA_OFFSET_RESET") or "error", port, gate == "checkpoint", max_wait)
 
 
@@ -59,13 +60,16 @@ def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None
         start_health: Callable[..., Any] = serve) -> int:
     config = load_config(getenv)
     stop = stop or threading.Event()
-    db = database(config.database_url)
-    health_db = database(config.database_url)
+    metrics = Metrics()
+    def create_database():
+        return (ShardedDatabase.from_env(getenv, metrics.observe_placement) if getenv("SHARD_REGISTRY_FILE")
+                else database(config.database_url))
+    db = create_database()
+    health_db = create_database()
     verifier = OIDCVerifier.from_env(getenv)
-    policy_db = database(config.database_url) if verifier is not None else None
+    policy_db = create_database() if verifier is not None else None
     policy_api = PolicyAPI(PolicyService(policy_db) if policy_db is not None else None, verifier)
     kafka = source(config.kafka_brokers, config.group, events.TOPICS, config.offset_reset)
-    metrics = Metrics()
     lot_feed = LotFeed(enabled=config.lot_feed_gate)
     applier = Applier(db, config.group, lot_feed.value)
     consumer = Consumer(kafka, DatabaseSink(db, config.group), applier, lot_feed, metrics,

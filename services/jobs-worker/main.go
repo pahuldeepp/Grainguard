@@ -52,23 +52,36 @@ func run(ctx context.Context, getenv func(string) string) error {
 		membershipPath = ""
 	}
 	authHTTP := &http.Client{Timeout: 4 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	pool, err := openPool(ctx, cfg.DatabaseURL)
-	if err != nil {
-		return err
+	var db TxStarter
+	var healthDB pinger
+	var pool *pgxpool.Pool
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(getenv, "jobs-worker", "greenguard_jobs", "jobs_app")
+		if err != nil {
+			return err
+		}
+		defer shards.Close()
+		db, healthDB = shards, shards
+	} else {
+		pool, err = openPool(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		db, healthDB = pool, pool
 	}
-	defer pool.Close()
 	metrics := &Metrics{DBPool: pool}
 	pub := rabbit.NewPublisher(cfg.RabbitURL, nil)
 	defer pub.Close()
-	dispatcher := &Dispatcher{DB: pool, Pub: pub, Policy: cfg.Policy, Workers: cfg.Workers, Batch: cfg.Batch, Interval: 500 * time.Millisecond, Metrics: metrics}
-	parts := []component{dispatcher.Run, receiptLoop(cfg, pool, metrics), serveHTTP(cfg.HTTPAddr, metrics, pool, &notificationAPI{db: pool, issuer: cfg.AuthIssuer, audience: cfg.AuthAudience, jwksURL: cfg.AuthJWKSURL, cursorKey: cfg.CursorHMACKey, client: authHTTP, memberships: memberships, membershipPath: membershipPath, membershipCheckedAt: time.Now(), membershipLastSuccess: time.Now(), membershipSource: cfg.MembershipSource, controlPlaneURL: cfg.ControlPlaneURL, controlLookupToken: cfg.ControlLookupToken, allowInsecureMembership: cfg.AllowInsecureMembership})}
+	dispatcher := &Dispatcher{DB: db, Pub: pub, Policy: cfg.Policy, Workers: cfg.Workers, Batch: cfg.Batch, Interval: 500 * time.Millisecond, Metrics: metrics}
+	parts := []component{dispatcher.Run, receiptLoop(cfg, db, metrics), serveHTTP(cfg.HTTPAddr, metrics, healthDB, &notificationAPI{db: db, issuer: cfg.AuthIssuer, audience: cfg.AuthAudience, jwksURL: cfg.AuthJWKSURL, cursorKey: cfg.CursorHMACKey, client: authHTTP, memberships: memberships, membershipPath: membershipPath, membershipCheckedAt: time.Now(), membershipLastSuccess: time.Now(), membershipSource: cfg.MembershipSource, controlPlaneURL: cfg.ControlPlaneURL, controlLookupToken: cfg.ControlLookupToken, allowInsecureMembership: cfg.AllowInsecureMembership, controlMeshMTLS: cfg.ControlMeshMTLS})}
 	if len(cfg.KafkaBrokers) > 0 {
 		src, err := newKafkaSource(cfg.KafkaBrokers, cfg.KafkaGroup, cfg.AlertsTopic)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		intake := &Intake{DB: pool, Source: src, Metrics: metrics, RetryDelay: time.Second}
+		intake := &Intake{DB: db, Source: src, Metrics: metrics, RetryDelay: time.Second}
 		parts = append(parts, intake.Run)
 	} else {
 		slog.Warn("KAFKA_BROKERS is empty; alert intake is disabled")

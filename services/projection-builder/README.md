@@ -79,6 +79,72 @@ Concurrency choices and grants are beside the forward-only SQL migration:
 
 ## Freshness and observability
 
+### Committed projection watermarks (tenant sharding Task 6)
+
+Migration **000019** adds tenant-scoped, forced-RLS `projection_watermarks` and
+`projection_event_completions` in every projection schema. Stable invoker-security
+views `read.projection_watermarks` and `read.projection_event_completions` follow
+the active data schema during promotion. Each watermark is identified by durable
+`(tenant_id, shard_incarnation, placement_epoch)`; compare its sequence only within
+that identity. Epoch and sequence cross JSON boundaries as exact decimal strings.
+
+`WithTenantSchema` admits workers through the local durable active
+`greenguard_internal.tenant_ownership` row, locked `FOR SHARE`, and sets placement
+context from that row. Missing, quiescing or fenced ownership denies traffic;
+no process default or event field supplies an incarnation. This proves local
+ownership admission. Control-plane routing, authority quiesce and bounded read
+leases remain responsibilities of the routing/worker-fencing tasks.
+
+An owner-controlled bootstrap/import must seed active customer ownership before
+traffic. Its trigger initializes an explicit sequence **0** in every projection
+schema without resetting existing sequences. Provisioning initializes new schemas
+from the same durable rows. Before replay, writer leases, heartbeat writes or
+promotion, `tenant_ownership_bootstrap` must seed the reserved infrastructure
+tenant using `greenguard_internal.seed_projection_infrastructure_ownership(shard,
+incarnation,epoch)` with the trusted database bootstrap identity. Missing bootstrap
+fails closed. Infrastructure promotion notifications have their own sequence;
+they do not certify any customer's projection.
+Customer snapshot import rejects caller-supplied reserved tenants and preserves
+the separately bootstrapped local infrastructure row. A customer import whose
+local identity conflicts with that durable bootstrap is rejected.
+
+After inbox idempotency admission, `INSERT ... ON CONFLICT DO UPDATE` locks the
+tenant/identity watermark row before stream/history locks. Each accepted event
+transaction increments it once, writes effects and exact event completions,
+then writes a notification/outbox and checkpoint in that transaction. Rollback
+reveals none of these writes; duplicate delivery does not increment the sequence.
+SQL notification/completion triggers require the matching watermark row to have
+been written by the current transaction; they reject reuse of a committed row.
+Apply 000019 before starting the new producer. The old producer rolls back its
+effects after that migration because it cannot supply a transaction watermark.
+This serializes independent aggregates for one tenant and requires tenant
+throughput/load evidence before production acceptance.
+
+Telemetry completion names the exact processed event, even when other versions
+are missing. Inventory deltas remain unresolved until contiguous folding has
+materialized them. The gap-fill transaction maps every newly folded inbox event
+identity to its watermark. Maximum observed source versions never certify a
+missing event. Historical notifications/inbox rows remain intact on upgrade;
+the migration does not invent historical completion or watermark identities.
+Existing retained notifications without identity cannot satisfy new read tokens.
+
+New transactional notification payloads carry `shard_incarnation`,
+`placement_epoch` and `projection_sequence`, with `source_version` retained
+separately. Inactive shadows retain notifications locally. After promotion,
+active versioned notifications enter the insert-only public CDC outbox with
+validated source-schema provenance. Promotion locks the old and target tenant
+watermarks, verifies exact old completion coverage, then rebases the target
+sequence monotonically before switching all read views. The existing canonical
+equality/frontier/writer-fencing proof is still required; numeric rebasing alone
+does not authorize promotion.
+
+The reader role can inspect local ownership through the scoped, read-only,
+standby-compatible `greenguard_internal.projection_ownership_snapshot(tenant)`
+function. It cannot invoke worker admission or mutate watermarks/completions.
+These primitives alone do not implement source-write read-your-writes: a source
+writer still needs to carry its exact event/version and resolve its completion
+before a minimum projection read. Cassandra and OpenSearch need their own proof.
+
 `Store.Freshness` returns last projection time, exact version strings, telemetry
 and inventory gap flags, and binding-feed freshness, scoped through `WithTenant`.
 It is a read seam for the future BFF, not an unauthenticated HTTP data endpoint.
@@ -304,3 +370,7 @@ incremental recovery at a known frontier, not a full historical rebuild or swap.
 Unit tests also cover lost retention, rejected events and actual protocol offset
 commits against franz-go's in-process broker; database tests prove manifest RLS
 and changed topic/window rejection. See Stage 05b evidence for executed results.
+
+### Placement routing
+
+`SHARD_REGISTRY_FILE` enables four-primary placement routing through the shared Go registry. Customer events resolve the authenticated control-plane placement before BEGIN; inbox, effect, completion, watermark and notification remain one owner transaction. Infrastructure barriers and version writer leases admit the reserved tenant independently on each configured shard. Versioned readiness checks every shard lease. Operational replay currently rejects registry mode explicitly; it needs a shard migration/replay protocol before sharded promotion is admitted. See [Go sharding contract](../../packages/go-common/SHARDING.md).

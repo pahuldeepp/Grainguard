@@ -150,3 +150,11 @@ requires `AUTH_MEMBERSHIP_SOURCE=control-plane`, `CONTROL_PLANE_URL`,
 shared membership client. The token's issuer and subject are mapped to tenant
 roles by the control plane; tokens with no membership are denied. The default
 Dex audience mode remains unchanged.
+
+## Tenant placement routing
+
+Set `SHARD_REGISTRY_FILE` to a private version 1 registry for `service: device-service`, `database: greenguard_inventory`, with all four `s1`–`s4` primaries and their incarnation UUIDs. Set `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN` for authenticated placement lookup. Production endpoints require `sslmode=verify-full` and `sslrootcert`; local loopback registries require explicit `SHARD_LOCAL_LOOPBACK=true`. The enabled runtime allocates no legacy database pool and fails closed on missing, stale, inactive or mismatched ownership.
+
+API and saga manifests must use `inventory_app`. Tenant and entitlement projector manifests must use `inventory_projector`; each projector deployment supplies its own private registry through `SHARD_REGISTRY_FILE`. `INVENTORY_DATABASE_URL` / `INVENTORY_PROJECTOR_DIRECT_URL` remain the legacy configuration only when the registry is absent.
+
+Every tenant transaction resolves the verified tenant, sets transaction-local tenant/shard/incarnation/epoch settings and calls `greenguard_internal.admit_tenant_placement` before business SQL. Commands, imports, projections, receipt IDs and outbox IDs retain their existing semantics. Saga result discovery fans out only the existing ID-only SECURITY DEFINER selector, then resolves and admits each tenant before reading/publishing a result. Quiescing tenants retain pending results. Verified entitlement heartbeats update tenant-free feed metadata on every owner primary. Health probes cover all primaries; pool shutdown waits at most five seconds.

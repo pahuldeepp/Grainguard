@@ -12,6 +12,19 @@ import {
   type MembershipFetcher,
 } from "./cache.js";
 import type { MembershipVersionStore } from "./redis-versions.js";
+export {
+  createPlacementResolver,
+  httpPlacementFetcher,
+  validateTenantRoute,
+  placementEpoch,
+  PlacementError,
+  MAX_ROUTE_TTL_MS,
+  type TenantRoute,
+} from "./placement.js";
+export {
+  suggestInitialShard,
+  type InitialPlacementRing,
+} from "./placement-ring.js";
 
 export {
   createMembershipCache,
@@ -203,3 +216,18 @@ export function createVerifierFromEnv(
     onMembershipChanged: membershipChangedHandler(cache),
   };
 }
+export {
+  READ_BUDGET_HEADER,
+  WATERMARK_REQUEST_HEADER,
+  WATERMARK_RESPONSE_HEADER,
+  WatermarkError,
+  parseWatermark,
+  serializeWatermark,
+  type ProjectionWatermark,
+} from "./watermark.js";
+export {
+  httpReadLeaseAuthority,
+  type ReadAdmissionLease,
+  type ReadLeaseAuthority,
+  type ReadAdmissionOptions,
+} from "./read-leases.js";

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	common "greenguard.local/go-common"
 	"io"
 	"net/http"
 	"net/url"
@@ -24,11 +25,15 @@ type APIKeyVerifier struct {
 }
 
 func NewAPIKeyVerifier(endpoint, lookupToken string) (*APIKeyVerifier, error) {
+	return NewAPIKeyVerifierWithMesh(endpoint, lookupToken, false)
+}
+
+func NewAPIKeyVerifierWithMesh(endpoint, lookupToken string, meshMTLS bool) (*APIKeyVerifier, error) {
 	u, err := url.Parse(endpoint)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && loopbackHosts[u.Hostname()])) || lookupToken == "" {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (loopbackHosts[u.Hostname()] || (meshMTLS && common.InternalMeshHost(u.Hostname()))))) || lookupToken == "" {
 		return nil, errors.New("invalid API-key verifier configuration")
 	}
-	return &APIKeyVerifier{URL: strings.TrimRight(endpoint, "/") + "/v1/internal/credentials/api-key/verify", OAuthURL: strings.TrimRight(endpoint, "/") + "/v1/internal/credentials/oauth-token/verify", LookupToken: lookupToken, Client: &http.Client{Timeout: 2 * time.Second}}, nil
+	return &APIKeyVerifier{URL: strings.TrimRight(endpoint, "/") + "/v1/internal/credentials/api-key/verify", OAuthURL: strings.TrimRight(endpoint, "/") + "/v1/internal/credentials/oauth-token/verify", LookupToken: lookupToken, Client: &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // VerifyOAuth accepts only a token the control plane has validated against its

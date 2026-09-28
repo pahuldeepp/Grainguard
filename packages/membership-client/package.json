@@ -6,6 +6,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./owner-db": {
+      "types": "./dist/owner-db.d.ts",
+      "default": "./dist/owner-db.js"
+    },
+    "./watermark": {
+      "types": "./dist/watermark.d.ts",
+      "default": "./dist/watermark.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

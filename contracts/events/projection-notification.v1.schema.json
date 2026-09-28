@@ -79,7 +79,10 @@
           "$ref": "#/$defs/uuid"
         },
         "purpose": {
-          "enum": ["projection_changed", "promotion_changed"]
+          "enum": [
+            "projection_changed",
+            "promotion_changed"
+          ]
         },
         "scope": {
           "enum": [
@@ -101,7 +104,30 @@
         },
         "projected_at": {
           "$ref": "#/$defs/utcTimestamp"
+        },
+        "shard_incarnation": {
+          "$ref": "#/$defs/uuid"
+        },
+        "placement_epoch": {
+          "$ref": "#/$defs/nonnegativeBigintString"
+        },
+        "projection_sequence": {
+          "$ref": "#/$defs/positiveBigintString"
         }
+      },
+      "dependentRequired": {
+        "shard_incarnation": [
+          "placement_epoch",
+          "projection_sequence"
+        ],
+        "placement_epoch": [
+          "shard_incarnation",
+          "projection_sequence"
+        ],
+        "projection_sequence": [
+          "shard_incarnation",
+          "placement_epoch"
+        ]
       }
     }
   },
@@ -121,6 +147,12 @@
       "minLength": 1,
       "maxLength": 19,
       "pattern": "^[1-9][0-9]{0,18}$"
+    },
+    "nonnegativeBigintString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 19,
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
     }
   }
 }

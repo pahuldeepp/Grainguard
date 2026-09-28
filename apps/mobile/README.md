@@ -95,3 +95,17 @@ Design direction and tokens: [docs/DESIGN_SYSTEM.md](../../docs/DESIGN_SYSTEM.md
   (`xcrun simctl ui <udid> content_size large`, `appearance light`). Do accessibility-size and dark sweeps on a separate temporary simulator
   (`xcrun simctl create` ... `delete`) so the main device keeps normal settings.
 - Release builds use only the generated HTTPS deployment config. Without it, they open Sign-in with "Sign-in is not configured for this build."
+
+`read-client.ts` exports `MobileReadClient` with the BFF's exact persisted reading,
+current-device, bin, rollup, history and search documents. It retains observed
+PostgreSQL minima per tenant/subject, clears on session/relogin events, and
+preserves the minimum through the one 401 refresh retry. `observeDeviceChange()`
+lets a future subscription transport raise the next refresh minimum. Higher
+epochs replace identity, late older hints are ignored, and controlled identity409
+allows one tenant-bound authoritative reset within the original deadline. Empty
+results use the GraphQL response certificate; unchanged identity/outage cannot
+downgrade the minimum. Old session hints are rejected before observation. The current
+shell's live alert screens do not yet consume this reading client. The portable
+watermark codec uses a dedicated package subpath and Metro/Jest source mapping,
+so the shell never imports the membership server runtime. See the
+[consistency contract](../../docs/api/bff-read-consistency.md).

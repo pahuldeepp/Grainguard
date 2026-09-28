@@ -23,6 +23,7 @@ import {
 import { type ControlRequest, PreconditionRequiredError } from "./http.js";
 import { FlagPolicyError } from "../flags/store.js";
 import { RateLimitedError } from "./rate-limited.js";
+import { PlacementUnavailableError } from "../domain/placement.js";
 
 export interface Problem {
   status: number;
@@ -34,6 +35,7 @@ type ErrorClass = abstract new (...args: never[]) => Error;
 
 const STATUS = new Map<ErrorClass, [number, string]>([
   [InvalidInputError, [400, "invalid_request"]],
+  [PlacementUnavailableError, [503, "placement_unavailable"]],
   [DomainConflictError, [409, "resource_conflict"]],
   [FlagPolicyError, [422, "flag_not_allowed"]],
   [SeatLimitError, [409, "seat_limit"]],

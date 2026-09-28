@@ -14,6 +14,13 @@
 \getenv risk_password RISK_DB_PASSWORD
 \getenv risk_migrator_password RISK_MIGRATOR_PASSWORD
 
+-- Non-runtime ownership import role. Only the bootstrap admin may SET ROLE;
+-- owner migrations grant the narrowly scoped import function later. This does
+-- not assign tenants or authorize runtime startup before trusted import.
+SELECT 'CREATE ROLE tenant_ownership_bootstrap NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_ownership_bootstrap') \gexec
+SELECT format('GRANT tenant_ownership_bootstrap TO %I WITH SET TRUE', current_user) \gexec
+
 -- Idempotent: Postgres runs this on a fresh volume, and `make db-up` re-runs it so an
 -- existing volume gains new roles and picks up rotated passwords.
 -- Runtime roles never own tables and never bypass row-level security; migrators own the
@@ -175,6 +182,9 @@ GRANT CONNECT ON DATABASE greenguard_hardware TO hardware_app;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO hardware_app;
 
+-- Operational shard bundles deliberately exclude central control and billing.
+\if :{?GG_OPERATIONAL_ONLY}
+\else
 -- Stage 09a tenant-control-plane owner (ADR-0017): runtime control_app, schema owner
 -- control_migrator. The control plane is the single writer of organizations/memberships.
 \getenv control_password CONTROL_DB_PASSWORD
@@ -214,3 +224,5 @@ GRANT CONNECT ON DATABASE greenguard_billing TO billing_app, cdc_reader;
 \connect greenguard_billing
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO billing_app;
+
+\endif

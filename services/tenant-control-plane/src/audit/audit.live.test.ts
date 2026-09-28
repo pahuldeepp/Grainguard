@@ -175,13 +175,51 @@ test("A01 A02 A05 A07 A08 tenant isolation, stable cursor, durable signed retry,
 test("A01 A03 owner reads include inventory and billing under RLS; CSV verifies", async () => {
   const a = await org("audit-owners-a"),
     b = await org("audit-owners-b");
-  async function insert(database: string, sql: string, params: unknown[]) {
+  async function insert(
+    database: string,
+    tenantId: string,
+    sql: string,
+    params: unknown[],
+  ) {
     const url = new URL(env("POSTGRES_ADMIN_URL"));
     url.pathname = `/${database}`;
     const client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
     try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.tenant_id',$1,true)", [
+        tenantId,
+      ]);
+      const [{ present }] = (
+        await client.query<{ present: boolean }>(
+          "SELECT to_regclass('greenguard_internal.tenant_ownership') IS NOT NULL AS present",
+        )
+      ).rows;
+      if (present) {
+        await client.query(
+          "INSERT INTO greenguard_internal.tenant_ownership(tenant_id,shard_id,shard_incarnation,placement_epoch,state) VALUES($1,'s1',$2,1,'active') ON CONFLICT(tenant_id) DO NOTHING",
+          [tenantId, "20000000-0000-4000-8000-000000000001"],
+        );
+        const [owner] = (
+          await client.query<{
+            shard_id: string;
+            shard_incarnation: string;
+            placement_epoch: string;
+          }>(
+            "SELECT shard_id,shard_incarnation::text,placement_epoch::text FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1",
+            [tenantId],
+          )
+        ).rows;
+        await client.query(
+          "SELECT set_config('app.shard_id',$1,true),set_config('app.shard_incarnation',$2,true),set_config('app.placement_epoch',$3,true)",
+          [owner.shard_id, owner.shard_incarnation, owner.placement_epoch],
+        );
+      }
       await client.query(sql, params);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
     } finally {
       await client.end();
     }
@@ -191,6 +229,7 @@ test("A01 A03 owner reads include inventory and billing under RLS; CSV verifies"
     foreignId = randomUUID();
   await insert(
     "greenguard_inventory",
+    a.tenantId,
     `INSERT INTO audit_events
     (audit_id,tenant_id,actor_type,actor_id,action,resource_type,resource_id,command_id,outcome,occurred_at)
     VALUES($1,$2,'human','owner-a','device.created','device',$3,$4,'succeeded',now())`,
@@ -198,6 +237,7 @@ test("A01 A03 owner reads include inventory and billing under RLS; CSV verifies"
   );
   await insert(
     "greenguard_inventory",
+    b.tenantId,
     `INSERT INTO audit_events
     (audit_id,tenant_id,actor_type,actor_id,action,resource_type,resource_id,command_id,outcome,occurred_at)
     VALUES($1,$2,'human','owner-b','device.created','device',$3,$4,'succeeded',now())`,
@@ -205,6 +245,7 @@ test("A01 A03 owner reads include inventory and billing under RLS; CSV verifies"
   );
   await insert(
     "greenguard_billing",
+    a.tenantId,
     `INSERT INTO billing_audit_events
     (tenant_id,audit_id,actor_id,action,object_id,detail)
     VALUES($1,$2,'system','billing.subscription.changed','sub-1','{"secret":"must-not-export"}'::jsonb)`,

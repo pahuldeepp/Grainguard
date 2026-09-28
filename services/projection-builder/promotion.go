@@ -25,7 +25,7 @@ type PromotionProof struct {
 
 type PromotionVerifier func(context.Context, pgx.Tx, string) (PromotionProof, error)
 
-var promotionViews = []string{"device_views", "device_latest", "reading_history", "stream_gaps", "site_views", "bin_views", "cable_layout_versions", "cable_layout_sensors", "sensor_reading_history", "risk_policy_versions", "risk_assessments"}
+var promotionViews = []string{"device_views", "device_latest", "reading_history", "stream_gaps", "site_views", "bin_views", "cable_layout_versions", "cable_layout_sensors", "sensor_reading_history", "risk_policy_versions", "risk_assessments", "projection_watermarks", "projection_event_completions"}
 var promotionIdentifier = regexp.MustCompile(`^read_v[1-9][0-9]{0,8}$`)
 
 // PromoteReadViews serializes promotions and changes all reader routes atomically.
@@ -49,7 +49,8 @@ func PromoteReadViews(ctx context.Context, db interface {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(7240513)"); err != nil {
 		return err
 	}
-	if _, err = activeReadSchema(ctx, tx); err != nil {
+	activeSchema, err := activeReadSchema(ctx, tx)
+	if err != nil {
 		return fmt.Errorf("resolve active read route: %w", err)
 	}
 	proof, err := verify(ctx, tx, schema)
@@ -58,6 +59,9 @@ func PromoteReadViews(ctx context.Context, db interface {
 	}
 	if !proof.AllTenantsReplayed || !proof.StableCommonFrontier || !proof.LiveShadowEqual || !proof.CanonicalReferenceEqual || !proof.ZeroLag || !proof.PostSwapConsumerReady {
 		return errors.New("promotion verification incomplete or lagging")
+	}
+	if _, err = tx.Exec(ctx, "SELECT greenguard_internal.rebase_projection_watermarks($1,$2)", activeSchema, schema); err != nil {
+		return fmt.Errorf("projection completion coverage/rebase: %w", err)
 	}
 	for _, name := range promotionViews {
 		// CREATE OR REPLACE preserves grants on the read view. It also retains the
@@ -68,6 +72,9 @@ func PromoteReadViews(ctx context.Context, db interface {
 		}
 	}
 	if _, err = tx.Exec(ctx, "GRANT USAGE ON SCHEMA "+schema+" TO read_query"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "GRANT SELECT ON "+schema+".projection_watermarks, "+schema+".projection_event_completions TO read_query"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "GRANT SELECT ON "+schema+".device_views, "+schema+".device_latest, "+schema+".reading_history, "+schema+".stream_gaps, "+schema+".site_views, "+schema+".bin_views, "+schema+".cable_layout_versions, "+schema+".cable_layout_sensors, "+schema+".sensor_reading_history, "+schema+".risk_policy_versions, "+schema+".risk_assessments TO read_query"); err != nil {
@@ -144,6 +151,18 @@ func emitPromotionEpoch(ctx context.Context, tx pgx.Tx, schema string) error {
 	if _, err := tx.Exec(ctx, `SELECT set_config('app.tenant_id',$1,true)`, infrastructureTenant); err != nil {
 		return err
 	}
+	if err := admitProjectionTenant(ctx, tx, infrastructureTenant); err != nil {
+		return err
+	}
+	// Promotion notification belongs to the durable infrastructure namespace,
+	// separately from all customer projection sequences in the promoted schema.
+	if _, err := tx.Exec(ctx, `SELECT set_config('search_path','public,pg_catalog',true)`); err != nil {
+		return err
+	}
+	watermark, err := advanceProjectionWatermark(ctx, tx, infrastructureTenant)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO public.consumer_inbox
 		(consumer_name,tenant_id,event_id,source_topic,source_partition,source_offset,event)
 		VALUES ('promotion',$1,$2,'projection.promotion',0,0,
@@ -151,8 +170,8 @@ func emitPromotionEpoch(ctx context.Context, tx pgx.Tx, schema string) error {
 		'correlation_id',$2::uuid,'traceparent',$3::text,'schema_name',$4::text))`, infrastructureTenant, eventID, traceparent, schema); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO public.projection_notifications
-		(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,consumer_name)
-		VALUES ($1,$2,'device',$1,$2,'promotion_changed','promotion')`, infrastructureTenant, eventID)
+	_, err = tx.Exec(ctx, `INSERT INTO public.projection_notifications
+		(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,consumer_name,shard_incarnation,placement_epoch,projection_sequence)
+		VALUES ($1,$2,'device',$1,$2,'promotion_changed','promotion',$3,$4,$5)`, infrastructureTenant, eventID, watermark.ShardIncarnation, watermark.PlacementEpoch, watermark.Sequence)
 	return err
 }

@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
@@ -10,7 +11,7 @@ import {
   OPTIONAL_HOLD_EXPIRED,
   setPreference,
 } from "./ledger.js";
-import { migrate } from "./migrate.js";
+import { MIGRATIONS_DIR, migrate } from "./migrate.js";
 import { runMigrate } from "./migrate.js";
 import { InvalidTenantError, withTenant } from "./tenant.js";
 import { incoming, makeDeps, makeTask } from "./testing/fixtures.js";
@@ -177,7 +178,11 @@ test(
           [task.tenant_id],
         ),
       ),
-      /row-level security/,
+      (error: unknown) =>
+        (error as { code?: string }).code === "42501" &&
+        /row-level security|tenant context does not match row tenant/.test(
+          String(error),
+        ),
     );
     await assert.rejects(
       withTenant(pool!, task.tenant_id, (c) =>
@@ -464,7 +469,12 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
   try {
     const url = new URL(process.env.NOTIFICATIONS_MIGRATION_URL!);
     url.pathname = `/${name}`;
-    assert.equal((await migrate(url.toString())).length, 3);
+    assert.deepEqual(
+      await migrate(url.toString()),
+      (await readdir(MIGRATIONS_DIR))
+        .filter((name) => name.endsWith(".sql"))
+        .sort(),
+    );
     assert.equal((await migrate(url.toString())).length, 0);
     assert.deepEqual(
       await runMigrate((k) =>
@@ -483,3 +493,69 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
     await admin.end();
   }
 });
+
+test(
+  "provider effect keeps the real ownership fence until ledger completion",
+  { skip },
+  async () => {
+    const task = makeTask();
+    const { deps } = makeDeps(pool!);
+    let entered!: () => void, complete!: () => void;
+    const active = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    deps.policy = { ...deps.policy, providerTimeoutMs: 2000 };
+    deps.adapter = () => ({
+      send: async () => {
+        entered();
+        await blocked;
+        return { kind: "sent", providerRef: "fenced-effect" };
+      },
+      reconcile: async () => ({ kind: "not_found" }),
+    });
+    const url = new URL(process.env.POSTGRES_ADMIN_URL!);
+    url.pathname = "/greenguard_notifications";
+    const admin = new pg.Client({ connectionString: url.toString() });
+    await admin.connect();
+    const running = handleTask(deps, incoming(task));
+    try {
+      await active;
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL lock_timeout='100ms'");
+      await assert.rejects(
+        admin.query(
+          "SELECT tenant_id FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 FOR UPDATE",
+          [task.tenant_id],
+        ),
+        { code: "55P03" },
+      );
+      await admin.query("ROLLBACK");
+      complete();
+      assert.equal(await running, "ack");
+      assert.equal(
+        (await delivery(task.tenant_id, task.intent_id))?.status,
+        "sent",
+      );
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL lock_timeout='100ms'");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT tenant_id FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 FOR UPDATE",
+            [task.tenant_id],
+          )
+        ).rowCount,
+        1,
+      );
+      await admin.query("ROLLBACK");
+    } finally {
+      complete();
+      await running;
+      await admin.query("ROLLBACK").catch(() => undefined);
+      await admin.end();
+    }
+  },
+);

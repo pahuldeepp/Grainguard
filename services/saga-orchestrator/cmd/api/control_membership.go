@@ -18,6 +18,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 )
 
@@ -45,7 +46,8 @@ type controlMembershipCache struct {
 
 func newControlMembershipCache(getenv func(string) string, client *http.Client) (*controlMembershipCache, error) {
 	base, err := url.Parse(getenv("CONTROL_PLANE_URL"))
-	if err != nil || base == nil || base.Host == "" || (base.Scheme != "https" && !(base.Scheme == "http" && (base.Hostname() == "localhost" || base.Hostname() == "127.0.0.1"))) {
+	meshHTTP := err == nil && base != nil && getenv("CONTROL_PLANE_MESH_MTLS") == "true" && common.InternalMeshHost(base.Hostname())
+	if err != nil || base == nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || (base.Scheme != "https" && !(base.Scheme == "http" && (base.Hostname() == "localhost" || base.Hostname() == "127.0.0.1" || meshHTTP))) {
 		return nil, errors.New("CONTROL_PLANE_URL must be https or loopback http")
 	}
 	token := getenv("CONTROL_LOOKUP_TOKEN")

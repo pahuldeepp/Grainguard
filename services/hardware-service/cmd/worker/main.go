@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 	"greenguard.local/hardware-service/hardware"
 )
 
@@ -31,7 +32,7 @@ func run(ctx context.Context) error {
 		return nil
 	}
 	url := os.Getenv("HARDWARE_DATABASE_URL")
-	if url == "" {
+	if url == "" && os.Getenv("SHARD_REGISTRY_FILE") == "" {
 		return errors.New("HARDWARE_DATABASE_URL required")
 	}
 	brokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
@@ -50,14 +51,26 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		return err
+	var db common.TxStarter
+	var ping func(context.Context) error
+	if os.Getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(os.Getenv, "hardware-service", "greenguard_hardware", "hardware_app")
+		if err != nil {
+			return err
+		}
+		defer shards.Close()
+		db, ping = shards, shards.Ping
+	} else {
+		pool, err := pgxpool.New(ctx, url)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		db, ping = pool, pool.Ping
 	}
-	defer pool.Close()
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelStartup()
-	if err := pool.Ping(startupCtx); err != nil {
+	if err := ping(startupCtx); err != nil {
 		return fmt.Errorf("connect hardware database: %w", err)
 	}
 	client, err := hardware.KafkaClient(brokers)
@@ -65,7 +78,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer client.CloseAllowingRebalance()
-	store := hardware.Store{DB: pool}
+	store := hardware.Store{DB: db}
 	dispatcher := hardware.MQTTDispatcher{Store: store}
 	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
 	opts := mqtt.NewClientOptions().AddBroker(mqttURL).SetClientID(clientID)

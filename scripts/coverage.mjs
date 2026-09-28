@@ -13,9 +13,19 @@ for (const workspace of [
   "packages/tenant-auth",
   "packages/contracts",
   "packages/read-model",
+  "packages/feature-flags",
+  "packages/entitlements",
+  "packages/audit",
+  "services/bff",
+  "services/gateway",
+  "services/read-api",
   "services/device-service",
   "services/workflow-alerts",
   "services/notification-service",
+  "services/tenant-control-plane",
+  "services/billing-service",
+  "packages/membership-client",
+  "packages/kafka-security",
 ]) {
   const filename = `${workspace}/coverage/lcov.info`;
   const normalized = readFileSync(filename, "utf8").replace(
@@ -154,13 +164,35 @@ writeFileSync(
     "services/cassandra-writer/",
   ),
 );
+run(
+  "go",
+  [
+    "test",
+    "-race",
+    "-coverpkg=./...",
+    "-coverprofile=../../coverage/cache-invalidator.raw.out",
+    "./...",
+  ],
+  "services/cache-invalidator",
+);
+writeFileSync(
+  "coverage/cache-invalidator.out",
+  readFileSync("coverage/cache-invalidator.raw.out", "utf8").replaceAll(
+    "greenguard.local/cache-invalidator/",
+    "services/cache-invalidator/",
+  ),
+);
 run("python3", ["-m", "venv", ".local/search-venv"]);
-run(".local/search-venv/bin/pip", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "pip",
   "install",
   "-r",
   "services/search-indexer/requirements-dev.txt",
 ]);
-run(".local/search-venv/bin/coverage", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "coverage",
   "run",
   "--source=services/search-indexer",
   "--omit=*/test_*.py,*/live_*.py",
@@ -172,7 +204,9 @@ run(".local/search-venv/bin/coverage", [
   "-p",
   "test_*.py",
 ]);
-run(".local/search-venv/bin/coverage", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "coverage",
   "xml",
   "-o",
   "services/search-indexer/coverage.xml",
@@ -186,14 +220,18 @@ writeFileSync(
   ),
 );
 run("python3", ["-m", "venv", ".local/risk-venv"]);
-run(".local/risk-venv/bin/pip", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "pip",
   "install",
   "-q",
   "-r",
   "services/risk-engine/requirements-dev.txt",
 ]);
 // Live greenguard_risk tests run here too (make coverage runs db-migrate first).
-run(".local/risk-venv/bin/coverage", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "coverage",
   "run",
   "--branch",
   "--data-file=coverage/risk-engine.coverage",
@@ -208,7 +246,9 @@ run(".local/risk-venv/bin/coverage", [
   "-p",
   "test_*.py",
 ]);
-run(".local/risk-venv/bin/coverage", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "coverage",
   "xml",
   "--data-file=coverage/risk-engine.coverage",
   "-o",
@@ -257,6 +297,24 @@ writeFileSync(
   readFileSync("coverage/saga-orchestrator.raw.out", "utf8").replaceAll(
     "greenguard.local/saga-orchestrator/",
     "services/saga-orchestrator/",
+  ),
+);
+run(
+  "go",
+  [
+    "test",
+    "-race",
+    "-coverpkg=./...",
+    "-coverprofile=../../coverage/hardware-service.raw.out",
+    "./...",
+  ],
+  "services/hardware-service",
+);
+writeFileSync(
+  "coverage/hardware-service.out",
+  readFileSync("coverage/hardware-service.raw.out", "utf8").replaceAll(
+    "greenguard.local/hardware-service/",
+    "services/hardware-service/",
   ),
 );
 console.log("Coverage reports ready for SonarQube.");

@@ -141,3 +141,7 @@ support the contract. CDC publishes v2 to `greenguard.telemetry.recorded.v2`
 and preserves v1 routing. The device binding heartbeat remains the existing
 feed freshness guard; a dedicated sensor-layout freshness heartbeat is not
 implemented in this slice.
+
+## Placement routing
+
+`SHARD_REGISTRY_FILE` selects a configured primary using the validated device/JWT/machine-client tenant and authenticated control-plane placement. Credential and placement lookups precede SQL transactions. Binding, entitlement, ingest, quota, rejection sampling and saga-binding writes use that owner transaction boundary. Feed barriers fan out to every primary under explicit infrastructure admission; ID-only saga-result enumeration visits all four before resolving each discovered customer again. The entitlement projector uses a separate private registry with the same service/database metadata and its `telemetry_entitlement_projector` credential. See [Go sharding contract](../../packages/go-common/SHARDING.md).

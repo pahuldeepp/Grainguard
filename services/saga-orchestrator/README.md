@@ -99,3 +99,7 @@ isolation, mismatched fencing token rejection, atomic advancement and replay wit
 second configure command.
 
 Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.
+
+## Placement routing
+
+`SHARD_REGISTRY_FILE` routes API commands, participant results, repairs, expirations and command publication to the current customer primary. Each physical shard has its own existing 64 scheduler leases; these are separate from the four placement shards. Workers admit explicit infrastructure before lease/ID scans and select the destination shard's lease fence after tenant routing. Each scan pass visits one bounded tenant page per held scheduler bucket. Count-only metrics aggregate all four or fail unavailable. Kafka IDs and command row locks retain replay identity. See [Go sharding contract](../../packages/go-common/SHARDING.md).

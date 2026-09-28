@@ -1,3 +1,6 @@
+import { AsyncResource } from "node:async_hooks";
+import { readContext, assertReadActive } from "./consistency.js";
+import { FreshnessUnavailable } from "./replicas.js";
 import type { ReadBackends } from "./backends.js";
 
 export class BulkheadFull extends Error {
@@ -11,6 +14,7 @@ type Queued<T> = {
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
+  cleanup?: () => void;
 };
 /** Bounded FIFO within each tenant, scheduled round-robin across tenants. */
 class FairReadAdmission {
@@ -28,7 +32,18 @@ class FairReadAdmission {
     private readonly waitMs = 2000,
   ) {}
   run<T>(tenant: string, load: () => Promise<T>): Promise<T> {
+    const context = readContext.getStore();
+    const boundLoad = AsyncResource.bind(async () => {
+      assertReadActive(context);
+      return load();
+    });
     return new Promise<T>((resolve, reject) => {
+      try {
+        assertReadActive(context);
+      } catch (error) {
+        reject(error);
+        return;
+      }
       const queue = this.queues.get(tenant) ?? [];
       if (
         this.queued >= this.queueLimit ||
@@ -38,7 +53,7 @@ class FairReadAdmission {
         return;
       }
       const item: Queued<T> = {
-        load,
+        load: boundLoad,
         resolve,
         reject,
         timer: setTimeout(() => {
@@ -52,10 +67,29 @@ class FairReadAdmission {
               const orderIndex = this.order.indexOf(tenant);
               if (orderIndex >= 0) this.order.splice(orderIndex, 1);
             }
+            item.cleanup?.();
             reject(new BulkheadFull("postgres"));
           }
         }, this.waitMs),
       };
+      const abort = () => {
+        const current = this.queues.get(tenant);
+        const index = current?.indexOf(item as Queued<unknown>) ?? -1;
+        if (index < 0) return;
+        current!.splice(index, 1);
+        this.queued--;
+        clearTimeout(item.timer);
+        item.cleanup?.();
+        if (!current!.length) {
+          this.queues.delete(tenant);
+          const orderIndex = this.order.indexOf(tenant);
+          if (orderIndex >= 0) this.order.splice(orderIndex, 1);
+        }
+        reject(new FreshnessUnavailable());
+        this.pump();
+      };
+      context?.signal?.addEventListener("abort", abort, { once: true });
+      item.cleanup = () => context?.signal?.removeEventListener("abort", abort);
       if (!queue.length) this.order.push(tenant);
       queue.push(item as Queued<unknown>);
       this.queues.set(tenant, queue);
@@ -88,6 +122,7 @@ class FairReadAdmission {
       if (queue.length) this.order.push(tenant);
       else this.queues.delete(tenant);
       clearTimeout(item.timer);
+      item.cleanup?.();
       this.active++;
       this.activeByTenant.set(
         tenant,
@@ -176,6 +211,27 @@ export function bulkheadBackends(
   );
   return {
     ...backends,
+    device: (tenant, device) =>
+      reads.run(tenant, () => backends.device(tenant, device)),
+    devices: (tenant, ids) =>
+      reads.run(tenant, () => backends.devices(tenant, ids)),
+    sites: (tenant, ids) =>
+      reads.run(tenant, () => backends.sites(tenant, ids)),
+    bins: (tenant, ids) => reads.run(tenant, () => backends.bins(tenant, ids)),
+    reading: (tenant, id) =>
+      reads.run(tenant, () => backends.reading(tenant, id)),
+    devicesBySite: (tenant, site, limit, after) =>
+      reads.run(tenant, () =>
+        backends.devicesBySite(tenant, site, limit, after),
+      ),
+    latest: (tenant, device) =>
+      reads.run(tenant, () => backends.latest(tenant, device)),
+    hotReadings: (query) =>
+      reads.run(query.tenantId, () => backends.hotReadings(query)),
+    rollup: (query, bucket) =>
+      reads.run(query.tenantId, () => backends.rollup(query, bucket)),
+    deviceCurrent: (tenant, device) =>
+      reads.run(tenant, () => backends.deviceCurrent(tenant, device)),
     binReadings: (tenant, bin, asOf) =>
       reads.run(tenant, () => backends.binReadings(tenant, bin, asOf)),
     binTrend: (query) =>

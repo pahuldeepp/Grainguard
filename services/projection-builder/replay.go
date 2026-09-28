@@ -455,7 +455,7 @@ func (j *replayJob) checkDatabase(ctx context.Context, expected string) error {
 		return nil
 	}
 	var total, forced int
-	if err := j.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, j.schema).Scan(&total, &forced); err != nil || total != 17 || forced != total {
+	if err := j.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, j.schema).Scan(&total, &forced); err != nil || total != 19 || forced != total {
 		return errors.New("versioned replay schema missing or RLS incomplete")
 	}
 	return nil
@@ -616,6 +616,9 @@ func (j *replayJob) newRunner(schemas schemas, window time.Duration) *replayRunn
 }
 
 func replayMain(ctx context.Context, getenv func(string) string) error {
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		return errors.New("sharded operational replay requires an explicit shard migration/replay protocol; fixed replay URLs are not admitted")
+	}
 	// Finite operational command; no HTTP server or live consumer is started.
 	bounded, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()

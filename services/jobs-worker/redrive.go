@@ -49,6 +49,9 @@ func listDead(ctx context.Context, db TxStarter, opts RedriveOptions) ([]DeadRef
 		if err != nil {
 			return nil, fmt.Errorf("list dead intents: %w", err)
 		}
+		if len(refs) > opts.Limit {
+			refs = refs[:opts.Limit]
+		}
 		return refs, nil
 	}
 	var refs []DeadRef

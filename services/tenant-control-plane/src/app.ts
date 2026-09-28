@@ -1,5 +1,9 @@
 import "reflect-metadata";
 import {
+  InternalPlacementController,
+  OrganizationPlacementController,
+} from "./api/placement.controller.js";
+import {
   Controller,
   Get,
   Inject,
@@ -125,6 +129,7 @@ export async function createControlPlaneApp(options: ControlPlaneOptions) {
     FlagSnapshotsController,
     IdentityDiscoveryController,
     InternalNotificationContactsController,
+    InternalPlacementController,
   ];
   if (options.auth)
     controllers.push(
@@ -132,6 +137,7 @@ export async function createControlPlaneApp(options: ControlPlaneOptions) {
       FlagsController,
       IdentityConnectionsController,
       NotificationContactsController,
+      OrganizationPlacementController,
     );
   if (options.auth && options.audit) controllers.push(AuditController);
   if (options.flagAdmin) controllers.push(GlobalFlagsController);

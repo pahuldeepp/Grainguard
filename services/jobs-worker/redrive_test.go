@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -277,7 +278,15 @@ func TestOperatorCommands(t *testing.T) {
 	_ = db
 	tenant := randomUUID()
 	deadIntents(t, db, tenant, &brokerDown{})
-	env := map[string]string{"JOBS_DATABASE_URL": envOrSkip(t, "JOBS_DIRECT_URL"), "USER": "tester"}
+	// The command opens its own pool; provide the trusted fixture shard pin.
+	endpoint, err := url.Parse(envOrSkip(t, "JOBS_DIRECT_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := endpoint.Query()
+	query.Set("options", "-c app.shard_id=s2 -c app.shard_incarnation=11111111-1111-4111-8111-111111111112 -c app.placement_epoch=1")
+	endpoint.RawQuery = strings.ReplaceAll(query.Encode(), "+", "%20")
+	env := map[string]string{"JOBS_DATABASE_URL": endpoint.String(), "USER": "tester"}
 	getenv := func(k string) string { return env[k] }
 	var out bytes.Buffer
 	if err := redriveCommand(context.Background(), []string{"-tenant", tenant, "-reason", "test"}, getenv, &out); err != nil || !strings.Contains(out.String(), "redriven 2 dead intents") {

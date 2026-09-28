@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Principal } from "@greenguard/tenant-auth";
-import { createApolloServer } from "./schema.js";
+import {
+  createApolloServer,
+  observeResponseWatermark,
+  type BffContext,
+} from "./schema.js";
 import { ProvisioningClient } from "./provisioning.js";
 import { ReadClient } from "./read-client.js";
 import { createDeviceLoader } from "./device-loader.js";
@@ -437,4 +441,272 @@ test("bin readings persisted roots map real metrics and trend coverage through t
     "/api/v1/read/bins/b1/readings/trend",
   ]);
   await server.stop();
+});
+
+test("GraphQL binds strict minima to principal and isolates aliases from device batching", async () => {
+  const token = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    placementEpoch: "1",
+    sequence: "9",
+  });
+  const requests: { method?: string; minimum: string | null }[] = [];
+  const read = new ReadClient("http://127.0.0.1:8093", async (_input, init) => {
+    const minimum = new Headers(init?.headers).get(
+      "x-greenguard-minimum-watermark",
+    );
+    requests.push({ method: init?.method, minimum });
+    return Response.json(
+      {
+        data:
+          init?.method === "POST" ? [{ device_id: "d" }] : { device_id: "d" },
+      },
+      { headers: { "x-greenguard-watermark": token } },
+    );
+  });
+  const server = createApolloServer();
+  const contextValue = {
+    principal,
+    authorization: "Bearer one",
+    provisioning: new ProvisioningClient("http://127.0.0.1:8092"),
+    read,
+    deviceLoader: createDeviceLoader(read, "Bearer one", principal.tenantId),
+  };
+  try {
+    const response = await server.executeOperation(
+      {
+        query:
+          'query($minimum: String) { eventual: device(id:"d") { deviceId } strict: device(id:"d", minimumConsistency:$minimum) { consistencyToken } }',
+        variables: { minimum: token },
+      },
+      { contextValue },
+    );
+    assert.equal(response.body.kind, "single");
+    if (response.body.kind === "single") {
+      assert.equal(response.body.singleResult.errors, undefined);
+      assert.equal(
+        (
+          response.body.singleResult.data?.strict as {
+            consistencyToken: string;
+          }
+        ).consistencyToken,
+        token,
+      );
+    }
+    assert.deepEqual(
+      requests.sort((a, b) => String(a.method).localeCompare(String(b.method))),
+      [
+        { method: "GET", minimum: token },
+        { method: "POST", minimum: null },
+      ],
+    );
+    for (const minimum of [
+      "malformed",
+      token.replace(principal.tenantId, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+    ]) {
+      const denied = await server.executeOperation(
+        {
+          query:
+            'query($minimum:String) { device(id:"d", minimumConsistency:$minimum) { deviceId } }',
+          variables: { minimum },
+        },
+        { contextValue },
+      );
+      if (denied.body.kind === "single")
+        assert.equal(
+          denied.body.singleResult.errors?.[0].extensions?.code,
+          "invalid_consistency_token",
+        );
+    }
+    assert.equal(requests.length, 2);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("GraphQL request certificate survives empty PG results and covers the oldest snapshot", async () => {
+  const token = (
+    sequence: string,
+    incarnation = "22222222-2222-4222-8222-222222222222",
+  ) =>
+    JSON.stringify({
+      v: 1,
+      tenantId: principal.tenantId,
+      shardIncarnation: incarnation,
+      placementEpoch: "3",
+      sequence,
+    });
+  const server = createApolloServer();
+  const read = new ReadClient("http://127.0.0.1:8093", async (input) => {
+    const path = new URL(String(input)).pathname;
+    return Response.json(
+      { data: path.endsWith("rollups") ? [] : null },
+      {
+        headers: {
+          "x-greenguard-watermark": token(path.endsWith("rollups") ? "7" : "9"),
+        },
+      },
+    );
+  });
+  const context: BffContext = {
+    principal,
+    authorization: "Bearer one",
+    provisioning: new ProvisioningClient("http://127.0.0.1:8092"),
+    read,
+  };
+  try {
+    const response = await server.executeOperation(
+      {
+        query:
+          '{ latestReading(deviceId:"d") { readingId } readingRollups(deviceId:"d", from:"a", to:"b", limit:1, bucket:"hour") { sampleCount } }',
+      },
+      { contextValue: context },
+    );
+    assert.equal(response.body.kind, "single");
+    if (response.body.kind === "single") {
+      assert.equal(response.body.singleResult.errors, undefined);
+      assert.equal(
+        response.body.singleResult.extensions?.consistencyToken,
+        token("7"),
+      );
+      assert.equal(response.body.singleResult.data?.latestReading, null);
+    }
+    observeResponseWatermark(context, token("7"));
+    assert.throws(
+      () =>
+        observeResponseWatermark(
+          context,
+          token("10", "33333333-3333-4333-8333-333333333333"),
+        ),
+      /consistency_identity_mismatch/,
+    );
+    const nextContext: BffContext = { ...context, consistencyToken: undefined };
+    const nextResponse = await server.executeOperation(
+      { query: "{ session { tenantId } }" },
+      { contextValue: nextContext },
+    );
+    if (nextResponse.body.kind === "single")
+      assert.equal(
+        nextResponse.body.singleResult.extensions?.consistencyToken,
+        undefined,
+      );
+  } finally {
+    await server.stop();
+  }
+});
+
+test("every persisted operation validates against the GraphQL schema", async () => {
+  const { parse, validate, buildSchema } = await import("graphql");
+  const { operations } = await import("./query-policy.js");
+  const { typeDefs } = await import("./schema.js");
+  const schema = buildSchema(typeDefs);
+  for (const [name, query] of Object.entries(operations))
+    assert.deepEqual(validate(schema, parse(query)), [], name);
+});
+
+test("persisted DeviceCurrent shares one aggregate HTTP request per authenticated operation", async () => {
+  const { operations } = await import("./query-policy.js");
+  const calls: Array<{
+    path: string;
+    authorization: string | null;
+    minimum: string | null;
+    budget: string | null;
+  }> = [];
+  const actual = JSON.stringify({
+    v: 1,
+    tenantId: principal.tenantId,
+    shardIncarnation: "22222222-2222-4222-8222-222222222222",
+    placementEpoch: "2",
+    sequence: "90",
+  });
+  const read = new ReadClient("http://127.0.0.1:8093", async (input, init) => {
+    const headers = new Headers(init?.headers);
+    calls.push({
+      path: new URL(String(input)).pathname,
+      authorization: headers.get("authorization"),
+      minimum: headers.get("x-greenguard-minimum-watermark"),
+      budget: headers.get("x-greenguard-read-budget-ms"),
+    });
+    return Response.json(
+      {
+        data: {
+          device: { device_id: "d", site_id: "s", serial_number: "sensor" },
+          latestReading: {
+            device_id: "d",
+            reading_id: "r",
+            observed_at: "now",
+            received_at: "now",
+            stream_version: "9007199254740993",
+          },
+        },
+      },
+      { headers: { "x-greenguard-watermark": actual } },
+    );
+  });
+  const server = createApolloServer();
+  try {
+    for (const minimum of [undefined, actual]) {
+      const response = await server.executeOperation(
+        {
+          query: operations.deviceCurrent,
+          variables: { id: "d", minimumConsistency: minimum },
+        },
+        {
+          contextValue: {
+            principal,
+            authorization: "Bearer one",
+            read,
+            provisioning: new ProvisioningClient("http://127.0.0.1:8092"),
+            readDeadline: Date.now() + 4000,
+          },
+        },
+      );
+      assert.equal(response.body.kind, "single");
+      if (response.body.kind === "single") {
+        assert.equal(response.body.singleResult.errors, undefined);
+        assert.equal(
+          response.body.singleResult.data?.device &&
+            (response.body.singleResult.data.device as { deviceId: string })
+              .deviceId,
+          "d",
+        );
+        assert.equal(
+          (
+            response.body.singleResult.data?.latestReading as {
+              streamVersion: string;
+            }
+          ).streamVersion,
+          "9007199254740993",
+        );
+        assert.equal(
+          response.body.singleResult.extensions?.consistencyToken,
+          actual,
+        );
+      }
+    }
+    assert.equal(
+      calls.length,
+      2,
+      "each operation makes one HTTP call, with no cross-request promise reuse",
+    );
+    assert.deepEqual(
+      calls.map((c) => c.path),
+      ["/api/v1/read/devices/d/current", "/api/v1/read/devices/d/current"],
+    );
+    assert.deepEqual(
+      calls.map((c) => c.minimum),
+      [null, actual],
+    );
+    assert.ok(
+      calls.every(
+        (c) =>
+          c.authorization === "Bearer one" &&
+          Number(c.budget) > 0 &&
+          Number(c.budget) <= 4000,
+      ),
+    );
+  } finally {
+    await server.stop();
+  }
 });

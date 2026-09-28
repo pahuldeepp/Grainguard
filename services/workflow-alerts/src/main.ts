@@ -9,7 +9,7 @@ import { startRiskKafkaConsumer } from "./consumer/kafka.js";
 // Entry point kept testable: configuration comes in as a parameter.
 export async function start(env: NodeJS.ProcessEnv) {
   const config = readConfig(env);
-  const db = createDb(config.databaseUrl);
+  const db = createDb(config.databaseUrl, 10, env);
   const tokenVerifier = config.auth
     ? await startMembershipRuntime(
         (name) => env[name],

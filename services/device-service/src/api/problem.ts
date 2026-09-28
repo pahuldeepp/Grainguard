@@ -1,3 +1,4 @@
+import { PlacementError } from "@greenguard/membership-client";
 import { ArgumentsHost, HttpException } from "@nestjs/common";
 import { BaseExceptionFilter } from "@nestjs/core";
 import { AuthError } from "@greenguard/tenant-auth";
@@ -41,6 +42,13 @@ const AUTH_HEADERS: Record<number, Record<string, string>> = {
 };
 
 export function classify(error: unknown): Problem {
+  if (error instanceof PlacementError)
+    return {
+      status: 503,
+      code: error.code,
+      title: "Service unavailable",
+      headers: { "Retry-After": "1" },
+    };
   if (error instanceof ServiceAuthError) {
     return {
       status: error.status,

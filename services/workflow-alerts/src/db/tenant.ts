@@ -1,3 +1,7 @@
+import {
+  admitOwnerPlacement,
+  resolveOwnerDatabase,
+} from "@greenguard/membership-client/owner-db";
 import type { Db, Tx } from "./client.js";
 
 const UUID_PATTERN =
@@ -41,9 +45,17 @@ export async function withTenant<T>(
   if (!isUuid(tenantId)) throw new InvalidTenantError();
   const lockTimeout = `${lockTimeoutMs}ms`;
   try {
-    return await db.$transaction(
+    const owner = await resolveOwnerDatabase(db, tenantId);
+    return await owner.database.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true), set_config('lock_timeout', ${lockTimeout}, true)`;
+        await tx.$executeRaw`SELECT set_config('lock_timeout', ${lockTimeout}, true)`;
+        await tx.$executeRaw`SELECT set_config('statement_timeout', '5000ms', true)`;
+        if (owner.route)
+          await admitOwnerPlacement(tenantId, owner.route, (sql, params) =>
+            tx.$executeRawUnsafe(sql, ...params),
+          );
+        else
+          await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         return work(tx);
       },
       { isolationLevel },

@@ -1,4 +1,8 @@
 import {
+  closeOwnerDatabase,
+  ownerDatabases,
+} from "@greenguard/membership-client/owner-db";
+import {
   startEntitlementWorker,
   type Envelope,
 } from "@greenguard/entitlements";
@@ -27,19 +31,23 @@ export async function applyHeartbeat(
   partition: number,
   emittedAt: Date,
 ): Promise<void> {
-  await db.$executeRaw`
+  await Promise.all(
+    ownerDatabases(db).map(
+      (owner) => owner.$executeRaw`
   INSERT INTO entitlement_feed_health(partition_id,verified_at)
   VALUES(${partition},LEAST(${emittedAt}::timestamptz,clock_timestamp()))
-  ON CONFLICT(partition_id) DO UPDATE SET verified_at=GREATEST(entitlement_feed_health.verified_at,excluded.verified_at)`;
+  ON CONFLICT(partition_id) DO UPDATE SET verified_at=GREATEST(entitlement_feed_health.verified_at,excluded.verified_at)`,
+    ),
+  );
 }
 const url = process.env.INVENTORY_PROJECTOR_DIRECT_URL;
 const brokers = process.env.KAFKA_BROKERS;
 if (process.argv[1]?.endsWith("/entitlements/projector.js")) {
-  if (!url || !brokers)
+  if ((!url && !process.env.SHARD_REGISTRY_FILE) || !brokers)
     throw new Error(
       "INVENTORY_PROJECTOR_DIRECT_URL and KAFKA_BROKERS required",
     );
-  const db = createDb(url);
+  const db = createDb(url ?? "", 10, process.env, "inventory_projector");
   const stop = await startEntitlementWorker({
     brokers: brokers.split(","),
     groupId: "greenguard-inventory-entitlements-v1",
@@ -52,7 +60,9 @@ if (process.argv[1]?.endsWith("/entitlements/projector.js")) {
     },
   });
   const shutdown = () => {
-    void stop().finally(() => db.$disconnect());
+    void stop().finally(() =>
+      closeOwnerDatabase(db, 5000, (client) => client.$disconnect()),
+    );
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

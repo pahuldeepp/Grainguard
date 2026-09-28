@@ -17,7 +17,11 @@ import { AlertClient } from "./alerts.js";
 import { NotificationClient } from "./notifications.js";
 import { attachSubscriptions } from "./subscriptions.js";
 import { LiveFeed, type LiveSubscriber } from "./live-feed.js";
-import { createApolloServer, type BffContext } from "./schema.js";
+import {
+  createApolloServer,
+  observeResponseWatermark,
+  type BffContext,
+} from "./schema.js";
 import {
   QueryPolicyError,
   resolvePersistedOperation,
@@ -93,10 +97,36 @@ export async function createApp(options: BffOptions) {
   });
   app.use(
     "/graphql",
+    (request, response, next) => {
+      const controller = new AbortController();
+      response.locals.readDeadline = Date.now() + 8000;
+      response.locals.readSignal = controller.signal;
+      const aborted = () => controller.abort();
+      const closed = () => {
+        if (!response.writableFinished) controller.abort();
+        cleanup();
+      };
+      const cleanup = () => {
+        request.off("aborted", aborted);
+        response.off("close", closed);
+      };
+      request.once("aborted", aborted);
+      response.once("close", closed);
+      response.once("finish", cleanup);
+      next();
+    },
     express.json({ limit: "32kb" }),
     async (request, response, next) => {
       try {
         const principal = await options.verify(request.header("Authorization"));
+        if (
+          (response.locals.readSignal as AbortSignal).aborted ||
+          Date.now() >= (response.locals.readDeadline as number)
+        ) {
+          if (!response.destroyed)
+            response.status(504).json({ code: "read_timeout" });
+          return;
+        }
         response.locals.principal = principal;
         next();
       } catch (error) {
@@ -153,18 +183,27 @@ export async function createApp(options: BffOptions) {
     expressMiddleware(server, {
       context: async ({ req, res }): Promise<BffContext> => {
         const authorization = req.header("Authorization") ?? "";
-        return {
+        const context: BffContext = {
           principal: res.locals.principal as Principal,
           authorization,
           traceparent: req.header("traceparent"),
+          readDeadline: res.locals.readDeadline as number,
+          readSignal: res.locals.readSignal as AbortSignal,
           provisioning: options.provisioning,
           read: options.read,
           alerts: options.alerts,
           notifications: options.notifications,
-          deviceLoader: options.read
-            ? createDeviceLoader(options.read, authorization)
-            : undefined,
         };
+        context.deviceLoader = options.read
+          ? createDeviceLoader(
+              options.read,
+              authorization,
+              context.principal.tenantId,
+              (token) => observeResponseWatermark(context, token),
+              { deadline: context.readDeadline, signal: context.readSignal },
+            )
+          : undefined;
+        return context;
       },
     }),
   );

@@ -11,7 +11,7 @@
     "migrate": "prisma migrate deploy",
     "saga:worker": "npm run build && node dist/saga/main.js",
     "tenant:projector": "npm run build && node dist/tenant-projection/main.js",
-    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements",
+    "build:deps": "npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements",
     "entitlements:projector": "npm run build && node dist/entitlements/projector.js"
   },
   "dependencies": {

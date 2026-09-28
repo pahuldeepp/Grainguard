@@ -87,9 +87,9 @@ test("all shipped operation documents fit the resolver budget and new hashes sta
     alertNotifications:
       "1d698e8f7d31fa9b524760cb838ce5ae159bf319e814348ed79036a6b03b7142",
     binReadingsLatest:
-      "b35aaa22693c18efc93bc6d2168857359db82bdae192c6451f6bcfe5e81eb34f",
+      "4d3af85135230b288c12bb98f994c3500aabd25b68d8ff9ed570250cb5bf1158",
     binReadingsTrend:
-      "64558554c608931cc737d50a31b9d70c6be2564974d21c0009b3c31ff62b3a6d",
+      "ac6b76a7bbc7fee9ff5cb2658acd57a3264de8c85624f42f86d36b7d2eff09b4",
   };
   for (const [name, hash] of Object.entries(expected))
     assert.equal(

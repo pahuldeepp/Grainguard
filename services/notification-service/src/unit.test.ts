@@ -393,3 +393,54 @@ test("an invalid task is dead-lettered without touching the database", async () 
   assert.equal(deps.metrics.get("tasks_rejected"), 1);
   assert.ok(new FakeBroker());
 });
+
+test("private shard registry config preserves placement authority without legacy pool URL", () => {
+  const env: Record<string, string> = {
+    SHARD_REGISTRY_FILE: "/private/owners.json",
+    RABBITMQ_URL: "amqp://localhost",
+    CONTROL_PLANE_URL: "https://control.test",
+    CONTROL_LOOKUP_TOKEN: "private-token",
+    SHARD_LOCAL_LOOPBACK: "false",
+  };
+  const config = loadConfig((key) => env[key]);
+  assert.equal(config.databaseUrl, "");
+  assert.equal(
+    config.ownerEnvironment?.SHARD_REGISTRY_FILE,
+    env.SHARD_REGISTRY_FILE,
+  );
+  assert.equal(
+    config.ownerEnvironment?.CONTROL_LOOKUP_TOKEN,
+    env.CONTROL_LOOKUP_TOKEN,
+  );
+});
+
+test("exported send and reconcile calls share capacity and retain their own provider deadline", async () => {
+  const { deps } = makeDeps(noPool);
+  deps.providers = new Semaphore(1);
+  deps.policy = { ...testPolicy, providerTimeoutMs: 20 };
+  const calls: string[] = [];
+  deps.adapter = () => ({
+    send: async () => {
+      calls.push("send");
+      return new Promise(() => {});
+    },
+    reconcile: async () => {
+      calls.push("reconcile");
+      return { kind: "not_found" };
+    },
+  });
+  const sending = attemptSend(deps, makeTask(), 1);
+  const reconciling = attemptReconcile(deps, makeTask());
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["send"]);
+  assert.equal(deps.providers.inFlight, 1);
+  const [sendResult, reconcileResult] = await Promise.all([
+    sending,
+    reconciling,
+  ]);
+  assert.equal(sendResult.status, "unknown");
+  assert.match(sendResult.error ?? "", /provider timeout/);
+  assert.equal(reconcileResult.status, "retry");
+  assert.deepEqual(calls, ["send", "reconcile"]);
+  assert.equal(deps.providers.inFlight, 0);
+});

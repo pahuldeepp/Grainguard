@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	common "greenguard.local/go-common"
 	"net/url"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ type Config struct {
 	ControlPlaneURL         string
 	ControlLookupToken      string
 	AllowInsecureMembership bool
+	ControlMeshMTLS         bool
 }
 
 func loadConfig(getenv func(string) string) (Config, error) {
@@ -48,9 +50,10 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		ControlPlaneURL:         getenv("CONTROL_PLANE_URL"),
 		ControlLookupToken:      getenv("CONTROL_LOOKUP_TOKEN"),
 		AllowInsecureMembership: getenv("AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP") == "true",
+		ControlMeshMTLS:         getenv("CONTROL_PLANE_MESH_MTLS") == "true",
 	}
-	if c.DatabaseURL == "" || c.RabbitURL == "" {
-		return c, errors.New("JOBS_DATABASE_URL and RABBITMQ_URL are required")
+	if (c.DatabaseURL == "" && getenv("SHARD_REGISTRY_FILE") == "") || c.RabbitURL == "" {
+		return c, errors.New("JOBS_DATABASE_URL or SHARD_REGISTRY_FILE, and RABBITMQ_URL, are required")
 	}
 	if c.MembershipSource != "file" && c.MembershipSource != "control-plane" {
 		return c, errors.New("AUTH_MEMBERSHIP_SOURCE must be file or control-plane")
@@ -63,8 +66,9 @@ func loadConfig(getenv func(string) string) (Config, error) {
 	}
 	if c.MembershipSource == "control-plane" {
 		u, err := url.Parse(c.ControlPlaneURL)
+		meshHTTP := err == nil && u != nil && c.ControlMeshMTLS && common.InternalMeshHost(u.Hostname())
 		if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-			(u.Scheme != "https" && !(u.Scheme == "http" && c.AllowInsecureMembership)) {
+			(u.Scheme != "https" && !(u.Scheme == "http" && (c.AllowInsecureMembership || meshHTTP))) {
 			return c, errors.New("CONTROL_PLANE_URL must use HTTPS unless AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP=true")
 		}
 	}

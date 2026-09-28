@@ -481,3 +481,246 @@ test("a pre-trip success cannot close an open breaker or clear its recovery prob
   assert.equal((await client.device("Bearer t1", "after"))?.deviceId, "after");
   assert.equal(calls, 6);
 });
+
+const watermarkTenant = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const watermarkShard = "11111111-1111-4111-8111-111111111111";
+const watermark = (
+  tenantId = watermarkTenant,
+  sequence = "9",
+  placementEpoch = "1",
+) =>
+  JSON.stringify({
+    v: 1,
+    tenantId,
+    shardIncarnation: watermarkShard,
+    placementEpoch,
+    sequence,
+  });
+
+test("minimum watermark remains request local on shared client and through retry", async () => {
+  const seen: { auth: string | null; minimum: string | null }[] = [];
+  let retry = true;
+  const client = new ReadClient(
+    "http://127.0.0.1:8093",
+    async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      const auth = headers.get("authorization");
+      const minimum = headers.get("x-greenguard-minimum-watermark");
+      seen.push({ auth, minimum });
+      if (auth === "Bearer one" && retry) {
+        retry = false;
+        return Response.json({ code: "read_busy" }, { status: 503 });
+      }
+      return Response.json(
+        {
+          data: {
+            reading_id: "r",
+            device_id: "d",
+            stream_version: "9007199254740993",
+          },
+        },
+        { headers: minimum ? { "x-greenguard-watermark": minimum } : {} },
+      );
+    },
+    { backoffMs: 1 },
+  );
+  const [strict, eventual] = await Promise.all([
+    client.latest("Bearer one", "d", {
+      tenantId: watermarkTenant,
+      minimumConsistency: watermark(),
+    }),
+    client.latest("Bearer two", "d", {
+      tenantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    }),
+  ]);
+  assert.equal(strict?.consistencyToken, watermark());
+  assert.equal(strict?.streamVersion, "9007199254740993");
+  assert.equal(eventual?.consistencyToken, null);
+  assert.deepEqual(
+    seen
+      .filter((call) => call.auth === "Bearer one")
+      .map((call) => call.minimum),
+    [watermark(), watermark()],
+  );
+  assert.deepEqual(
+    seen
+      .filter((call) => call.auth === "Bearer two")
+      .map((call) => call.minimum),
+    [null],
+  );
+});
+
+test("watermark request rejects malformed and cross tenant tokens before fetching", async () => {
+  let calls = 0;
+  const client = new ReadClient("http://127.0.0.1:8093", async () => {
+    calls++;
+    return Response.json({ data: null });
+  });
+  for (const token of [
+    "bad-json",
+    watermark("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+    watermark(watermarkTenant, "9223372036854775808"),
+  ]) {
+    await assert.rejects(
+      client.latest("Bearer one", "d", {
+        tenantId: watermarkTenant,
+        minimumConsistency: token,
+      }),
+      (error: unknown) =>
+        error instanceof ReadUpstreamError &&
+        error.code === "invalid_consistency_token",
+    );
+  }
+  assert.equal(calls, 0);
+});
+
+test("strict watermark rejects old epochs, missing admission and lower sequence responses", async () => {
+  for (const actual of [
+    undefined,
+    watermark(watermarkTenant, "8"),
+    watermark(watermarkTenant, "10", "2"),
+    watermark().replace(watermarkShard, "22222222-2222-4222-8222-222222222222"),
+  ]) {
+    const client = new ReadClient("http://127.0.0.1:8093", async () =>
+      Response.json(
+        { data: { reading_id: "r", device_id: "d" } },
+        { headers: actual ? { "x-greenguard-watermark": actual } : {} },
+      ),
+    );
+    await assert.rejects(
+      client.latest("Bearer one", "d", {
+        tenantId: watermarkTenant,
+        minimumConsistency: watermark(),
+      }),
+      (error: unknown) =>
+        error instanceof ReadUpstreamError &&
+        error.code === "consistency_minimum_unsatisfied",
+    );
+  }
+  const client = new ReadClient("http://127.0.0.1:8093", async () =>
+    Response.json(
+      { data: {} },
+      {
+        headers: {
+          "x-greenguard-watermark": watermark(
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          ),
+        },
+      },
+    ),
+  );
+  await assert.rejects(
+    client.latest("Bearer one", "d", { tenantId: watermarkTenant }),
+    (error: unknown) =>
+      error instanceof ReadUpstreamError &&
+      error.code === "invalid_consistency_response",
+  );
+});
+
+test("unsupported owning store preserves controlled strict-read failure", async () => {
+  const client = new ReadClient("http://127.0.0.1:8093", async (_url, init) => {
+    assert.equal(
+      new Headers(init?.headers).get("x-greenguard-minimum-watermark"),
+      watermark(),
+    );
+    return Response.json(
+      { code: "consistency_store_unsupported" },
+      { status: 409 },
+    );
+  });
+  await assert.rejects(
+    client.search("Bearer one", "grain", 1, {
+      tenantId: watermarkTenant,
+      minimumConsistency: watermark(),
+    }),
+    (error: unknown) =>
+      error instanceof ReadUpstreamError &&
+      error.status === 409 &&
+      error.code === "consistency_store_unsupported",
+  );
+});
+
+test("read attempts propagate shrinking budgets and honor caller cancellation", async () => {
+  let now = 1000;
+  const budgets: string[] = [];
+  const client = new ReadClient(
+    "http://127.0.0.1:8093",
+    async (_url, init) => {
+      budgets.push(
+        new Headers(init?.headers).get("x-greenguard-read-budget-ms")!,
+      );
+      if (budgets.length === 1) {
+        now += 100;
+        return Response.json({ code: "busy" }, { status: 503 });
+      }
+      return Response.json({ data: null });
+    },
+    {
+      now: () => now,
+      overallTimeoutMs: 1000,
+      perAttemptTimeoutMs: 500,
+      backoffMs: 1,
+    },
+  );
+  await client.device("Bearer one", "d", {
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    deadline: 1150,
+  });
+  assert.deepEqual(budgets, ["150", "50"]);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    client.device("Bearer one", "d", {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      signal: controller.signal,
+    }),
+    /read_timeout/,
+  );
+  assert.equal(budgets.length, 2);
+  await assert.rejects(
+    client.device("Bearer one", "d", {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      deadline: now,
+    }),
+    /read_timeout/,
+  );
+  assert.equal(budgets.length, 2);
+});
+
+test("caller disconnect neither opens the shared breaker nor strands a half-open probe", async () => {
+  let now = 1000;
+  let mode: "busy" | "cancel" | "healthy" = "cancel";
+  let controller = new AbortController();
+  const client = new ReadClient(
+    "http://127.0.0.1:8093",
+    async () => {
+      if (mode === "busy")
+        return Response.json({ code: "busy" }, { status: 503 });
+      if (mode === "healthy") return Response.json({ data: null });
+      controller.abort();
+      return new Promise<Response>(() => {});
+    },
+    { failureThreshold: 1, cooldownMs: 100, backoffMs: 1, now: () => now },
+  );
+  const consistency = () => ({
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    signal: controller.signal,
+  });
+  await assert.rejects(
+    client.device("Bearer one", "d", consistency()),
+    /read_timeout/,
+  );
+  mode = "healthy";
+  await client.device("Bearer two", "d");
+  mode = "busy";
+  await assert.rejects(client.device("Bearer one", "d"));
+  now += 100;
+  mode = "cancel";
+  controller = new AbortController();
+  await assert.rejects(
+    client.device("Bearer one", "d", consistency()),
+    /read_timeout/,
+  );
+  mode = "healthy";
+  await client.device("Bearer two", "d");
+});

@@ -1,3 +1,8 @@
+import {
+  createOwnerDatabase,
+  closeOwnerDatabase,
+  ownerDatabases,
+} from "@greenguard/membership-client/owner-db";
 import "reflect-metadata";
 import {
   Controller,
@@ -43,22 +48,34 @@ export interface Probe {
 export class DatabaseProbe implements Probe, OnModuleDestroy {
   private readonly pool: pg.Pool;
   constructor(url: string) {
-    this.pool = new pg.Pool({
-      connectionString: url,
-      max: 5,
-      connectionTimeoutMillis: 1000,
-      query_timeout: 1000,
-      idleTimeoutMillis: 10000,
+    this.pool = createOwnerDatabase({
+      legacyUrl: url,
+      service: "device-service",
+      database: "greenguard_inventory",
+      roles: ["inventory_app"],
+      create: (connectionString) => {
+        const pool = new pg.Pool({
+          connectionString,
+          max: 1,
+          connectionTimeoutMillis: 1000,
+          query_timeout: 1000,
+          idleTimeoutMillis: 10000,
+        });
+        pool.on("error", () =>
+          console.error("device-service: idle database connection failed"),
+        );
+        return pool;
+      },
+      close: (pool) => pool.end(),
     });
-    this.pool.on("error", () =>
-      console.error("device-service: idle database connection failed"),
-    );
   }
   async ping() {
-    await this.pool.query("SELECT 1");
+    await Promise.all(
+      ownerDatabases(this.pool).map((pool) => pool.query("SELECT 1")),
+    );
   }
   async onModuleDestroy() {
-    await this.pool.end();
+    await closeOwnerDatabase(this.pool, 5000, (pool) => pool.end());
   }
 }
 @Controller()
@@ -173,7 +190,7 @@ export interface ApiOptions {
 class DbLifecycle implements OnModuleDestroy {
   constructor(@Inject(DB) private readonly db: Db) {}
   async onModuleDestroy() {
-    await this.db.$disconnect();
+    await closeOwnerDatabase(this.db, 5000, (db) => db.$disconnect());
   }
 }
 

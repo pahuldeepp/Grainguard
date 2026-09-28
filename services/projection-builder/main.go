@@ -18,6 +18,8 @@ import (
 type app struct {
 	lease              *writerLease
 	dbPool             *pgxpool.Pool
+	shards             *common.ShardedDB
+	shardLeases        []*writerLease
 	processor          *Processor
 	ping               func(context.Context) error
 	close              func()
@@ -49,12 +51,15 @@ func buildApp(getenv func(string) string) (*app, error) {
 	}
 	brokers := getenv("KAFKA_BROKERS")
 	url := getenv("PROJECTION_DATABASE_URL")
-	if strings.TrimSpace(brokers) == "" || url == "" {
+	if strings.TrimSpace(brokers) == "" || (url == "" && getenv("SHARD_REGISTRY_FILE") == "") {
 		return nil, errors.New("KAFKA_BROKERS and PROJECTION_DATABASE_URL are required")
 	}
 	schemas, err := loadSchemas(eventSchemaDir(getenv))
 	if err != nil {
 		return nil, err
+	}
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		return buildShardedApp(getenv, window, brokers, schemas)
 	}
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
@@ -104,7 +109,7 @@ func prepareWriterSchema(pool *pgxpool.Pool, targetSchema string) (*writerLease,
 	}
 	var total, forced int
 	err := pool.QueryRow(context.Background(), `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, targetSchema).Scan(&total, &forced)
-	if err != nil || total != 17 || forced != total {
+	if err != nil || total != 19 || forced != total {
 		return nil, errors.New("versioned writer schema missing or RLS incomplete")
 	}
 	return acquireWriterLease(context.Background(), pool, targetSchema)
@@ -129,7 +134,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 func serve(parent context.Context, a *app, server *http.Server, listener net.Listener) error {
 	var leaseLoop func(context.Context) <-chan error
+	leases := a.shardLeases
 	if a.lease != nil {
+		leases = append(leases, a.lease)
+	}
+	if len(leases) > 0 {
 		leaseLoop = func(ctx context.Context) <-chan error {
 			done := make(chan error, 1)
 			go func() {
@@ -142,7 +151,12 @@ func serve(parent context.Context, a *app, server *http.Server, listener net.Lis
 						return
 					case <-ticker.C:
 						bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-						err := a.lease.renew(bounded)
+						var err error
+						for _, lease := range leases {
+							if err = lease.renew(bounded); err != nil {
+								break
+							}
+						}
 						cancel()
 						if err != nil {
 							done <- err

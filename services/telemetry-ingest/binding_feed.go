@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 const (
@@ -78,6 +80,15 @@ func (f *BindingFeed) Heartbeat(ctx context.Context, m BindingMessage) error {
 		f.ClockSkew.Add(1)
 		cp.SourceTime = now
 	}
+	if shards, ok := f.DB.(*common.ShardedDB); ok {
+		return shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			local := BindingFeed{DB: shards.InfrastructureDB(shard)}
+			return local.saveHeartbeat(ctx, m, cp)
+		})
+	}
+	return f.saveHeartbeat(ctx, m, cp)
+}
+func (f *BindingFeed) saveHeartbeat(ctx context.Context, m BindingMessage, cp FeedCheckpoint) error {
 	tx, err := f.DB.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -136,6 +147,25 @@ func (f *BindingFeed) Check(ctx context.Context, tx pgx.Tx) error {
 
 func (f *BindingFeed) metrics(ctx context.Context) string {
 	age := math.Inf(1)
+	if shards, ok := f.DB.(*common.ShardedDB); ok {
+		age = 0
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			tx, err := shards.InfrastructureDB(shard).BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+			if err != nil {
+				return err
+			}
+			defer rollback(tx)
+			value, err := f.age(ctx, tx)
+			if err == nil {
+				age = max(age, value.Seconds())
+			}
+			return err
+		})
+		if err != nil {
+			age = math.Inf(1)
+		}
+		return fmt.Sprintf("# TYPE binding_feed_age_seconds gauge\nbinding_feed_age_seconds %g\n# TYPE binding_feed_stale_total counter\nbinding_feed_stale_total %d\n", age, f.Stale.Load()) + fmt.Sprintf("# TYPE binding_feed_clock_skew_total counter\nbinding_feed_clock_skew_total %d\n", f.ClockSkew.Load())
+	}
 	tx, err := f.DB.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err == nil {
 		defer rollback(tx)

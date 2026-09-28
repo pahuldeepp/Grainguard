@@ -31,6 +31,18 @@ test("S3C1 bucket, region and public key enable S3 without a directory or link s
   });
 });
 
+test("sharded inventory audit uses its owner registry without a legacy URL", () => {
+  const config = readConfig({
+    ...base,
+    BILLING_DATABASE_URL: owners.BILLING_DATABASE_URL,
+    INVENTORY_SHARD_REGISTRY_FILE: "/run/secrets/inventory-shards.json",
+    ...s3,
+    ...key,
+  });
+  assert.equal(config.audit?.inventoryDatabaseUrl, "");
+  assert.equal(config.audit?.billingDatabaseUrl, owners.BILLING_DATABASE_URL);
+});
+
 test("S3C2 partial S3 configuration fails closed", () => {
   assert.throws(
     () => readConfig({ ...base, ...owners, ...s3 }),

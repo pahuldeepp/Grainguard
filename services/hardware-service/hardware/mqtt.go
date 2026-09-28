@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	common "greenguard.local/go-common"
 	"log"
 	"strings"
 	"time"
@@ -117,14 +118,23 @@ func (d MQTTDispatcher) PublishPending(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		token := d.Client.Publish(commandTopic(item.Command), 1, false, data)
-		if !token.WaitTimeout(5 * time.Second) {
-			log.Printf("MQTT publish timed out for pending hardware command=%s; it remains pending", item.Command.CommandID)
+		err = d.Store.WithExternalAdmission(ctx, item.Command.TenantID, func() error {
+			token := d.Client.Publish(commandTopic(item.Command), 1, false, data)
+			if !token.WaitTimeout(5 * time.Second) {
+				log.Printf("MQTT publish timed out for pending hardware command=%s; it remains pending", item.Command.CommandID)
+				return nil
+			}
+			if err = token.Error(); err != nil {
+				log.Printf("MQTT publish failed for pending hardware command=%s: %v", item.Command.CommandID, err)
+				return nil
+			}
 			return nil
+		})
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
 		}
-		if err = token.Error(); err != nil {
-			log.Printf("MQTT publish failed for pending hardware command=%s: %v", item.Command.CommandID, err)
-			return nil
+		if err != nil {
+			return err
 		}
 	}
 	return nil

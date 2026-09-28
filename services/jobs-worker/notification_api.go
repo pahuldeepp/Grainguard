@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	common "greenguard.local/go-common"
 	"io"
 	"log/slog"
 	"math/big"
@@ -46,6 +47,7 @@ type notificationAPI struct {
 	controlPlaneURL                      string
 	controlLookupToken                   string
 	allowInsecureMembership              bool
+	controlMeshMTLS                      bool
 }
 
 type apiPrincipal struct {
@@ -136,7 +138,8 @@ func (a *notificationAPI) membership(ctx context.Context, issuer, subject string
 
 func (a *notificationAPI) lookupMembership(ctx context.Context, issuer, subject string) (apiMembership, bool, error) {
 	u, err := url.Parse(a.controlPlaneURL)
-	if err != nil || u.Hostname() == "" || (u.Scheme != "https" && !(u.Scheme == "http" && a.allowInsecureMembership)) {
+	meshHTTP := err == nil && u != nil && a.controlMeshMTLS && common.InternalMeshHost(u.Hostname())
+	if err != nil || u.Hostname() == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (a.allowInsecureMembership || meshHTTP))) {
 		return apiMembership{}, false, errors.New("membership lookup URL is not secure")
 	}
 	u.Path, err = url.JoinPath(u.Path, "/v1/internal/memberships")

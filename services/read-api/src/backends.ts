@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { MinimumSequence, ReplicaProvider } from "./replicas.js";
 import cassandra from "cassandra-driver";
 import {
   getDevice,
@@ -16,6 +17,8 @@ import {
   listReadings,
   withReadTenant,
   type Reading,
+  type DeviceView,
+  type ReadTransaction,
 } from "@greenguard/read-model";
 
 export interface HistoryQuery {
@@ -41,7 +44,35 @@ export interface BinTrendQuery {
 export interface SearchBackend {
   search(tenantId: string, query: string, limit: number): Promise<unknown[]>;
 }
+/** Aggregate JSON uses the same canonical timestamp and numeric wire types as pg rows. */
+type JsonView<T> = { [K in keyof T]: T[K] extends Date ? string : T[K] };
+function normalizeSnapshotRow<T extends Record<string, unknown>>(
+  row: T | null,
+): T | null {
+  if (!row) return null;
+  for (const field of [
+    "observed_at",
+    "received_at",
+    "projected_at",
+    "updated_at",
+  ]) {
+    if (typeof row[field] === "string")
+      (row as Record<string, unknown>)[field] = new Date(
+        row[field] as string,
+      ).toISOString();
+  }
+  return row;
+}
+
+export interface DeviceCurrentSnapshot {
+  device: JsonView<DeviceView> | null;
+  latestReading: JsonView<Reading> | null;
+}
 export interface ReadBackends {
+  deviceCurrent(
+    tenantId: string,
+    deviceId: string,
+  ): Promise<DeviceCurrentSnapshot>;
   device(tenantId: string, deviceId: string): Promise<unknown>;
   devices(tenantId: string, deviceIds: string[]): Promise<unknown[]>;
   sites(tenantId: string, siteIds: string[]): Promise<unknown[]>;
@@ -64,43 +95,72 @@ export interface ReadBackends {
   search: SearchBackend;
   close?(): Promise<void>;
 }
-export function postgresReads(pool: Pool) {
+export function postgresReads(
+  pool: Pick<Pool, "connect"> | ReplicaProvider,
+  options: {
+    /** Trusted consistency resolver; callers must not substitute unverified tenant context. */
+    minimumSequence?: (
+      tenantId: string,
+    ) => Promise<MinimumSequence | undefined>;
+  } = {},
+) {
+  const read = async <T>(
+    tenantId: string,
+    fn: (tx: ReadTransaction) => Promise<T>,
+  ): Promise<T> => {
+    const minimum = await options.minimumSequence?.(tenantId);
+    if ("withTenant" in pool) return pool.withTenant(tenantId, fn, minimum);
+    if (minimum)
+      throw new Error("minimum consistency requires a replica provider");
+    return withReadTenant(pool, tenantId, fn);
+  };
+  // The transaction executor chooses the endpoint before invoking any query helper.
   return {
+    deviceCurrent: (tenantId: string, deviceId: string) =>
+      read(tenantId, async (tx): Promise<DeviceCurrentSnapshot> => {
+        // Scalar subqueries are one SQL statement/snapshot, including legacy primary mode.
+        // Each result is at most one row and both predicates bind the authenticated tenant.
+        // PostgreSQL JSON numbers lose int64 precision in JS; preserve version fields as text.
+        const result = await tx.query<{
+          device: DeviceCurrentSnapshot["device"];
+          latest_reading: DeviceCurrentSnapshot["latestReading"];
+        }>(
+          `SELECT
+             (SELECT to_jsonb(d) || jsonb_build_object('inventory_version',d.inventory_version::text) FROM read.device_views d WHERE tenant_id=$1 AND device_id=$2 LIMIT 1) AS device,
+             (SELECT to_jsonb(r) || jsonb_build_object('stream_version',to_jsonb(r)->>'stream_version') || CASE WHEN to_jsonb(r) ? 'age_seconds' THEN jsonb_build_object('age_seconds',to_jsonb(r)->>'age_seconds') ELSE '{}'::jsonb END FROM read.latest_readings r WHERE tenant_id=$1 AND device_id=$2 LIMIT 1) AS latest_reading`,
+          [tenantId, deviceId],
+        );
+        const row = result.rows[0];
+        return {
+          device: normalizeSnapshotRow(row?.device ?? null),
+          latestReading: normalizeSnapshotRow(row?.latest_reading ?? null),
+        };
+      }),
     device: (tenantId: string, deviceId: string) =>
-      withReadTenant(pool, tenantId, (tx) => getDevice(tx, tenantId, deviceId)),
+      read(tenantId, (tx) => getDevice(tx, tenantId, deviceId)),
     devices: (tenantId: string, deviceIds: string[]) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getDevices(tx, tenantId, deviceIds),
-      ),
+      read(tenantId, (tx) => getDevices(tx, tenantId, deviceIds)),
     sites: (tenantId: string, siteIds: string[]) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getSiteNames(tx, tenantId, siteIds),
-      ),
+      read(tenantId, (tx) => getSiteNames(tx, tenantId, siteIds)),
     bins: (tenantId: string, binIds: string[]) =>
-      withReadTenant(pool, tenantId, (tx) => getBins(tx, tenantId, binIds)),
+      read(tenantId, (tx) => getBins(tx, tenantId, binIds)),
     reading: (tenantId: string, readingId: string) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getReading(tx, tenantId, readingId),
-      ),
+      read(tenantId, (tx) => getReading(tx, tenantId, readingId)),
     devicesBySite: (
       tenantId: string,
       siteId: string,
       limit: number,
       after?: string,
     ) =>
-      withReadTenant(pool, tenantId, (tx) =>
+      read(tenantId, (tx) =>
         listDevicesBySite(tx, tenantId, siteId, limit, after),
       ),
     latest: (tenantId: string, deviceId: string) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getLatestReading(tx, tenantId, deviceId),
-      ),
+      read(tenantId, (tx) => getLatestReading(tx, tenantId, deviceId)),
     binReadings: (tenantId: string, binId: string, asOf: Date) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getBinReadings(tx, tenantId, binId, asOf),
-      ),
+      read(tenantId, (tx) => getBinReadings(tx, tenantId, binId, asOf)),
     binTrend: (q: BinTrendQuery) =>
-      withReadTenant(pool, q.tenantId, async (tx) => {
+      read(q.tenantId, async (tx) => {
         const bins = await listBinDevices(tx, q.tenantId, q.binId, 51);
         const bin = (await getBins(tx, q.tenantId, [q.binId]))[0] ?? null;
         if (!bin)
@@ -121,15 +181,13 @@ export function postgresReads(pool: Pool) {
         return { bins: bin, buckets, source: "postgres" as const };
       }),
     freshness: (tenantId: string, deviceId: string) =>
-      withReadTenant(pool, tenantId, (tx) =>
-        getFreshness(tx, tenantId, deviceId),
-      ),
+      read(tenantId, (tx) => getFreshness(tx, tenantId, deviceId)),
     hotReadings: (q: HistoryQuery) =>
-      withReadTenant(pool, q.tenantId, (tx) =>
+      read(q.tenantId, (tx) =>
         listReadings(tx, q.tenantId, q.deviceId, q.from, q.to, q.limit),
       ),
     rollup: (q: HistoryQuery, bucket: "hour" | "day") =>
-      withReadTenant(pool, q.tenantId, async (tx) => {
+      read(q.tenantId, async (tx) => {
         const result = await tx.query(
           `SELECT date_trunc('${bucket}', observed_at) AS bucket_start, count(*)::int AS sample_count, avg(temperature_c) AS avg_temperature_c, avg(relative_humidity_percent) AS avg_relative_humidity_percent FROM read.reading_history WHERE tenant_id=$1 AND device_id=$2 AND observed_at >= $3 AND observed_at < $4 GROUP BY 1 ORDER BY 1 DESC LIMIT $5`,
           [q.tenantId, q.deviceId, q.from, q.to, q.limit],
@@ -137,6 +195,13 @@ export function postgresReads(pool: Pool) {
         return result.rows;
       }),
   };
+}
+/** Keep history/search caching, but never refill PostgreSQL cache from an ungated replica. */
+export function withoutPostgresCache(
+  cached: ReadBackends,
+  postgres: ReturnType<typeof postgresReads>,
+): ReadBackends {
+  return { ...cached, ...postgres };
 }
 export class CassandraHistory implements HistoryBackend {
   constructor(private readonly client: cassandra.Client) {}

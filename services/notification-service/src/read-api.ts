@@ -1,3 +1,4 @@
+import { ownerDatabases } from "@greenguard/membership-client/owner-db";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Pool } from "pg";
 import {
@@ -249,6 +250,13 @@ export async function notificationReadReady(
   auditKey: string,
 ): Promise<boolean> {
   if (auditKey.length < 32) return false;
+  const checks = await Promise.all(
+    ownerDatabases(pool).map((owner) => notificationPoolReady(owner)),
+  );
+  return checks.every(Boolean);
+}
+
+async function notificationPoolReady(pool: Pool): Promise<boolean> {
   try {
     const { rows } = await pool.query<{ ready: boolean }>(
       `SELECT current_user = 'notifications_app'

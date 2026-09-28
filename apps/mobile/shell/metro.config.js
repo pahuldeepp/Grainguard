@@ -9,14 +9,18 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 // imported in place, not copied. It uses NodeNext-style "./x.js" specifiers
 // that point at .ts files, which Metro cannot resolve on its own.
 const coreDir = path.resolve(__dirname, '../src');
+const watermarkDir = path.resolve(__dirname, '../../../packages/membership-client/src');
 
 const config = {
-  watchFolders: [coreDir],
+  watchFolders: [coreDir, watermarkDir],
   resolver: {
     // Core files sit outside this project; let them resolve the shell's modules.
     nodeModulesPaths: [path.resolve(__dirname, 'node_modules')],
     extraNodeModules: { '@greenguard/mobile-core': coreDir },
     resolveRequest: (context, moduleName, platform) => {
+      if (moduleName === '@greenguard/membership-client/watermark') {
+        return { type: 'sourceFile', filePath: path.join(watermarkDir, 'watermark.ts') };
+      }
       if (
         moduleName.startsWith('.') &&
         moduleName.endsWith('.js') &&

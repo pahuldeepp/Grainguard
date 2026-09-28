@@ -100,7 +100,7 @@ func TestWithTenantSetsTransactionLocalTenant(t *testing.T) {
 	if err := WithTenant(context.Background(), db, testTenant, noop); err != nil {
 		t.Fatal(err)
 	}
-	if tx.execSQL != "SELECT set_config('app.tenant_id', $1, true)" {
+	if tx.execSQL != "SELECT greenguard_internal.use_projection_tenant_placement($1::uuid)" {
 		t.Errorf("sql = %q", tx.execSQL)
 	}
 	if len(tx.execArgs) != 1 || tx.execArgs[0] != testTenant {
@@ -121,7 +121,7 @@ func TestWithTenantSchemaValidatesBeforeBegin(t *testing.T) {
 	if err := WithTenantSchema(context.Background(), db, testTenant, "read_v42", noop); err != nil {
 		t.Fatal(err)
 	}
-	if db.tx.execSQL != "SELECT set_config('search_path', $1, true)" || len(db.tx.execArgs) != 1 || db.tx.execArgs[0] != "read_v42,pg_catalog" {
+	if db.tx.execSQL != "SELECT greenguard_internal.use_projection_tenant_placement($1::uuid)" || len(db.tx.execArgs) != 1 || db.tx.execArgs[0] != testTenant {
 		t.Fatal(db.tx.execSQL, db.tx.execArgs)
 	}
 }
@@ -189,6 +189,7 @@ func TestWithTenantDoesNotLeakOnPooledConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.MaxConns = 1
+	configureFixturePlacement(t, config)
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)

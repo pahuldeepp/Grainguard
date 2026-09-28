@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	common "greenguard.local/go-common"
 	"io"
 	"strconv"
 	"time"
@@ -52,6 +53,9 @@ func parseCheckpoint(m Message, partitions int) (FeedCheckpoint, error) {
 }
 
 func (s *Store) Heartbeat(ctx context.Context, m Message) error {
+	if _, ok := s.DB.(*common.ShardedDB); ok {
+		return s.forEachInfrastructure(ctx, func(local *Store) error { return local.Heartbeat(ctx, m) })
+	}
 	cp, err := parseCheckpoint(m, 6)
 	if err != nil {
 		return ErrCheckpoint
@@ -94,6 +98,17 @@ func minTime(a, b time.Time) time.Time {
 // FeedAge requires every canonical inventory partition. Telemetry progress cannot
 // prove inventory freshness. The extra five seconds conservatively bounds clock skew.
 func (s *Store) FeedAge(ctx context.Context) (time.Duration, error) {
+	if _, ok := s.DB.(*common.ShardedDB); ok {
+		var oldest time.Duration
+		err := s.forEachInfrastructure(ctx, func(local *Store) error {
+			age, err := local.FeedAge(ctx)
+			if age > oldest {
+				oldest = age
+			}
+			return err
+		})
+		return oldest, err
+	}
 	var count int
 	var oldest, newest *time.Time
 	schema := s.Schema

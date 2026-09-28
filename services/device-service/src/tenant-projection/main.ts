@@ -1,13 +1,14 @@
+import { closeOwnerDatabase } from "@greenguard/membership-client/owner-db";
 import { createDb } from "../db/client.js";
 import { startTenantProjector } from "./worker.js";
 
 const url = process.env.INVENTORY_PROJECTOR_DIRECT_URL;
 const brokers = process.env.KAFKA_BROKERS;
-if (!url || !brokers)
+if ((!url && !process.env.SHARD_REGISTRY_FILE) || !brokers)
   throw new Error(
     "INVENTORY_PROJECTOR_DIRECT_URL and KAFKA_BROKERS are required",
   );
-const db = createDb(url);
+const db = createDb(url ?? "", 10, process.env, "inventory_projector");
 const stop = await startTenantProjector(
   db,
   brokers.split(","),
@@ -18,7 +19,9 @@ const stop = await startTenantProjector(
   },
 );
 const shutdown = () => {
-  void stop().finally(() => db.$disconnect());
+  void stop().finally(() =>
+    closeOwnerDatabase(db, 5000, (client) => client.$disconnect()),
+  );
 };
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);

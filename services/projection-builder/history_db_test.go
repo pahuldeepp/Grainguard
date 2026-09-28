@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 	"greenguard.local/projection-builder/history"
 	"greenguard.local/projection-builder/migrations"
 )
@@ -23,6 +24,12 @@ type historyDatabase struct {
 }
 
 func scratchHistoryDB(t *testing.T, migrate bool) historyDatabase {
+	return scratchHistoryDBConfigured(t, migrate, true)
+}
+func scratchHistoryDBWithoutFixturePlacement(t *testing.T, migrate bool) historyDatabase {
+	return scratchHistoryDBConfigured(t, migrate, false)
+}
+func scratchHistoryDBConfigured(t *testing.T, migrate, fixturePlacement bool) historyDatabase {
 	t.Helper()
 	ctx := context.Background()
 	admin, err := pgx.Connect(ctx, envOrSkip(t, "POSTGRES_ADMIN_URL"))
@@ -41,8 +48,8 @@ func scratchHistoryDB(t *testing.T, migrate bool) historyDatabase {
 			t.Fatal(err)
 		}
 	}
-	owner := historyPool(t, target)
-	runtime := historyPool(t, databaseURL(t, envOrSkip(t, "PROJECTION_DIRECT_URL"), name))
+	owner := historyPoolConfigured(t, target, fixturePlacement)
+	runtime := historyPoolConfigured(t, databaseURL(t, envOrSkip(t, "PROJECTION_DIRECT_URL"), name), fixturePlacement)
 	inspection, err := pgx.Connect(ctx, databaseURL(t, envOrSkip(t, "POSTGRES_ADMIN_URL"), name))
 	if err != nil {
 		t.Fatal(err)
@@ -51,12 +58,18 @@ func scratchHistoryDB(t *testing.T, migrate bool) historyDatabase {
 	return historyDatabase{runtime, owner, inspection, target}
 }
 func historyPool(t *testing.T, url string) *pgxpool.Pool {
+	return historyPoolConfigured(t, url, true)
+}
+func historyPoolConfigured(t *testing.T, url string, fixturePlacement bool) *pgxpool.Pool {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	if fixturePlacement {
+		configureFixturePlacement(t, cfg)
+	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -267,9 +280,16 @@ func assertHistoryForeignKeys(t *testing.T, db historyDatabase, tenant string, e
 	})
 	assertSQLState(t, err, "23503")
 
-	err = WithTenant(context.Background(), db.runtime, randomUUID(), func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose)
- VALUES(current_setting('app.tenant_id')::uuid,$1,'device',$2,$3,'projection_changed')`, randomUUID(), event[fieldAggregate], event[fieldEvent])
+	notificationTenant := randomUUID()
+	err = WithTenant(context.Background(), db.runtime, notificationTenant, func(ctx context.Context, tx pgx.Tx) error {
+		// A valid same-transaction watermark reaches the foreign-key rejection
+		// instead of failing the independent projection certificate first.
+		w, err := advanceProjectionWatermark(ctx, tx, notificationTenant)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,shard_incarnation,placement_epoch,projection_sequence)
+ VALUES(current_setting('app.tenant_id')::uuid,$1,'device',$2,$3,'projection_changed',$4,$5,$6)`, randomUUID(), event[fieldAggregate], event[fieldEvent], w.ShardIncarnation, w.PlacementEpoch, w.Sequence)
 		return err
 	})
 	assertSQLState(t, err, "23503")
@@ -317,7 +337,9 @@ func seedUnpartitionedHistory(t *testing.T, db historyDatabase, event map[string
 	t.Helper()
 	body, _ := json.Marshal(event)
 	p := event[fieldPayload].(map[string]any)
-	err := WithTenant(context.Background(), db.runtime, event[fieldTenant].(string), func(ctx context.Context, tx pgx.Tx) error {
+	// Seed the historical schema with its original tenant RLS helper; the new
+	// admission function is introduced by the migrations under test.
+	err := common.WithTenantSchema(context.Background(), db.runtime, event[fieldTenant].(string), "public", func(ctx context.Context, tx pgx.Tx) error {
 		queries := []struct {
 			sql  string
 			args []any

@@ -1,9 +1,9 @@
+import { fixtureDb } from "../testing/fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import kafkaJs from "kafkajs";
 import type { DomainEvent } from "@greenguard/contracts";
-import { createDb } from "../db/client.js";
 import { withTenant } from "../db/tenant.js";
 import {
   applyTenantEvent,
@@ -83,8 +83,8 @@ test("M10 live tenant projection converges under duplicate/reordered delivery; a
     t.skip("inventory projector and app DB URLs required");
     return;
   }
-  const projector = createDb(projectorUrl);
-  const app = createDb(appUrl);
+  const projector = fixtureDb(projectorUrl);
+  const app = fixtureDb(appUrl);
   t.after(async () => {
     await projector.$disconnect();
     await app.$disconnect();
@@ -125,7 +125,7 @@ test("M10 opt-in canonical Kafka tenant event survives projector restart and red
     t.skip("projector DB and Kafka are required");
     return;
   }
-  const db = createDb(url);
+  const db = fixtureDb(url);
   const kafka = new Kafka({
     clientId: `inventory-tenant-live-${randomUUID()}`,
     brokers: [broker],

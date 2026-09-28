@@ -18,6 +18,7 @@ const bumpScript = `local current = tonumber(redis.call('GET', KEYS[1]) or '0') 
 local next = math.max(current + 1, tonumber(ARGV[1]))
 redis.call('SET', KEYS[1], string.format('%d', next))
 if tonumber(ARGV[2]) > 0 then redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+if #KEYS>1 then redis.call('DEL',KEYS[2]); redis.call('INCR',KEYS[3]) end
 redis.call('PUBLISH', ARGV[3], ARGV[4])
 return next`
 
@@ -25,15 +26,69 @@ const liveChannel = "gg:read:v1:live"
 
 var bump = redis.NewScript(bumpScript)
 
+// Notifications may advance a current guard, but can never create placement.
+// Missing guards are rebuilt by a leased Read API from its owning primary.
+const advanceWatermarkScript = `local function ge(a,b) return #a>#b or (#a==#b and a>=b) end
+local raw=redis.call('GET',KEYS[1]); local next=cjson.decode(ARGV[1])
+if raw then
+ local ok,old=pcall(cjson.decode,raw)
+ if not ok or type(old)~='table' or type(old.sequence)~='string' then return redis.error_reply('invalid watermark guard') end
+ if old.tenantId~=next.tenantId or old.shardIncarnation~=next.shardIncarnation or old.placementEpoch~=next.placementEpoch then return 0 end
+ if ge(next.sequence,old.sequence) then redis.call('SET',KEYS[1],ARGV[1],'PX',600000) end
+end
+redis.call('INCR',KEYS[2])
+redis.call('PUBLISH',ARGV[2],ARGV[3]); return 1`
+
+var advanceWatermark = redis.NewScript(advanceWatermarkScript)
+
 // RedisBumper runs the bump script against a cluster or single-node client.
 type RedisBumper struct{ client redis.UniversalClient }
 
+func (r RedisBumper) Advance(ctx context.Context, t Target) error {
+	watermark := struct {
+		V           int    `json:"v"`
+		Tenant      string `json:"tenantId"`
+		Incarnation string `json:"shardIncarnation"`
+		Epoch       string `json:"placementEpoch"`
+		Sequence    string `json:"sequence"`
+	}{1, t.Tenant, t.Incarnation, t.PlacementEpoch, t.Sequence}
+	encoded, err := json.Marshal(watermark)
+	if err != nil {
+		return err
+	}
+	hint, err := json.Marshal(map[string]string{"scope": t.Scope, "tenant": t.Tenant, "device": t.Device, "shard_incarnation": t.Incarnation, "placement_epoch": t.PlacementEpoch, "projection_sequence": t.Sequence})
+	if err != nil {
+		return err
+	}
+	guard := watermarkGuardKey(t.Tenant)
+	return advanceWatermark.Run(ctx, r.client, []string{guard, guard + ":revision"}, string(encoded), liveChannel, string(hint)).Err()
+}
+
 func (r RedisBumper) Bump(ctx context.Context, key string, floor int64, ttl time.Duration) error {
+	return r.bumpKey(ctx, key, floor, ttl, true)
+}
+func (r RedisBumper) BumpTarget(ctx context.Context, t Target, floor int64, ttl time.Duration) error {
+	return r.bumpKey(ctx, t.Key(), floor, ttl, t.Incarnation == "")
+}
+func (r RedisBumper) bumpKey(ctx context.Context, key string, floor int64, ttl time.Duration, legacy bool) error {
 	hint, err := liveHint(key)
 	if err != nil {
 		return err
 	}
-	return bump.Run(ctx, r.client, []string{key}, floor, ttl.Milliseconds(), liveChannel, hint).Err()
+	keys := []string{key}
+	if key != epochKey && legacy {
+		// Legacy invalidation has no watermark proof. Remove its tenant guard so
+		// a future v2 read must rebuild from durable primary state, never infer zero.
+		var scope struct {
+			Tenant string `json:"tenant"`
+		}
+		if err = json.Unmarshal([]byte(hint), &scope); err != nil {
+			return err
+		}
+		guard := watermarkGuardKey(scope.Tenant)
+		keys = append(keys, guard, guard+":revision")
+	}
+	return bump.Run(ctx, r.client, keys, floor, ttl.Milliseconds(), liveChannel, hint).Err()
 }
 
 // The hint is published in the same Redis script as the cache bump. A consumer
