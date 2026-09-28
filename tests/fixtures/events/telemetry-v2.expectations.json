@@ -1,0 +1,23 @@
+{
+  "telemetry-v2/co2-unbounded.json": true,
+  "telemetry-v2/grain-only.json": true,
+  "telemetry-v2/sensor-only.json": true,
+  "telemetry-v2/negative-co2.json": false,
+  "telemetry-v2/grain-over-100.json": false,
+  "telemetry-v2/humidity-not-grain.json": false,
+  "telemetry-v2/wrong-unit.json": false,
+  "telemetry-v2/missing-unit.json": false,
+  "telemetry-v2/extra-unit.json": false,
+  "telemetry-v2/empty.json": false,
+  "telemetry-v2/null-value.json": false,
+  "telemetry-v2/duplicate-sensor.json": false,
+  "telemetry-v2/bad-sensor-unit.json": false,
+  "telemetry-v2/sensor-negative-co2.json": false,
+  "telemetry-v2/layout-overflow.json": false,
+  "telemetry-v2/nil-sensor.json": false,
+  "telemetry-v2/negative-depth.json": false,
+  "telemetry-v2/unknown-metric.json": false,
+  "telemetry-v2/unknown-field.json": false,
+  "telemetry-recorded.v1.valid.json": true,
+  "telemetry-recorded.v2.valid.json": true
+}

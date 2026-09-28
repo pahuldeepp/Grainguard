@@ -26,5 +26,6 @@
   "invalid/unknown-payload-field.json": false,
   "invalid/unknown-schema-version.json": false,
   "invalid/unknown-top-level-field.json": false,
-  "invalid/uppercase-tenant-id.json": false
+  "invalid/uppercase-tenant-id.json": false,
+  "cable-layout-changed.v1.valid.json": true
 }

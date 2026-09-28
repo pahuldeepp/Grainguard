@@ -1,0 +1,46 @@
+{
+  "type": "record",
+  "name": "Value",
+  "namespace": "greenguard_control_contacts.public.notification_contacts",
+  "fields": [
+    {
+      "name": "tenant_id",
+      "type": "string"
+    },
+    {
+      "name": "email_to",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "sms_to",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "version",
+      "type": "string",
+      "default": "1"
+    },
+    {
+      "name": "__deleted",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "__op",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "__source_ts_ms",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "schema_version",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

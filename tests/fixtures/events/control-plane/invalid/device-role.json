@@ -1,0 +1,23 @@
+{
+  "event_id": "9b1c5d7e-6f80-5b0c-9d1e-5f6a7b8c9d0e",
+  "schema_version": 1,
+  "occurred_at": "2026-09-25T10:00:00.000000Z",
+  "tenant_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+  "correlation_id": "6e8d2f4b-3a5c-4b7d-8e9f-2a3b4c5d6e7f",
+  "causation_id": "7f9e3a5c-4b6d-4c8e-9fa0-3b4c5d6e7f80",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "event_type": "membership.changed",
+  "aggregate_type": "membership",
+  "aggregate_id": "8a0b4c6d-5e7f-5a9b-8c0d-4e5f6a7b8c9d",
+  "aggregate_version": "2",
+  "payload": {
+    "membership_id": "8a0b4c6d-5e7f-5a9b-8c0d-4e5f6a7b8c9d",
+    "membership_version": "2",
+    "identity_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    "role": "device",
+    "state": "active",
+    "actor_identity_id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+    "action": "role_changed",
+    "effective_at": "2026-09-25T10:00:00.000000Z"
+  }
+}

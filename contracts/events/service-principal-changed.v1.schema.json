@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:service-principal-changed:v1",
+  "title": "GreenGuard service principal lifecycle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id","event_type","schema_version","occurred_at","tenant_id","aggregate_type","aggregate_id","aggregate_version","correlation_id","causation_id","traceparent","payload"],
+  "properties": {
+    "event_id": {"$ref":"#/$defs/uuid"},
+    "event_type": {"enum":["service_principal.created","service_principal.rotated","service_principal.revoked"]},
+    "schema_version": {"const":1},
+    "occurred_at": {"type":"string","format":"date-time"},
+    "tenant_id": {"$ref":"#/$defs/uuid"},
+    "aggregate_type": {"const":"service_principal"},
+    "aggregate_id": {"$ref":"#/$defs/uuid"},
+    "aggregate_version": {"$ref":"#/$defs/version"},
+    "correlation_id": {"$ref":"#/$defs/uuid"},
+    "causation_id": {"$ref":"#/$defs/uuid"},
+    "traceparent": {"type":"string","pattern":"^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"},
+    "payload": {
+      "type":"object","additionalProperties":false,
+      "required":["tenant_id","principal_id","principal_version","state"],
+      "properties": {
+        "tenant_id":{"$ref":"#/$defs/uuid"},
+        "principal_id":{"$ref":"#/$defs/uuid"},
+        "principal_version":{"$ref":"#/$defs/version"},
+        "state":{"enum":["active","revoked"]}
+      }
+    }
+  },
+  "$defs": {
+    "uuid":{"type":"string","format":"uuid","pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "version":{"type":"string","pattern":"^[1-9][0-9]*$"}
+  }
+}

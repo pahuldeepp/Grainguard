@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:events:projection-notification:v1",
+  "title": "GreenGuard projection.notification v1",
+  "description": "Committed read-model change published from greenguard_read.outbox_events (ADR-0016). Consumers invalidate caches; they never treat it as domain truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "aggregate_type",
+    "aggregate_id",
+    "aggregate_version",
+    "correlation_id",
+    "causation_id",
+    "traceparent",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "event_type": {
+      "const": "projection.notification"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "tenant_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "aggregate_type": {
+      "const": "projection_notification"
+    },
+    "aggregate_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "aggregate_version": {
+      "$ref": "#/$defs/positiveBigintString"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "causation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "notification_id",
+        "resource_type",
+        "resource_id",
+        "purpose",
+        "scope",
+        "source_event_id",
+        "source_event_type",
+        "source_version",
+        "projected_at"
+      ],
+      "properties": {
+        "notification_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "resource_type": {
+          "const": "device"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "purpose": {
+          "enum": ["projection_changed", "promotion_changed"]
+        },
+        "scope": {
+          "enum": [
+            "device",
+            "tenant",
+            "epoch"
+          ]
+        },
+        "source_event_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_event_type": {
+          "type": "string",
+          "pattern": "^[a-z_]+\\.[a-z_]+$",
+          "maxLength": 64
+        },
+        "source_version": {
+          "$ref": "#/$defs/positiveBigintString"
+        },
+        "projected_at": {
+          "$ref": "#/$defs/utcTimestamp"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "positiveBigintString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 19,
+      "pattern": "^[1-9][0-9]{0,18}$"
+    }
+  }
+}
