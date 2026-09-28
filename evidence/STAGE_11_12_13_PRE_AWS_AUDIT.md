@@ -208,3 +208,36 @@ build gate. The isolated Compose containers and network were then stopped
 without deleting volumes. This is local verification only; it does not prove
 AWS deployment, live mesh/data-service interoperability, public HTTPS login,
 or physical-iPhone acceptance.
+
+## Release, mobile tenancy, MQTT, and clean-checkout continuation
+
+The mobile Cognito flow now resolves a no-tenant access token through the
+BFF's authenticated `session` query before opening tenant-scoped caches or
+replaying queued ACKs. It binds the confirmed subject/tenant scope to the
+Keychain session, rejects identity mismatch, and rechecks on refresh. The
+mobile core suite passes 54 tests and the iOS shell typecheck passes. Real
+hosted login, tenant switching and ACK behavior on a physical iPhone remain
+unproved.
+
+CI now checks that every exact signed GHCR digest can be pulled anonymously
+before publishing Terraform release inputs. Only 9 of 20 existing `latest`
+package URLs passed a read-only anonymous probe; this is not proof for the
+release digests and currently blocks the direct-GHCR single-apply route. ECR
+promotion after Terraform creates repositories has an apply-order cycle; it
+has not been integrated into one apply. The image gate must pass on all exact
+release digests before that route is used.
+
+The private MQTT broker is now a conditional, digest-pinned wave-11 Argo
+child. The hardware worker receives a CA-only mount and TLS credential
+contract, with an exact NetworkPolicy edge and a single stable client ID per
+Recreate rollout. Terraform, Argo, Helm, Secret and network render checks
+pass offline. Broker authentication, approved device credentials and ACL,
+durable storage, external device DNS/ingress and real firmware traffic remain
+live acceptance work. The iPhone uses the HTTPS BFF, not this MQTT endpoint.
+
+The shared working tree previously had over 1,800 untracked files; the passing
+local gate therefore did not prove clean-checkout reproducibility. Mobile/iOS,
+Read API, dashboard, and shared membership/entitlements/flags/audit workspace
+source have now been scoped into commits. Remaining dirty modules and a clean
+checkout build still need review. The latest combined Helm, Argo application
+tree, data-plane and `git diff --check` checks pass on the current tree.
