@@ -186,3 +186,15 @@ cleanup. The offline teardown suite passes 44 stubbed cases. Raw `terraform
 destroy` still cannot guarantee the requested post-destroy AWS inventory;
 `destroy-verified.sh` is the only verified operator sequence. No real AWS
 plan/apply/destroy or physical-iPhone test has run.
+
+A follow-up review found a wave deadlock: Schema Registry could not become
+healthy before the wave-12 ACL Job. The Registry Service/Deployment is now a
+separate conditional wave-13 Application, while wave 10 owns the broker and
+wave 12 owns ACL/topic bootstrap. The Argo tree and data-plane checks reject
+Registry in wave 10. This proves the rendered order only; live Argo health and
+broker authorization still need acceptance. The reviewer also found an
+AvroConverter Registry credential/trust gap and two teardown preflight gaps;
+those were fixed and their offline checks pass. The latest local checks include
+44 teardown fixtures, 31 secret/registration fixtures, all affected Go module
+tests, all-workspace TypeScript typecheck, Kafka security parser tests,
+notification tests, Helm validation, Terraform validation and actionlint.
