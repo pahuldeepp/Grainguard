@@ -1,0 +1,9 @@
+{
+  "environment": "local",
+  "execution": "validate-only",
+  "runId": "offline-example-01",
+  "durationSeconds": 60,
+  "offeredRps": 5,
+  "journeys": ["device-ingest", "read-freshness", "alert-create-and-ack"],
+  "cleanupOwner": "greenguard-stage13-offline-example-01"
+}

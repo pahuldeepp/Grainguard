@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import pg from "pg";
-process.loadEnvFile(".env");
+process.loadEnvFile(process.env.GREENGUARD_ENV_FILE ?? ".env");
 const children = [];
 async function freePort() {
   const server = createServer();

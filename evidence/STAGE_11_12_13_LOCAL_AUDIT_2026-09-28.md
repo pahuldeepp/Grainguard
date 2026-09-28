@@ -165,3 +165,39 @@
 These results provide local/static evidence only. They do not establish that
 Stages 11–13 are complete or that the disposable AWS environment is ready for
 `terraform apply`.
+
+## Follow-up verification — 2026-09-28
+
+- The disposable Compose wrapper in `scripts/stage12-compose-gate.mjs` completed
+  `make verify` and `make smoke` using a unique generated environment file,
+  Compose project, host ports, and PostgreSQL volume. It removed only that
+  project and volume after both targets passed. The smoke reported live DB and
+  PgBouncer readiness, unavailable-DB behavior, application-role privileges,
+  and cross-database denial. Risk tests passed 97 with one optional shard-live
+  test skipped; six optional real-Redis tests were skipped. This remains local
+  acceptance, not a full 4-shard or AWS run.
+- The wrapper has static tests for generated control-plane URL/token pairing,
+  explicit recursive Makefile selection, and its generated Makefile behavior
+  (3/3 passed). Workspace tests/builds and Go race/vet/build stages completed
+  in the same isolated verification run.
+- One earlier manual attempt preceded the recursive-Makefile fix and entered
+  the repository's shared migration target before stopping at the existing
+  dirty `greenguard_jobs` migration ledger (version 7). It was not forced or
+  repaired. Subsequent full verification used the corrected wrapper and a
+  newly isolated database. Do not use the shared development database for
+  acceptance until it is backed up and reconciled.
+- Stage 13 now has a validate-only, offline workload-manifest harness. Its
+  five tests cover absent/non-local environment rejection, bounded settings,
+  and exact run-scoped ownership checks. It performs no workload, fault, or
+  cleanup action and explicitly reports `certification: false`; Stage 13 stays
+  planned until live load, soak, and failure exercises are measured.
+- Stage 11 review confirmed the gateway has no application-level RED metrics.
+  A public-listener `/metrics` prototype was rejected and reverted because it
+  would expose unauthenticated telemetry. A separate internal listener and
+  scrape-only policy are still needed. SLO approval, representative load, and
+  production paging remain unproven.
+- The destroy review confirms the verified wrapper runs a post-destroy
+  inventory, but scans the configured account/region plus named global
+  resources only. It cannot prove account-wide, all-region absence of billable
+  GreenGuard resources. Raw `terraform destroy` does not perform that final
+  inventory.
