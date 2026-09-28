@@ -1,0 +1,29 @@
+nameOverride: audit-export-worker
+replicaCount: 1
+deploymentStrategy: Recreate
+terminationGracePeriodSeconds: 90
+pdb: { enabled: false }
+service:
+  enabled: true
+  port: 8098
+  containerPort: 8098
+container:
+  name: audit-export-worker
+  command: ["node"]
+  args: ["services/tenant-control-plane/dist/audit/worker.js"]
+  envFrom:
+    - secretRef:
+        name: audit-export-worker-config
+  env:
+    - { name: AUDIT_EXPORT_HEALTH_PORT, value: "8098" }
+networkPolicy:
+  ingressEnabled: false
+  egressServices:
+    - { namespace: greenguard, name: tenant-control-plane, release: tenant-control-plane, port: 3010 }
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 5, failureThreshold: 24 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 30 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 15 }
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: 1, memory: 1Gi }

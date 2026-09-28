@@ -20,7 +20,7 @@ const input = () => ({
 });
 
 test("initial OIDC admin enrollment accepts opaque external sub and replays exactly", async () => {
-  const entry = { ...input(), subject: "auth0|operator-abc-123" };
+  const entry = { ...input(), subject: `auth0|operator-${randomUUID()}` };
   assert.equal(await enrollFirstAdmin(db, entry), "created");
   assert.equal(await enrollFirstAdmin(db, entry), "existing");
   assert.deepEqual(await lookupMembership(db, entry.issuer, entry.subject), {
@@ -40,7 +40,10 @@ test("input validation rejects invalid issuer, opaque-sub controls and non-admin
   assert.deepEqual(validateFirstAdminEnrollment(entry), entry);
   assert.throws(
     () =>
-      validateFirstAdminEnrollment({ ...entry, issuer: "http://id.example.test" }),
+      validateFirstAdminEnrollment({
+        ...entry,
+        issuer: "http://id.example.test",
+      }),
     /issuer/,
   );
   assert.throws(

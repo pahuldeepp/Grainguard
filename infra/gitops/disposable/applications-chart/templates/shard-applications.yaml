@@ -1,7 +1,10 @@
 {{- $data := .Values.dataPlane | default dict }}
 {{- if $data.enabled }}
 {{- $shards := $data.shards | default dict }}
+{{- $maintenance := $data.projectionMaintenance | default dict }}
 {{- if $shards }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($maintenance.image | default "")) }}{{ fail "shard projection maintenance requires the immutable projection-builder image" }}{{ end }}
+{{- if not (and (kindIs "slice" $maintenance.rdsCIDRs) (gt (len $maintenance.rdsCIDRs) 0) (le (len $maintenance.rdsCIDRs) 6)) }}{{ fail "shard projection maintenance requires private RDS CIDRs" }}{{ end }}
 {{- $seenHosts := dict (lower $data.rdsHost) true }}
 {{- if ne (len $shards) 4 }}{{ fail "exactly four operational shards s1-s4 are required" }}{{ end }}
 {{- range $id := list "s1" "s2" "s3" "s4" }}
@@ -9,12 +12,13 @@
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($shard.rdsHost | default "")) }}{{ fail (printf "%s requires an RDS endpoint" $id) }}{{ end }}
 {{- if hasKey $seenHosts (lower $shard.rdsHost) }}{{ fail "central and shard RDS endpoints must be distinct" }}{{ end }}
 {{- $_ := set $seenHosts (lower $shard.rdsHost) true }}
-{{- range $key := list "bootstrapSecret" "pgbouncerAuthSecret" "cdcSecret" }}
+{{- range $key := list "bootstrapSecret" "pgbouncerAuthSecret" "cdcSecret" "projectionMaintenanceSecret" }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $shard $key | default "")) }}{{ fail (printf "%s %s must be a Secret name" $id $key) }}{{ end }}
 {{- end }}
 {{- range $app := list
   (dict "name" (printf "%s-rds-bootstrap" $id) "chart" "rds-bootstrap-chart" "wave" "20" "values" (dict "name" (printf "greenguard-%s-rds-bootstrap" $id) "rdsHost" $shard.rdsHost "credentialSecret" $shard.bootstrapSecret "caSecret" (index $data.secrets "rdsCa") "operationalOnly" true))
   (dict "name" (printf "%s-pgbouncer" $id) "chart" "pgbouncer-chart" "wave" "22" "values" (dict "name" (printf "pgbouncer-%s" $id) "image" (index $data.images "pgbouncer") "rdsHost" $shard.rdsHost "authSecret" $shard.pgbouncerAuthSecret "caSecret" (index $data.secrets "rdsCa") "operationalOnly" true))
+  (dict "name" (printf "%s-projection-history-maintenance" $id) "chart" "projection-maintenance-chart" "wave" "26" "values" (dict "name" (printf "projection-history-%s" $id) "shard" $id "image" $maintenance.image "rdsHost" $shard.rdsHost "rdsCIDRs" $maintenance.rdsCIDRs "credentialSecret" $shard.projectionMaintenanceSecret "caSecret" (index $data.secrets "rdsCa")))
 }}
 ---
 apiVersion: argoproj.io/v1alpha1

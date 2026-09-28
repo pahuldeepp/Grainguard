@@ -38,6 +38,32 @@ Details: `evidence/STAGE_10E_LIVE_LOGIN_VALIDATION.md`. The redirect uses the `g
 - Conflict (409/412) is success-equivalent because the alert is no longer in the state the command targeted; the UI should refetch detail to show the real state.
 - Claims are decoded only to scope local data; the BFF remains the authority.
 
+### OIDC client verification boundary
+
+The mobile core currently validates the PKCE state and compares the returned
+ID token's `nonce`, but it only decodes the ID token payload to make that
+comparison. It does **not** verify the ID token signature, issuer, audience,
+or expiry on-device. Do not use decoded ID-token claims as identity or
+authorization evidence. Every API request and the BFF-backed tenant-membership
+lookup independently validate the access token's signature, issuer, audience
+(or the configured Cognito access-token client allowlist), and expiry before
+returning tenant data.
+
+Adding full ID-token verification safely requires both provider and runtime
+support: the mobile deployment configuration must include the exact issuer and
+JWKS endpoint (with a stable `kid` and supported signing algorithm such as
+RS256), and the iOS runtime must provide a maintained platform-backed public
+key verification primitive or standards-compliant WebCrypto
+`SubtleCrypto.importKey`/`verify`, including bounded JWKS caching and refresh
+for key rotation. Hermes currently has no WebCrypto; the shell polyfill only
+implements secure randomness, SHA-256, and encoding, and the mobile core's
+injected `CryptoDeps` has no signature-verification operation. The `jose`
+dependency used by the server verifier is not a mobile dependency and cannot
+be assumed to work in Hermes without that crypto support. We therefore keep
+the server access-token verifier as the security boundary and leave
+on-device ID-token verification as an explicit mobile release-readiness gap;
+do not add a handwritten RSA/JWS verifier as a substitute.
+
 ## Not done
 
 - Physical iPhone run against a deployed HTTPS issuer and BFF; push notifications.

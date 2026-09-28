@@ -6,3 +6,4 @@
 *.tfstate.*
 .terraform/
 .last-destroy-pvs
+.last-destroy-pvs.scope.json

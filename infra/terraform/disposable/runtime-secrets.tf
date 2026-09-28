@@ -9,8 +9,37 @@ variable "runtime_secret_values" {
   }
 }
 
+variable "audit_export_signing_material" {
+  description = "Sensitive Ed25519 signing material for the disposable audit exporter. Supply matching PKCS#8 private and SPKI public PEMs, a key id, and a 32+ byte API link secret; worker startup validates the key pair."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+  validation {
+    condition = length(var.audit_export_signing_material) == 0 || (
+      toset(keys(var.audit_export_signing_material)) == toset(["AUDIT_EXPORT_PRIVATE_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_ID", "AUDIT_EXPORT_LINK_SECRET"]) &&
+      length(try(var.audit_export_signing_material["AUDIT_EXPORT_PRIVATE_KEY_PEM"], "")) > 0 &&
+      length(try(var.audit_export_signing_material["AUDIT_EXPORT_PUBLIC_KEY_PEM"], "")) > 0 &&
+      can(regex("^[A-Za-z0-9._-]{1,64}$", try(var.audit_export_signing_material["AUDIT_EXPORT_PUBLIC_KEY_ID"], ""))) &&
+      length(try(var.audit_export_signing_material["AUDIT_EXPORT_LINK_SECRET"], "")) >= 32
+    )
+    error_message = "Audit export signing material requires exactly the private/public PEM, valid key id, and 32+ character API link secret."
+  }
+}
+
 locals {
   runtime_bootstrap_role_keys = toset(flatten(regexall("(?m)^\\\\getenv\\s+\\S+\\s+(\\S+)\\s*$", file("${path.module}/../../gitops/disposable/rds-bootstrap-chart/files/init-databases.sql"))))
+  # These credentials belong only to the central control and billing databases.
+  # Operational shard bootstrap Secrets must never copy them to every shard.
+  runtime_central_only_bootstrap_role_keys = toset([
+    "CONTROL_DB_PASSWORD",
+    "CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD",
+    "CONTROL_MIGRATOR_PASSWORD",
+    "CONTROL_AUDIT_WORKER_PASSWORD",
+    "BILLING_DB_PASSWORD",
+    "BILLING_MIGRATOR_PASSWORD",
+    "BILLING_AUDIT_READER_PASSWORD",
+  ])
+  runtime_shard_bootstrap_role_keys = setsubtract(local.runtime_bootstrap_role_keys, local.runtime_central_only_bootstrap_role_keys)
   runtime_secret_exact_keys = {
     greenguard-rds-bootstrap  = local.runtime_bootstrap_role_keys
     greenguard-rds-ca         = toset(["ca.pem"])
@@ -42,13 +71,41 @@ locals {
       key => try(var.runtime_secret_values["notification-service-config"][key], "")
     }
   } : {}
-  runtime_secret_input_names = setunion(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))), nonsensitive(toset(keys(local.generated_runtime_values))))
+  generated_projection_maintenance_values = var.enable_application_tree ? {
+    for shard_id, shard in aws_db_instance.shard : "greenguard-${shard_id}-projection-history-maintenance-config" => {
+      PROJECTION_MAINTENANCE_URL    = "postgresql://projection_history_maintainer:${replace(urlencode(try(var.shard_role_passwords[shard_id]["PROJECTION_HISTORY_MAINTAINER_PASSWORD"], "")), "+", "%20")}@${shard.address}:5432/greenguard_read?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem"
+      PROJECTION_HISTORY_SCHEMA     = "public"
+      PROJECTION_HISTORY_HOT_WINDOW = "24h"
+      PROJECTION_HISTORY_AHEAD_DAYS = "3"
+    }
+  } : {}
+  generated_audit_export_values = var.enable_application_tree ? {
+    "audit-export-worker-config" = {
+      CONTROL_AUDIT_DATABASE_URL   = "postgresql://control_audit_worker:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_AUDIT_WORKER_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+      BILLING_AUDIT_DATABASE_URL   = "postgresql://billing_audit_reader:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["BILLING_AUDIT_READER_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_billing?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+      CONTROL_LOOKUP_TOKEN         = try(var.runtime_secret_values["tenant-control-plane-config"]["CONTROL_LOOKUP_TOKEN"], "")
+      AUDIT_EXPORT_PRIVATE_KEY_PEM = try(var.audit_export_signing_material["AUDIT_EXPORT_PRIVATE_KEY_PEM"], "")
+      AUDIT_EXPORT_PUBLIC_KEY_PEM  = try(var.audit_export_signing_material["AUDIT_EXPORT_PUBLIC_KEY_PEM"], "")
+      AUDIT_EXPORT_PUBLIC_KEY_ID   = try(var.audit_export_signing_material["AUDIT_EXPORT_PUBLIC_KEY_ID"], "")
+      AUDIT_EXPORT_S3_BUCKET       = aws_s3_bucket.audit_exports.id
+      AUDIT_EXPORT_S3_REGION       = var.aws_region
+    }
+  } : {}
+  generated_all_runtime_values = merge(local.generated_runtime_values, local.generated_projection_maintenance_values, local.generated_audit_export_values)
+  runtime_secret_input_names   = setunion(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))), nonsensitive(toset(keys(local.generated_all_runtime_values))))
   runtime_secret_owned_values = {
-    for name, values in merge(var.runtime_secret_values, local.generated_migration_values, local.generated_runtime_values) : name => merge(
+    for name, values in merge(var.runtime_secret_values, local.generated_migration_values, local.generated_all_runtime_values) : name => merge(
       { for key, value in values : key => value if !contains([for config, profile in local.runtime_database_profiles : profile.key if !contains(["tenant-control-plane-config", "billing-service-config"], config)], key) },
       name == "tenant-control-plane-config" ? { CONTROL_ENTITLEMENT_PROJECTOR_URL = "postgresql://control_entitlement_projector:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem" } : {},
       name == "notification-contacts-projector-config" ? { NOTIFICATION_STATE_TABLE = aws_dynamodb_table.notification_state[0].name, AWS_REGION = var.aws_region } : {},
       name == "eventbridge-bridge-config" ? { AWS_REGION = var.aws_region, AWS_ACCOUNT_ID = var.target_account_id } : {},
+      name == "tenant-control-plane-config" && var.enable_application_tree ? {
+        AUDIT_EXPORT_S3_BUCKET      = aws_s3_bucket.audit_exports.id
+        AUDIT_EXPORT_S3_REGION      = var.aws_region
+        AUDIT_EXPORT_PUBLIC_KEY_PEM = try(var.audit_export_signing_material["AUDIT_EXPORT_PUBLIC_KEY_PEM"], "")
+        AUDIT_EXPORT_LINK_SECRET    = try(var.audit_export_signing_material["AUDIT_EXPORT_LINK_SECRET"], "")
+        BILLING_DATABASE_URL        = "postgresql://billing_app:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["BILLING_DB_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_billing?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+      } : {},
       contains(["tenant-control-plane-config", "billing-service-config"], name) ? {
         (local.runtime_database_profiles[name].key) = "postgresql://${local.runtime_database_profiles[name].role}:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"][local.runtime_database_profiles[name].password_key], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/${local.runtime_database_profiles[name].database}?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
       } : {}
@@ -86,6 +143,10 @@ resource "aws_secretsmanager_secret_version" "runtime" {
       condition     = each.key != "notification-contacts-projector-config" || alltrue([for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] : try(length(trimspace(var.runtime_secret_values["notification-service-config"][key])) > 0, false)])
       error_message = "The contacts projector needs broker and Registry credentials copied from notification-service-config."
     }
+    precondition {
+      condition     = each.key != "audit-export-worker-config" || (toset(keys(var.audit_export_signing_material)) == toset(["AUDIT_EXPORT_PRIVATE_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_ID", "AUDIT_EXPORT_LINK_SECRET"]) && try(length(var.runtime_secret_values["tenant-control-plane-config"]["CONTROL_LOOKUP_TOKEN"]) >= 32, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_AUDIT_WORKER_PASSWORD"]) > 0, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["BILLING_AUDIT_READER_PASSWORD"]) > 0, false))
+      error_message = "Audit export needs a complete Ed25519 key contract, control lookup token, and dedicated central database role passwords."
+    }
   }
 }
 
@@ -96,7 +157,7 @@ resource "terraform_data" "runtime_secret_sync" {
   depends_on       = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing, terraform_data.runtime_secret_cleanup]
   lifecycle {
     precondition {
-      condition     = local.runtime_secret_input_names == var.secret_names && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))))) == 0 && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_runtime_values))))) == 0
+      condition     = local.runtime_secret_input_names == var.secret_names && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))))) == 0 && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_all_runtime_values))))) == 0
       error_message = "Application bootstrap requires Terraform-owned values for every approved secret container and no extra values."
     }
   }

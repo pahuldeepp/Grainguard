@@ -96,6 +96,16 @@
       "health": "/readyz"
     },
     {
+      "name": "audit-export-worker",
+      "chart": "greenguard-service",
+      "profile": "audit-export-worker",
+      "image": "tenant-control-plane",
+      "phase": "applications",
+      "secret": "audit-export-worker-config",
+      "health": "/readyz",
+      "kafka": false
+    },
+    {
       "name": "workflow-alerts",
       "chart": "greenguard-service",
       "profile": "workflow-alerts",
@@ -319,6 +329,12 @@
       "kafkaPrincipal": "notification-service",
       "health": "/readyz"
     }
+  ],
+  "scheduledTasks": [
+    { "name": "projection-history-s1", "image": "projection-builder", "shard": "s1", "secret": "greenguard-s1-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s1-initial" },
+    { "name": "projection-history-s2", "image": "projection-builder", "shard": "s2", "secret": "greenguard-s2-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s2-initial" },
+    { "name": "projection-history-s3", "image": "projection-builder", "shard": "s3", "secret": "greenguard-s3-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s3-initial" },
+    { "name": "projection-history-s4", "image": "projection-builder", "shard": "s4", "secret": "greenguard-s4-projection-history-maintenance-config", "schedule": "*/10 * * * *", "initialJob": "projection-history-s4-initial" }
   ],
   "blockingGaps": [
     "Terraform owns seven locally archived controller releases with checked SHA-256 locks and an optional GitOps root, but the default private EKS API is unreachable from an external Terraform runner; live CRD/webhook/application health remain unproven",

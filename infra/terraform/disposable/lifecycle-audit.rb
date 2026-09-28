@@ -40,12 +40,17 @@ def findings(sources = nil)
   code = ->(file) { source(file).lines.reject { |line| line.lstrip.start_with?('#') }.join }
   wrapper = code.call('destroy-verified.sh')
   pre = code.call('pre-destroy.sh')
+  teardown = code.call('teardown.tf')
   inventory = code.call('check-teardown.sh')
   ordered = lambda do |body, *steps|
     positions = steps.map { |step| body.index(step) }
     positions.none?(&:nil?) && positions.each_cons(2).all? { |a, b| a < b }
   end
   contracts = {
+    'verified_destroy_wrapper_guard' => ['teardown.tf',
+      teardown.include?('GG_VERIFIED_DESTROY_SCOPE') &&
+      teardown.include?('terraform destroy must be run through destroy-verified.sh') &&
+      wrapper.include?('GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}"')],
     'partial_apply_before_eks' => ['destroy-verified.sh',
       code.call('scope_override.tf').include?('terraform_data.cell_scope.output.cluster_name') &&
       wrapper.include?('"$terraform_bin" show -json') &&
@@ -64,9 +69,11 @@ def findings(sources = nil)
   contracts.each do |id, (file, satisfied)|
     findings << { id: id, file: file, remediation: 'Restore the executable scope, guard, preflight and fail-closed teardown ordering; run teardown_test.sh.' } unless satisfied
   end
-  # No supported post-destroy graph contract exists today. A magic marker cannot close this gap.
+  # Terraform destroy provisioners run before their resource is deleted and
+  # cannot guarantee a post-destroy inventory. The wrapper is the only path
+  # that can check after Terraform has removed the full state.
   findings << { id: 'raw_destroy_no_post_inventory', file: 'teardown.tf',
-                remediation: 'Use destroy-verified.sh for final inventory. Raw terraform destroy has no supported guaranteed post-destroy inventory; an executable graph or external orchestration contract and failure fixtures are required to close this finding.' }
+                remediation: 'Use destroy-verified.sh. Ordinary raw terraform destroy now fails its scope guard, but Terraform has no supported post-destroy provisioner; the wrapper must inventory after state deletion. The marker is an operational guard, not a security boundary.' }
   findings
 ensure
   @sources = nil

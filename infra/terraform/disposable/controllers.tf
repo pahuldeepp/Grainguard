@@ -13,6 +13,35 @@ provider "helm" {
   }
 }
 
+# Terraform's Helm provider runs on the operator machine. Prove that this
+# runner can reach and authenticate to the newly created EKS API before the
+# first chart mutation, especially when the endpoint is private.
+resource "terraform_data" "eks_api_reachability" {
+  input = {
+    account_id   = var.target_account_id
+    region       = var.aws_region
+    cluster_name = aws_eks_cluster.cell.name
+    environment  = var.environment
+  }
+  triggers_replace = [
+    aws_eks_cluster.cell.endpoint,
+    aws_eks_cluster.cell.certificate_authority[0].data,
+    aws_eks_cluster.cell.name,
+    var.target_account_id,
+  ]
+  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin]
+
+  provisioner "local-exec" {
+    command = "python3 \"${path.module}/check-eks-api-reachability.py\""
+    environment = {
+      GG_EKS_ACCOUNT_ID   = self.input.account_id
+      GG_EKS_REGION       = self.input.region
+      GG_EKS_CLUSTER_NAME = self.input.cluster_name
+      GG_EKS_ENVIRONMENT  = self.input.environment
+    }
+  }
+}
+
 resource "helm_release" "aws_load_balancer_controller" {
   name      = "aws-load-balancer-controller"
   namespace = "kube-system"
@@ -33,6 +62,7 @@ resource "helm_release" "aws_load_balancer_controller" {
     aws_eks_node_group.general,
     aws_eks_access_policy_association.cluster_admin,
     aws_eks_pod_identity_association.alb_controller,
+    terraform_data.eks_api_reachability,
   ]
 }
 
@@ -45,7 +75,7 @@ resource "helm_release" "istio_base" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin]
+  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
 }
 
 resource "helm_release" "istiod" {
@@ -90,7 +120,7 @@ resource "helm_release" "keda" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin]
+  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
 }
 
 resource "helm_release" "argo_rollouts" {
@@ -102,7 +132,7 @@ resource "helm_release" "argo_rollouts" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin]
+  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
 }
 
 resource "helm_release" "argocd" {

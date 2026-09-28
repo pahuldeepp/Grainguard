@@ -25,12 +25,20 @@ cannot infer reachability from a successful EKS create. If choosing the
 existing scoped public endpoint option, retain its operator `/32` restrictions
 and account guards; never broaden access to bypass connectivity.
 
-A preflight cannot contact an EKS endpoint that has not been created yet.
-The deployment orchestrator must own infrastructure creation followed by a
-reachability gate and application deployment, or run from an already routed
-runner. The existing incomplete deployment readiness gate remains in force;
-this runner does not make the root ready or bypass that gate. Helm `atomic`,
-`wait`, and timeouts cover their release operations, not application journeys.
+The Terraform graph runs `check-eks-api-reachability.py` after EKS, the general
+node group, and cluster-admin access are ready, but before its first Helm
+release. It checks the exact AWS account and cluster, `ACTIVE` state, a
+temporary kubeconfig, API `/readyz`, and Kubernetes read authorization. A
+private endpoint still requires the Terraform runner to have VPN or in-VPC
+routing; this gate makes a missing route fail before controller charts start.
+It does not provision a VPN/runner or allow a disconnected laptop to finish the
+apply. Its fixture tests are offline and do not prove live endpoint reachability.
+
+The first-run graph creates infrastructure, then checks runner reachability,
+then installs controllers. The existing incomplete deployment readiness gate
+remains in force; these checks do not make the root ready or bypass that gate.
+Helm `atomic`, `wait`, and timeouts cover their release operations, not
+application journeys.
 
 ## Read-only automatic application health gate
 

@@ -27,12 +27,17 @@ interface TenantTable {
   dependencies: Set<string>;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHARD = /^s[1-4]$/;
 const identifier = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
 function validateIdentity(value: OwnerIdentity): void {
-  if (!SHARD.test(value.shardId) || !UUID.test(value.incarnation) || !/^[1-9][0-9]*$/.test(value.epoch)) {
+  if (
+    !SHARD.test(value.shardId) ||
+    !UUID.test(value.incarnation) ||
+    !/^[1-9][0-9]*$/.test(value.epoch)
+  ) {
     throw new Error("invalid owner identity");
   }
 }
@@ -71,7 +76,10 @@ async function inspectTables(client: PoolClient): Promise<TenantTable[]> {
     if (row.is_primary_key) table.primaryKey.push(row.column_name);
     byName.set(row.table_name, table);
   }
-  const fk = await client.query<{ table_name: string; foreign_table_name: string }>(`
+  const fk = await client.query<{
+    table_name: string;
+    foreign_table_name: string;
+  }>(`
     SELECT child.relname AS table_name, parent.relname AS foreign_table_name
     FROM pg_constraint con
     JOIN pg_class child ON child.oid=con.conrelid
@@ -82,10 +90,13 @@ async function inspectTables(client: PoolClient): Promise<TenantTable[]> {
         AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped)
       AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=parent.oid
         AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped)`);
-  for (const edge of fk.rows) byName.get(edge.table_name)?.dependencies.add(edge.foreign_table_name);
+  for (const edge of fk.rows)
+    byName.get(edge.table_name)?.dependencies.add(edge.foreign_table_name);
   const tables = [...byName.values()];
   if (tables.some((table) => table.primaryKey.length === 0)) {
-    throw new Error("tenant table without a primary key requires an explicit move adapter");
+    throw new Error(
+      "tenant table without a primary key requires an explicit move adapter",
+    );
   }
   return topologicalTables(tables);
 }
@@ -95,9 +106,14 @@ function topologicalTables(tables: TenantTable[]): TenantTable[] {
   const ordered: TenantTable[] = [];
   while (pending.size) {
     const ready = [...pending.values()]
-      .filter((table) => [...table.dependencies].every((name) => !pending.has(name)))
+      .filter((table) =>
+        [...table.dependencies].every((name) => !pending.has(name)),
+      )
       .sort((a, b) => a.name.localeCompare(b.name));
-    if (!ready.length) throw new Error("tenant table foreign-key cycle requires an explicit move adapter");
+    if (!ready.length)
+      throw new Error(
+        "tenant table foreign-key cycle requires an explicit move adapter",
+      );
     for (const table of ready) {
       pending.delete(table.name);
       ordered.push(table);
@@ -108,17 +124,25 @@ function topologicalTables(tables: TenantTable[]): TenantTable[] {
 
 function canonical(value: unknown): string {
   if (value === null || value === undefined) return "null";
-  if (Buffer.isBuffer(value)) return JSON.stringify({ bytea: value.toString("hex") });
-  if (value instanceof Date) return JSON.stringify({ timestamp: value.toISOString() });
+  if (Buffer.isBuffer(value))
+    return JSON.stringify({ bytea: value.toString("hex") });
+  if (value instanceof Date)
+    return JSON.stringify({ timestamp: value.toISOString() });
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
 
-function digestRows(tables: TenantTable[], rowsByTable: Map<string, QueryResultRow[]>): { sha256: string; rowCount: bigint } {
+function digestRows(
+  tables: TenantTable[],
+  rowsByTable: Map<string, QueryResultRow[]>,
+): { sha256: string; rowCount: bigint } {
   const hash = createHash("sha256");
   let rowCount = 0n;
   for (const table of tables) {
@@ -132,14 +156,35 @@ function digestRows(tables: TenantTable[], rowsByTable: Map<string, QueryResultR
   return { sha256: hash.digest("hex"), rowCount };
 }
 
-async function assertOwner(client: PoolClient, tenantId: string, identity: OwnerIdentity, state: "fenced" | "prepared"): Promise<void> {
-  const result = await client.query<{ shard_id: string; incarnation: string; epoch: string; state: string }>(`
+async function assertOwner(
+  client: PoolClient,
+  tenantId: string,
+  identity: OwnerIdentity,
+  state: "fenced" | "prepared",
+): Promise<void> {
+  const result = await client.query<{
+    shard_id: string;
+    incarnation: string;
+    epoch: string;
+    state: string;
+  }>(
+    `
     SELECT shard_id, shard_incarnation::text AS incarnation,
       placement_epoch::text AS epoch,state
-    FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1::uuid`, [tenantId]);
+    FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1::uuid`,
+    [tenantId],
+  );
   const owner = result.rows[0];
-  if (!owner || owner.shard_id !== identity.shardId || owner.incarnation !== identity.incarnation || owner.epoch !== identity.epoch || owner.state !== state) {
-    throw new Error(`owner placement does not match required ${state} identity`);
+  if (
+    !owner ||
+    owner.shard_id !== identity.shardId ||
+    owner.incarnation !== identity.incarnation ||
+    owner.epoch !== identity.epoch ||
+    owner.state !== state
+  ) {
+    throw new Error(
+      `owner placement does not match required ${state} identity`,
+    );
   }
 }
 
@@ -150,41 +195,151 @@ export interface MoveReceipt {
   [key: string]: unknown;
 }
 
-async function callReceipt(pool: Pool, sql: string, values: unknown[]): Promise<MoveReceipt> {
+async function callReceipt(
+  pool: Pool,
+  sql: string,
+  values: unknown[],
+): Promise<MoveReceipt> {
   const result = await pool.query<{ receipt: MoveReceipt }>(sql, values);
-  if (!result.rows[0]?.receipt || typeof result.rows[0].receipt !== "object") throw new Error("owner move procedure returned no receipt");
+  if (!result.rows[0]?.receipt || typeof result.rows[0].receipt !== "object")
+    throw new Error("owner move procedure returned no receipt");
   return result.rows[0].receipt;
 }
 
-function assertReceiptIdentity(receipt: MoveReceipt, tenantId: string, operationId: string, phase: string, source: OwnerIdentity, target: OwnerIdentity): void {
-  if (receipt.tenantId !== tenantId || receipt.operationId !== operationId || receipt.phase !== phase ||
-      receipt.sourceShardId !== source.shardId || receipt.sourceIncarnation !== source.incarnation || receipt.sourceEpoch !== source.epoch ||
-      receipt.targetShardId !== target.shardId || receipt.targetIncarnation !== target.incarnation || receipt.targetEpoch !== target.epoch) {
-    throw new Error(`owner ${phase} receipt is not bound to the requested tenant move: ${JSON.stringify(receipt)}`);
+function assertReceiptIdentity(
+  receipt: MoveReceipt,
+  tenantId: string,
+  operationId: string,
+  phase: string,
+  source: OwnerIdentity,
+  target: OwnerIdentity,
+): void {
+  if (
+    receipt.tenantId !== tenantId ||
+    receipt.operationId !== operationId ||
+    receipt.phase !== phase ||
+    receipt.sourceShardId !== source.shardId ||
+    receipt.sourceIncarnation !== source.incarnation ||
+    receipt.sourceEpoch !== source.epoch ||
+    receipt.targetShardId !== target.shardId ||
+    receipt.targetIncarnation !== target.incarnation ||
+    receipt.targetEpoch !== target.epoch
+  ) {
+    throw new Error(
+      `owner ${phase} receipt is not bound to the requested tenant move: ${JSON.stringify(receipt)}`,
+    );
   }
 }
 
-export async function prepareRiskMoveTarget(pool: Pool, tenantId: string, operationId: string, source: OwnerIdentity, target: OwnerIdentity): Promise<MoveReceipt> {
-  const receipt = await callReceipt(pool, `SELECT greenguard_internal.prepare_tenant_move_target($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint) AS receipt`,
-    [tenantId, operationId, source.shardId, source.incarnation, source.epoch, target.shardId, target.incarnation, target.epoch]);
-  assertReceiptIdentity(receipt, tenantId, operationId, "target_prepared", source, target);
-  if (receipt.state !== "prepared" || receipt.shardId !== target.shardId || receipt.epoch !== target.epoch) throw new Error("Risk target preparation receipt is invalid");
+export async function prepareRiskMoveTarget(
+  pool: Pool,
+  tenantId: string,
+  operationId: string,
+  source: OwnerIdentity,
+  target: OwnerIdentity,
+): Promise<MoveReceipt> {
+  const receipt = await callReceipt(
+    pool,
+    `SELECT greenguard_internal.prepare_tenant_move_target($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint) AS receipt`,
+    [
+      tenantId,
+      operationId,
+      source.shardId,
+      source.incarnation,
+      source.epoch,
+      target.shardId,
+      target.incarnation,
+      target.epoch,
+    ],
+  );
+  assertReceiptIdentity(
+    receipt,
+    tenantId,
+    operationId,
+    "target_prepared",
+    source,
+    target,
+  );
+  if (
+    receipt.state !== "prepared" ||
+    receipt.shardId !== target.shardId ||
+    receipt.epoch !== target.epoch
+  )
+    throw new Error("Risk target preparation receipt is invalid");
   return receipt;
 }
 
-export async function fenceRiskMoveSource(pool: Pool, tenantId: string, operationId: string, source: OwnerIdentity, target: OwnerIdentity): Promise<MoveReceipt> {
-  const receipt = await callReceipt(pool, `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint) AS receipt`,
-    [tenantId, operationId, source.shardId, source.incarnation, source.epoch, target.shardId, target.incarnation, target.epoch]);
-  assertReceiptIdentity(receipt, tenantId, operationId, "source_fenced", source, target);
-  if (receipt.state !== "fenced" || receipt.shardId !== source.shardId || receipt.epoch !== source.epoch) throw new Error("Risk source fence receipt is invalid");
+export async function fenceRiskMoveSource(
+  pool: Pool,
+  tenantId: string,
+  operationId: string,
+  source: OwnerIdentity,
+  target: OwnerIdentity,
+): Promise<MoveReceipt> {
+  const receipt = await callReceipt(
+    pool,
+    `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint) AS receipt`,
+    [
+      tenantId,
+      operationId,
+      source.shardId,
+      source.incarnation,
+      source.epoch,
+      target.shardId,
+      target.incarnation,
+      target.epoch,
+    ],
+  );
+  assertReceiptIdentity(
+    receipt,
+    tenantId,
+    operationId,
+    "source_fenced",
+    source,
+    target,
+  );
+  if (
+    receipt.state !== "fenced" ||
+    receipt.shardId !== source.shardId ||
+    receipt.epoch !== source.epoch
+  )
+    throw new Error("Risk source fence receipt is invalid");
   return receipt;
 }
 
-export async function recordRiskMoveCopy(pool: Pool, evidence: CopyEvidence): Promise<MoveReceipt> {
-  const receipt = await callReceipt(pool, `SELECT greenguard_internal.record_tenant_move_copy($1::uuid,$2::uuid,$3,$4,$5::bigint,$6::integer) AS receipt`,
-    [evidence.tenantId, evidence.operationId, evidence.sourceSha256, evidence.targetSha256, evidence.rowCount, evidence.tableCount]);
-  assertReceiptIdentity(receipt, evidence.tenantId, evidence.operationId, "copy_verified", evidence.source, evidence.target);
-  if (receipt.sourceSha256 !== evidence.sourceSha256 || receipt.targetSha256 !== evidence.targetSha256 || receipt.rowCount !== evidence.rowCount || receipt.tableCount !== evidence.tableCount) throw new Error("Risk copy receipt differs from verified snapshot evidence");
+export async function recordRiskMoveCopy(
+  pool: Pool,
+  evidence: CopyEvidence,
+): Promise<MoveReceipt> {
+  const receipt = await callReceipt(
+    pool,
+    `SELECT greenguard_internal.record_tenant_move_copy($1::uuid,$2::uuid,$3,$4,$5::bigint,$6::integer) AS receipt`,
+    [
+      evidence.tenantId,
+      evidence.operationId,
+      evidence.sourceSha256,
+      evidence.targetSha256,
+      evidence.rowCount,
+      evidence.tableCount,
+    ],
+  );
+  assertReceiptIdentity(
+    receipt,
+    evidence.tenantId,
+    evidence.operationId,
+    "copy_verified",
+    evidence.source,
+    evidence.target,
+  );
+  if (
+    receipt.sourceSha256 !== evidence.sourceSha256 ||
+    receipt.targetSha256 !== evidence.targetSha256 ||
+    receipt.rowCount !== evidence.rowCount ||
+    receipt.tableCount !== evidence.tableCount
+  )
+    throw new Error(
+      "Risk copy receipt differs from verified snapshot evidence",
+    );
   return receipt;
 }
 
@@ -194,16 +349,48 @@ export async function activateRiskMoveTarget(
   operationId: string,
   source: OwnerIdentity,
   target: OwnerIdentity,
-  route: { tenantId: string; shardId: string; placementEpoch: string; state: string },
+  route: {
+    tenantId: string;
+    shardId: string;
+    placementEpoch: string;
+    state: string;
+  },
 ): Promise<MoveReceipt> {
-  if (route.tenantId !== tenantId || route.shardId !== target.shardId || route.placementEpoch !== target.epoch || route.state !== "activating") {
-    throw new Error("control-plane placement is not switched to this target; activation is refused");
+  if (
+    route.tenantId !== tenantId ||
+    route.shardId !== target.shardId ||
+    route.placementEpoch !== target.epoch ||
+    route.state !== "activating"
+  ) {
+    throw new Error(
+      "control-plane placement is not switched to this target; activation is refused",
+    );
   }
-  const receipt = await callReceipt(pool, `SELECT greenguard_internal.activate_tenant_move_target($1::uuid,$2::uuid) AS receipt`, [tenantId, operationId]);
-  assertReceiptIdentity(receipt, tenantId, operationId, "target_activated", source, target);
-  if (receipt.tenantId !== tenantId || receipt.operationId !== operationId || receipt.phase !== "target_activated" ||
-      receipt.shardId !== target.shardId || receipt.incarnation !== target.incarnation || receipt.epoch !== target.epoch || receipt.state !== "active" ||
-      typeof receipt.sourceSha256 !== "string" || receipt.sourceSha256 !== receipt.targetSha256 || !/^[0-9a-f]{64}$/.test(receipt.sourceSha256)) {
+  const receipt = await callReceipt(
+    pool,
+    `SELECT greenguard_internal.activate_tenant_move_target($1::uuid,$2::uuid) AS receipt`,
+    [tenantId, operationId],
+  );
+  assertReceiptIdentity(
+    receipt,
+    tenantId,
+    operationId,
+    "target_activated",
+    source,
+    target,
+  );
+  if (
+    receipt.tenantId !== tenantId ||
+    receipt.operationId !== operationId ||
+    receipt.phase !== "target_activated" ||
+    receipt.shardId !== target.shardId ||
+    receipt.incarnation !== target.incarnation ||
+    receipt.epoch !== target.epoch ||
+    receipt.state !== "active" ||
+    typeof receipt.sourceSha256 !== "string" ||
+    receipt.sourceSha256 !== receipt.targetSha256 ||
+    !/^[0-9a-f]{64}$/.test(receipt.sourceSha256)
+  ) {
     throw new Error("Risk target activation receipt is invalid");
   }
   return receipt;
@@ -226,52 +413,99 @@ export async function copyTenantSnapshot(
   if (!UUID.test(operationId)) throw new Error("invalid move operation id");
   validateIdentity(source);
   validateIdentity(target);
-  if (source.shardId === target.shardId || BigInt(target.epoch) <= BigInt(source.epoch)) throw new Error("target placement must advance to another shard");
+  if (
+    source.shardId === target.shardId ||
+    BigInt(target.epoch) <= BigInt(source.epoch)
+  )
+    throw new Error("target placement must advance to another shard");
 
   const sourceClient = await sourcePool.connect();
   const targetClient = await targetPool.connect();
   try {
     await sourceClient.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    await sourceClient.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
+    await sourceClient.query("SELECT set_config('app.tenant_id',$1,true)", [
+      tenantId,
+    ]);
     await assertOwner(sourceClient, tenantId, source, "fenced");
     const tables = await inspectTables(sourceClient);
     const sourceRows = new Map<string, QueryResultRow[]>();
     for (const table of tables) {
-      const selected = table.columns.map((column) => table.types.get(column)?.startsWith("json")
-        ? `${identifier(column)}::text AS ${identifier(column)}`
-        : identifier(column)).join(",");
-      const result = await sourceClient.query(`SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`, [tenantId]);
+      const selected = table.columns
+        .map((column) =>
+          table.types.get(column)?.startsWith("json")
+            ? `${identifier(column)}::text AS ${identifier(column)}`
+            : identifier(column),
+        )
+        .join(",");
+      const result = await sourceClient.query(
+        `SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`,
+        [tenantId],
+      );
       sourceRows.set(table.name, result.rows);
     }
     const sourceEvidence = digestRows(tables, sourceRows);
 
     await targetClient.query("BEGIN");
-    await targetClient.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
-    await targetClient.query("SELECT set_config('app.shard_id',$1,true)", [target.shardId]);
-    await targetClient.query("SELECT set_config('app.shard_incarnation',$1,true)", [target.incarnation]);
-    await targetClient.query("SELECT set_config('app.placement_epoch',$1,true)", [target.epoch]);
-    await targetClient.query("SELECT set_config('app.tenant_move_operation_id',$1,true)", [operationId]);
+    await targetClient.query("SELECT set_config('app.tenant_id',$1,true)", [
+      tenantId,
+    ]);
+    await targetClient.query("SELECT set_config('app.shard_id',$1,true)", [
+      target.shardId,
+    ]);
+    await targetClient.query(
+      "SELECT set_config('app.shard_incarnation',$1,true)",
+      [target.incarnation],
+    );
+    await targetClient.query(
+      "SELECT set_config('app.placement_epoch',$1,true)",
+      [target.epoch],
+    );
+    await targetClient.query(
+      "SELECT set_config('app.tenant_move_operation_id',$1,true)",
+      [operationId],
+    );
     await assertOwner(targetClient, tenantId, target, "prepared");
     for (const table of tables) {
-      const existing = await targetClient.query(`SELECT 1 FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid LIMIT 1`, [tenantId]);
-      if (existing.rowCount) throw new Error(`target already contains tenant rows in ${table.name}`);
+      const existing = await targetClient.query(
+        `SELECT 1 FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid LIMIT 1`,
+        [tenantId],
+      );
+      if (existing.rowCount)
+        throw new Error(`target already contains tenant rows in ${table.name}`);
       for (const row of sourceRows.get(table.name) ?? []) {
         const columns = table.columns;
         const values = columns.map((column) => row[column]);
-        const placeholders = columns.map((column, index) => `$${index + 1}${table.types.get(column)?.startsWith("json") ? `::${table.types.get(column)}` : ""}`);
-        await targetClient.query(`INSERT INTO public.${identifier(table.name)} (${columns.map(identifier).join(",")}) VALUES (${placeholders.join(",")})`, values);
+        const placeholders = columns.map(
+          (column, index) =>
+            `$${index + 1}${table.types.get(column)?.startsWith("json") ? `::${table.types.get(column)}` : ""}`,
+        );
+        await targetClient.query(
+          `INSERT INTO public.${identifier(table.name)} (${columns.map(identifier).join(",")}) VALUES (${placeholders.join(",")})`,
+          values,
+        );
       }
     }
     const targetRows = new Map<string, QueryResultRow[]>();
     for (const table of tables) {
-      const selected = table.columns.map((column) => table.types.get(column)?.startsWith("json")
-        ? `${identifier(column)}::text AS ${identifier(column)}`
-        : identifier(column)).join(",");
-      const result = await targetClient.query(`SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`, [tenantId]);
+      const selected = table.columns
+        .map((column) =>
+          table.types.get(column)?.startsWith("json")
+            ? `${identifier(column)}::text AS ${identifier(column)}`
+            : identifier(column),
+        )
+        .join(",");
+      const result = await targetClient.query(
+        `SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`,
+        [tenantId],
+      );
       targetRows.set(table.name, result.rows);
     }
     const targetEvidence = digestRows(tables, targetRows);
-    if (sourceEvidence.sha256 !== targetEvidence.sha256 || sourceEvidence.rowCount !== targetEvidence.rowCount) throw new Error("tenant snapshot digest mismatch");
+    if (
+      sourceEvidence.sha256 !== targetEvidence.sha256 ||
+      sourceEvidence.rowCount !== targetEvidence.rowCount
+    )
+      throw new Error("tenant snapshot digest mismatch");
     await targetClient.query("COMMIT");
     await sourceClient.query("COMMIT");
     return {

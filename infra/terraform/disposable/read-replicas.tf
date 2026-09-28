@@ -115,7 +115,7 @@ resource "aws_secretsmanager_secret" "shard_routing" {
   for_each = toset([
     "device-service", "telemetry-ingest", "projection-builder", "risk-engine",
     "workflow-alerts", "jobs-worker", "notification-service", "saga-orchestrator",
-    "hardware-service", "read-api"
+    "hardware-service", "read-api", "audit-export-worker"
   ])
   name                    = "greenguard/${var.environment}/shard-routing/${each.key}"
   recovery_window_in_days = 0

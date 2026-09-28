@@ -33,6 +33,8 @@ class LifecycleAuditTest < Minitest::Test
 
   def test_contract_regressions_cannot_be_hidden_in_comments
     mutations = [
+      ['teardown.tf', 'GG_VERIFIED_DESTROY_SCOPE', 'GG_UNSCOPED_DESTROY', 'verified_destroy_wrapper_guard'],
+      ['destroy-verified.sh', 'GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}"', 'echo skip marker', 'verified_destroy_wrapper_guard'],
       ['scope_override.tf', 'terraform_data.cell_scope.output.cluster_name', 'missing_scope', 'partial_apply_before_eks'],
       ['destroy-verified.sh', 'if scopes:', 'if False:', 'partial_apply_before_eks'],
       ['destroy-verified.sh', 'if [ "$parse_status" -ne 42 ]; then', 'if false; then', 'partial_apply_before_eks'],

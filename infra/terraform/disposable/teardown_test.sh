@@ -141,7 +141,10 @@ echo "terraform $*" >>"$STUB_DIR/calls"
   exit 0
 }
 [ "$1" = show ] && { cat "$STUB_DIR/show_state" 2>/dev/null || printf '%s\n' '{}'; exit 0; }
-[ "$1" = destroy ] && [ ! -f "$STUB_DIR/terraform_error" ] && { rm -f "$STUB_DIR/cluster"; exit 0; }
+[ "$1" = destroy ] && {
+  [ "${GG_VERIFIED_DESTROY_SCOPE:-}" = "123456789012:us-east-1:sandbox:greenguard-sandbox-cell-1" ] || exit 91
+  [ ! -f "$STUB_DIR/terraform_error" ] && { rm -f "$STUB_DIR/cluster"; exit 0; }
+}
 [ ! -f "$STUB_DIR/terraform_error" ]
 EOF
 chmod +x "$work/aws" "$work/kubectl" "$work/sleep" "$work/terraform"
@@ -389,6 +392,7 @@ grep -q 'KMS key inventory failed' "$STUB_DIR/out" &&
 setup wrapper-clean
 GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1 || fail "verified destroy wrapper succeeds on empty inventory"
 grep -q '^terraform destroy$' "$STUB_DIR/calls" &&
+  [ ! -e "$GG_PV_INVENTORY_FILE.scope.json" ] &&
   [ "$(grep -c '^aws sts get-caller-identity' "$STUB_DIR/calls")" -eq 3 ] &&
   [ "$(grep -n '^aws sts get-caller-identity' "$STUB_DIR/calls" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^terraform destroy$' "$STUB_DIR/calls" | cut -d: -f1)" ] &&
   ok "verified wrapper pre-cleans, destroys, then inventories"
@@ -439,7 +443,17 @@ if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/ou
 setup wrapper-inventory-fails
 echo 'arn:aws:ec2:us-east-1:1:natgateway/nat-1' >"$STUB_DIR/tagged"
 if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/out" 2>&1; then fail "remaining resource must fail wrapper"; fi
-grep -q 'natgateway/nat-1' "$STUB_DIR/out" && ok "verified wrapper fails when inventory finds a resource"
+grep -q 'natgateway/nat-1' "$STUB_DIR/out" &&
+  [ -f "$GG_PV_INVENTORY_FILE.scope.json" ] &&
+  [ "$(python3 -c 'import os,stat,sys; print(format(stat.S_IMODE(os.stat(sys.argv[1]).st_mode), "o"))' "$GG_PV_INVENTORY_FILE.scope.json")" = 600 ] &&
+  ok "verified wrapper retains a private retry manifest when inventory finds a resource"
+touch "$STUB_DIR/identity_error"
+printf '%s\n' '{"values":{"root_module":{"resources":[]}}}' >"$STUB_DIR/show_state"
+rm -f "$STUB_DIR/tagged"
+GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1 || fail "saved-scope retry succeeds after Terraform state is empty"
+[ ! -e "$GG_PV_INVENTORY_FILE.scope.json" ] &&
+  grep -q 'terraform destroy' "$STUB_DIR/calls" &&
+  ok "empty-state retry uses the saved exact scope and removes the manifest only after clean inventory"
 
 setup wrapper-master-secret
 echo "$master_secret_arn" >"$STUB_DIR/master_secret_output"

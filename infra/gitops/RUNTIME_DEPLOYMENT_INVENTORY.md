@@ -1,6 +1,6 @@
 # Disposable AWS runtime deployment inventory
 
-Status: audited from repository source; **no AWS deployment has been proven**.
+Status: source inventory refreshed 2026-09-28; **no AWS deployment has been proven**.
 `scripts/check-image-inventory.sh` verifies the published Dockerfiles against
 CI and Terraform ECR repository names. `scripts/helm-validate.sh` verifies
 offline rendering. Neither check supplies an image digest, runtime secrets,
@@ -37,36 +37,40 @@ files are authoritative.
 
 ## Runtime gaps before an end-to-end apply
 
-1. **No GitOps application tree or bootstrap.** `infra/gitops/` has a README
-   and this inventory, but no Argo CD `Application`/`ApplicationSet`, pinned
-   controller installation, deployment ordering, or health gate. Terraform
-   currently has no mechanism to install the charts.
-2. **No deployable environment values.** Image fields deliberately default to
-   empty. CI publishes digest-addressable images to GHCR, while Terraform
-   creates ECR repositories; no promotion or digest transfer connects them.
-   Chart `env`/`envFrom`, data/broker endpoints, secret references, and actual
-   NetworkPolicy peers are not supplied for a disposable environment.
-3. **Data and broker lifecycle missing.** No EKS release or managed resource
-   currently supplies all required PostgreSQL databases, migrations,
-   Kafka/Connect, RabbitMQ, Redis, Cassandra, OpenSearch, MQTT, and object
-   storage with ordered readiness. The local Compose stack is not an AWS
-   deployment definition.
-4. **New runtime artifacts still require live proof.** The six added images and
-   profiles need CI publication, digest promotion, validated environment secrets,
-   data egress, and startup tests in EKS. The search indexer needs a durable
-   `search-indexer-quarantine` PVC and index version selected after migrations.
-   Other `services/*/README.md` directories may be scaffolds and should not be
-   assumed deployable.
-5. **Network and security are static only.** Chart NetworkPolicies permit DNS
+The repository now contains a disposable GitOps application tree, controller
+and data-plane charts, migration gates, secret lifecycle tooling, image digest
+assembly/promotion tooling, and a Terraform bootstrap plus a bounded ready-Pod
+gate. These are source-level deployment mechanisms; their presence does not
+prove a successful AWS deployment. See
+[`disposable/DEPLOYMENT_ORCHESTRATION.md`](disposable/DEPLOYMENT_ORCHESTRATION.md)
+and [`disposable/DATA_PLANE.md`](disposable/DATA_PLANE.md) for the current
+contracts and test boundaries. The fail-closed Terraform readiness gate remains
+in place until the explicitly listed prerequisites and acceptance evidence are
+complete.
+
+1. **First-run requirements remain external or unproven.** Image publication,
+   account-guarded ECR promotion, a routed runner for the private EKS API,
+   operator-supplied identity provider settings and runtime secrets, and live
+   data-service/migration readiness have not been exercised against AWS.
+2. **User enrollment and end-to-end journeys are separate acceptance steps.**
+   A real human must be enrolled through the documented first-admin flow after
+   the control plane is reachable. The configured web and mobile OAuth clients,
+   tenant membership, API journey, telemetry-to-alert/ACK journey, and physical
+   iPhone connection have no live-provider/device proof.
+3. **The workload gate is intentionally narrow.** It checks the exact
+   application workload inventory, immutable images, generations, and ready
+   Pods. It does not prove migrations, database correctness or isolation,
+   authenticated journeys, telemetry/projection/alerts, or mobile behavior.
+4. **Network and security are static only.** Chart NetworkPolicies permit DNS
    and listed pod peers. The environment still needs broker/data/IdP egress,
    ingress gateway and HTTPS routes, actual mesh principals, and a working
    network policy engine. Enabling Istio or KEDA in a chart requires their
    controllers/CRDs to be installed first. Canary analysis requires a live
    Prometheus metric and failed-analysis rollback evidence.
-6. **Healthy Pods do not prove workflows.** Probes are configured for HTTP
-   profiles, but there is no cross-service AWS acceptance sequence covering
-   migrations, login/tenant membership, telemetry to Kafka to projection,
-   dashboard/mobile alerts, ACK, rollback, and teardown.
+5. **Healthy Pods do not prove workflows.** Probes are configured for HTTP
+   profiles, but the cross-service AWS acceptance sequence covering migrations,
+   login/tenant membership, telemetry to Kafka to projection, dashboard/mobile
+   alerts, ACK, rollback, and teardown remains pending.
 
 Stage 11's observability acceptance is incomplete per `docs/STAGE_11_PLAN.md`.
 Stage 12's cluster rollout/mesh/canary/security acceptance is incomplete per

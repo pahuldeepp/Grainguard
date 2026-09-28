@@ -15,11 +15,12 @@ values = {
     'rdsHost' => 'db.example.us-east-1.rds.amazonaws.com',
     'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name, digest] },
     'shards' => {
-      's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth'},
-      's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth'},
-      's3' => {'rdsHost' => 'shard3.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard3-cdc', 'bootstrapSecret' => 'greenguard-s3-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s3-pgbouncer-auth'},
-      's4' => {'rdsHost' => 'shard4.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard4-cdc', 'bootstrapSecret' => 'greenguard-s4-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s4-pgbouncer-auth'}
+      's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s1-projection-history-maintenance-config'},
+      's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s2-projection-history-maintenance-config'},
+      's3' => {'rdsHost' => 'shard3.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard3-cdc', 'bootstrapSecret' => 'greenguard-s3-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s3-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s3-projection-history-maintenance-config'},
+      's4' => {'rdsHost' => 'shard4.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard4-cdc', 'bootstrapSecret' => 'greenguard-s4-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s4-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s4-projection-history-maintenance-config'}
     },
+    'projectionMaintenance' => {'image' => digest, 'rdsCIDRs' => ['10.60.128.0/20']},
     'secrets' => {
       'pgbouncerAuth' => 'greenguard-pgbouncer-auth',
       'rdsCa' => 'greenguard-rds-ca',

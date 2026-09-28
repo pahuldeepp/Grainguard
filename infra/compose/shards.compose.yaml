@@ -1,0 +1,240 @@
+name: greenguard-shards
+services:
+  postgres-s1:
+    extends:
+      file: compose.yaml
+      service: postgres
+    profiles: [sharding]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+    environment:
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_SHARD_NETWORK_CIDR: ${GG_SHARD_NETWORK_CIDR:-172.30.44.0/24}
+      GG_SHARD_ID: s1
+    ports: !override ["127.0.0.1:57431:5432"]
+    volumes: !override
+      - postgres-s1-data:/var/lib/postgresql/data
+      - ./shard-init.sql:/docker-entrypoint-initdb.d/001-shard.sql:ro
+      - ./init-databases.sql:/bootstrap/init-databases.sql:ro
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=${GG_PG_MAX_REPLICATION_SLOTS:-20}
+      - -c
+      - max_wal_senders=${GG_PG_MAX_WAL_SENDERS:-20}
+      - -c
+      - max_connections=${GG_PG_MAX_CONNECTIONS:-250}
+      - -c
+      - max_slot_wal_keep_size=2GB
+      - -c
+      - wal_keep_size=256MB
+  postgres-s1-replica:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    profiles: [sharding]
+    entrypoint: ["/bin/sh", "/bootstrap/shard-replica.sh"]
+    environment:
+      GG_PRIMARY_HOST: postgres-s1
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_PG_MAX_CONNECTIONS: ${GG_PG_MAX_CONNECTIONS:-250}
+      GG_PG_MAX_WAL_SENDERS: ${GG_PG_MAX_WAL_SENDERS:-20}
+      GG_PG_MAX_REPLICATION_SLOTS: ${GG_PG_MAX_REPLICATION_SLOTS:-20}
+    ports: ["127.0.0.1:58431:5432"]
+    volumes:
+      - postgres-s1-replica-data:/var/lib/postgresql/data
+      - ./shard-replica.sh:/bootstrap/shard-replica.sh:ro
+    depends_on:
+      postgres-s1:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(psql -U postgres -d postgres -Atqc 'SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = '"'"'streaming'"'"' AND last_msg_receipt_time >= now() - interval '"'"'90 seconds'"'"' AND latest_end_lsn <= pg_last_wal_replay_lsn())')" = t
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+  postgres-s2:
+    extends:
+      file: compose.yaml
+      service: postgres
+    profiles: [sharding]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+    environment:
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_SHARD_NETWORK_CIDR: ${GG_SHARD_NETWORK_CIDR:-172.30.44.0/24}
+      GG_SHARD_ID: s2
+    ports: !override ["127.0.0.1:57432:5432"]
+    volumes: !override
+      - postgres-s2-data:/var/lib/postgresql/data
+      - ./shard-init.sql:/docker-entrypoint-initdb.d/001-shard.sql:ro
+      - ./init-databases.sql:/bootstrap/init-databases.sql:ro
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=${GG_PG_MAX_REPLICATION_SLOTS:-20}
+      - -c
+      - max_wal_senders=${GG_PG_MAX_WAL_SENDERS:-20}
+      - -c
+      - max_connections=${GG_PG_MAX_CONNECTIONS:-250}
+      - -c
+      - max_slot_wal_keep_size=2GB
+      - -c
+      - wal_keep_size=256MB
+  postgres-s2-replica:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    profiles: [sharding]
+    entrypoint: ["/bin/sh", "/bootstrap/shard-replica.sh"]
+    environment:
+      GG_PRIMARY_HOST: postgres-s2
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_PG_MAX_CONNECTIONS: ${GG_PG_MAX_CONNECTIONS:-250}
+      GG_PG_MAX_WAL_SENDERS: ${GG_PG_MAX_WAL_SENDERS:-20}
+      GG_PG_MAX_REPLICATION_SLOTS: ${GG_PG_MAX_REPLICATION_SLOTS:-20}
+    ports: ["127.0.0.1:58432:5432"]
+    volumes:
+      - postgres-s2-replica-data:/var/lib/postgresql/data
+      - ./shard-replica.sh:/bootstrap/shard-replica.sh:ro
+    depends_on:
+      postgres-s2:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(psql -U postgres -d postgres -Atqc 'SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = '"'"'streaming'"'"' AND last_msg_receipt_time >= now() - interval '"'"'90 seconds'"'"' AND latest_end_lsn <= pg_last_wal_replay_lsn())')" = t
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+  postgres-s3:
+    extends:
+      file: compose.yaml
+      service: postgres
+    profiles: [sharding]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+    environment:
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_SHARD_NETWORK_CIDR: ${GG_SHARD_NETWORK_CIDR:-172.30.44.0/24}
+      GG_SHARD_ID: s3
+    ports: !override ["127.0.0.1:57433:5432"]
+    volumes: !override
+      - postgres-s3-data:/var/lib/postgresql/data
+      - ./shard-init.sql:/docker-entrypoint-initdb.d/001-shard.sql:ro
+      - ./init-databases.sql:/bootstrap/init-databases.sql:ro
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=${GG_PG_MAX_REPLICATION_SLOTS:-20}
+      - -c
+      - max_wal_senders=${GG_PG_MAX_WAL_SENDERS:-20}
+      - -c
+      - max_connections=${GG_PG_MAX_CONNECTIONS:-250}
+      - -c
+      - max_slot_wal_keep_size=2GB
+      - -c
+      - wal_keep_size=256MB
+  postgres-s3-replica:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    profiles: [sharding]
+    entrypoint: ["/bin/sh", "/bootstrap/shard-replica.sh"]
+    environment:
+      GG_PRIMARY_HOST: postgres-s3
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_PG_MAX_CONNECTIONS: ${GG_PG_MAX_CONNECTIONS:-250}
+      GG_PG_MAX_WAL_SENDERS: ${GG_PG_MAX_WAL_SENDERS:-20}
+      GG_PG_MAX_REPLICATION_SLOTS: ${GG_PG_MAX_REPLICATION_SLOTS:-20}
+    ports: ["127.0.0.1:58433:5432"]
+    volumes:
+      - postgres-s3-replica-data:/var/lib/postgresql/data
+      - ./shard-replica.sh:/bootstrap/shard-replica.sh:ro
+    depends_on:
+      postgres-s3:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(psql -U postgres -d postgres -Atqc 'SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = '"'"'streaming'"'"' AND last_msg_receipt_time >= now() - interval '"'"'90 seconds'"'"' AND latest_end_lsn <= pg_last_wal_replay_lsn())')" = t
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+  postgres-s4:
+    extends:
+      file: compose.yaml
+      service: postgres
+    profiles: [sharding]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+    environment:
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_SHARD_NETWORK_CIDR: ${GG_SHARD_NETWORK_CIDR:-172.30.44.0/24}
+      GG_SHARD_ID: s4
+    ports: !override ["127.0.0.1:57434:5432"]
+    volumes: !override
+      - postgres-s4-data:/var/lib/postgresql/data
+      - ./shard-init.sql:/docker-entrypoint-initdb.d/001-shard.sql:ro
+      - ./init-databases.sql:/bootstrap/init-databases.sql:ro
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=${GG_PG_MAX_REPLICATION_SLOTS:-20}
+      - -c
+      - max_wal_senders=${GG_PG_MAX_WAL_SENDERS:-20}
+      - -c
+      - max_connections=${GG_PG_MAX_CONNECTIONS:-250}
+      - -c
+      - max_slot_wal_keep_size=2GB
+      - -c
+      - wal_keep_size=256MB
+  postgres-s4-replica:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    profiles: [sharding]
+    entrypoint: ["/bin/sh", "/bootstrap/shard-replica.sh"]
+    environment:
+      GG_PRIMARY_HOST: postgres-s4
+      GG_REPLICATION_PASSWORD: ${GG_REPLICATION_PASSWORD:?Run node scripts/shards-local.mjs up}
+      GG_PG_MAX_CONNECTIONS: ${GG_PG_MAX_CONNECTIONS:-250}
+      GG_PG_MAX_WAL_SENDERS: ${GG_PG_MAX_WAL_SENDERS:-20}
+      GG_PG_MAX_REPLICATION_SLOTS: ${GG_PG_MAX_REPLICATION_SLOTS:-20}
+    ports: ["127.0.0.1:58434:5432"]
+    volumes:
+      - postgres-s4-replica-data:/var/lib/postgresql/data
+      - ./shard-replica.sh:/bootstrap/shard-replica.sh:ro
+    depends_on:
+      postgres-s4:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(psql -U postgres -d postgres -Atqc 'SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = '"'"'streaming'"'"' AND last_msg_receipt_time >= now() - interval '"'"'90 seconds'"'"' AND latest_end_lsn <= pg_last_wal_replay_lsn())')" = t
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+volumes:
+  postgres-s1-data:
+  postgres-s1-replica-data:
+  postgres-s2-data:
+  postgres-s2-replica-data:
+  postgres-s3-data:
+  postgres-s3-replica-data:
+  postgres-s4-data:
+  postgres-s4-replica-data:
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${GG_SHARD_NETWORK_CIDR:-172.30.44.0/24}

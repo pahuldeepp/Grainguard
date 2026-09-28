@@ -1,5 +1,8 @@
 import { createDb } from "./db/client.js";
-import { enrollFirstAdmin, validateFirstAdminEnrollment } from "./enroll-first-admin.js";
+import {
+  enrollFirstAdmin,
+  validateFirstAdminEnrollment,
+} from "./enroll-first-admin.js";
 import { verifyFirstAdminAccessToken } from "./enroll-first-admin-token.js";
 
 export async function main(
@@ -62,7 +65,11 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-if (process.argv[1]?.endsWith("tenant-control-plane/dist/enroll-first-admin-cli.js")) {
+if (
+  process.argv[1]?.endsWith(
+    "tenant-control-plane/dist/enroll-first-admin-cli.js",
+  )
+) {
   let token = "";
   for await (const chunk of process.stdin) {
     token += chunk;

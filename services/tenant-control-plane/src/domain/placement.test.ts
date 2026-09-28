@@ -56,17 +56,74 @@ async function organization() {
 }
 async function prepared(tenantId: string, op: string) {
   for (const key of ["source_fenced", "target_prepared", "copy_verified"])
-    await recordPlacementMoveReceipt(db, tenantId, op, key, await receipt(tenantId, op, key));
+    await recordPlacementMoveReceipt(
+      db,
+      tenantId,
+      op,
+      key,
+      await receipt(tenantId, op, key),
+    );
 }
 async function receipt(tenantId: string, operationId: string, phase: string) {
   const move = await placementMove(db, tenantId, operationId);
-  const common = { tenantId, operationId, phase, sourceShardId: move.sourceShardId, sourceIncarnation: "11111111-1111-4111-8111-111111111111", sourceEpoch: move.expectedEpoch, targetShardId: move.targetShardId, targetIncarnation: "22222222-2222-4222-8222-222222222222", targetEpoch: (BigInt(move.expectedEpoch) + 1n).toString() };
-  if (phase === "source_fenced") return { ...common, shardId: move.sourceShardId, incarnation: common.sourceIncarnation, epoch: move.expectedEpoch, state: "fenced" };
-  if (phase === "target_prepared") return { ...common, shardId: move.targetShardId, incarnation: common.targetIncarnation, epoch: common.targetEpoch, state: "prepared" };
-  if (phase === "target_activated") return { ...common, shardId: move.targetShardId, incarnation: common.targetIncarnation, epoch: common.targetEpoch, state: "active" };
-  if (phase === "copy_verified" || phase === "baseline_copied") return { ...common, sourceSha256: "a".repeat(64), targetSha256: "a".repeat(64), rowCount: "0", tableCount: 1 };
-  if (phase === "targets_unactivated") return { ...common, shardId: move.targetShardId, incarnation: common.targetIncarnation, state: "absent" };
-  if (phase === "source_reactivated") return { ...common, shardId: move.sourceShardId, incarnation: common.sourceIncarnation, epoch: common.targetEpoch, state: "active" };
+  const common = {
+    tenantId,
+    operationId,
+    phase,
+    sourceShardId: move.sourceShardId,
+    sourceIncarnation: "11111111-1111-4111-8111-111111111111",
+    sourceEpoch: move.expectedEpoch,
+    targetShardId: move.targetShardId,
+    targetIncarnation: "22222222-2222-4222-8222-222222222222",
+    targetEpoch: (BigInt(move.expectedEpoch) + 1n).toString(),
+  };
+  if (phase === "source_fenced")
+    return {
+      ...common,
+      shardId: move.sourceShardId,
+      incarnation: common.sourceIncarnation,
+      epoch: move.expectedEpoch,
+      state: "fenced",
+    };
+  if (phase === "target_prepared")
+    return {
+      ...common,
+      shardId: move.targetShardId,
+      incarnation: common.targetIncarnation,
+      epoch: common.targetEpoch,
+      state: "prepared",
+    };
+  if (phase === "target_activated")
+    return {
+      ...common,
+      shardId: move.targetShardId,
+      incarnation: common.targetIncarnation,
+      epoch: common.targetEpoch,
+      state: "active",
+    };
+  if (phase === "copy_verified" || phase === "baseline_copied")
+    return {
+      ...common,
+      sourceSha256: "a".repeat(64),
+      targetSha256: "a".repeat(64),
+      rowCount: "0",
+      tableCount: 1,
+    };
+  if (phase === "targets_unactivated")
+    return {
+      ...common,
+      shardId: move.targetShardId,
+      incarnation: common.targetIncarnation,
+      state: "absent",
+    };
+  if (phase === "source_reactivated")
+    return {
+      ...common,
+      shardId: move.sourceShardId,
+      incarnation: common.sourceIncarnation,
+      epoch: common.targetEpoch,
+      state: "active",
+    };
   throw new Error(`unknown receipt phase ${phase}`);
 }
 test("registry seeds four stable IDs; legacy organizations retain s1 and all metadata is protected", async () => {
@@ -313,7 +370,13 @@ test("move CAS advances once, requires receipts, blocks admission until activate
     finishPlacementMove(db, tenantId, op, "aborted"),
     PlacementConflictError,
   );
-  await recordPlacementMoveReceipt(db, tenantId, op, "target_activated", await receipt(tenantId, op, "target_activated"));
+  await recordPlacementMoveReceipt(
+    db,
+    tenantId,
+    op,
+    "target_activated",
+    await receipt(tenantId, op, "target_activated"),
+  );
   const done = await finishPlacementMove(db, tenantId, op, "completed");
   assert.equal(done.state, "completed");
   assert.equal((await resolveTenant(db, tenantId)).state, "active");
@@ -352,7 +415,13 @@ test("baseline preparation is durable while writes stay active; quiescing starts
     compareAndSetPlacement(db, tenantId, "1", target, op),
     PlacementConflictError,
   );
-  await recordPlacementMoveReceipt(db, tenantId, op, "baseline_copied", await receipt(tenantId, op, "baseline_copied"));
+  await recordPlacementMoveReceipt(
+    db,
+    tenantId,
+    op,
+    "baseline_copied",
+    await receipt(tenantId, op, "baseline_copied"),
+  );
   assert.equal(
     (await beginPlacementMove(db, tenantId, "1", target, op)).state,
     "quiescing",
@@ -364,7 +433,10 @@ test("empty or negative receipts never permit ownership switch or runtime reacti
   const op = randomUUID();
   await beginPlacementMove(db, tenantId, "1", target, op);
   for (const key of ["source_fenced", "target_prepared", "copy_verified"])
-    await recordPlacementMoveReceipt(db, tenantId, op, key, { ...await receipt(tenantId, op, key), state: "invalid" });
+    await recordPlacementMoveReceipt(db, tenantId, op, key, {
+      ...(await receipt(tenantId, op, key)),
+      state: "invalid",
+    });
   await assert.rejects(
     compareAndSetPlacement(db, tenantId, "1", target, op),
     PlacementConflictError,
@@ -384,15 +456,39 @@ test("operation-bound receipt with a forged target identity cannot authorize pla
   const { tenantId, target } = await organization();
   const op = randomUUID();
   await beginPlacementMove(db, tenantId, "1", target, op);
-  await recordPlacementMoveReceipt(db, tenantId, op, "source_fenced", await receipt(tenantId, op, "source_fenced"));
+  await recordPlacementMoveReceipt(
+    db,
+    tenantId,
+    op,
+    "source_fenced",
+    await receipt(tenantId, op, "source_fenced"),
+  );
   const forged = await receipt(tenantId, op, "target_prepared");
-  await recordPlacementMoveReceipt(db, tenantId, op, "target_prepared", { ...forged, shardId: "s3", targetShardId: "s3" });
-  await recordPlacementMoveReceipt(db, tenantId, op, "copy_verified", await receipt(tenantId, op, "copy_verified"));
-  await assert.rejects(compareAndSetPlacement(db, tenantId, "1", target, op), PlacementConflictError);
+  await recordPlacementMoveReceipt(db, tenantId, op, "target_prepared", {
+    ...forged,
+    shardId: "s3",
+    targetShardId: "s3",
+  });
+  await recordPlacementMoveReceipt(
+    db,
+    tenantId,
+    op,
+    "copy_verified",
+    await receipt(tenantId, op, "copy_verified"),
+  );
+  await assert.rejects(
+    compareAndSetPlacement(db, tenantId, "1", target, op),
+    PlacementConflictError,
+  );
   const move = await placementMove(db, tenantId, op);
-  await assert.rejects(asRuntime({ "app.tenant_id": tenantId },
-    "UPDATE organizations SET shard_id=$2,routing_epoch=2,placement_state='activating' WHERE tenant_id=$1",
-    [tenantId, target]), /matching switched move receipt/);
+  await assert.rejects(
+    asRuntime(
+      { "app.tenant_id": tenantId },
+      "UPDATE organizations SET shard_id=$2,routing_epoch=2,placement_state='activating' WHERE tenant_id=$1",
+      [tenantId, target],
+    ),
+    /matching switched move receipt/,
+  );
   assert.equal(move.state, "quiescing");
 });
 test("only one concurrent move per tenant wins and conflicting operation reuse is rejected", async () => {
@@ -428,7 +524,13 @@ test("pre-switch abort requires positive receipts and fences old epochs", async 
     PlacementConflictError,
   );
   for (const key of ["targets_unactivated", "source_reactivated"])
-    await recordPlacementMoveReceipt(db, tenantId, op, key, await receipt(tenantId, op, key));
+    await recordPlacementMoveReceipt(
+      db,
+      tenantId,
+      op,
+      key,
+      await receipt(tenantId, op, key),
+    );
   const aborted = await finishPlacementMove(db, tenantId, op, "aborted");
   assert.equal(aborted.resultingEpoch, "2");
   const restored = await resolveTenant(db, tenantId);
@@ -446,10 +548,21 @@ test("immutable receipts and forced RLS isolate move ledgers", async () => {
   const op = randomUUID();
   await beginPlacementMove(db, a.tenantId, "1", a.target, op);
   const immutableProof = await receipt(a.tenantId, op, "source_fenced");
-  await recordPlacementMoveReceipt(db, a.tenantId, op, "source_fenced", immutableProof);
-  await recordPlacementMoveReceipt(db, a.tenantId, op, "source_fenced", { ...immutableProof });
+  await recordPlacementMoveReceipt(
+    db,
+    a.tenantId,
+    op,
+    "source_fenced",
+    immutableProof,
+  );
+  await recordPlacementMoveReceipt(db, a.tenantId, op, "source_fenced", {
+    ...immutableProof,
+  });
   await assert.rejects(
-    recordPlacementMoveReceipt(db, a.tenantId, op, "source_fenced", { ...immutableProof, epoch: "9" }),
+    recordPlacementMoveReceipt(db, a.tenantId, op, "source_fenced", {
+      ...immutableProof,
+      epoch: "9",
+    }),
     IdempotencyConflictError,
   );
   assert.equal((await placementMove(db, a.tenantId, op)).expectedEpoch, "1");

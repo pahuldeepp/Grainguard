@@ -28,7 +28,9 @@ export function validateFirstAdminEnrollment(
     !/^https:\/\/[^/?#@\s]+(?:\/[^?#\s]*)?$/.test(issuer) ||
     issuer.length > 512
   )
-    throw new Error("ENROLL_ISSUER must be the exact configured HTTPS OIDC issuer");
+    throw new Error(
+      "ENROLL_ISSUER must be the exact configured HTTPS OIDC issuer",
+    );
   // OIDC `sub` is provider-defined. Auth0, Dex and many other providers use
   // non-UUID subjects, so accept bounded opaque values but reject whitespace
   // and control characters before using it as an identity key.
@@ -36,9 +38,14 @@ export function validateFirstAdminEnrollment(
     typeof subject !== "string" ||
     !subject ||
     subject.length > 512 ||
-    /[\s\u0000-\u001f\u007f]/.test(subject)
+    [...subject].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return /\s/.test(character) || codePoint < 0x20 || codePoint === 0x7f;
+    })
   )
-    throw new Error("ENROLL_SUBJECT must be the verified, bounded OIDC sub claim");
+    throw new Error(
+      "ENROLL_SUBJECT must be the verified, bounded OIDC sub claim",
+    );
   if (typeof tenantId !== "string" || !UUID.test(tenantId))
     throw new Error("ENROLL_TENANT_ID must be a lowercase UUID");
   if (role !== "admin")

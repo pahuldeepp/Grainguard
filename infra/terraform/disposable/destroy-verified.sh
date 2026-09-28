@@ -26,16 +26,65 @@ fi
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
 
-# Read the scope persisted by the last successful apply. This is more reliable
-# than trusting typed inventory arguments after the Terraform state is empty.
-outputs_json="$("$terraform_bin" output -json)" || {
-  echo "destroy-verified: Terraform state outputs unavailable; retain state and inspect it before cleanup" >&2
-  exit 1
-}
+# Read the scope persisted by the last successful apply. A mode-0600 manifest
+# is retained before destruction so a failed final inventory can be retried
+# after Terraform has erased state.
+pv_inventory_file="${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}"
+manifest_file="${pv_inventory_file}.scope.json"
+outputs_json="$("$terraform_bin" output -json 2>/dev/null)" || outputs_json=""
 identity_file="$(mktemp)"
 shard_secrets_file="$(mktemp)"
 partial_state_json=""
 trap 'rm -f "$identity_file" "$shard_secrets_file"' EXIT
+manifest_recovery=false
+if [ -f "$manifest_file" ] || [ -L "$manifest_file" ]; then
+  state_json=""
+  state_is_empty=false
+  if state_json="$("$terraform_bin" show -json 2>/dev/null)"; then
+    if printf '%s' "$state_json" | python3 -c '
+import json, sys
+def managed(module):
+    if any(item.get("mode") == "managed" for item in module.get("resources", [])):
+        return True
+    return any(managed(child) for child in module.get("child_modules", []))
+try:
+    root = json.load(sys.stdin)["values"]["root_module"]
+except (KeyError, TypeError, json.JSONDecodeError):
+    raise SystemExit(1)
+raise SystemExit(1 if managed(root) else 0)
+'; then
+      state_is_empty=true
+    fi
+  elif [ ! -s "$here/terraform.tfstate" ]; then
+    state_is_empty=true
+  fi
+  if [ "$state_is_empty" = true ]; then
+    [ "$#" -eq 4 ] || {
+      echo "destroy-verified: Terraform state is empty; retry must provide the recorded region, environment, cluster and account" >&2
+      exit 1
+    }
+    manifest_json="$(python3 "$here/destroy-scope-manifest.py" read "$manifest_file")" || {
+      echo "destroy-verified: saved cleanup manifest is invalid; refusing recovery" >&2
+      exit 1
+    }
+    printf '%s' "$manifest_json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(" ".join([d["region"], d["environment"], d["cluster_name"], d["account_id"], d["master_secret_arn"]]))
+' >"$identity_file"
+    printf '%s' "$manifest_json" | python3 -c '
+import json, sys
+print("\n".join(json.load(sys.stdin)["shard_master_secret_arns"]))
+' >"$shard_secrets_file"
+    region="${1}"
+    environment="${2}"
+    cluster="${3}"
+    account="${4}"
+    manifest_recovery=true
+  fi
+fi
+
+if [ "$manifest_recovery" != true ]; then
 if printf '%s' "$outputs_json" | python3 -c '
 import json, re, sys
 outputs = json.load(sys.stdin)
@@ -201,6 +250,24 @@ for arn in arns:
         raise SystemExit("destroy-verified: shard master secret ARN does not match saved account/region")
 print("\n".join(dict.fromkeys(arns)))
 ' "$region" "$account" >"$shard_secrets_file" || exit 1
+fi
+
+# Save the scope before pre-cleanup mutates anything. A failed destroy or
+# failed post-destroy inventory deliberately leaves this owner-only manifest
+# behind for an exact retry after Terraform state has disappeared.
+if [ "$manifest_recovery" != true ]; then
+  python3 "$here/destroy-scope-manifest.py" save "$manifest_file" \
+    "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "$shard_secrets_file" || {
+      echo "destroy-verified: could not safely persist cleanup scope; refusing destroy" >&2
+      exit 1
+    }
+fi
+manifest_json="$(python3 "$here/destroy-scope-manifest.py" read "$manifest_file")" || {
+  echo "destroy-verified: persisted cleanup manifest could not be reopened; refusing destroy" >&2
+  exit 1
+}
+master_secret_arn="$(printf '%s' "$manifest_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["master_secret_arn"])')"
+printf '%s' "$manifest_json" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["shard_master_secret_arns"]))' >"$shard_secrets_file"
 
 # Run this idempotent hook before Terraform destroy: an interrupted apply may
 # not yet have created terraform_data.pre_destroy_cleanup, so relying on its
@@ -208,7 +275,8 @@ print("\n".join(dict.fromkeys(arns)))
 # The hook verifies AWS account and Kubernetes access before any deletion.
 GG_CLUSTER="$cluster" GG_REGION="$region" GG_ENVIRONMENT="$environment" GG_ACCOUNT="$account" \
   GG_MASTER_SECRET_ARN="$master_secret_arn" \
-  GG_PV_INVENTORY_FILE="${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}" \
+  GG_PV_INVENTORY_FILE="$pv_inventory_file" \
   "$here/pre-destroy.sh"
-"$terraform_bin" destroy
-GG_SHARD_MASTER_SECRET_ARNS="$(cat "$shard_secrets_file")" "$here/check-teardown.sh" "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "${GG_PV_INVENTORY_FILE:-$here/.last-destroy-pvs}"
+GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}" "$terraform_bin" destroy
+GG_SHARD_MASTER_SECRET_ARNS="$(cat "$shard_secrets_file")" "$here/check-teardown.sh" "$region" "$environment" "$cluster" "$account" "$master_secret_arn" "$pv_inventory_file"
+python3 "$here/destroy-scope-manifest.py" remove "$manifest_file"

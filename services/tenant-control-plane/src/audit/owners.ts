@@ -7,6 +7,7 @@ import {
   resolveOwnerDatabase,
   admitOwnerPlacement,
   closeOwnerDatabase,
+  ownerDatabases,
 } from "@greenguard/membership-client/owner-db";
 import type { TenantRoute } from "@greenguard/membership-client";
 
@@ -21,6 +22,11 @@ type Row = {
 };
 export type AuditOwner = "inventory" | "billing";
 export type AuditReader = Pick<AuditSources, "read">;
+export type AuditSourceOptions = Readonly<{
+  registryFileEnv?: string;
+  service?: string;
+  roles?: readonly string[];
+}>;
 const SQL: Record<AuditOwner, string> = {
   inventory: `SELECT audit_id::text,
     to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS occurred_at,
@@ -48,13 +54,16 @@ export class AuditSources {
     inventoryDatabaseUrl: string,
     billingDatabaseUrl: string,
     env: NodeJS.ProcessEnv = process.env,
+    options: AuditSourceOptions = {},
   ) {
+    const registryFileEnv =
+      options.registryFileEnv ?? "INVENTORY_SHARD_REGISTRY_FILE";
     this.inventory = createOwnerDatabase({
       legacyUrl: inventoryDatabaseUrl,
-      env: { ...env, SHARD_REGISTRY_FILE: env.INVENTORY_SHARD_REGISTRY_FILE },
-      service: "device-service",
+      env: { ...env, SHARD_REGISTRY_FILE: env[registryFileEnv] },
+      service: options.service ?? "device-service",
       database: "greenguard_inventory",
-      roles: ["inventory_app"],
+      roles: options.roles ?? ["inventory_app"],
       create: (url) =>
         new pg.Pool({
           connectionString: url,
@@ -73,6 +82,15 @@ export class AuditSources {
     await Promise.all([
       closeOwnerDatabase(this.inventory, 5000, (pool) => pool.end()),
       this.billing.end(),
+    ]);
+  }
+  /** Probe every configured inventory shard and central billing source. */
+  async healthcheck(): Promise<void> {
+    await Promise.all([
+      ...ownerDatabases(this.inventory).map((database) =>
+        (database as pg.Pool).query("SELECT 1"),
+      ),
+      this.billing.query("SELECT 1"),
     ]);
   }
   /** A multi-page export restarts if placement changes between pages. */

@@ -71,6 +71,31 @@ func TestUpBuildsAnEmptyDatabaseAndIsRepeatable(t *testing.T) {
 	}
 }
 
+func TestAuditReaderIsSelectOnlyAndPlacementAdmissionScoped(t *testing.T) {
+	admin, err := pgx.Connect(context.Background(), withDatabase(t, env(t, "POSTGRES_ADMIN_URL"), "greenguard_telemetry"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	var selectAudit, insertAudit, selectDevices, executeAdmission, publicExecuteAdmission, forcedRLS, safeRole bool
+	var memberships int
+	if err := admin.QueryRow(context.Background(), `SELECT
+		has_table_privilege('inventory_audit_reader','public.audit_events','SELECT'),
+		has_table_privilege('inventory_audit_reader','public.audit_events','INSERT'),
+		has_table_privilege('inventory_audit_reader','public.device_bindings','SELECT'),
+		has_function_privilege('inventory_audit_reader','greenguard_internal.admit_tenant_placement(uuid,text,uuid,bigint)','EXECUTE'),
+		has_function_privilege('public','greenguard_internal.admit_tenant_placement(uuid,text,uuid,bigint)','EXECUTE'),
+		(SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.audit_events'::regclass),
+		(SELECT NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolinherit AND NOT rolbypassrls FROM pg_roles WHERE rolname='inventory_audit_reader'),
+		(SELECT count(*)::int FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member JOIN pg_roles g ON g.oid=m.roleid WHERE r.rolname='inventory_audit_reader' OR g.rolname='inventory_audit_reader')`).
+		Scan(&selectAudit, &insertAudit, &selectDevices, &executeAdmission, &publicExecuteAdmission, &forcedRLS, &safeRole, &memberships); err != nil {
+		t.Fatal(err)
+	}
+	if !selectAudit || insertAudit || selectDevices || !executeAdmission || publicExecuteAdmission || !forcedRLS || !safeRole || memberships != 0 {
+		t.Fatalf("audit reader privileges are too broad or not admitted: audit SELECT=%t INSERT=%t devices SELECT=%t admission=%t public admission=%t forced RLS=%t safe role=%t memberships=%d", selectAudit, insertAudit, selectDevices, executeAdmission, publicExecuteAdmission, forcedRLS, safeRole, memberships)
+	}
+}
+
 func TestUpReportsConnectionFailuresWithoutCredentials(t *testing.T) {
 	for _, target := range []string{"postgresql://nobody:secret@127.0.0.1:1/none", "not a url"} {
 		err := Up(target)

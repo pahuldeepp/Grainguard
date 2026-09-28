@@ -130,9 +130,10 @@ variable "mqtt_image_digest" {
 locals {
   deployment_contract = jsondecode(file("${path.module}/../../gitops/disposable/contract.json"))
   required_images     = toset([for release in local.deployment_contract.releases : release.image])
-  required_runtime_secret_names = toset([
-    for release in local.deployment_contract.releases : release.secret if release.name != "dashboard"
-  ])
+  required_runtime_secret_names = setunion(
+    toset([for release in local.deployment_contract.releases : release.secret if release.name != "dashboard"]),
+    toset([for shard_id in local.postgres_shard_ids : "greenguard-${shard_id}-projection-history-maintenance-config"])
+  )
   required_bootstrap_secret_names = toset(["greenguard-rds-bootstrap", "greenguard-rds-ca"])
   migration_owner_names           = toset(["control", "billing", "telemetry", "projection", "jobs", "saga", "hardware", "inventory", "alerts", "risk", "notifications"])
   required_migration_secret_names = toset(concat(
@@ -155,6 +156,7 @@ locals {
     "hardware-service-worker"         = { service = "hardware-service", secret = "hardware-service", env = "SHARD_REGISTRY_FILE" }
     "tenant-control-plane"            = { service = "device-service", secret = "device-service", env = "INVENTORY_SHARD_REGISTRY_FILE" }
     "read-api"                        = { service = "read-api", secret = "read-api", env = "READ_SHARD_REGISTRY_FILE" }
+    "audit-export-worker"             = { service = "audit-export-worker", secret = "audit-export-worker", env = "INVENTORY_AUDIT_SHARD_REGISTRY_FILE" }
     "device-saga-worker"              = { service = "device-service", secret = "device-service", env = "SHARD_REGISTRY_FILE" }
     "device-tenant-projector"         = { service = "device-service", secret = "inventory-projector", env = "SHARD_REGISTRY_FILE" }
     "inventory-entitlement-projector" = { service = "device-service", secret = "inventory-projector", env = "SHARD_REGISTRY_FILE" }
@@ -229,7 +231,7 @@ locals {
             ] : [],
             contains(local.otel_http_releases, release.name) ? local.otel_http_env : [],
             contains(local.mesh_http_releases, release.name) ? [{ name = "GG_MESH_INTERNAL_HTTP", value = "1" }] : [],
-            [
+            release.name == "audit-export-worker" ? [] : [
               { name = "KAFKA_REQUIRE_TLS", value = "true" },
               { name = "KAFKA_SECURITY_PROTOCOL", value = "SASL_SSL" },
               { name = "KAFKA_SASL_MECHANISM", value = "PLAIN" },
@@ -246,7 +248,7 @@ locals {
           ) },
         )
         postgresReadReplica = { caSecretName = "greenguard-rds-ca" }
-        kafka               = { caSecretName = "greenguard-kafka-ca" }
+        kafka               = release.name == "audit-export-worker" ? { caSecretName = "" } : { caSecretName = "greenguard-kafka-ca" }
         volumes = concat(
           try(release.baseValues.volumes, []),
           release.name == "hardware-service-worker" ? [{ name = "mqtt-ca", secret = { secretName = "greenguard-mqtt-broker", items = [{ key = "ca.crt", path = "ca.crt" }] } }] : [],
@@ -275,7 +277,10 @@ locals {
       } },
       { for key, value in { networkPolicy = {
         egressCIDRs = var.enable_application_tree ? [for cidr in data.aws_prefix_list.dynamodb[0].cidr_blocks : { cidr = cidr, port = 443 }] : []
-      } } : key => value if release.name == "notification-contacts-projector" }
+      } } : key => value if release.name == "notification-contacts-projector" },
+      { for key, value in { networkPolicy = {
+        egressCIDRs = var.enable_application_tree ? [for cidr in data.aws_prefix_list.s3[0].cidr_blocks : { cidr = cidr, port = 443 }] : []
+      } } : key => value if contains(toset(["audit-export-worker", "tenant-control-plane"]), release.name) }
     )
   }]
 }
@@ -321,11 +326,16 @@ resource "helm_release" "gitops_bootstrap" {
       enabled = true
       rdsHost = aws_db_instance.postgres.address
       images  = var.data_plane_image_digests
+      projectionMaintenance = {
+        image    = lookup(var.deployment_image_digests, "projection-builder", "")
+        rdsCIDRs = [for subnet in aws_subnet.private : subnet.cidr_block]
+      }
       shards = { for shard_id, shard in aws_db_instance.shard : shard_id => {
-        rdsHost             = shard.address
-        bootstrapSecret     = "greenguard-${shard_id}-rds-bootstrap"
-        pgbouncerAuthSecret = "greenguard-${shard_id}-pgbouncer-auth"
-        cdcSecret           = "greenguard-${shard_id}-cdc-credentials"
+        rdsHost                     = shard.address
+        bootstrapSecret             = "greenguard-${shard_id}-rds-bootstrap"
+        pgbouncerAuthSecret         = "greenguard-${shard_id}-pgbouncer-auth"
+        cdcSecret                   = "greenguard-${shard_id}-cdc-credentials"
+        projectionMaintenanceSecret = "greenguard-${shard_id}-projection-history-maintenance-config"
       } }
       secrets = {
         pgbouncerAuth  = "greenguard-pgbouncer-auth"
@@ -390,7 +400,7 @@ resource "helm_release" "gitops_bootstrap" {
     }
   }
 
-  depends_on = [helm_release.argocd, helm_release.greenguard_namespace, terraform_data.runtime_secret_sync, aws_eks_pod_identity_association.notification_contacts_projector]
+  depends_on = [helm_release.argocd, helm_release.greenguard_namespace, terraform_data.runtime_secret_sync, aws_eks_pod_identity_association.notification_contacts_projector, aws_eks_pod_identity_association.audit_export]
 }
 
 # Argo applies the child Applications asynchronously after this Helm release

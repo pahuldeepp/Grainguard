@@ -150,3 +150,72 @@ test("audit inventory pages admit only the resolved owner and restart exports af
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("audit worker shard registry permits only its read-only inventory identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "gg-audit-worker-registry-"));
+  const registry = join(directory, "registry.json");
+  const env = {
+    INVENTORY_AUDIT_SHARD_REGISTRY_FILE: registry,
+    SHARD_LOCAL_LOOPBACK: "true",
+    CONTROL_PLANE_URL: "http://127.0.0.1:3010",
+    CONTROL_LOOKUP_TOKEN: "internal-test-token",
+  };
+  const manifest = (role: string) => ({
+    formatVersion: 1,
+    service: "audit-export-worker",
+    database: "greenguard_inventory",
+    shards: Object.fromEntries(
+      ["s1", "s2", "s3", "s4"].map((id, index) => [
+        id,
+        {
+          incarnation,
+          primaryUrl: `postgres://${role}:test@127.0.0.1:${5441 + index}/greenguard_inventory?sslmode=disable`,
+          replicaUrls: [],
+        },
+      ]),
+    ),
+  });
+  let sources: AuditSources | undefined;
+  try {
+    await writeFile(
+      registry,
+      JSON.stringify(manifest("inventory_audit_reader")),
+      {
+        mode: 0o600,
+      },
+    );
+    sources = new AuditSources(
+      "",
+      "postgres://billing_audit_reader:test@127.0.0.1/greenguard_billing",
+      env,
+      {
+        registryFileEnv: "INVENTORY_AUDIT_SHARD_REGISTRY_FILE",
+        service: "audit-export-worker",
+        roles: ["inventory_audit_reader"],
+      },
+    );
+    await sources.close();
+    sources = undefined;
+
+    await writeFile(registry, JSON.stringify(manifest("inventory_app")), {
+      mode: 0o600,
+    });
+    assert.throws(
+      () =>
+        new AuditSources(
+          "",
+          "postgres://billing_audit_reader:test@127.0.0.1/greenguard_billing",
+          env,
+          {
+            registryFileEnv: "INVENTORY_AUDIT_SHARD_REGISTRY_FILE",
+            service: "audit-export-worker",
+            roles: ["inventory_audit_reader"],
+          },
+        ),
+      /invalid_owner_endpoint/,
+    );
+  } finally {
+    await sources?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

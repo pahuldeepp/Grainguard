@@ -20,9 +20,9 @@ it is not a full GreenGuard deployment. Leave it unset for normal use.
 
 The following workflow is **not runnable as a full deployment yet**. Ordinary
 `terraform plan` and `terraform apply` fail the readiness gate today. The gate
-also calls out the audit-export mismatch: paid catalog tiers advertise the
-feature, while the exporter worker and signing-key/S3 runtime path are not
-deployed. Do not
+also calls out audit-export live acceptance: paid catalog tiers advertise the
+feature and the worker, signing-key/S3 path, and scoped identities are
+configured, but no live signed upload/download has been proven. Do not
 set the incomplete-foundation override for a GreenGuard end-to-end deployment.
 
 1. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace every
@@ -69,17 +69,21 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    for failures before EKS exists. Older partial states can recover from the
    exact EKS ARN and tags. Optional
    arguments are accepted only when they match that saved identity exactly.
-   If neither the output nor a verified state identity is available,
-   the wrapper refuses to destroy; inspect and recover the state before
-   cleanup. Raw `terraform destroy` runs its
+   Before cleanup it persists the exact cell scope and all available RDS
+   master-secret ARNs in owner-only `.last-destroy-pvs.scope.json`. If destroy
+   succeeds but the final inventory fails, retry with the same four explicit
+   scope arguments; the wrapper accepts the saved manifest only after proving
+   the active Terraform state has no managed resources. It retains the
+   manifest until a clean inventory passes. Raw `terraform destroy` runs its
    pre-destroy cleanup only if Terraform recorded that hook during apply; a
    failed apply can leave a cluster before the hook enters state. It also
    cannot guarantee a final inventory after all Terraform-managed resources
    are gone. Terraform destroy provisioners fire
    when their own resource is deleted; a future resource omitted from a
-   dependency chain could be deleted after a supposed final checker. Use the
-   wrapper for a single verified operator command, or run the inventory
-   explicitly after raw `terraform destroy`.
+   dependency chain could be deleted after a supposed final checker. The
+   current destroy provisioner rejects a bare invocation without the exact
+   wrapper scope marker. That marker is an operator guard, not a security
+   boundary; use the wrapper for the final inventory.
 
    Verified destroy first checks the final AWS inventory read permissions and
    simulates the hook's CloudFormation and log deletion permissions before any
@@ -140,10 +144,12 @@ Cassandra, Route 53, and the complete Stage 12 application/data stack are not
 yet implemented in this root. The RDS instance still requires databases,
 roles, migrations, PgBouncer, CDC grants, and connector deployment.
 
-The verified destroy wrapper captures the RDS-managed master secret ARN from
-Terraform state before deletion. The pre-destroy hook records exact EBS
-volume IDs from GreenGuard PVCs before deleting their owners in ignored
-`.last-destroy-pvs`; keep that file until the inventory passes. Its
+The verified destroy wrapper captures the RDS-managed primary and shard
+master-secret ARNs from Terraform state before deletion. It preserves them in
+the mode-0600 ignored `.last-destroy-pvs.scope.json`; keep it until inventory
+passes. The pre-destroy hook records exact EBS volume IDs from GreenGuard PVCs
+before deleting their owners in ignored `.last-destroy-pvs`; keep that file
+until inventory passes. Its
 post-destroy inventory queries RDS, RDS manual snapshots, S3, the exact
 secret ARN, and those exact EBS IDs in addition to tagged
 resources. Direct `terraform destroy` cannot pass the secret ARN to the final

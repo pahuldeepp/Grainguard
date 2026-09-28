@@ -1,0 +1,2815 @@
+python3 scripts/check_plan.py
+Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.
+This check validates planning files only. Run make verify and make smoke for application checks.
+docker compose -p greenguard-stage12 --env-file .env -f infra/compose/compose.yaml -f .local/stage12-verification/compose.override.yaml up -d --wait --build
+ Image greenguard-stage12-pgbouncer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 682B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 381B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.6s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 35B done
+#5 DONE 0.0s
+
+#6 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#6 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S -g 10001 pgbouncer && adduser -S -u 10001 -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:745aff0c8b64f37456d42756a23f902e13f342d06215a0d04edfd3feb8082d8f done
+#9 exporting config sha256:47eccecd618a0cbdf149cd6a01956257f559cce0f027ade2f2227772bee15c72 done
+#9 exporting attestation manifest sha256:17eaf4ec9618d1be0409961d9db46569a1ab42dc9b8032df2daac88a949277fd done
+#9 exporting manifest list sha256:ebf0b1423bfb8617ee43aea8a47d2f8fdb85ec5db37a74b83d2cfe08574c0f11 done
+#9 naming to docker.io/library/greenguard-stage12-pgbouncer:latest done
+#9 unpacking to docker.io/library/greenguard-stage12-pgbouncer:latest done
+#9 DONE 0.0s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.0s
+ Image greenguard-stage12-pgbouncer Built 
+ Container greenguard-stage12-pgbouncer-1 Running 
+ Container greenguard-stage12-postgres-1 Running 
+ Container greenguard-stage12-postgres-1 Waiting 
+ Container greenguard-stage12-postgres-1 Healthy 
+ Container greenguard-stage12-pgbouncer-1 Waiting 
+ Container greenguard-stage12-postgres-1 Waiting 
+ Container greenguard-stage12-pgbouncer-1 Healthy 
+ Container greenguard-stage12-postgres-1 Healthy 
+docker compose -p greenguard-stage12 --env-file .env -f infra/compose/compose.yaml -f .local/stage12-verification/compose.override.yaml exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
+psql:/docker-entrypoint-initdb.d/001-databases.sql:24: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/docker-entrypoint-initdb.d/001-databases.sql:47: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+npm run build -w @greenguard/otel
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+npm run migrate -w services/device-service
+
+> @greenguard/device-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_inventory", schema "public" at "127.0.0.1:55433"
+
+21 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/workflow-alerts
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55433"
+
+6 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/tenant-control-plane
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:55433"
+
+23 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w @greenguard/billing-service
+
+> @greenguard/billing-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_billing", schema "public" at "127.0.0.1:55433"
+
+10 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+cd services/telemetry-ingest && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make projection-migrate
+cd services/projection-builder && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-migrate
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m risk_engine.migrate
+risk migrations applied: none (up to date)
+/Applications/Xcode.app/Contents/Developer/usr/bin/make jobs-migrate
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/notification-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+/Applications/Xcode.app/Contents/Developer/usr/bin/make saga-migrate
+cd services/saga-orchestrator && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make hardware-migrate
+cd services/hardware-service && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-test
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
+test_crash_before_commit_leaves_nothing_then_redelivery_applies_once (test_apply.ApplyFailureTest.test_crash_before_commit_leaves_nothing_then_redelivery_applies_once) ... ok
+test_data_rejections_quarantine_and_rls_denial_is_hard (test_apply.ApplyFailureTest.test_data_rejections_quarantine_and_rls_denial_is_hard) ... ok
+test_transient_errors_retry_with_bounded_backoff (test_apply.ApplyFailureTest.test_transient_errors_retry_with_bounded_backoff) ... ok
+test_transient_exhaustion_stops_without_commit (test_apply.ApplyFailureTest.test_transient_exhaustion_stops_without_commit) ... ok
+test_zero_attempt_policy_is_explicit (test_apply.ApplyFailureTest.test_zero_attempt_policy_is_explicit) ... ok
+test_backdated_lot_change_reports_affected_assessments (test_apply.ApplyInventoryTest.test_backdated_lot_change_reports_affected_assessments) ... ok
+test_binding_versions_never_regress (test_apply.ApplyInventoryTest.test_binding_versions_never_regress) ... ok
+test_invalidation_outbox_failure_rolls_back_lot_and_ledger (test_apply.ApplyInventoryTest.test_invalidation_outbox_failure_rolls_back_lot_and_ledger) ... ok
+test_lot_versions (test_apply.ApplyInventoryTest.test_lot_versions) ... ok
+test_stale_older_lot_version_is_ignored (test_apply.ApplyInventoryTest.test_stale_older_lot_version_is_ignored) ... ok
+test_additive_v2_measurements_apply_without_quarantine (test_apply.ApplyTelemetryTest.test_additive_v2_measurements_apply_without_quarantine) ... ok
+test_binding_mismatch_and_missing_binding (test_apply.ApplyTelemetryTest.test_binding_mismatch_and_missing_binding) ... ok
+test_duplicate_delivery_preserves_result_and_writes_nothing (test_apply.ApplyTelemetryTest.test_duplicate_delivery_preserves_result_and_writes_nothing) ... ok
+test_late_reading_scores_against_wheat_and_emits_valid_event (test_apply.ApplyTelemetryTest.test_late_reading_scores_against_wheat_and_emits_valid_event) ... ok
+test_not_ready_and_quarantine_roll_back_everything (test_apply.ApplyTelemetryTest.test_not_ready_and_quarantine_roll_back_everything) ... ok
+test_same_event_id_with_different_payload_is_quarantined (test_apply.ApplyTelemetryTest.test_same_event_id_with_different_payload_is_quarantined) ... ok
+test_unknown_grain_and_unbound_device (test_apply.ApplyTelemetryTest.test_unknown_grain_and_unbound_device) ... ok
+test_fixture_shape_round_trips_through_contract (test_apply.BuildEventTest.test_fixture_shape_round_trips_through_contract) ... ok
+test_record_is_immutable (test_apply.BuildEventTest.test_record_is_immutable) ... ok
+test_commits_only_after_effect_and_handles_duplicates (test_consumer.ConsumerTest.test_commits_only_after_effect_and_handles_duplicates) ... ok
+test_invalid_records_are_quarantined_and_do_not_block (test_consumer.ConsumerTest.test_invalid_records_are_quarantined_and_do_not_block) ... ok
+test_late_lot_change_is_counted (test_consumer.ConsumerTest.test_late_lot_change_is_counted) ... backdated lot change affects 1 earlier assessments
+ok
+test_not_ready_is_quarantined_only_after_the_bound (test_consumer.ConsumerTest.test_not_ready_is_quarantined_only_after_the_bound) ... ok
+test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives (test_consumer.ConsumerTest.test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives) ... ok
+test_quarantine_and_unavailable_fallback_reasons (test_consumer.ConsumerTest.test_quarantine_and_unavailable_fallback_reasons) ... ok
+test_quarantine_failure_stops_without_commit (test_consumer.ConsumerTest.test_quarantine_failure_stops_without_commit) ... ok
+test_endpoints_and_labels (test_consumer.HealthTest.test_endpoints_and_labels) ... ok
+test_adapter_contract (test_consumer.KafkaSourceTest.test_adapter_contract) ... ok
+test_default_client_factories (test_consumer.KafkaSourceTest.test_default_client_factories) ... %3|1790583495.448|FAIL|rdkafka#consumer-1| [thrd:127.0.0.1:1/bootstrap]: 127.0.0.1:1/bootstrap: Connect to ipv4#127.0.0.1:1 failed: Connection refused (after 0ms in state CONNECT)
+ok
+test_failures_are_hard (test_consumer.KafkaSourceTest.test_failures_are_hard) ... ok
+test_checkpoint_becomes_watermark_once_lot_partitions_are_applied (test_consumer.LotFeedTest.test_checkpoint_becomes_watermark_once_lot_partitions_are_applied) ... ok
+test_disabled_gate_trusts_open_intervals (test_consumer.LotFeedTest.test_disabled_gate_trusts_open_intervals) ... ok
+test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited (test_consumer.LotFeedTest.test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited) ... ok
+test_config_validation (test_consumer.MainTest.test_config_validation) ... ok
+test_main_installs_signal_handlers (test_consumer.MainTest.test_main_installs_signal_handlers) ... ok
+test_run_wires_collaborators_and_shuts_down (test_consumer.MainTest.test_run_wires_collaborators_and_shuts_down) ... ok
+test_database_sink_records_coordinates_and_digest (test_consumer.SinkTest.test_database_sink_records_coordinates_and_digest) ... ok
+test_checkpoint (test_join.EventParsingTest.test_checkpoint) ... ok
+test_fields_reject_trailing_newlines (test_join.EventParsingTest.test_fields_reject_trailing_newlines) ... ok
+test_fixtures_parse (test_join.EventParsingTest.test_fixtures_parse) ... ok
+test_inventory_rejections (test_join.EventParsingTest.test_inventory_rejections) ... ok
+test_rejections_have_stable_reasons (test_join.EventParsingTest.test_rejections_have_stable_reasons) ... ok
+test_binding_state (test_join.EventTimeJoinTest.test_binding_state) ... ok
+test_exact_boundaries_are_half_open (test_join.EventTimeJoinTest.test_exact_boundaries_are_half_open) ... ok
+test_late_wheat_reading_after_canola_replacement_uses_wheat (test_join.EventTimeJoinTest.test_late_wheat_reading_after_canola_replacement_uses_wheat) ... ok
+test_missing_or_overlapping_lot_state_is_not_ready (test_join.EventTimeJoinTest.test_missing_or_overlapping_lot_state_is_not_ready) ... ok
+test_open_interval_needs_a_fresh_lot_feed (test_join.EventTimeJoinTest.test_open_interval_needs_a_fresh_lot_feed) ... ok
+test_reading_after_replacement_uses_canola (test_join.EventTimeJoinTest.test_reading_after_replacement_uses_canola) ... ok
+test_backdated_placement_retracts_assessment_atomically_and_once (test_live_db.LiveRiskDatabaseTest.test_backdated_placement_retracts_assessment_atomically_and_once) ... ok
+test_connection_failures_are_transient_store_errors (test_live_db.LiveRiskDatabaseTest.test_connection_failures_are_transient_store_errors) ... ok
+test_duplicate_crash_and_replay (test_live_db.LiveRiskDatabaseTest.test_duplicate_crash_and_replay) ... ok
+test_event_time_join_and_contract_valid_outbox (test_live_db.LiveRiskDatabaseTest.test_event_time_join_and_contract_valid_outbox) ... ok
+test_every_unique_key_on_tenant_tables_is_tenant_scoped (test_live_db.LiveRiskDatabaseTest.test_every_unique_key_on_tenant_tables_is_tenant_scoped) ... ok
+test_forced_rls_isolates_tenants (test_live_db.LiveRiskDatabaseTest.test_forced_rls_isolates_tenants) ... ok
+test_invalid_measurements_quarantine_through_database_sink (test_live_db.LiveRiskDatabaseTest.test_invalid_measurements_quarantine_through_database_sink) ... ok
+test_overlapping_interval_is_excluded (test_live_db.LiveRiskDatabaseTest.test_overlapping_interval_is_excluded) ... ok
+test_policy_versions_select_by_bin_and_event_time_without_rewriting_history (test_live_db.LiveRiskDatabaseTest.test_policy_versions_select_by_bin_and_event_time_without_rewriting_history) ... ok
+test_runtime_role_limits (test_live_db.LiveRiskDatabaseTest.test_runtime_role_limits) ... ok
+test_same_ids_in_two_tenants_neither_collide_nor_leak (test_live_db.LiveRiskDatabaseTest.test_same_ids_in_two_tenants_neither_collide_nor_leak) ... ok
+test_stale_inventory_cannot_regress (test_live_db.LiveRiskDatabaseTest.test_stale_inventory_cannot_regress) ... ok
+test_sqlstate_classes (test_migrate.ClassifyTest.test_sqlstate_classes) ... ok
+test_applies_in_order_once_and_rejects_modified_history (test_migrate.MigrateTest.test_applies_in_order_once_and_rejects_modified_history) ... ok
+test_live_entry_point_is_idempotent (test_migrate.MigrateTest.test_live_entry_point_is_idempotent) ... <frozen runpy>:130: RuntimeWarning: 'risk_engine.migrate' found in sys.modules after import of package 'risk_engine', but prior to execution of 'risk_engine.migrate'; this may result in unpredictable behaviour
+ok
+test_main (test_migrate.MigrateTest.test_main) ... ok
+test_rejects_duplicate_versions_and_bad_names (test_migrate.MigrateTest.test_rejects_duplicate_versions_and_bad_names) ... ok
+test_repository_migrations_are_forward_only_and_named (test_migrate.MigrateTest.test_repository_migrations_are_forward_only_and_named) ... ok
+test_connection_loss_closes_and_reconnects (test_migrate.PgDatabaseUnitTest.test_connection_loss_closes_and_reconnects) ... ok
+test_algorithm_substitution_is_rejected (test_policy_auth.PolicyOIDCTest.test_algorithm_substitution_is_rejected) ... ok
+test_cognito_access_mode_accepts_only_mapped_human_access_tokens (test_policy_auth.PolicyOIDCTest.test_cognito_access_mode_accepts_only_mapped_human_access_tokens) ... ok
+test_http_publication_binds_verified_tenant_and_rejects_tenant_input (test_policy_auth.PolicyOIDCTest.test_http_publication_binds_verified_tenant_and_rejects_tenant_input) ... ok
+test_membership_mapping_overrides_signed_tenant_and_roles (test_policy_auth.PolicyOIDCTest.test_membership_mapping_overrides_signed_tenant_and_roles) ... ok
+test_membership_miss_is_denied_and_auth_header_is_strict (test_policy_auth.PolicyOIDCTest.test_membership_miss_is_denied_and_auth_header_is_strict) ... ok
+test_rejects_machine_device_and_non_admin_principals (test_policy_auth.PolicyOIDCTest.test_rejects_machine_device_and_non_admin_principals) ... ok
+test_rejects_wrong_issuer_audience_expiry_and_not_before (test_policy_auth.PolicyOIDCTest.test_rejects_wrong_issuer_audience_expiry_and_not_before) ... ok
+test_valid_signed_tenant_admin_returns_verified_principal (test_policy_auth.PolicyOIDCTest.test_valid_signed_tenant_admin_returns_verified_principal) ... ok
+test_active_policy_requires_scoring_thresholds_and_reachable_warning (test_policy_domain.PolicyValidationTest.test_active_policy_requires_scoring_thresholds_and_reachable_warning) ... ok
+test_calibration_requires_evidence_and_approval (test_policy_domain.PolicyValidationTest.test_calibration_requires_evidence_and_approval) ... ok
+test_measurement_validation_is_unit_aware_finite_and_optional (test_policy_domain.PolicyValidationTest.test_measurement_validation_is_unit_aware_finite_and_optional) ... ok
+test_policy_service_binds_tenant_role_and_calibration_approver (test_policy_domain.PolicyValidationTest.test_policy_service_binds_tenant_role_and_calibration_approver) ... ok
+test_unapproved_synthetic_values_are_draft_and_uncalibrated (test_policy_domain.PolicyValidationTest.test_unapproved_synthetic_values_are_draft_and_uncalibrated) ... ok
+test_additive_v2_measurements_are_accepted_without_changing_scoring (test_scoring.ScoringTest.test_additive_v2_measurements_are_accepted_without_changing_scoring) ... ok
+test_batch_change_selects_a_different_grain_policy (test_scoring.ScoringTest.test_batch_change_selects_a_different_grain_policy) ... ok
+test_boundaries_and_replay (test_scoring.ScoringTest.test_boundaries_and_replay) ... ok
+test_highest_allowed_threshold_keeps_critical_alert_eligible (test_scoring.ScoringTest.test_highest_allowed_threshold_keeps_critical_alert_eligible) ... ok
+test_invalid_inputs_and_policy_fail_closed (test_scoring.ScoringTest.test_invalid_inputs_and_policy_fail_closed) ... ok
+test_missing_inputs_do_not_generate_alerts (test_scoring.ScoringTest.test_missing_inputs_do_not_generate_alerts) ... ok
+test_all_four_routes_preserve_exact_epoch (test_shards.ShardTest.test_all_four_routes_preserve_exact_epoch) ... ok
+test_authority_latency_and_failure_metrics_are_bounded (test_shards.ShardTest.test_authority_latency_and_failure_metrics_are_bounded) ... ok
+test_entire_registry_validated_before_allocating (test_shards.ShardTest.test_entire_registry_validated_before_allocating) ... ok
+test_explicit_transport_ledger_and_all_shard_health_close (test_shards.ShardTest.test_explicit_transport_ledger_and_all_shard_health_close) ... ok
+test_failed_or_invalid_authority_never_queries_a_primary (test_shards.ShardTest.test_failed_or_invalid_authority_never_queries_a_primary) ... ok
+test_http_requires_tls_or_explicit_loopback_or_mesh (test_shards.ShardTest.test_http_requires_tls_or_explicit_loopback_or_mesh) ... ok
+test_sql_admission_precedes_business_and_failure_rolls_back (test_shards.ShardTest.test_sql_admission_precedes_business_and_failure_rolls_back) ... ok
+test_matching_admission_rls_stale_epoch_and_lock_drain (test_shards_live.ShardAdmissionLiveTest.test_matching_admission_rls_stale_epoch_and_lock_drain) ... skipped 'isolated shard acceptance URL absent'
+test_parses_additive_scalars_and_sensor_layout_provenance (test_telemetry_v2_events.TelemetryV2ParserTest.test_parses_additive_scalars_and_sensor_layout_provenance) ... ok
+test_rejects_unit_mismatch_duplicate_identity_and_missing_observations (test_telemetry_v2_events.TelemetryV2ParserTest.test_rejects_unit_mismatch_duplicate_identity_and_missing_observations) ... ok
+test_v1_and_v2_topic_schema_versions_are_not_interchangeable (test_telemetry_v2_events.TelemetryV2ParserTest.test_v1_and_v2_topic_schema_versions_are_not_interchangeable) ... ok
+
+----------------------------------------------------------------------
+Ran 97 tests in 1.742s
+
+OK (skipped=1)
+npm run format:check
+
+> greenguard@0.1.0 format:check
+> prettier --check "apps/dashboard/src/**/*.{ts,tsx,css}" "services/bff/src/**/*.ts" "services/gateway/src/**/*.ts" "services/device-service/src/**/*.ts" "services/workflow-alerts/src/**/*.ts" "services/notification-service/src/**/*.ts" "packages/*/src/**/*.ts" "scripts/*.mjs" "services/read-api/src/**/*.ts" "services/tenant-control-plane/src/**/*.ts"
+
+Checking formatting...
+All matched files use Prettier code style!
+npm run lint
+
+> greenguard@0.1.0 lint
+> eslint apps/dashboard/src apps/mobile/src services/bff/src services/gateway/src services/device-service/src services/workflow-alerts/src services/notification-service/src services/billing-service/src packages/otel/src packages/tenant-auth/src packages/contracts/src packages/read-model/src packages/feature-flags/src packages/entitlements/src packages/audit/src scripts/*.mjs services/read-api/src services/tenant-control-plane/src packages/membership-client/src
+
+npm run typecheck
+
+> greenguard@0.1.0 typecheck
+> npm run typecheck --workspaces
+
+
+> @greenguard/dashboard@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/mobile@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/otel@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/tenant-auth@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/contracts@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/read-model@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/membership-client@0.1.0 typecheck
+> npm run build:deps && tsc --noEmit
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/entitlements@0.1.0 typecheck
+> npm run build -w @greenguard/kafka-security && tsc --noEmit
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/audit@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @greenguard/tenant-control-plane@0.1.0 typecheck
+> npm run build:deps && prisma generate && tsc --noEmit
+
+
+> @greenguard/tenant-control-plane@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/feature-flags -w @greenguard/membership-client -w @greenguard/audit -w @greenguard/entitlements
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+
+> @greenguard/billing-service@0.1.0 typecheck
+> npm run build -w @greenguard/kafka-security && prisma generate && tsc --noEmit
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 8ms
+
+
+> @greenguard/bff@0.1.0 typecheck
+> npm run build -w @greenguard/membership-client && tsc --noEmit
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/gateway@0.1.0 typecheck
+> npm run build -w @greenguard/membership-client && tsc --noEmit
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/device-service@0.1.0 typecheck
+> npm run build:deps && prisma generate && tsc --noEmit
+
+
+> @greenguard/device-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 46ms
+
+
+> @greenguard/workflow-alerts@0.1.0 typecheck
+> npm run build:deps && prisma generate && tsc --noEmit
+
+
+> @greenguard/workflow-alerts@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+
+> @greenguard/notification-service@0.1.0 typecheck
+> npm run build:deps && tsc --noEmit
+
+
+> @greenguard/notification-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/read-api@0.1.0 typecheck
+> npm run build -w @greenguard/read-model -w @greenguard/membership-client -w @greenguard/entitlements && tsc --noEmit
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+npm test
+
+> greenguard@0.1.0 pretest
+> node scripts/clean-workspace-dist.mjs && npm run build -w @greenguard/membership-client
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> greenguard@0.1.0 test
+> npm run test --workspaces
+
+
+> @greenguard/dashboard@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.1 /Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/apps/dashboard
+
+Not implemented: Window's scrollTo() method
+
+ Test Files  19 passed (19)
+      Tests  90 passed (90)
+   Start at  03:19:05
+   Duration  1.39s (environment 66%, tests 14%, import 12%, transform 7%)
+
+
+> @greenguard/mobile@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/mobile@0.1.0 build
+> tsc
+
+✔ enqueue persists a stable key that survives restart (0.572875ms)
+✔ duplicate acknowledge of the same alert keeps one entry and one key (0.102875ms)
+✔ drain replays in order with the original key and identity, then empties (0.625166ms)
+✔ crash between send and dequeue replays the same key without a second effect (1.06125ms)
+✔ 409 and 412 count as already acknowledged and dequeue (0.241375ms)
+✔ transient failure backs off, blocks later entries, then resumes in order (0.285292ms)
+✔ backoff doubles per attempt up to the cap and network errors are retried (0.225875ms)
+✔ retries are bounded: an exhausted entry is rejected and the queue moves on (0.232209ms)
+✔ a permanent 4xx rejects the entry without retrying and later entries still send (0.1255ms)
+✔ queued acknowledgements never replay under another tenant or user (0.125791ms)
+✔ an identity change mid-replay stops the pass and keeps the entry (0.081083ms)
+✔ relogin required pauses the queue without spending an attempt (0.094292ms)
+✔ a 401 that survives the refresh also pauses for re-login (0.043833ms)
+✔ offline submissions queue without sending, then flush once online (0.106709ms)
+✔ overlapping drains share one pass and send each entry once (0.064583ms)
+✔ unknown errors are treated as transient (0.070625ms)
+✔ dismiss ignores unknown keys and only acts on the caller's scope (0.045333ms)
+✔ operations match the BFF persisted-query allowlist text (0.4815ms)
+✔ list sends persisted-query hash, bearer token and no tenant in the payload (14.583875ms)
+✔ list results are cached per tenant and cleared on demand (1.294167ms)
+✔ detail returns the alert (0.30325ms)
+✔ acknowledge sends id, version and the caller's idempotency key (0.559667ms)
+✔ acknowledge refuses to send under a different tenant or user (0.20975ms)
+✔ a 401 forces one token refresh and retries once (0.581ms)
+✔ a second 401 is surfaced instead of looping (0.660792ms)
+✔ GraphQL errors carry the code and upstream status (0.3195ms)
+✔ network failure and empty data become transient status 0 errors (0.367167ms)
+✔ code exchange sends the verifier and computes expiry from the clock (12.653917ms)
+✔ code exchange rejects an id token with the wrong nonce (0.3815ms)
+✔ openid code exchange rejects a missing id token (0.149792ms)
+✔ refresh keeps the old refresh token when none is rotated (0.147375ms)
+✔ invalid_grant is permanent; 5xx and network errors are transient (0.287458ms)
+✔ a token response without an access token is rejected (0.114125ms)
+✔ S256 challenge matches the RFC 7636 appendix B vector (3.868791ms)
+✔ base64Url is unpadded and url safe (0.139041ms)
+✔ request material is random, long enough and distinct (1.25075ms)
+✔ authorization URL carries PKCE, state, nonce and audience (0.334959ms)
+✔ callback returns the code when state matches (0.0915ms)
+✔ callback rejects state mismatch, missing state and idp errors (0.205375ms)
+✔ mobile read operations match persisted allowlist (0.721875ms)
+✔ mobile preserves minima for refresh, leaves other store reads eventual, and resets tenant/session state (15.351417ms)
+✔ mobile 401 retry preserves the minimum and rejects an identity switch before retry (0.978083ms)
+✔ mobile rejects malformed or foreign minima without a request and never accepts a mismatched epoch (0.477417ms)
+✔ mobile live watermark becomes the next refresh minimum and legacy messages retain it (0.378625ms)
+✔ mobile cleared session prevents old in-flight response from restoring consistency state (0.635208ms)
+✔ mobile foreground moves and same-epoch restores reset exactly once from admitted actual token (1.189208ms)
+✔ mobile reset rejects unchanged, lower, foreign or missing actual identities and does not retry outages (1.227708ms)
+✔ mobile reset cannot loop and same-epoch hints require an authoritative snapshot (0.509125ms)
+✔ mobile rejects a valid lower-epoch reset and retains the old minimum (0.422375ms)
+✔ empty foreground snapshot resets from the tenant-bound GraphQL response certificate (0.801083ms)
+✔ a live hint from a prior tenant or subject clears context and cannot update the new session (0.273833ms)
+✔ foreground reset and mobile401retry share the original operation deadline (0.397333ms)
+✔ an older response certificate does not hide higher or conflicting nested tokens (0.322916ms)
+✔ reset certifies the oldest snapshot then preserves the highest observed next-read floor (0.335667ms)
+✔ reset cannot use a newer nested snapshot to hide a snapshot below concurrent new-identity demand (0.392625ms)
+✔ a cleared session cannot start a recovery request after an old409 (0.189792ms)
+✔ sign-in stores tokens only in the secure store and reads identity from claims (13.682041ms)
+✔ a token without a tenant claim uses the BFF membership for local tenant scope (1.430792ms)
+✔ a token without a tenant claim rejects a mismatched BFF session (0.587334ms)
+✔ a no-tenant token cannot enter offline state without a BFF membership resolver (0.359083ms)
+✔ a token with neither tenant claim nor issuer is rejected (0.338208ms)
+✔ callback with a forged state is rejected and pending state is consumed (0.208833ms)
+✔ unexpired tokens are reused; expiring tokens refresh once for concurrent callers (0.454958ms)
+✔ permanent refresh failure clears tokens and requires re-login (0.79425ms)
+✔ transient refresh failure keeps tokens so the caller can retry later (1.205458ms)
+✔ forced refresh replaces a token the server rejected (0.408709ms)
+✔ no tokens means re-login required (0.074042ms)
+✔ switching tenant clears tokens and cached data, then starts a new sign-in (0.388208ms)
+✔ signing in as a different tenant over a live session clears caches (0.355875ms)
+✔ a token without a tenant claim is refused (0.234333ms)
+✔ sign-out removes tokens and notifies listeners (0.202708ms)
+✔ dist/support.test.js (29.108458ms)
+ℹ tests 72
+ℹ suites 0
+ℹ pass 72
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71.580833
+
+> @greenguard/otel@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+✔ a request continues the caller's trace with a new server span (10.028709ms)
+✔ without a valid traceparent a new root trace starts (2.947625ms)
+✔ sampling: the ratio applies to new traces and a caller's decision is kept (105.308458ms)
+✔ server errors mark the span as failed (1.194333ms)
+✔ span names never contain identifiers (0.120459ms)
+✔ traceparent formatting keeps only the sampled bit (0.091666ms)
+✔ without an active span there is no traceparent and annotating is a no-op (0.102417ms)
+✔ an OTLP endpoint is used when no exporter is injected, and shutdown resets globals (1.148084ms)
+✔ exports bounded local pool saturation gauges (0.600583ms)
+✔ rejects dynamic pool labels (0.100625ms)
+✔ records query latency and the slow threshold without query labels (0.092875ms)
+✔ aggregates every shard pool and unregisters members independently (0.161ms)
+✔ pool end removes its metrics registration (0.06775ms)
+✔ callback pool shutdown also unregisters its metrics (0.060083ms)
+✔ repeated registration retains a pool until the last handle unregisters (0.055959ms)
+✔ failed pool shutdown preserves saturation gauges and the error (0.279625ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 230.113791
+
+> @greenguard/tenant-auth@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+✔ valid token yields a principal from signed claims (4.038209ms)
+✔ scheme is case-insensitive (1.026833ms)
+✔ missing header is missing_token (0.227709ms)
+✔ malformed headers are malformed_header (0.721625ms)
+✔ alg none is rejected (0.259708ms)
+✔ HS256 signed with the public key is rejected (0.783708ms)
+✔ unknown kid is rejected (0.731292ms)
+✔ garbage token and tampered signature are rejected without leaking details (1.055334ms)
+✔ wrong issuer and audience are rejected (2.034792ms)
+✔ opt-in Cognito access mode accepts only mapped user access tokens for allowed clients (6.164042ms)
+✔ expired token is expired_token, within tolerance passes (1.082417ms)
+✔ token without exp is rejected (0.617375ms)
+✔ nbf in the future is rejected (0.634458ms)
+✔ injected now and clock tolerance drive expiry (0.597084ms)
+✔ invalid tenant_id claims are invalid_claims (3.73825ms)
+✔ invalid roles claims are invalid_claims (2.997542ms)
+✔ invalid sub is invalid_claims (1.535458ms)
+✔ requireRole allows listed roles and denies others, admin is not implicit (0.154084ms)
+✔ remote JWKS is cached: two verifies make one request (13.801791ms)
+✔ key rotation is picked up after the cooldown (46.089542ms)
+✔ an unreachable, failing or slow key server is 503 auth_unavailable, not a bad token (304.7105ms)
+✔ a healthy key server that lacks the token's key stays 401 invalid_token (5.037458ms)
+✔ the device role is accepted and carries the device id as subject (1.651708ms)
+✔ S01: unlisted issuer is rejected (1.919833ms)
+✔ S02/S03: same subject is scoped by issuer and IdP tenant claims are ignored (2.90775ms)
+✔ issuer confusion cannot select a different key set (0.797042ms)
+✔ machine credentials use owner verification and ignore caller tenant claims (11.302416ms)
+✔ revoked, insufficient-scope and unavailable owner fail closed (0.362417ms)
+✔ only machine-shaped bearer enters machine verifier (0.714917ms)
+✔ membership supplies tenant and roles; IdP-asserted claims are ignored (3.393542ms)
+✔ an authenticated identity without membership is invalid_claims (1.115625ms)
+✔ membership is scoped to the issuer (0.106625ms)
+✔ malformed membership files fail at startup (0.092667ms)
+✔ env verifier requires issuer, audience and JWKS URL (0.158375ms)
+✔ Cognito env mode requires allowed clients and a trusted membership mapper (0.454292ms)
+✔ env verifier rejects negative tuning values (0.062458ms)
+✔ env verifier maps memberships from the configured file over a live JWKS (14.503791ms)
+✔ env verifier without a membership file uses signed claims (4.645375ms)
+✔ roles use the complete allow-list and errors identify only the entry index (0.239875ms)
+✔ refresh revokes membership, publishes whole maps and stops on close (0.624292ms)
+✔ bad refresh retains the whole last good map then rejects with 401 until recovery (1.337541ms)
+✔ refresh timer is unreferenced and zero disables refresh (0.161292ms)
+✔ env membership refresh honors configuration and validates timer bounds (0.246167ms)
+✔ duplicate membership keys fail initial load without exposing identifiers (0.051958ms)
+✔ noncanonical tenant UUIDs fail initial load with only the entry index (0.184209ms)
+✔ duplicate identity refresh keeps the last good map until max-stale then fails closed (0.449917ms)
+✔ invalid tenant UUID refresh keeps the last good map until max-stale then fails closed (0.314333ms)
+✔ valid distinct memberships load even when issuer or subject is shared (0.054958ms)
+✔ OAuth client credentials verifies RS256 and maps client to its sole tenant (34.639917ms)
+✔ configured JWKS serves signed short-lived M2M tokens (69.738375ms)
+✔ tenantClaim binds the token to the tenant registered for the client (12.826041ms)
+ℹ tests 51
+ℹ suites 0
+ℹ pass 51
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 525.083333
+
+> @greenguard/contracts@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+✔ every alert lifecycle type has a valid fixture (3.30975ms)
+✔ invalid alert fixtures fail for their named rule (1.475166ms)
+✔ an alert event cannot claim another aggregate type (0.108166ms)
+✔ billing lifecycle contracts validate all five outbox event shapes (2.75775ms)
+✔ tenant.created and membership.changed fixtures are valid (2.367459ms)
+✔ every invalid control-plane event fails with its exact rule (1.281292ms)
+✔ shared facility verdicts match (4.806ms)
+✔ C01 every valid fixture passes (5.052667ms)
+✔ risk assessment identity and severity invariants fail closed (0.341584ms)
+✔ risk.assessed v2 separates device stream order from schema version and gates uncalibrated policy (0.157667ms)
+✔ risk invalidation has a registered versioned contract (1.011583ms)
+✔ C02 every invalid fixture fails with its exact rule (3.617666ms)
+✔ shared telemetry identity verdicts match (0.298375ms)
+✔ C03 versions beyond MAX_SAFE_INTEGER round-trip exactly (0.165417ms)
+✔ C03 out-of-range versions fail (0.154791ms)
+✔ C04 structural defects fail (0.213958ms)
+✔ C04 semantic defects report every failing rule (0.111083ms)
+✔ schema files resolve from the repo root (0.042083ms)
+✔ outboxRowToEvent produces a valid event (0.772833ms)
+✔ outboxRowToEvent formats exactly six fractional digits (0.127708ms)
+✔ outboxRowToEvent renders bigint versions beyond safe integers exactly (0.073ms)
+✔ unknown event_type or schema_version fails (0.091125ms)
+✔ device-, tenant- and epoch-scoped projection notifications are valid (2.279625ms)
+✔ every invalid projection notification fails with its exact rule (1.321792ms)
+✔ v1 and additive telemetry fixture verdicts match (6.481541ms)
+✔ v1 stays strict and v2 rejects nonfinite measurements (0.272084ms)
+✔ cable owner snapshot denies duplicate identities, positions, nil IDs and invalid depth (0.928334ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 201.5205
+
+> @greenguard/read-model@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+✔ tenant transaction commits and releases, while failures roll back (0.98875ms)
+✔ bin latest independently selects the newest non-null sample per metric across active devices (4.991584ms)
+✔ all read queries include an explicit tenant predicate and bounded list inputs (0.255208ms)
+﹣ live read role sees only its tenant and cannot write or inspect checkpoints (0.041542ms) # SKIP
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 52.328541
+
+> @greenguard/membership-client@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+﹣ live Kafka event invalidates two Redis-backed verifier replicas (0.254542ms) # SKIP
+membership lookup failed or was stale; bounded last good entry applies
+✔ shared Redis version floor rejects an older lookup on another replica and ignores reordered events (12.981292ms)
+✔ identity keys are deterministic hashes of issuer|subject, distinct per issuer (0.194916ms)
+✔ a verified identity is mapped from the store and IdP tenant claims are ignored (M08) (30.898875ms)
+✔ a token that fails verification never triggers a membership lookup (35.294834ms)
+✔ revoke -> event -> entry gone -> next request 403, never the stale role (36.075792ms)
+✔ revoke while the consumer is down: still denied within the 30 s TTL bound (15.419709ms)
+✔ duplicate and out-of-order events are no-ops once the cache holds a newer version (12.91025ms)
+membership lookup failed or was stale; bounded last good entry applies
+✔ a lookup that answers older than an event already seen is not trusted (7.714042ms)
+✔ a newer event for another tenant invalidates the identity; reordered events do not (24.376917ms)
+✔ negative results are cached for 5 s so a new invitee is admitted soon (16.571959ms)
+✔ malformed event payload cannot crash the verifier (22.573959ms)
+membership lookup failed or was stale; bounded last good entry applies
+membership lookup failed or was stale; bounded last good entry applies
+membership lookup failed or was stale; bounded last good entry applies
+✔ lookup outage keeps the last good entry until 5 minutes, then fails closed (M07) (16.716083ms)
+membership lookup failed or was stale; bounded last good entry applies
+✔ an outage with no cached entry denies instead of allowing (46.00375ms)
+✔ the HTTP fetcher maps 200 active/revoked and 404, and rejects every other answer (14.38675ms)
+✔ the HTTP fetcher rejects a malformed membership body (0.537791ms)
+✔ the env switch keeps the file source by default and validates the control-plane source (40.830792ms)
+✔ registry validates all four owner roles/database/TLS endpoints before allocation (1.636417ms)
+✔ tenant requests select private pools independently with no default or client route fallback (1.246334ms)
+✔ missing, cross-tenant, expired, wrong incarnation and quiescing authority never downgrade (1.043291ms)
+✔ exact placement context and durable admission precede business work (0.529417ms)
+✔ shutdown invokes every pool once, reports failures and bounds hung closure (16.66225ms)
+✔ failed construction closes earlier databases and preserves its original error (0.470709ms)
+✔ placement fetch, parsing and error cleanup share a bounded timeout (63.506ms)
+✔ placement epochs preserve BIGINT precision and reject noncanonical/overflow input (0.310458ms)
+✔ lease validator rejects tenant mismatch, expiry, excessive TTL and caller hints (1.186791ms)
+✔ cache serves bounded leases; expiry plus authority outage fails closed (0.296ms)
+✔ fresh lookup, stale epoch and quiescing admissions are explicit (0.148333ms)
+✔ invalidation prevents an in-flight response from recreating a cached route (0.079875ms)
+✔ concurrent cache misses share one authority fetch and both succeed (0.086834ms)
+✔ clear cancels all shared loads while a replacement can complete (0.098542ms)
+✔ cache has a bounded entry budget and clear invalidates all entries (0.172667ms)
+✔ local guard detects fresh-authority regression while its lease remains valid (0.122792ms)
+✔ expiry, invalidation and eviction fetch primary authority without a lifetime tenant limit (0.283792ms)
+✔ authenticated HTTP fetcher carries only tenant context and bounds requests (8.706083ms)
+✔ placement fetcher preserves a configured path prefix (0.200125ms)
+✔ an expected epoch ahead of a cached lease refreshes the primary authority (0.091917ms)
+✔ initial placement ring is deterministic across ordering/version changes, includes every shard (3.272084ms)
+✔ adding a shard moves only suggestions selecting that added shard (0.891792ms)
+✔ invalid or expired lease admission rejects without an HTTP request (0.724583ms)
+✔ lease client validates authority identity and uses authenticated bounded requests (11.707042ms)
+✔ lease outage, foreign tenant, expired lease and non-mTLS HTTP fail closed (0.769208ms)
+✔ authority deadline bounds fetch, body parsing and rejected-body cleanup even when mocks ignore cancellation (63.564208ms)
+✔ watermarks preserve BIGINT precision and bind to the authenticated tenant (0.956667ms)
+✔ malformed, overflow, ambiguous and route-hint tokens are rejected (0.138875ms)
+ℹ tests 45
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 540.944458
+
+> @greenguard/feature-flags@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+﹣ 10b DynamoDB snapshot adapter is tenant-scoped, monotonic and safe under races (0.246042ms) # SKIP
+✔ flag feed applies only increasing complete tenant snapshots (0.722583ms)
+✔ reserved infrastructure event updates global fallback only (0.080667ms)
+✔ F01 tenant override is isolated and global fallback stays separate (0.982542ms)
+✔ F02 provider outage and type mismatch return typed defaults (0.217166ms)
+✔ F03 stale cache defaults and reports scope (0.197375ms)
+✔ configuration changes are monotonic, immutable, and rollout buckets stable (0.210208ms)
+✔ F06 caller context and unheld role cannot spoof tenant or role (0.120791ms)
+✔ global locked kill switch beats a tenant override (0.060667ms)
+✔ flag registry allows only declared tenant-settable keys and types (0.10375ms)
+✔ poison flag events are classified; unknown keys are poison (0.133833ms)
+✔ tenant snapshot cache is bounded by LRU size (0.085625ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 73.005
+
+> @greenguard/entitlements@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ billing event rejects wrong key, forged tenant, and version mismatch (0.571833ms)
+✔ heartbeat decodes emitted_at, ignores plan events and rejects malformed heartbeats (0.675291ms)
+✔ plan decoder ignores heartbeats (0.046833ms)
+✔ higher versions win; duplicates and reordered events cannot roll back (1.060667ms)
+✔ tenant isolation and stale or missing fallback deny paid features (0.339167ms)
+✔ an unchanged paid plan is honored while heartbeats arrive and fails closed only when the feed is stale (0.096458ms)
+✔ a lagging partition keeps the feed stale and a late heartbeat cannot move health backwards (0.063834ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 55.418
+
+> @greenguard/kafka-security@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ local broker uses no security options (0.507334ms)
+✔ AWS TLS requirement rejects absent or incomplete SASL settings (0.186792ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40.933833
+
+> @greenguard/audit@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+✔ unprivileged audit export pseudonymizes email with a keyed HMAC and never serializes arbitrary payload (1.319ms)
+✔ tampered file, manifest, signature and cross-tenant rows fail (0.289667ms)
+✔ empty export has a verifiable manifest (0.150584ms)
+✔ R01 non-privileged email pseudonyms are per-tenant keyed HMACs, not bare SHA-256 (0.912084ms)
+✔ R02 pseudonymizing without a strong key fails closed; privileged rows need no key (0.188583ms)
+✔ R03 CSV cells that could run as spreadsheet formulas are neutralized inside the quotes (0.172542ms)
+✔ R04 a CSV export with formula-like cells still verifies through the library and the CLI (55.44625ms)
+✔ C01 no S3 variable selects the filesystem backend (0.424417ms)
+✔ C02 a bucket with a region yields production defaults (0.378583ms)
+✔ C03 partial configuration fails closed (0.246459ms)
+✔ C04 endpoint must be https unless loopback; bucket and TTL are validated (0.202ms)
+✔ C05 local MinIO settings enable path style and static credentials (2.595375ms)
+✔ P01 uploads export, signature, then manifest last, head-verifying each before the next (54.269209ms)
+✔ P02 transient errors retry with growing backoff and then succeed (9.314125ms)
+✔ P03 a non-transient error is not retried and nothing later is uploaded (6.156542ms)
+✔ P04 exhausted retries reject and the manifest commit marker is never written (6.186458ms)
+✔ P05 head verification rejects a missing, foreign-tenant or altered object (7.351209ms)
+✔ P06 a retry after a crash overwrites the same three keys (5.9165ms)
+✔ P07 transient classification covers 5xx, throttling and network resets only (0.1405ms)
+✔ F01 filesystem storage keeps the legacy <root>/<job>/<file> layout and is idempotent (14.856ms)
+✔ F02 filesystem put refuses a mismatching body and a foreign-tenant key (0.867167ms)
+✔ S09 keys follow tenants/<tenant>/audit-exports/<job>/<file> and reject non-UUIDs (0.607ms)
+✔ S01 put sends SSE-S3, content headers, tenant metadata and a SHA-256 checksum (42.381417ms)
+✔ S02 KMS key switches encryption to aws:kms (10.315583ms)
+✔ S03 a body that differs from the expected SHA-256 is refused before any upload (2.619291ms)
+✔ S04 put refuses a key that is not this tenant's and job's (1.953458ms)
+✔ S05 head maps S3 metadata and reports absent objects as null (0.63425ms)
+✔ S06 assertStoredMatches detects size, hash, checksum, encryption and tenant drift (0.154625ms)
+✔ S07 presignGet signs a short-lived GET with a fixed download disposition (7.235458ms)
+✔ S08 presign TTL above the 300 second ceiling, zero or fractional is refused (2.200709ms)
+✔ S09 listKeys pages through a tenant/job prefix and refuses anything off-layout (0.329916ms)
+✔ large-export writer streams ordered rows and publishes one signed directory (54.992333ms)
+✔ foreign and out-of-order rows fail without publishing partial output (6.367375ms)
+✔ verify-audit-export files accept signed content and reject a changed file (220.325875ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 307.20825
+
+> @greenguard/tenant-control-plane@0.1.0 test
+> npm run build && node --test --test-concurrency=1 "dist/**/*.test.js"
+
+
+> @greenguard/tenant-control-plane@0.1.0 prebuild
+> node --input-type=module -e "import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });"
+
+
+> @greenguard/tenant-control-plane@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/tenant-control-plane@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/feature-flags -w @greenguard/membership-client -w @greenguard/audit -w @greenguard/entitlements
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+✔ API-key HTTP issuance shows secret once, metadata is safe, and revocation denies lookup (207.341667ms)
+✔ health probes answer without a token (105.758417ms)
+✔ M08: IdP-asserted tenant and roles are ignored; the store decides (32.435417ms)
+✔ M01: an admin of tenant B cannot list or change tenant A over HTTP (51.500958ms)
+✔ role change needs If-Match: missing 428, stale 412 with ETag, current 200 (39.025458ms)
+✔ requests are validated: no key 400, unknown body field 400, bad token 401, viewer 403, last admin 409 (46.945083ms)
+✔ the internal lookup needs the service credential and answers 200 or 404 (18.105125ms)
+revocation-to-403-ms(outbox read + apply + verify)=23.2
+✔ M05/M06: revoke -> outbox event -> cache entry gone -> next request 403, measured; without the event denied at the TTL (77.783625ms)
+✔ discovery answers unknown domains identically, then throttles per IP with Retry-After (102.204542ms)
+✔ control plane keeps verified issuer identity and email verification (4.298375ms)
+✔ real Go ingest admission calls control plane for two-tenant keys and M2M revocation (4425.453333ms)
+✔ verified membership binds tenant placement and rejects forged claims (204.638708ms)
+✔ internal endpoint requires service authentication; callers cannot supply shard/epoch routing (21.515084ms)
+✔ read lease endpoints require service auth, reject hints and never permit caching (31.115916ms)
+✔ token bucket allows a burst, then returns Retry-After seconds, then refills (0.318042ms)
+✔ token bucket memory is bounded and evicts the oldest address (0.063833ms)
+﹣ S3X1 export -> upload -> head-verify -> presigned HTTP download verifies with the Ed25519 CLI (0.274667ms) # SKIP
+﹣ S3X2 an expired presigned URL is rejected (0.039917ms) # SKIP
+﹣ S3X3 tenant A's URL cannot fetch tenant B's object and a tampered URL fails (0.027666ms) # SKIP
+﹣ S3X4 B's admin cannot obtain links to A's export and A's link call presigns only A's keys (0.024375ms) # SKIP
+﹣ S3X5 killing the worker mid-upload leaves a claimable job and recovery yields one object set (0.032041ms) # SKIP
+﹣ S3X6 multipart upload keeps the SHA-256 and encryption intact (0.024542ms) # SKIP
+✔ A01 A02 A05 A07 A08 tenant isolation, stable cursor, durable signed retry, audit, role (203.225292ms)
+✔ A01 A03 owner reads include inventory and billing under RLS; CSV verifies (183.193917ms)
+✔ A05 worker crash leaves a reclaimable job and one completed output (96.203667ms)
+✔ DL1 the download token is issued as a header value, never inside the URL (119.13275ms)
+✔ DL2 a valid header token streams the verified file; a missing token is forbidden (73.225791ms)
+✔ DL3 a file altered on disk is never sent (61.659167ms)
+✔ S3L1 authorized admin gets presigned links and the issuance is audited (130.790042ms)
+✔ S3L2 nothing is presigned for another tenant's admin, a viewer, or a foreign job (123.202417ms)
+✔ S3L3 an object whose stored tenant is not the caller's tenant is never presigned (62.503833ms)
+✔ S3L4 a job that is not ready or has expired is not found (105.8135ms)
+✔ A06 download tokens expire and are bound to tenant, job and actor (0.77075ms)
+✔ EQ1 an idempotent replay returns the same job and creates nothing new (96.676167ms)
+✔ EQ2 the same key with a different request is a conflict (42.173125ms)
+✔ EQ3 exports.per_day is enforced with a Retry-After, replays at the limit still succeed, tenants are independent (129.492416ms)
+✔ EQ4 a plan without an exports.per_day allowance gets the free default of zero (52.959083ms)
+✔ EQ5 concurrent requests cannot exceed the daily quota (63.839834ms)
+✔ EQ6 a healthy feed honors the paid plan's exports.per_day (55.933667ms)
+✔ EQ7 a stale or absent feed fails closed to the free default with the same 429 (77.416458ms)
+✔ EQ8 the quota counts only today's jobs (UTC day) (51.602042ms)
+✔ audit inventory pages admit only the resolved owner and restart exports after a move (19.892375ms)
+✔ audit worker shard registry permits only its read-only inventory identity (1.21125ms)
+✔ S3C1 bucket, region and public key enable S3 without a directory or link secret (0.742417ms)
+✔ sharded inventory audit uses its owner registry without a legacy URL (0.108375ms)
+✔ S3C2 partial S3 configuration fails closed (0.214166ms)
+✔ S3C3 a set link secret is still length-checked and S3 wins over a directory (0.070125ms)
+✔ S3D1 links are issued for export, manifest and signature with the digest (1.401708ms)
+✔ S3D2 wrong-tenant or wrong-job object metadata is refused before anything is presigned (0.299041ms)
+✔ S3D3 a missing object, an altered digest or a storage error yield not found (0.115208ms)
+✔ S3D4 TTL is the smaller of the configured value, 300 seconds and the export lifetime (0.168708ms)
+✔ S3D5 an export whose recorded digest is missing is not downloadable (0.070417ms)
+✔ V01 a file whose SHA-256 matches opens and streams the same bytes (2.992792ms)
+✔ V02 altered, truncated, missing or non-file targets are not found and reveal no path (1.444584ms)
+✔ V03 a file changed between hashing and sending is refused before any byte is sent (0.883666ms)
+✔ V04 a stream error mid-send destroys the response without throwing or leaking the path (1.015875ms)
+✔ audit worker accepts a matching Ed25519 signing identity (1.424791ms)
+✔ audit worker rejects mismatched signing keys and invalid identities (0.423542ms)
+✔ audit worker health endpoints separate liveness from dependency readiness (12.156ms)
+✔ S3W1 a failed upload never completes the job, cleans temp files and is requeued with backoff (153.492584ms)
+✔ S3W2 transient upload errors retry and the job completes once (65.986209ms)
+✔ S3W3 a half-uploaded job (manifest missing) is not ready and recovers to one object set (86.451084ms)
+✔ S3W4 an object that fails head verification never marks the job ready (87.8625ms)
+✔ S3W5 failures back off, are capped, and end in a failed state with a bounded error (160.574417ms)
+✔ S3W6 a backed-off job does not block a healthy one, and a lease that keeps expiring is failed at the cap (113.383875ms)
+✔ S3W7 a stale worker cannot complete, renew, or requeue a reclaimed attempt (59.054042ms)
+✔ S3W8 a long upload renews its lease and completes (1331.402334ms)
+✔ reads defaults and requires the database URL and lookup credential (0.860333ms)
+✔ the lookup credential must hold at least 32 bytes (0.10725ms)
+✔ AUTH_* is all-or-nothing and remote JWKS must use https (0.091167ms)
+✔ single-issuer Cognito access mode requires an explicit public client allowlist (0.081917ms)
+✔ 09g multi-issuer config accepts two issuers and preserves legacy single issuer (0.218083ms)
+✔ 09g multi-issuer config rejects malformed, duplicate and unsafe entries (0.1515ms)
+✔ 09e audit export requires all owner databases when enabled (0.078625ms)
+✔ machine issuers default to the M2M issuer, may be listed, and must be https (0.162333ms)
+✔ API key is tenant scoped, digest-only, and revocation denies next verify (117.2975ms)
+✔ rotation overlap and concurrent rotation yield one successor (50.479084ms)
+✔ OAuth client maps to exactly one tenant and creator revocation disables credentials (59.480167ms)
+✔ removing the creator closes both credential mechanisms (31.367958ms)
+✔ credential creation rejects scope escalation, invalid expiry and invalid device scope (8.756333ms)
+✔ identical replay returns a stored safe result and never a second secret (42.063042ms)
+✔ a lost create response leaves a recoverable orphan under the free key limit (40.738417ms)
+✔ a failed create leaves no receipt, key or event so the retry issues normally (21.964334ms)
+✔ a demoted creator's key and client lose scopes the current role no longer permits (44.040208ms)
+✔ missing organization and non-member both answer role-forbidden (19.670084ms)
+✔ OAuth registration is limited to allow-listed issuers and fails closed (11.760292ms)
+﹣ M09 opt-in process crash before and after commit preserves atomic effects (0.329167ms) # STAGE09_CRASH_LIVE=1 required
+✔ raw SQL unique violations are recognized without matching messages (0.296875ms)
+✔ domain conflicts have a stable HTTP 409 mapping (0.319167ms)
+✔ ENT-08 concurrent invitation accepts never exceed seats.max (103.155667ms)
+✔ api_keys.max is tenant-scoped and rejects over-limit issuance (83.275334ms)
+✔ ENT-10 a paid plan applied an hour ago is still honored while the feed is healthy (43.691583ms)
+✔ ENT-11 a stale feed fails closed to the free key default and a heartbeat restores the plan (60.097917ms)
+✔ ENT-12 heartbeat never regresses a newer plan and never touches another tenant (81.562625ms)
+✔ identity connection tables enforce tenant RLS and runtime has no delete (21.642041ms)
+✔ S04/S05: JIT off rejects unknown identity; verified domain with JIT on grants viewer (93.991416ms)
+✔ S06: unverified domain and unverified email cannot grant JIT (11.224834ms)
+✔ S07: a connection for A cannot grant membership in B (46.003291ms)
+✔ DX1: an expired domain claim stops JIT and discovery (27.289625ms)
+✔ DX2: re-verification extends the claim; a failed re-check leaves it expired (38.388ms)
+✔ DX3: another tenant can claim an expired domain; the old owner loses JIT (52.26025ms)
+✔ DX4: release is admin-of-owner only, then another tenant can claim (47.512667ms)
+✔ DX5: JIT membership enforces seats.max (default 3 seats: admin plus two) (45.17575ms)
+✔ DX6: concurrent JIT grants through different connections cannot exceed seats.max (47.458125ms)
+✔ DX7: concurrent JIT for one identity returns the persisted membership (30.785167ms)
+✔ registry seeds four stable IDs; legacy organizations retain s1 and all metadata is protected (122.879125ms)
+✔ editing the onboarding ring affects only new tenants and immutable history preserves prior decisions (61.522042ms)
+✔ onboarding persists one ring suggestion and runtime resolution never rehashes (76.011958ms)
+✔ trusted onboarding override persists provenance without a public routing hint (29.480417ms)
+✔ resolver serializes epochs beyond JS precision and rejects offline shard ownership (35.872417ms)
+✔ registry incarnation is authoritative; replacements rotate only offline with the next version (50.455875ms)
+✔ move CAS advances once, requires receipts, blocks admission until activated and replays durably (71.155375ms)
+✔ baseline preparation is durable while writes stay active; quiescing starts only for cutover (38.154041ms)
+✔ empty or negative receipts never permit ownership switch or runtime reactivation (40.427541ms)
+✔ operation-bound receipt with a forged target identity cannot authorize placement CAS (39.937208ms)
+✔ only one concurrent move per tenant wins and conflicting operation reuse is rejected (24.628583ms)
+✔ pre-switch abort requires positive receipts and fences old epochs (38.0915ms)
+✔ immutable receipts and forced RLS isolate move ledgers (54.330625ms)
+✔ database enforces registry references, epoch monotonicity, and one live move (55.900042ms)
+✔ quiesce closes new leases, existing responses drain before epoch CAS (110.742417ms)
+✔ expired/lost leases cannot admit a response or indefinitely block cutover (114.575334ms)
+✔ lease RLS prevents another tenant from reading, releasing or using it (88.011458ms)
+✔ creating an organization makes the caller admin and writes audit and outbox in one transaction (M09) (75.98925ms)
+✔ M02: replaying an invitation token gives one membership; another identity cannot reuse it (72.671ms)
+✔ M03: expired, malformed and wrong-tenant tokens are rejected (38.751375ms)
+✔ M01: only active admins manage members and other tenants look absent (36.265458ms)
+✔ member listing uses a bounded keyset cursor without repeats (36.644458ms)
+✔ concurrent role changes on one version: exactly one wins, the other gets a version conflict (32.131042ms)
+✔ M04: the last admin cannot be demoted or removed, and concurrent removals leave one admin (37.489583ms)
+✔ lookup maps an identity to its one active membership and forgets it after revocation (42.051584ms)
+✔ a fresh invitation reactivates a revoked membership at the next version and clears revocation metadata (45.532292ms)
+✔ an identity with active memberships in two tenants is ambiguous and never guessed (38.167125ms)
+✔ M20: a forwarded invitation token is bound to the invited verified email (38.850041ms)
+✔ verified OIDC access tokens preserve opaque non-UUID subjects (24.20575ms)
+✔ first-admin verifier rejects wrong issuer, wrong audience, expired and client-credentials tokens (73.919333ms)
+✔ first-admin verifier rejects invalid tenant IDs and unbounded token input (11.632875ms)
+✔ initial OIDC admin enrollment accepts opaque external sub and replays exactly (59.310667ms)
+✔ input validation rejects invalid issuer, opaque-sub controls and non-admin roles (0.268708ms)
+✔ F01 F05 F06: tenant override is isolated, audited and header spoofing fails (190.23925ms)
+✔ F05 tenant admin cannot set unregistered, locked or mistyped flags (422) (17.697875ms)
+✔ global writes require platform credential and audit configured actor (154.809ms)
+✔ global kill switch may be locked; unknown global keys are rejected with 422 (10.077875ms)
+✔ start serves probes and the lookup from environment configuration (89.776292ms)
+✔ every tenant table has tenant_id and forced RLS; identities is the one documented exception (29.290625ms)
+✔ notification contacts CDC is table-scoped, read-only, RLS-visible and published for inserts/updates (20.010583ms)
+✔ audit exporter control role has only tenant-scoped read and job-state privileges (8.620916ms)
+✔ notification contact migration keeps format checks and permits a versioned cleared row (52.562209ms)
+✔ M12: only ephemeral read leases permit DELETE; audit, outbox and receipts remain immutable (40.442959ms)
+✔ RLS: a tenant sees and writes only its own rows (33.953083ms)
+✔ composite tenant keys and role checks are enforced by the database (50.267708ms)
+✔ contact API requires admin identity for writes and lookup token for internal reads (209.265583ms)
+✔ contact versions prevent stale updates and concurrent creation or replacement (33.357333ms)
+✔ contact validation returns safe errors and updates create no recipient-bearing events (33.891916ms)
+✔ notification contact forced RLS denies cross-tenant reads, writes and unscoped reads (74.890459ms)
+✔ deactivated organizations hide contacts and cannot update them (25.758041ms)
+✔ internal contact lookup is mounted without end-user authentication configuration (12.614667ms)
+✔ revoked admins cannot replace contacts and database constraints reject malformed destinations (63.16725ms)
+✔ contacts accept snapshots, normalize omitted channels, and allow an explicit cleared tombstone (0.923458ms)
+✔ closed contacts validation rejects empty, malformed and injected recipients without echoing values (0.262833ms)
+﹣ committed revoke reaches two verifiers through CDC and Kafka (0.264208ms) # SKIP
+✔ the seed command reports an idempotent run and requires its database URL (54.642083ms)
+✔ the dev Dex memberships seed the store idempotently, keeping existing tenant IDs (79.592ms)
+✔ a seed entry with a device role or several roles is refused before any write (0.387958ms)
+✔ seed keys split on the first pipe, so Auth0-style subjects survive (5.073958ms)
+ℹ tests 164
+ℹ suites 0
+ℹ pass 156
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 8
+ℹ todo 0
+ℹ duration_ms 21907.556292
+
+> @greenguard/billing-service@0.1.0 test
+> npm run build && node --test --test-concurrency=1 dist/src/*.test.js dist/catalog/*.test.js
+
+
+> @greenguard/billing-service@0.1.0 build
+> npm run build -w @greenguard/kafka-security && prisma generate && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+✔ catalog sync uses stable lookup keys and rejects a mismatched price (0.745625ms)
+✔ every plan defines every limit key and paid plans never fall below free (0.097542ms)
+✔ audit reader can only select the forced-RLS billing audit table (24.509792ms)
+✔ B03 duplicate Stripe event has one subscription and entitlement effect (74.055875ms)
+✔ B04 reordered updated then created events retain the current remote state (31.21975ms)
+✔ B05 restart after inbox commit and after tenant commit applies once (2141.42475ms)
+✔ B06 retry after Stripe call uses one Checkout Session (46.457875ms)
+✔ B07 cancel at period end lowers entitlements only at the boundary (32.802417ms)
+✔ B08 downgrade below current usage retains plan until period boundary (46.528417ms)
+✔ B09 past_due grace ends in free limits; unpaid is immediate (37.707083ms)
+✔ B10 meter resend uses one identifier and one remote effect (28.401708ms)
+✔ B11 close racing a late reading attributes it to exactly one period with matching totals (40.603625ms)
+✔ F4 usage period stays open through the close lag so late-consumed readings bill to their month (40.031791ms)
+✔ F4 a lagging consumer defers the period close (23.861333ms)
+✔ F4 meter events use an accepted event time and quarantine raises reconciliation_required (98.641459ms)
+✔ F4 waiting for the customer neither counts an attempt nor busy-loops (911.06925ms)
+✔ F4 concurrent Checkout requests create one Checkout command (30.106708ms)
+✔ F4 a duplicate completed subscription is cancelled and raised for reconciliation (46.156791ms)
+✔ F4 paused keeps the paid entitlement; incomplete_expired grants none (54.592625ms)
+✔ F4 quarantined transient webhook failures are redriven with bounded backoff (74.648166ms)
+✔ F4 work queues expose identifier columns only and selectors return IDs (14.846542ms)
+✔ B12 reconciliation reports mismatch without silently altering money (19.721208ms)
+✔ B13 metadata mismatch quarantines event and cannot alter other tenant (34.808417ms)
+✔ active checkout is rejected; canceled subscription can be replaced (49.463ms)
+✔ B16 redrive is audited and applied events remain no-ops (28.448208ms)
+✔ billing RLS and explicit tenant filters deny cross-tenant reads (20.855625ms)
+✔ durable worker finds tenant command after restart (1303.119792ms)
+✔ due-work index and malformed-source receipt survive restart (57.168541ms)
+✔ HTTP billing API authenticates tenant admin and persists command before 202 (97.728167ms)
+✔ B01 HTTP bad signature returns 400 with no inbox row; valid raw body commits (31.330583ms)
+✔ F4 meter event time stays inside Stripe's accepted window and the usage month (0.3115ms)
+✔ F4 an old period is clamped into the accepted 35 day window (0.046792ms)
+✔ F4 paused keeps a defined status and incomplete_expired carries no entitlement (0.150667ms)
+✔ B01 rejects a bad webhook signature before storage (0.935292ms)
+✔ B02 rejects a webhook timestamp outside the five minute window (0.096959ms)
+✔ B14 refuses live keys at startup (0.120125ms)
+✔ B15 accepts either active signing secret during rotation (0.293542ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5967.943834
+
+> @greenguard/bff@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ alert list and acknowledgement forward bearer, cursor and concurrency headers without tenant override (13.350541ms)
+✔ GraphQL acknowledge accepts the owner command receipt after commit (23.977375ms)
+✔ viewer cannot acknowledge and invalid cursors never reach the owner (0.2185ms)
+✔ alert transition history forwards only the owner cursor and rejects malformed cursors (0.481125ms)
+✔ alert notifications enforce operator role and verify alert ownership before notification owners (7.831875ms)
+✔ GraphQL alert page maps owner data and carries an opaque cursor (5.010209ms)
+✔ request loader batches distinct IDs, deduplicates repeats, and never reuses a tenant result (13.19075ms)
+✔ batch response cannot inject an unrequested device (0.69425ms)
+✔ ENT-06 GraphQL preserves Read API entitlement denial (43.568917ms)
+✔ mesh HTTP is opt-in and limited to Kubernetes Service DNS (0.761833ms)
+✔ live feed validates scope and reports Redis health (2.295667ms)
+✔ cluster connection events restore live feed subscriptions after reconnect (0.476625ms)
+✔ live hints carry bounded projection identity and sequence without converting stream versions (0.437291ms)
+✔ a still-valid JWT loses BFF access after membership.changed (62.874209ms)
+✔ HTTP GraphQL verifies the bearer before executing a tenant-scoped query (19.730959ms)
+✔ HTTP GraphQL carries a valid caller trace into the saga start request (8.921083ms)
+BFF rate limiter unavailable Error: rate_check_timeout
+    at Timeout.<anonymous> (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/bff/dist/rate-limit.js:9:49)
+    at listOnTimeout (node:internal/timers:685:17)
+    at process.processTimers (node:internal/timers:618:7)
+✔ readiness is separate from liveness and a stalled rate check is bounded (26.430625ms)
+✔ notification history composes owner APIs, binds alert and intent generation, and keeps critical explicitly unconfigured (16.546125ms)
+✔ notification history retains owner intents with explicit partial delivery coverage (0.50625ms)
+✔ notification history maps owner network failures to a controlled unavailable result (0.145125ms)
+✔ notification history drops malformed intents and reports partial coverage (0.312541ms)
+✔ notification history rejects viewer access and malformed owner pages (0.274708ms)
+✔ forwards bearer and idempotency key without accepting a caller tenant (13.432792ms)
+✔ enforces roles before any upstream request (0.189458ms)
+✔ rejects invalid provisioning idempotency keys before an upstream call (0.243792ms)
+✔ preserves owner not-found for a foreign saga (1.028541ms)
+✔ rejects dot-segment saga IDs before constructing owner paths (0.168ms)
+✔ rejects cleartext upstream except loopback (0.064916ms)
+✔ forwards only a valid incoming traceparent to the saga API (0.652ms)
+✔ status and redrive forward only a valid traceparent (0.695208ms)
+✔ only registered, untampered persisted operations execute (2.644292ms)
+✔ cost gate bounds aliases, nesting, fragments, and operation count (0.67375ms)
+✔ all shipped operation documents fit the resolver budget and new hashes stay pinned (1.359625ms)
+✔ rate limit checks have a bounded wait (6.413875ms)
+✔ operation costs separate cheap, history, search, and provisioning traffic (0.656708ms)
+✔ alert acknowledgements and provisioning use separate rate buckets (0.2085ms)
+✔ two replicas use tenant-scoped shared Redis keys and opaque user identifiers (0.159792ms)
+✔ machine API keys get a separate tenant-scoped Redis bucket (0.118667ms)
+✔ machine principal may use telemetry reads but cannot run mutations or session (42.459833ms)
+✔ BFF rejects exhausted requests before reaching GraphQL with Retry-After (10.360083ms)
+✔ ReadClient forwards bearer and maps each owning store's records (13.477625ms)
+✔ ReadClient preserves opaque upstream errors and rejects unsafe URL (154.023041ms)
+✔ ReadClient rejects dot-segment IDs before URL normalization (0.269375ms)
+✔ reading versions preserve large wire strings and reject ambiguous objects (0.441708ms)
+✔ site cursor and rollup queries preserve owner routing and bearer (0.511625ms)
+✔ bin latest and trend preserve sensor, policy, freshness and range metadata (0.639167ms)
+✔ safe GET retries transient failures at most three times (4.791709ms)
+✔ safe GET does not retry an owner authorization failure (0.226208ms)
+✔ read timeout obeys one overall deadline and never retries POST batches (61.854125ms)
+✔ a prompt header with a stalled body uses the per-attempt deadline (36.410916ms)
+✔ breaker rejects without upstream calls then recovers after a successful probe (8.02175ms)
+✔ a failed recovery probe reopens the breaker for another cooldown (4.094167ms)
+✔ a pre-trip success cannot close an open breaker or clear its recovery probe (4.186334ms)
+✔ minimum watermark remains request local on shared client and through retry (2.041959ms)
+✔ watermark request rejects malformed and cross tenant tokens before fetching (0.229208ms)
+✔ strict watermark rejects old epochs, missing admission and lower sequence responses (0.5555ms)
+✔ unsupported owning store preserves controlled strict-read failure (0.150084ms)
+✔ read attempts propagate shrinking budgets and honor caller cancellation (0.575166ms)
+✔ caller disconnect neither opens the shared breaker nor strands a half-open probe (4.39175ms)
+✔ saga mTLS is opt-in and rejects partial or cleartext configuration (0.6105ms)
+✔ GraphQL aliases use one request batch and reading(id) preserves projection freshness (47.172542ms)
+✔ GraphQL rejects oversized history and search before the Read API (8.595584ms)
+✔ GraphQL status maps saga and history from the owning API (4.418417ms)
+✔ GraphQL does not turn a foreign-tenant saga into data (3.8575ms)
+✔ GraphQL mutations call the owning command API (3.954125ms)
+✔ GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch search through Read API (6.414208ms)
+✔ session returns only the verified principal (3.111667ms)
+✔ bin readings persisted roots map real metrics and trend coverage through the BFF (3.483583ms)
+✔ GraphQL binds strict minima to principal and isolates aliases from device batching (11.3525ms)
+✔ GraphQL request certificate survives empty PG results and covers the oldest snapshot (3.922542ms)
+✔ every persisted operation validates against the GraphQL schema (4.355625ms)
+✔ persisted DeviceCurrent shares one aggregate HTTP request per authenticated operation (5.497ms)
+✔ subscription verifies bearer, scopes reads and catches up after reconnect (720.564792ms)
+✔ silent peers lose their connection slots and subscription polling stops (374.037667ms)
+✔ live notification demands its projection watermark and discards late old placement hints (36.864667ms)
+✔ subscription foreground mismatch resets once for a move or same-epoch incarnation restore (3.916875ms)
+✔ newer hint advances minimum directly and late older hints are discarded (32.030167ms)
+✔ subscription reset is bounded and rejects lower/unchanged/missing identity or outage (12.303458ms)
+✔ subscription retains the certificate when a fresh admitted reading is empty (2.298834ms)
+✔ a newer hint during an old snapshot discards that snapshot and reruns at the new minimum (2.213375ms)
+ℹ tests 80
+ℹ suites 0
+ℹ pass 80
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1497.131583
+
+> @greenguard/gateway@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/gateway@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ a stalled provisioning POST has a bounded deadline and one upstream effect (115.968708ms)
+✔ a still-valid JWT loses gateway access after membership.changed (44.724459ms)
+✔ machine may proxy read and GraphQL but cannot start provisioning or obtain a subscription ticket (7.7185ms)
+✔ public liveness and dependency readiness (2.958625ms)
+✔ requires verified bearer on protected routes (1.413167ms)
+✔ forwards original bearer and strips spoofed tenant header (3.257208ms)
+✔ forwards caller trace context to the GraphQL BFF (1.51ms)
+✔ routes BFF and saga via explicit method/path allowlist (6.331833ms)
+✔ blocks query identity, path normalization and oversized body (3.172375ms)
+✔ WebSocket requires bearer and rejects token in query string (7.975042ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 287.988583
+
+> @greenguard/device-service@0.1.0 test
+> npm run build && node --test --test-concurrency=1 "dist/**/*.test.js"
+
+
+> @greenguard/device-service@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/device-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 52ms
+
+✔ authentication: missing, malformed, expired, wrong-audience and forged tokens are 401 (232.322041ms)
+✔ authorization: viewers read but cannot write; only admins create sites and bins (63.26625ms)
+✔ grain lot placement is admin-only, tenant-scoped and validates its outbox contract (140.229625ms)
+✔ tenant isolation over HTTP: tenant B cannot see or change tenant A, and a forged tenant header is ignored (177.576625ms)
+✔ registration is idempotent over HTTP and requires a valid Idempotency-Key (95.7215ms)
+✔ optimistic concurrency: ETag, If-Match, 428 and 412 (133.382625ms)
+✔ status changes bump the version and validate input (134.169416ms)
+✔ pagination: bounded pages with a stable cursor (146.417375ms)
+✔ malformed requests get problem+json without leaking internals (84.696375ms)
+✔ correlation: valid IDs are kept and reach the outbox; invalid ones are replaced (107.915625ms)
+✔ event contracts: every outbox event written through the API validates (110.76625ms)
+✔ traceparent flags are normalised to the sampled bit so stored events stay valid (250.61075ms)
+✔ H6: facility commands require valid keys and replay stable responses (111.3215ms)
+✔ cable HTTP routes authenticate, enforce roles and tenant ownership (420.84125ms)
+✔ cable HTTP If-Match edits/removals expose new versions and stale preconditions (190.849375ms)
+✔ cable HTTP input rejects spoofed tenant/asset/sensor identities and unsupported units (70.033583ms)
+✔ every domain error maps to a stable HTTP status and code (0.525292ms)
+✔ health probes keep their own body when the API is enabled (84.29025ms)
+✔ 500 responses are logged by class name only (0.181792ms)
+✔ request validators accept good input and reject bad input (0.3895ms)
+✔ without API options only the health routes exist (10.460875ms)
+✔ a request's server span is the origin trace stored on the outbox event (244.742542ms)
+✔ header versioning: default version is echoed and a deprecated version announces its sunset (167.457375ms)
+✔ header versioning: after the sunset instant the old version is 410 Gone, before authentication (13.074416ms)
+✔ defaults when header absent (13.020125ms)
+✔ explicit supported version with padding (3.884625ms)
+✔ deprecated version sets all headers and appends Vary and Link (1.273292ms)
+✔ deprecated without sunset omits Sunset, Link (1.025208ms)
+✔ sunset without deprecatedAt is implicitly deprecated (1.58425ms)
+✔ boundary: now equals deprecatedAt is deprecated, before is current (1.588709ms)
+✔ boundary: now equals sunsetAt is 410 and one second earlier is 200 (1.493459ms)
+✔ sunset without successor omits successor field (0.956791ms)
+✔ unsupported versions return 400 with the non-sunset list (3.620375ms)
+✔ long invalid value is truncated to 64 chars in the body (0.808083ms)
+✔ header injection value is unsupported and never reflected in headers (0.195625ms)
+✔ array header values are joined and rejected; default clock works (0.068041ms)
+✔ absent env yields the default registry (0.424458ms)
+✔ loads ISO dates, successor and documentation (1.100375ms)
+✔ equal deprecatedAt and sunsetAt is accepted (0.078208ms)
+✔ loadVersionRegistry rejects invalid JSON (0.166125ms)
+✔ loadVersionRegistry rejects null document (0.039042ms)
+✔ loadVersionRegistry rejects missing versions (0.048584ms)
+✔ loadVersionRegistry rejects non-string default (0.029917ms)
+✔ loadVersionRegistry rejects non-object entry (0.029208ms)
+✔ loadVersionRegistry rejects bad version chars (0.03925ms)
+✔ loadVersionRegistry rejects unknown default (0.072709ms)
+✔ loadVersionRegistry rejects duplicate (0.042167ms)
+✔ loadVersionRegistry rejects unparsable date (0.034875ms)
+✔ loadVersionRegistry rejects non-string date (0.03ms)
+✔ loadVersionRegistry rejects sunset before deprecation (0.025458ms)
+✔ loadVersionRegistry rejects unknown successor (0.037958ms)
+✔ loadVersionRegistry rejects empty successor (0.029959ms)
+✔ loadVersionRegistry rejects non-string docs (0.020833ms)
+✔ resolveVersion states around boundaries (0.442125ms)
+✔ resolveVersion truncates the requested value (0.053667ms)
+✔ database failures change readiness but not liveness; shutdown closes probe (56.05975ms)
+✔ requires the database URL without echoing any value (1.517333ms)
+✔ applies local defaults (0.747709ms)
+✔ honours PORT and HOST overrides (0.054292ms)
+✔ mesh control lookup HTTP requires opt-in and Service DNS; JWKS stays HTTPS (0.26475ms)
+✔ auth is optional but all-or-nothing (0.096667ms)
+✔ Cognito access mode requires mapped users and public client IDs (0.0795ms)
+✔ the JWKS URL must be https, or loopback http for local development (0.080667ms)
+✔ import service authentication is all-or-nothing and requires secure endpoints (0.178583ms)
+✔ tracing is enabled only by a collector endpoint and validates its settings (0.139458ms)
+✔ private shard registry config requires no legacy database URL (0.085458ms)
+✔ ENT-10 tenant transaction cancels a synthetic slow statement (122.709625ms)
+✔ tenant IDs must be lowercase, non-nil UUIDs (0.585667ms)
+✔ postgresCode only reads the driver adapter SQLSTATE (0.0645ms)
+✔ an invalid tenant is rejected before any database call (0.095166ms)
+▶ D03 over direct session
+  ✔ tenant context ends with its transaction on a reused connection (20.675916ms)
+  ✔ a failed transaction does not leave its tenant context behind (9.610042ms)
+  ✔ alternating tenants only ever see their own rows (82.895625ms)
+✔ D03 over direct session (337.28925ms)
+▶ D03 over PgBouncer
+  ✔ tenant context ends with its transaction on a reused connection (19.322583ms)
+  ✔ a failed transaction does not leave its tenant context behind (12.728875ms)
+  ✔ alternating tenants only ever see their own rows (90.24225ms)
+✔ D03 over PgBouncer (258.822917ms)
+✔ ENT-03 projector keeps highest source version and tenant A never writes B (128.007667ms)
+✔ ENT-12 heartbeat is monotonic, capped at the clock and leaves plan rows and other tenants untouched (103.725542ms)
+✔ import route rejects absent, human, malformed, wrong issuer/audience/scope and lookup outage (116.634208ms)
+✔ tenant-bound admission, replay fence, conflict, rollback and canonical events (310.165709ms)
+✔ device import applies binding/status changes, soft delete and no duplicate effects (168.571167ms)
+✔ imported devices obey the existing tenant device capacity and failed admission rolls back (222.458333ms)
+✔ import device moves and removals publish atomic cable layout snapshots (165.666167ms)
+✔ control lookup sends a signed-token tenant hint and fails closed on outage (9.503459ms)
+✔ control lookup preserves a configured endpoint path prefix (0.150458ms)
+✔ canonical IDs and full signed-64-bit coordinate IDs match the Python normalizer (0.472416ms)
+✔ sensor layout validation preserves absent depths and zero meters, and sorts positions (1.207375ms)
+✔ sensor layout rejects malformed IDs, unknown fields, duplicate positions and invalid depths (0.314208ms)
+✔ stable sensor IDs are owner-assigned on create and distinct on edits (0.107167ms)
+✔ layout versions must leave room for a PostgreSQL bigint increment (0.099125ms)
+✔ cable creation retries retain owner-assigned identities and one atomic snapshot/audit (285.260625ms)
+✔ layout edits keep sensor IDs, allow position swaps, retire omissions and reject stale edits (93.46625ms)
+✔ concurrent edits have exactly one winner and no failed-command owner event (45.778333ms)
+✔ cross-tenant cable reads, edits, removals, sensor claims and references are denied (129.500791ms)
+✔ forced RLS protects both layout tables without application predicates; identity/delete privileges remain denied (116.002875ms)
+✔ cables require an active provisioned device bound to the requested bin; physical asset cannot act as a bin (89.719542ms)
+✔ device moves and deletion emit versioned owner snapshots while retaining sample identities (149.776125ms)
+✔ device unbinding and explicit cable removal each revoke sensors through a deleted snapshot (174.561209ms)
+✔ cable reassignment preserves sensor IDs and emits the new device association (108.929916ms)
+✔ an owner outbox failure rolls back cable, sensors, audit and receipt (124.065875ms)
+✔ database depth checks deny nonfinite and negative values even without API validation (52.896209ms)
+✔ every emitted cable owner event satisfies the frozen strict JSON contract (24.15225ms)
+✔ ENT-01/02 concurrent registrations serialize and downgrade preserves existing devices (299.12125ms)
+✔ ENT-05 tenant B cannot spend tenant A limit; pending saga obeys same lock (218.372709ms)
+✔ ENT-10 a paid plan applied an hour ago is still honored while the feed is healthy (132.186084ms)
+✔ ENT-11 a stale feed fails closed to the free device default; a new heartbeat restores the plan (154.414667ms)
+✔ H6 unit: site uses one tenant transaction and replays original result (1.253958ms)
+✔ H6 unit: failed site write never attempts outbox insertion (0.138041ms)
+✔ H6 unit: bin uses one tenant transaction and replays original result (0.185541ms)
+✔ H6 unit: failed bin write never attempts outbox insertion (0.079041ms)
+✔ D02: runtime role cannot bypass RLS and owns no tables (266.567875ms)
+✔ D02: without a tenant context the runtime role sees no rows (37.471375ms)
+✔ D02: tenant B cannot read tenant A (28.855584ms)
+✔ D02: tenant B cannot insert rows for tenant A (10.500083ms)
+✔ D02: tenant B cannot change tenant A's devices (30.720834ms)
+✔ D02: tenant B cannot reference tenant A's site or bin (20.267958ms)
+✔ a device's bin must belong to the device's site (11.005875ms)
+✔ runtime role cannot delete, rewrite identity, or touch history (45.28025ms)
+✔ H6: tenant A cannot create or read tenant B facilities or outbox (59.576834ms)
+✔ wheat-to-canola placement preserves the observed-time batch and one outbox effect per version (328.825166ms)
+✔ invalid or cross-tenant placement leaves no grain or event effects (173.499ms)
+✔ registration writes device, outbox event, audit and receipt together (212.014792ms)
+✔ a retry with the same idempotency key returns the original result (33.468959ms)
+✔ concurrent retries of one command create exactly one device (54.056666ms)
+✔ reusing an idempotency key for a different request is rejected (25.675334ms)
+✔ a duplicate serial number under a new key is rejected (26.752625ms)
+✔ other database errors are passed through unchanged (11.607458ms)
+✔ optimistic: a stale version changes nothing and reports the current one (51.515833ms)
+✔ optimistic: of two concurrent edits from the same version, exactly one wins (27.947ms)
+✔ optimistic: an unknown device is reported as not found (8.7515ms)
+✔ pessimistic: status change locks the row, bumps the version and emits an event (39.97725ms)
+✔ pessimistic: a held lock fails fast with NOWAIT and times out otherwise (2180.792541ms)
+✔ receipt, outbox event and audit record share one command ID (42.693125ms)
+✔ a duplicate bin is reported as a duplicate bin (15.697709ms)
+✔ device lists are bounded keyset pages (147.188ms)
+✔ malformed versions and cursors are rejected as invalid input (0.2235ms)
+✔ H6: site creation is atomic, traced and idempotent (36.440125ms)
+✔ H6: site outbox failure rolls back the facility and receipt (17.728333ms)
+✔ H6: bin creation is atomic, traced and idempotent (37.057542ms)
+✔ H6: bin outbox failure rolls back the facility and receipt (17.260584ms)
+device-service: AUTH_* not set, /v1 API disabled (health only)
+device-service listening on localhost
+✔ startup fails fast without a database URL (186.306917ms)
+device-service listening on localhost
+✔ startup listens and reports readiness against an unreachable database (57.018667ms)
+device-service listening on localhost
+✔ startup mounts the authenticated API when AUTH_* is configured (16.181833ms)
+✔ startup with an invalid version policy fails before listening (2.720791ms)
+[Nest] 31097  - 09/28/2026, 3:20:31 AM   ERROR Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 1
+}
+Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16)
+✔ startup enables tracing when a collector endpoint is configured (8565.424ms)
+✔ D01: migrations build an empty database, re-apply cleanly and match the schema (2293.227791ms)
+✔ M11: existing inventory tenants upgrade into version-one control-plane projections (1815.2695ms)
+✔ R1: CDC can snapshot both tenants' outbox rows and nothing else (44.315792ms)
+✔ simultaneous tenant transactions route separately and admit before business SQL (1.992042ms)
+✔ cross-tenant, wrong shard incarnation, missing and quiescing placement cannot run work (0.610833ms)
+✔ durable missing/stale ownership stops the transaction before business work (0.223417ms)
+inventory saga result discovery unavailable { ownerIndex: 1 }
+inventory saga result discovery unavailable { ownerIndex: 1 }
+✔ every shard closes and hung shutdown has a caller bound (16.676417ms)
+✔ ID-only saga discovery and tenant-free heartbeat metadata fan out to every shard (0.369792ms)
+✔ discovery outage keeps healthy shards progressing and resets the round-robin cursor (0.495708ms)
+✔ ping runs a trivial query and shutdown ends the pool (0.87675ms)
+✔ ping rejects when the database is unreachable (2.370667ms)
+✔ idle connection errors are logged without leaking details (0.157791ms)
+✔ inventory saga activation, replay, compensation and tenant isolation (207.833208ms)
+✔ deadline deactivation of a never-activated device is a no-op success (52.499167ms)
+﹣ live Kafka inventory command reaches durable result outbox and result topic (0.352541ms) # INVENTORY_SAGA_KAFKA_LIVE=1 enables broker test
+✔ retired tenant list is rejected at startup (0.768167ms)
+✔ ID-only tenant discovery is bounded, fair and never crosses tenants (3886.527542ms)
+ℹ tenants=120 passes=4 initial_selector_batch=100
+✔ a valid saga command trace is kept with only the sampled bit (0.4085ms)
+✔ invalid, all-zero or missing traces are dropped, never derived from IDs (0.076459ms)
+✔ result headers echo the stored trace or carry none (0.758917ms)
+✔ M10 tenant event decoder accepts canonical key and rejects forged identity (2.997125ms)
+✔ M10 live tenant projection converges under duplicate/reordered delivery; app cannot write (179.79175ms)
+﹣ M10 opt-in canonical Kafka tenant event survives projector restart and redelivery (0.139542ms) # INVENTORY_TENANT_KAFKA_LIVE=1 enables the broker test
+ℹ tests 168
+ℹ suites 2
+ℹ pass 166
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 33140.60025
+
+> @greenguard/workflow-alerts@0.1.0 test
+> npm run build && node --test --test-concurrency=1 "dist/**/*.test.js"
+
+
+> @greenguard/workflow-alerts@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/workflow-alerts@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+▶ acknowledge
+  ✔ transitions once, writes audit and alert.acknowledged (108.40725ms)
+  ✔ a retried Idempotency-Key returns the original outcome; reuse for another request conflicts (82.20725ms)
+  ✔ stale If-Match version and unknown alert are rejected (37.74775ms)
+✔ acknowledge (228.846958ms)
+▶ acknowledge versus escalation
+  ✔ ack first: the later escalation is suppressed with a no-op receipt (62.356083ms)
+  ✔ escalation first: an acknowledge with the old version gets 412, then succeeds on the new one (72.642708ms)
+  ✔ not yet due: no escalation, no receipt (37.934458ms)
+  ✔ concurrent race: exactly one of ack or escalation takes effect (203.465209ms)
+  ✔ a held row lock makes a racing command fail fast instead of waiting forever (2138.522167ms)
+✔ acknowledge versus escalation (2515.430541ms)
+✔ opens only at or above the open threshold with an alert-eligible severity (0.710334ms)
+✔ an active episode updates, holds and resolves with hysteresis (0.096542ms)
+✔ escalation is due only after the rule timeout (0.066584ms)
+✔ deterministic IDs are stable, distinct and RFC 4122 shaped (0.156416ms)
+✔ single pooled connection A → B → no-context denies leakage after commit, rollback and timeout (223.583625ms)
+▶ alerts HTTP API
+  ✔ read, acknowledge with Idempotency-Key and If-Match, replay the same answer (138.347625ms)
+  ✔ preconditions: 428 without If-Match, 412 with a stale one, 400 without a key (29.906583ms)
+  ✔ roles: viewer reads but cannot acknowledge; no token is 401 (30.102083ms)
+  ✔ tenant B cannot list, read or acknowledge tenant A's alert (68.936625ms)
+  ✔ keyset pagination and state filter stay inside the tenant (73.5515ms)
+  ✔ health and readiness probes (10.429625ms)
+✔ alerts HTTP API (430.365375ms)
+▶ row-level security at the SQL layer
+  ✔ alerts_app without tenant context sees nothing; with B's context sees none of A (91.160042ms)
+  ✔ alerts_app cannot write another tenant's rows or delete anything (46.844833ms)
+✔ row-level security at the SQL layer (138.227292ms)
+✔ batched risk-score rule read is deduplicated, bounded, tenant-filtered and role protected (264.852834ms)
+✔ lifecycle history respects version order, exact final pages, diagnostics, truthful coverage and private DTOs (199.342791ms)
+✔ issuer collision, other member, legacy actor and all old DTOs have redacted identity (103.914542ms)
+✔ history rejects foreign IDs, malformed/binding-mismatched cursors and invalid authentication (110.07875ms)
+✔ microsecond/time/id ties page correctly and suppressed rows cannot repair pre-audit coverage (118.796125ms)
+✔ issuer-aware keyed identity, legacy/system handling and audit purpose separation (0.960834ms)
+✔ history cursor authenticates all bindings and rejects malformed inputs (0.464417ms)
+✔ rule and history requests are bounded (0.13575ms)
+✔ authenticated owner fails startup without both display and cursor keys (0.219291ms)
+✔ invalid cursor rejects before transaction; foreign episode stops before page and coverage (0.460042ms)
+✔ verified but unparseable bearer claims become 401 instead of 500 (0.363917ms)
+✔ problem mapping covers auth, state, lock and unknown errors (0.642583ms)
+✔ page defaults and correlation IDs (0.36475ms)
+✔ sqlState reads only the driver adapter SQLSTATE (0.062167ms)
+✔ defaults and required database URL (0.861042ms)
+✔ AUTH_* is all-or-nothing and JWKS needs https outside loopback (0.135625ms)
+✔ authenticated startup validates secret keys before opening owner resources (0.064291ms)
+✔ Cognito access mode requires mapped users and public client IDs (0.082958ms)
+✔ private shard registry config requires no legacy database URL (0.038708ms)
+✔ risk v2 orders by aggregate stream version while v1 keeps its assessment version (1.180125ms)
+▶ risk.assessed consumer
+  ✔ v2 opens alerts and orders by the envelope stream sequence (84.0515ms)
+  ✔ v2 uses envelope stream sequence and uncalibrated policy cannot open alerts (25.664292ms)
+  ✔ invalidation resolves only the causally current alert and is replay-safe (66.581542ms)
+  ✔ invalidation cannot resolve a newer assessment or another tenant's alert (66.855333ms)
+  ✔ hysteresis: opens at 40, updates, holds above 25, resolves below 25 (124.407542ms)
+  ✔ every outbox row is a valid alert lifecycle event and matches its audit row (52.555292ms)
+  ✔ duplicate delivery is a no-op that returns the original effect (40.067084ms)
+  ✔ the same event_id with different content is a conflict and changes nothing (66.961542ms)
+  ✔ invalid or foreign events are rejected before any write (0.633375ms)
+  ✔ stale or reordered assessments cannot regress an episode (42.061542ms)
+  ✔ a crash before COMMIT leaves no inbox, episode, transition or outbox row (67.069917ms)
+  ✔ event IDs derive from (tenant, episode, version, type) and survive redelivery (88.585541ms)
+  ✔ concurrent scores for one bin create exactly one episode (71.432875ms)
+✔ risk.assessed consumer (797.8745ms)
+﹣ live Kafka assessment and invalidation resolve once across two tenants (0.330458ms) # set ALERTS_KAFKA_LIVE=1 with Kafka and alerts Postgres running
+✔ subscribes to both risk assessment contract versions and invalidations (0.548292ms)
+✔ Snappy codec decodes raw and Kafka Xerial-framed batches (4.9985ms)
+✔ a non-restartable consumer crash removes readiness (0.057833ms)
+✔ commits only after the effect is durable (0.6365ms)
+✔ invalid, conflicting, malformed and header-mismatched records are quarantined before commit (0.151167ms)
+✔ transient failures retry; exhausted retries stop without committing (5.180375ms)
+✔ a failed quarantine write does not commit the offset (0.106708ms)
+✔ the loop drains records, idles, and stops on abort (5.956917ms)
+✔ starts probes only without AUTH_* and reports not ready without a database (82.7805ms)
+[Nest] 32421  - 09/28/2026, 3:21:02 AM   ERROR Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 1
+}
+Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16)
+✔ mounts the authenticated API and tracing when configured (8555.155833ms)
+✔ consumer crash removes readiness and shutdown closes consumer before database (11.510708ms)
+[Nest] 32421  - 09/28/2026, 3:21:02 AM   ERROR Error: consumer failed
+    at Object.close (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/main.test.js:92:23)
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/app.js:91:40
+    at Shutdown.onApplicationShutdown (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/app.js:97:23)
+    at MapIterator.iteratee (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:21:43)
+    at MapIterator.next (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/map.js:13:39)
+    at IteratorWithOperators.next (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/iterate.js:21:28)
+    at Array.from (<anonymous>)
+    at IteratorWithOperators.toArray (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/iterate.js:180:22)
+    at callOperator (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:22:10)
+    at callAppShutdownHook (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:39:50)
+Error: consumer failed
+    at Object.close (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/main.test.js:92:23)
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/app.js:91:40
+    at Shutdown.onApplicationShutdown (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/workflow-alerts/dist/app.js:97:23)
+    at MapIterator.iteratee (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:21:43)
+    at MapIterator.next (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/map.js:13:39)
+    at IteratorWithOperators.next (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/iterate.js:21:28)
+    at Array.from (<anonymous>)
+    at IteratorWithOperators.toArray (/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/iterare/lib/iterate.js:180:22)
+    at callOperator (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:22:10)
+    at callAppShutdownHook (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:39:50)
+✔ shutdown closes the verifier even if an earlier cleanup fails (3.981208ms)
+✔ every table has forced RLS and alerts_app holds no DELETE or ownership (29.261334ms)
+✔ the episode window key and one-active index reject a second episode (35.140625ms)
+✔ hysteresis thresholds are enforced by the database (17.545375ms)
+✔ simultaneous tenant transactions route separately and admit before business SQL (1.635542ms)
+✔ cross-tenant, wrong shard incarnation, missing and quiescing placement cannot run work (0.593375ms)
+✔ durable missing/stale ownership stops the transaction before business work (0.222417ms)
+✔ every shard closes and hung shutdown has a caller bound (17.245334ms)
+✔ HTTP placement failures have a controlled retryable problem (0.2365ms)
+ℹ tests 75
+ℹ suites 5
+ℹ pass 74
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 16693.713875
+
+> @greenguard/notification-service@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/notification-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+﹣ live Kafka CDC contact rows project monotonically to DynamoDB and survive projector restart (0.415333ms) # SKIP
+﹣ live projector restarts after transient DynamoDB failure and reapplies the uncommitted Kafka record (0.066458ms) # SKIP
+﹣ live Debezium Avro snapshot row and heartbeat project through Schema Registry into DynamoDB (0.050625ms) # SKIP
+﹣ live DynamoDB feed checkpoint stays monotonic through duplicate and older heartbeat replay (0.045542ms) # SKIP
+﹣ live crash after DynamoDB apply but before offset commit replays as an idempotent no-op (0.042666ms) # SKIP
+✔ Schema Registry uses verified HTTPS and Basic auth in AWS profile (2.362417ms)
+✔ preserves int64 BIGINT versions beyond JavaScript safe integer and validates tenant key (0.3695ms)
+✔ rejects unsafe, invalid and hard-delete CDC records; channel clears remain versioned nulls (0.1445ms)
+✔ accepts only the expected transactional Postgres heartbeat and exposes stale age (0.206459ms)
+✔ projects contact events, ignores duplicate/stale versions, and keeps metrics tenant-free (0.188917ms)
+✔ invalid events are quarantined before acknowledgment without PII in headers (0.121208ms)
+✔ failed DLQ publish or transient DynamoDB failure propagates so Kafka offset stays uncommitted (0.185167ms)
+✔ DynamoDB store writes numeric exact versions with strict monotonic condition; conditional conflict is a no-op (0.321584ms)
+✔ quarantine preserves malformed Avro bytes exactly and keeps exception text out of headers (0.325334ms)
+✔ wire decoder quarantines permanent framing and Avro poison but retries Registry lookup failures (0.59875ms)
+✔ readiness requires both fresh heartbeat and an available consumer (0.070792ms)
+✔ DynamoDB feed heartbeat uses reserved key and monotonic condition; duplicates and replay are safe (0.212833ms)
+✔ heartbeat is committed to the feed store before acknowledgment; replay never rewinds freshness (0.26025ms)
+✔ initial connect failure recovers and later crash can schedule another recovery (22.893ms)
+✔ projector rejects invalid configured ports before startup (0.435125ms)
+✔ projector bind failure cleans up consumer and store before returning (6.099917ms)
+✔ shutdown waits for an in-flight delivery to settle before closing resources (1.958ms)
+✔ shutdown fails within a bounded time if a delivery never settles (5.735041ms)
+✔ settlement failures are collected without unhandled rejections (0.24925ms)
+{"level":"WARN","timestamp":"2026-09-28T08:21:07.417Z","logger":"kafkajs","message":"KafkaJS v2.0.0 switched default partitioner. To retain the same partitioning behavior as in previous versions, create the producer with the option \"createPartitioner: Partitioners.LegacyPartitioner\". See the migration guide at https://kafka.js.org/docs/migration-guide-v2.0.0#producer-new-default-partitioner for details. Silence this warning by setting the environment variable \"KAFKAJS_NO_PARTITIONER_WARNING=1\""}
+﹣ 10b Kafka config events durably project into tenant-isolated DynamoDB snapshots (0.320167ms) # SKIP
+✔ DynamoDB flag feed awaits persistence before Kafka message completion (8.432041ms)
+✔ malformed JSON is bounded, source-addressable quarantine and completes successfully (3.568375ms)
+✔ poison flag event is quarantined then acknowledged (1.862083ms)
+✔ DynamoDB persistence failure rejects the Kafka handler for retry (3.353208ms)
+✔ quarantine publish failure rejects the Kafka handler for retry (3.015458ms)
+✔ non-restartable DynamoDB crash marks unavailable and redelivers on the shared group (20.430667ms)
+✔ restart=true, stale crash callbacks, and stop during restart timer never create another consumer (74.659292ms)
+✔ producer disconnect still runs when consumer disconnect fails during stop (0.33675ms)
+✔ flag feed retries initial outage and applies queued version on recovery (6.831375ms)
+✔ process-local flag feeds use distinct consumer groups and replay from beginning (3.861125ms)
+✔ poison flag event is quarantined and committed past; later kill switch applies (3.46925ms)
+✔ quarantine publish failure does not commit: the error propagates for redelivery (2.753708ms)
+✔ optionalSendGate refresh bookkeeping is bounded (2.241584ms)
+✔ F04: optional work waits in retry queue when disabled; no ledger or provider call (1.240292ms)
+✔ F02 F03: absent, down and stale configuration disable optional sends (1.336833ms)
+✔ unchanged authoritative snapshot renews freshness; outage eventually defaults off (0.514541ms)
+✔ global snapshot supplies fallback and tenant override wins (0.293542ms)
+✔ snapshot validates bearer transport before any request and rejects redirects (2.399084ms)
+✔ flag snapshots reject mismatched scope, tenant, version, and flags shape (0.69325ms)
+✔ config propagates local-only insecure opt-in; live remains HTTPS-only (0.817083ms)
+✔ no configured flag source delivers warnings directly through normal ledger (0.953333ms)
+✔ configured disabled gate bounds holds, preserves first-held metadata and parks with stable failed receipt (5.231459ms)
+✔ first-held timestamp is initialized once and retry publish failure leaves original unacked (0.227834ms)
+✔ exhausted hold persists terminal failure and survives park failure then flag recovery (0.300292ms)
+✔ non-restartable crash reconnects after disconnect, retries same poison offset and ignores stale/restartable crashes (32.040208ms)
+✔ shutdown waits for in-flight producer and disconnects late consumer before producer (19.988ms)
+✔ shutdown waits for in-flight connect and disconnects late consumer before producer (21.735167ms)
+✔ shutdown waits for in-flight subscribe and disconnects late consumer before producer (23.980167ms)
+✔ shutdown waits for in-flight run and disconnects late consumer before producer (20.923417ms)
+✔ shutdown cancels recovery retry and ignores displaced crashes (18.098584ms)
+✔ hold terminal state survives receipt failure then flag re-enables without a send (0.334041ms)
+✔ hold exhaustion keeps prior sent terminal result and never fabricates failure for uncertain send (0.151792ms)
+✔ a redelivered task produces one logical delivery and one terminal result (85.825542ms)
+✔ concurrent duplicates never double-send (48.31625ms)
+✔ optional hold expiry records only a hold attempt and preserves terminal state (35.506542ms)
+✔ optional hold expiry leaves an in-progress provider claim uncertain (26.991458ms)
+✔ the terminal guard rejects any change to a finished delivery (37.22275ms)
+✔ tenants are isolated and the runtime role cannot delete (37.300333ms)
+✔ a crash before commit leaves no delivery row (14.556875ms)
+✔ preferences suppress a channel and use optimistic versions (40.303625ms)
+✔ provider timeout records unknown, then reconciles to one delivery (100.281917ms)
+✔ an unreachable provider stays unknown and is parked, never marked failed (228.26075ms)
+✔ transient failures back off and dead-letter after max attempts; replay retries (92.124416ms)
+✔ a permanent rejection is a terminal failure (23.74925ms)
+✔ a crash during the provider call is reconciled on redelivery (32.015625ms)
+✔ a broker failure after commit requeues and the retry stays idempotent (24.088791ms)
+✔ redrive preserves a prior sent result after a lost receipt confirm (24.546583ms)
+✔ redrive retries failed delivery and ignores the old generation (57.279042ms)
+✔ redrive rechecks preference after a suppressed delivery (54.572708ms)
+✔ migrations apply twice on a fresh database (140.314625ms)
+✔ provider effect keeps the real ownership fence until ledger completion (149.50225ms)
+✔ concurrent tenants use separate admitted transactions and release pooled contexts (3.938167ms)
+✔ wrong/cross-tenant/missing/quiescing routes never allocate a session or provider effect (0.888ms)
+✔ durable stale/missing placement rolls back and releases before business work (0.352167ms)
+✔ provider intent commits first and admitted effect/finish retain idempotency on redelivery (1.254375ms)
+✔ quiesce between committed intent and effect pauses provider and preserves uncertain intent (0.351084ms)
+✔ all shard pools close and hung shutdown is bounded (15.883959ms)
+✔ queued provider work waits outside a database transaction while the active effect retains its owner fence (5.175542ms)
+✔ sendgrid selects expected route, uses trusted contact, and confirms acceptance (11.269458ms)
+✔ sendgrid permanently rejects missing selected contact without fallback (0.267959ms)
+✔ sendgrid preserves network ambiguity and strips sensitive exceptions (0.569416ms)
+✔ sendgrid classifies confirmed rejection/throttle and keeps ambiguous responses unknown (2.04025ms)
+✔ sendgrid enforces deadline even when fetch ignores AbortSignal (10.568042ms)
+✔ sendgrid propagates caller cancellation without exposing abort reason (1.210209ms)
+✔ twilio selects expected route, uses trusted contact, and confirms acceptance (1.244083ms)
+✔ twilio permanently rejects missing selected contact without fallback (0.114292ms)
+✔ twilio preserves network ambiguity and strips sensitive exceptions (0.1735ms)
+✔ twilio classifies confirmed rejection/throttle and keeps ambiguous responses unknown (0.706458ms)
+✔ twilio enforces deadline even when fetch ignores AbortSignal (11.559791ms)
+✔ twilio propagates caller cancellation without exposing abort reason (0.277625ms)
+✔ non-critical selector matrix allows only warning email and SMS (0.57125ms)
+✔ HTTP resolver makes an exact authenticated tenant contact GET (0.337375ms)
+✔ HTTP contacts are fetched independently for the task tenant with no shared recipient cache (0.237541ms)
+✔ missing trusted API record returns null; selector never falls back or sends (0.175959ms)
+✔ malformed contacts/statuses and invalid tenant never expose sensitive API errors (0.865833ms)
+✔ HTTP lookup network/body failures and timeout are sanitized and bounded (11.228958ms)
+✔ HTTP-backed selector resolves trusted contact before provider dispatch (0.390167ms)
+✔ malformed injected contacts, lookup errors and slow lookups never reach provider (5.450625ms)
+✔ late contact lookup cannot start a send after deadline and pre-cancelled calls never lookup (6.138917ms)
+✔ safe templates reject injection and invalid fields without echoing arbitrary data (0.433458ms)
+✔ critical tasks, channel mismatch and unstable intent ID reject before lookup (0.138334ms)
+✔ malformed/unexpected acceptance responses remain unknown (0.776208ms)
+✔ SendGrid 202 acceptance survives missing header and unsafe references never enter ledger (0.232542ms)
+✔ Twilio accepted statuses confirm send, failed statuses reject and unreadable response is unknown (0.950709ms)
+✔ no provider/lookup errors log recipients, bodies, credentials or raw responses (0.421791ms)
+✔ missing provider configuration cannot send or fallback (0.117208ms)
+✔ live config requires provider secrets and authenticated API; no SES/SNS Node config exists (0.438458ms)
+✔ live loadConfig rejects plaintext contact URL even with local opt-in; HTTPS passes (0.358333ms)
+✔ contact resolver requires TLS unless explicitly enabled for local/test HTTP (0.243875ms)
+✔ 503 and resolver timeout map to worker retry and recover with the same intent (22.57375ms)
+✔ provider network failure and provider timeout remain worker unknown after dispatch (40.103ms)
+✔ provider selector fails closed for critical and malformed severity values (0.226333ms)
+{"event":"notification_history_read","audit_id":"7bc0d33c9bf5f3c6d3fabd80","result_count":1}
+✔ owner lookup derives tenant from the verified principal and returns sanitized attempts (21.528333ms)
+✔ owner lookup denies a viewer before touching the database (5.047ms)
+✔ owner lookup bounds request size and rejects duplicate generations (2.742083ms)
+{"event":"notification_history_read","audit_id":"7bc0d33c9bf5f3c6d3fabd80","result_count":1}
+✔ owner notification history excludes seeded critical deliveries (46.300791ms)
+✔ parseTask accepts a task and rejects poison (1.133292ms)
+✔ semaphore bounds concurrency and withTimeout reports timeouts (23.004958ms)
+✔ local adapter is idempotent by key and supports every behaviour (0.286542ms)
+✔ config validates input (0.277708ms)
+✔ runtime live provider selection resolves trusted warning contacts and sends email and SMS (2.503208ms)
+✔ RabbitMQ worker rejects critical and unknown severity before flags, ledger or provider calls (0.275625ms)
+✔ metrics have no tenant labels and report lag (17.439833ms)
+✔ critical HTTP dispatch endpoint is not exposed by the server worker (4.001917ms)
+✔ confirm broker resolves on confirm and rejects on nack (0.208917ms)
+✔ settle acks after success, dead-letters rejects, requeues errors (0.138417ms)
+✔ topology declares every exchange, queue and binding (0.109625ms)
+✔ backoff is exponential and capped (0.043458ms)
+✔ provider outcomes map to ledger statuses; timeout is unknown, not failed (51.506417ms)
+✔ an invalid task is dead-lettered without touching the database (0.136333ms)
+✔ private shard registry config preserves placement authority without legacy pool URL (0.058625ms)
+✔ exported send and reconcile calls share capacity and retain their own provider deadline (21.597292ms)
+ℹ tests 137
+ℹ suites 0
+ℹ pass 131
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 6
+ℹ todo 0
+ℹ duration_ms 1454.618875
+
+> @greenguard/read-api@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/membership-client -w @greenguard/entitlements && tsc
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ local PostgreSQL saturation returns read_busy with bounded retry advice (15.908667ms)
+✔ a still-valid JWT loses Read API access after membership.changed (32.545542ms)
+✔ machine reads use verified tenant and require read:telemetry scope (2.676292ms)
+✔ batch lookup and reading use the verified tenant, reject foreign IDs and bound input (10.05725ms)
+✔ site and bin batch lookup derive tenant and validate bounded UUID arrays (1.835042ms)
+✔ tenant identity comes only from verified principal across backends (1.368458ms)
+✔ site pages use owner cursor and look one row ahead without accepting tenant override (0.613875ms)
+✔ bin readings and trends derive tenant from identity and enforce closed range/resolution enums (1.80725ms)
+✔ hot history, old history and rollups route to expected storage (1.40725ms)
+✔ range and limit bounds reject requests before backend access (0.661833ms)
+✔ timestamps require zones on both bounds; explicit offsets work (1.100541ms)
+✔ pruning margin routes just-inside and crossing ranges to history (1.699667ms)
+✔ both backends report full pages as truncated and reject unsupported cursors (1.927708ms)
+✔ Cassandra history fans out by UTC day with tenant partition, deadline and limit (2.084958ms)
+✔ search enforces tenant in the query and filters mismatched backend hits (14.71625ms)
+✔ search HTTPS requires credentials and a Node startup CA (0.342792ms)
+✔ device current uses one tenant-filtered statement and preserves exact versions and canonical dates (0.308334ms)
+✔ cold history protects global and tenant capacity and releases slots (1.123167ms)
+✔ search has an independent pool and errors release its slot (0.2185ms)
+✔ HTTP returns a retry hint when Cassandra has no origin capacity (29.805ms)
+✔ bin read admission queues per tenant and schedules another tenant before a hot tenant's backlog (2.021917ms)
+✔ queued aggregate reads retain request context and cancelled work never starts (0.370917ms)
+✔ ordinary primary reads retain Redis; explicit minima and configured replicas bypass uncertified entries (0.495917ms)
+✔ concurrent requests share one origin load and tenant keys remain separate (171.626625ms)
+✔ every route is cached per tenant and kind (1.84525ms)
+✔ origin errors are not cached and Redis outage falls back to origin (0.33175ms)
+✔ slow Redis is bounded by the op timeout and opens the breaker (26.693125ms)
+✔ lock or fill failures after a miss still return origin data (0.53275ms)
+✔ tenant envelope mismatch, corrupt entries and invalid tenants are never served (0.445833ms)
+✔ invalidation bumps only the requesting tenant's generation (0.389959ms)
+✔ oversize and undefined values are served but not cached (0.203958ms)
+✔ a waiter past its bound loads without the lock; an expired holder fills only an absent key (66.99975ms)
+✔ invalid options and address maps are rejected; clients are built from env (1.224041ms)
+✔ the ioredis adapter maps NX, PX and EVAL arguments (0.163ms)
+✔ device invalidation clears only that device; a tenant bump clears device reads too (0.46575ms)
+✔ a global epoch change is honoured after the refresh interval (0.21175ms)
+✔ failed Cassandra startup retries on readiness and shares an in-flight attempt (4.090375ms)
+✔ Cassandra client rejects incomplete credentials and TLS config (0.58925ms)
+✔ Cassandra client enables hostname and chain verification (1.589583ms)
+✔ mixed cached and database snapshots certify the oldest exact sequence and reject identity changes (0.631083ms)
+✔ concurrent requests isolate minima and return only their actual snapshot watermark (33.109834ms)
+✔ foreign/malformed minima and unsupported store proofs never reach origins (9.101042ms)
+read-api request failed Error: authority unavailable
+    at Object.admit (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/read-api/dist/consistency.test.js:160:19)
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/read-api/dist/app.js:72:64
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/read-api/dist/consistency.js:50:20
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+✔ lost response lease rejects a completed query and releases admission (1.954375ms)
+✔ ten database reads inside one HTTP operation reuse one lease and one response admission (2.163917ms)
+✔ authoritative changed identity is409, not a replica lag or outage recovery signal (3.227709ms)
+✔ read budgets are bounded and malformed budgets do not reach origins (6.16ms)
+✔ expired response budget refuses final admission and releases its lease (32.899667ms)
+✔ unsupported cold-store minimum rejects before primary entitlement lookup (1.463542ms)
+✔ expired acquisition returns promptly and releases its late durable lease (75.332292ms)
+✔ deadline bounds final authority admission even if authority ignores signal (23.38425ms)
+✔ device current executes one SQL snapshot with both explicit tenant predicates and one trusted minimum (1.177583ms)
+✔ authenticated current operation acquires one lease and certifies one bounded tenant snapshot (32.826625ms)
+✔ current aggregate refuses oversized response payloads (5.584125ms)
+✔ ENT-06 history range follows the verified tenant and paid downgrade (0.852875ms)
+✔ ENT-10/11 history range honors an old plan while the feed is healthy and fails closed when it is stale (59.75125ms)
+✔ ENT-12 heartbeat leaves plan rows untouched and another tenant unreadable (12.376041ms)
+✔ entitlement metadata is primary-only, uncertifying and uses the request budget (1.074583ms)
+✔ entitlement resolves one tenant owner and admits full placement before SQL (3.294625ms)
+✔ moved owner rolls back and releases before business SQL (0.720083ms)
+✔ quiescing and incarnation mismatch refuse to allocate a tenant transaction (0.9855ms)
+✔ heartbeat fans out partition-only monotonic health to all physical pools (0.438ms)
+✔ main read query credentials cannot instantiate entitlement writer registry (0.171083ms)
+✔ startup failure closes every private pool and shutdown is idempotent (0.412958ms)
+✔ fatal consumer error stops worker and closes all pools before exit (0.391541ms)
+✔ heartbeat writes are bounded to two and failures propagate (2.667542ms)
+﹣ live PostgreSQL, Cassandra and Elasticsearch routes preserve tenant isolation (0.346875ms) # SKIP
+✔ authority telemetry counts success and failure with bounded non-tenant labels (0.845042ms)
+✔ startup completes within the bound when Redis never connects (51.552209ms)
+✔ startup returns as soon as Redis connects and reports failures (0.604958ms)
+✔ READ_REDIS_STARTUP_WAIT_MS is optional and validated (0.119166ms)
+﹣ real PG snapshot selects current ownership despite retained higher old-epoch watermark (0.288375ms) # SKIP
+✔ aborted request never checks out a connection or quarantines a replica (1.651875ms)
+✔ disconnect during pool checkout returns the late connection without starting SQL (3.233916ms)
+✔ disconnect closes an admitted snapshot once and prevents further SQL or commit (0.438666ms)
+✔ one failed replica does not fail readiness; only healthy endpoints are selected (0.406ms)
+✔ all replicas failed is unavailable unless the allowed primary path is healthy (0.276125ms)
+✔ primary recovery immediately restores readiness despite its prior failure backoff (0.202334ms)
+✔ failed endpoint probes respect exponential backoff and recover independently (0.163583ms)
+✔ idle errors evict their endpoint and concurrent health checks share one probe (0.147875ms)
+✔ a due recovery probe runs independently while the current read uses a healthy endpoint (0.95975ms)
+✔ deadline rejects a pending connect and returns a late unused connection (10.978875ms)
+✔ a local full-pool wait does not quarantine a healthy replica (12.819208ms)
+✔ shutdown closes every replica exactly once, rejects admission and preserves primary ownership (0.294125ms)
+✔ an admitted lease can roll back during shutdown using a bounded cleanup query (0.1145ms)
+✔ a finished lease cannot query a released pool connection (0.091541ms)
+✔ a lagging snapshot ends before business SQL and fresh primary snapshot checks identical identity (0.39675ms)
+✔ missing watermark, different incarnation, epoch or insufficient sequence never downgrades consistency (0.491583ms)
+✔ business query failure rolls back on its selected endpoint and is never replayed (0.218208ms)
+✔ a commit failure discards its connection and never replays business SQL (0.171458ms)
+✔ a business statement after the original deadline is rejected without replay (0.142791ms)
+✔ tenant filters and transaction context match even when minimum consistency uses a replica (0.3885ms)
+✔ connection configuration rejects unsafe roles, TLS, duplicates and conflicting inputs (0.214ms)
+✔ configuration parse errors never disclose credential-bearing input (0.149167ms)
+✔ replica-backed PostgreSQL bypasses cache hit and fill even after invalidation (0.471292ms)
+✔ disconnect interrupts a pending watermark admission query without failing the replica (0.334208ms)
+✔ business SQL uses remaining request budget while admission retains its shorter cap (0.180917ms)
+✔ expired snapshots cannot commit even when callers suppress a query failure (0.110291ms)
+✔ finished lease commit after expiry cannot discard a reused client (0.165333ms)
+✔ exhausted local checkout capacity reports busy without quarantining the endpoint (0.184041ms)
+✔ mixed checkout saturation and endpoint failure is freshness unavailable rather than busy (0.256625ms)
+✔ invalid shard pool capacity fails before allocating connections (0.638458ms)
+✔ registry validates all four private bundles before allocating pools and limits credentials to read_query (1.211875ms)
+✔ trusted lease selects only its shard; missing, foreign and stale config fail before pool access (1.953709ms)
+✔ internal metadata snapshots do not certify application rows and retain cancellation (0.284458ms)
+✔ configured shard pool capacity applies to primary pools without connecting (0.719417ms)
+﹣ real Redis rejects stale fills, missing guards, wrong epochs and expired locks with exact BIGINT comparisons (0.287791ms) # SKIP
+﹣ real cache wrapper rebuilds recovery guards from primary, preserves strict minima and fences init races (0.039583ms) # SKIP
+﹣ real Redis atomically checks revision, recovery, canonical identities and lock capabilities (0.031625ms) # SKIP
+﹣ real wrapper fences invalidation between metadata and hit and rejects the stale namespace fill (0.032125ms) # SKIP
+✔ warm hit has four Redis commands, exact token and separate global epoch checks (2.984292ms)
+✔ primary guard initialization and newer retained guard set the origin floor (0.753375ms)
+✔ cache outage, timeout and changed recovery epoch preserve the requested origin minimum (10.968ms)
+✔ malformed metadata and wrong-identity cache envelopes fall back without certifying (0.46775ms)
+✔ abort or expiry cannot start Redis or origin work (0.304292ms)
+✔ abort during metadata, hit or primary lookup cannot admit, certify or fall back (0.448959ms)
+✔ abort during origin or fill admission stops effects and restores the request minimum (0.2295ms)
+✔ parallel misses isolate origin minima and fill using each load's own watermark (0.30775ms)
+✔ disconnect during pending initialization admission rejects without subsequent cache effects (0.319333ms)
+✔ disconnect during pending fill admission rejects without subsequent cache effects (0.183166ms)
+ℹ tests 119
+ℹ suites 0
+ℹ pass 113
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 6
+ℹ todo 0
+ℹ duration_ms 488.134167
+node --test scripts/contacts-schema.test.mjs
+✔ checked-in Avro contracts match exactly and reject leaked or drifted fields (1.7685ms)
+✔ contract registration sets BACKWARD policy, checks existing schemas, and registers reviewed Avro (9.600458ms)
+✔ registered producer schemas must exactly match checked-in fields and BACKWARD policy (0.754292ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 54.237
+cd packages/kafka-transport && test -z "$(gofmt -l .)"
+cd packages/kafka-transport && go vet ./...
+cd packages/kafka-transport && go test -race ./...
+ok  	greenguard.local/kafka-transport	(cached)
+cd packages/go-common && test -z "$(gofmt -l .)"
+cd packages/go-common && go vet ./...
+cd packages/go-common && go test -race ./...
+ok  	greenguard.local/go-common	(cached)
+cd packages/go-migrations && test -z "$(gofmt -l .)"
+cd packages/go-migrations && go vet ./...
+cd packages/go-migrations && go test -race ./...
+ok  	greenguard.local/go-migrations	(cached)
+cd services/telemetry-ingest && test -z "$(gofmt -l .)"
+cd services/telemetry-ingest && go vet ./...
+cd services/telemetry-ingest && go test -race ./...
+ok  	greenguard.local/telemetry-ingest	(cached)
+ok  	greenguard.local/telemetry-ingest/cmd/migrate	(cached)
+ok  	greenguard.local/telemetry-ingest/migrations	(cached)
+cd services/cdc-transformer && test -z "$(gofmt -l .)"
+cd services/cdc-transformer && go vet ./...
+cd services/cdc-transformer && go test -race ./...
+ok  	greenguard.local/cdc-transformer	(cached)
+cd services/cache-invalidator && test -z "$(gofmt -l .)"
+cd services/cache-invalidator && go vet ./...
+cd services/cache-invalidator && go test -race ./...
+ok  	greenguard.local/cache-invalidator	(cached)
+cd services/projection-builder && test -z "$(gofmt -l .)"
+cd services/projection-builder && go vet ./...
+cd services/projection-builder && go test -race ./...
+ok  	greenguard.local/projection-builder	16.836s
+ok  	greenguard.local/projection-builder/cmd/maintain	1.390s
+ok  	greenguard.local/projection-builder/cmd/migrate	1.931s
+?   	greenguard.local/projection-builder/cmd/provision-version	[no test files]
+ok  	greenguard.local/projection-builder/history	(cached)
+ok  	greenguard.local/projection-builder/migrations	2.098s
+cd services/cassandra-writer && test -z "$(gofmt -l .)"
+cd services/cassandra-writer && go vet ./...
+cd services/cassandra-writer && go test -race ./...
+ok  	greenguard.local/cassandra-writer	(cached)
+?   	greenguard.local/cassandra-writer/cmd/migrate	[no test files]
+ok  	greenguard.local/cassandra-writer/history	(cached)
+cd services/jobs-worker && test -z "$(gofmt -l .)"
+cd services/jobs-worker && go vet ./...
+cd services/jobs-worker && go test -race ./...
+ok  	greenguard.local/jobs-worker	5.168s
+ok  	greenguard.local/jobs-worker/cmd/migrate	1.717s
+?   	greenguard.local/jobs-worker/migrations	[no test files]
+ok  	greenguard.local/jobs-worker/rabbit	(cached)
+cd services/saga-orchestrator && test -z "$(gofmt -l .)"
+cd services/saga-orchestrator && go vet ./...
+/Applications/Xcode.app/Contents/Developer/usr/bin/make saga-test
+cd services/saga-orchestrator && go test -race ./...
+ok  	greenguard.local/saga-orchestrator/cmd/api	(cached)
+?   	greenguard.local/saga-orchestrator/cmd/migrate	[no test files]
+ok  	greenguard.local/saga-orchestrator/cmd/worker	3.308s
+?   	greenguard.local/saga-orchestrator/migrations	[no test files]
+ok  	greenguard.local/saga-orchestrator/saga	9.644s
+cd services/hardware-service && test -z "$(gofmt -l .)"
+cd services/hardware-service && go vet ./...
+cd services/hardware-service && go test -race ./...
+ok  	greenguard.local/hardware-service/cmd/migrate	1.286s
+?   	greenguard.local/hardware-service/cmd/mqtt-fixture	[no test files]
+ok  	greenguard.local/hardware-service/cmd/worker	1.746s
+ok  	greenguard.local/hardware-service/hardware	27.722s
+ok  	greenguard.local/hardware-service/migrations	1.865s
+/Applications/Xcode.app/Contents/Developer/usr/bin/make build
+npm run build
+
+> greenguard@0.1.0 build
+> npm run build --workspaces
+
+
+> @greenguard/dashboard@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 267 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                              0.84 kB │ gzip:  0.39 kB
+dist/assets/index-Ciya5Mj2.css              16.22 kB │ gzip:  3.97 kB
+dist/assets/bin-label-CvRhN5NW.js            0.21 kB │ gzip:  0.18 kB
+dist/assets/rolldown-runtime-CbXtAM7H.js     0.58 kB │ gzip:  0.36 kB
+dist/assets/severity-BYynbcsw.js             1.30 kB │ gzip:  0.58 kB
+dist/assets/ui-ZIIZ67aL.js                   4.95 kB │ gzip:  1.52 kB
+dist/assets/ProvisioningPanel-q6GGw0P-.js    7.44 kB │ gzip:  2.62 kB
+dist/assets/BinReadings-8XamY4JJ.js          7.76 kB │ gzip:  2.52 kB
+dist/assets/AlertsView-CksKiSJH.js          13.38 kB │ gzip:  4.16 kB
+dist/assets/ReadViews-BaK5IPtu.js           13.38 kB │ gzip:  3.48 kB
+dist/assets/index-RrUZn6C3.js               28.05 kB │ gzip:  9.05 kB
+dist/assets/vendor-data-DjUBTJ6k.js        225.03 kB │ gzip: 66.09 kB
+dist/assets/vendor-react-YroLYF4B.js       256.68 kB │ gzip: 81.48 kB
+
+✓ built in 399ms
+
+> @greenguard/mobile@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-control-plane@0.1.0 prebuild
+> node --input-type=module -e "import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });"
+
+
+> @greenguard/tenant-control-plane@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/tenant-control-plane@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/feature-flags -w @greenguard/membership-client -w @greenguard/audit -w @greenguard/entitlements
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/audit@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+
+> @greenguard/billing-service@0.1.0 build
+> npm run build -w @greenguard/kafka-security && prisma generate && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 9ms
+
+
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/gateway@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/device-service@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/device-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 45ms
+
+
+> @greenguard/workflow-alerts@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/workflow-alerts@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 8ms
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/notification-service@0.1.0 build:deps
+> npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/membership-client -w @greenguard/entitlements && tsc
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth -w @greenguard/kafka-security
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+
+> @greenguard/entitlements@0.1.0 build
+> npm run build -w @greenguard/kafka-security && tsc
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+mkdir -p build
+cd services/telemetry-ingest && go build -o ../../build/telemetry-ingest .
+cd services/cdc-transformer && go build -o ../../build/cdc-transformer .
+cd services/cache-invalidator && go build -o ../../build/cache-invalidator .
+cd services/projection-builder && go build -o ../../build/projection-builder .
+cd services/hardware-service && go build -o ../../build/hardware-worker ./cmd/worker

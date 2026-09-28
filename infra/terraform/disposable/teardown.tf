@@ -66,7 +66,17 @@ resource "terraform_data" "pre_destroy_cleanup" {
   provisioner "local-exec" {
     when        = destroy
     interpreter = ["bash", "-c"]
-    command     = "\"$GG_SCRIPT\""
+    # Native terraform destroy has no post-destroy hook, so refuse to begin
+    # the destructive cleanup unless the verified wrapper supplies this
+    # state-bound scope marker. This is an operator guard, not a security
+    # boundary; the wrapper then performs the required final inventory.
+    command = <<-EOT
+      if [ "$${GG_VERIFIED_DESTROY_SCOPE:-}" != "${self.input.account}:${self.input.region}:${self.input.environment}:${self.input.cluster}" ]; then
+        echo "terraform destroy must be run through destroy-verified.sh for post-destroy inventory" >&2
+        exit 1
+      fi
+      "$GG_SCRIPT"
+    EOT
     environment = {
       GG_SCRIPT            = self.input.script
       GG_CLUSTER           = self.input.cluster

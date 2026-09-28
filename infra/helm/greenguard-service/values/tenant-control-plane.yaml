@@ -4,6 +4,7 @@ networkPolicy:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
   ingressSources:
     - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: audit-export-worker, app.kubernetes.io/instance: audit-export-worker } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: read-api, app.kubernetes.io/instance: read-api } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: device-service, app.kubernetes.io/instance: device-service } }

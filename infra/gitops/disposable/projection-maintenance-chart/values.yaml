@@ -1,0 +1,11 @@
+name: ""
+shard: ""
+image: ""
+rdsHost: ""
+rdsCIDRs: []
+credentialSecret: ""
+caSecret: greenguard-rds-ca
+schedule: "*/10 * * * *"
+hotWindow: 24h
+aheadDays: 3
+schema: public

@@ -129,7 +129,13 @@ output "postgres_master_secret_arn" {
 resource "aws_s3_bucket" "audit_exports" {
   bucket        = local.audit_bucket
   force_destroy = true
-  tags          = { Name = "${var.cluster_name}-audit-exports" }
+  tags = {
+    Name        = "${var.cluster_name}-audit-exports"
+    Environment = var.environment
+    Lifecycle   = "Disposable"
+    Cell        = var.cluster_name
+    ManagedBy   = "Terraform"
+  }
 
   lifecycle {
     precondition {

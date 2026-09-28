@@ -9,7 +9,8 @@ shards = %w[s1 s2 s3 s4].to_h { |id| [id, {
   'rdsHost' => "db-#{id}.example.us-east-1.rds.amazonaws.com",
   'bootstrapSecret' => "greenguard-#{id}-rds-bootstrap",
   'pgbouncerAuthSecret' => "greenguard-#{id}-pgbouncer-auth",
-  'cdcSecret' => "greenguard-#{id}-cdc-credentials"
+  'cdcSecret' => "greenguard-#{id}-cdc-credentials",
+  'projectionMaintenanceSecret' => "greenguard-#{id}-projection-history-maintenance-config"
 }] }
 values = {
   'cell' => 'greenguard-shard-test', 'repositoryUrl' => 'https://example.test/greenguard.git', 'revision' => 'b' * 40,
@@ -18,7 +19,8 @@ values = {
     'enabled' => true, 'rdsHost' => 'db-central.example.us-east-1.rds.amazonaws.com',
     'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name,digest] },
     'secrets' => {'pgbouncerAuth'=>'greenguard-pgbouncer-auth', 'rdsCa'=>'greenguard-rds-ca', 'cdcCredentials'=>'greenguard-cdc-credentials'},
-    'shards' => shards
+    'shards' => shards,
+    'projectionMaintenance' => {'image' => digest, 'rdsCIDRs' => ['10.60.128.0/20']}
   }
 }
 def render(root, chart, values)
@@ -34,10 +36,23 @@ apps = render(root,'applications-chart',values)
 %w[s1 s2 s3 s4].each do |id|
   bootstrap = apps.find { |app| app.dig('metadata','name') == "greenguard-#{id}-rds-bootstrap" }
   pooler = apps.find { |app| app.dig('metadata','name') == "greenguard-#{id}-pgbouncer" }
-  raise "missing #{id} bootstrap or pooler" unless bootstrap && pooler
-  [bootstrap,pooler].each do |app|
+  maintenance = apps.find { |app| app.dig('metadata','name') == "greenguard-#{id}-projection-history-maintenance" }
+  raise "missing #{id} bootstrap, pooler, or projection maintenance" unless bootstrap && pooler && maintenance
+  [bootstrap,pooler,maintenance].each do |app|
     raise 'lost shard lifecycle ownership' unless app.dig('metadata','finalizers') == ['resources-finalizer.argocd.argoproj.io'] && app.dig('metadata','labels','greenguard.io/shard') == id
   end
+  raise 'projection maintenance Application ordering/source drift' unless maintenance.dig('metadata','annotations','argocd.argoproj.io/sync-wave') == '26' && maintenance.dig('spec','source','path') == 'infra/gitops/disposable/projection-maintenance-chart'
+  maintenance_values = maintenance.dig('spec','source','helm','valuesObject')
+  raise 'projection maintenance shard credential or endpoint drift' unless maintenance_values['credentialSecret'] == shards[id]['projectionMaintenanceSecret'] && maintenance_values['rdsHost'] == shards[id]['rdsHost'] && maintenance_values['image'] == digest
+  maintenance_objects = render(root,'projection-maintenance-chart',maintenance_values)
+  initial = maintenance_objects.find { |object| object['kind'] == 'Job' }
+  cron = maintenance_objects.find { |object| object['kind'] == 'CronJob' }
+  policy = maintenance_objects.find { |object| object['kind'] == 'NetworkPolicy' }
+  raise 'projection maintenance initial job hook absent' unless initial && initial.dig('metadata','annotations','argocd.argoproj.io/hook') == 'Sync' && initial.dig('spec','template','spec','containers',0,'command') == ['/projection-maintain']
+  raise 'projection maintenance schedule/concurrency contract drift' unless cron && cron.dig('spec','schedule') == '*/10 * * * *' && cron.dig('spec','concurrencyPolicy') == 'Forbid'
+  container = cron.dig('spec','jobTemplate','spec','template','spec','containers',0)
+  raise 'projection maintenance mounted migration credentials or lost dedicated Secret' unless container.dig('env',0,'valueFrom','secretKeyRef') == {'name' => shards[id]['projectionMaintenanceSecret'], 'key' => 'PROJECTION_MAINTENANCE_URL'}
+  raise 'projection maintenance egress policy missing' unless policy && policy.dig('spec','policyTypes') == ['Ingress','Egress'] && policy.dig('spec','ingress') == []
   bootstrap_objects = render(root,'rds-bootstrap-chart',bootstrap.dig('spec','source','helm','valuesObject'))
   job = bootstrap_objects.find { |item| item['kind'] == 'Job' }
   raise 'operational bootstrap selected central databases' unless job.dig('spec','template','spec','containers',0,'args').include?('GG_OPERATIONAL_ONLY=1')

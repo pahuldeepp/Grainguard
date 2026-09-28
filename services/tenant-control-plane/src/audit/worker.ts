@@ -1,4 +1,5 @@
-import { createPrivateKey, type KeyObject } from "node:crypto";
+import { createPrivateKey, createPublicKey, type KeyObject } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -35,6 +36,41 @@ export interface AuditWorkerOptions {
   sleep?: (ms: number) => Promise<unknown>;
   /** Test hook for lease renewal timing. */
   heartbeatIntervalMs?: number;
+}
+
+export function auditWorkerIdentityFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  privateKey: KeyObject;
+  publicKeyId: string;
+} {
+  const privatePem = env.AUDIT_EXPORT_PRIVATE_KEY_PEM?.replaceAll("\\n", "\n");
+  const publicPem = env.AUDIT_EXPORT_PUBLIC_KEY_PEM?.replaceAll("\\n", "\n");
+  const publicKeyId = env.AUDIT_EXPORT_PUBLIC_KEY_ID;
+  if (
+    !privatePem ||
+    !publicPem ||
+    !publicKeyId ||
+    !/^[a-zA-Z0-9._-]{1,64}$/.test(publicKeyId)
+  )
+    throw new Error("audit worker signing identity is incomplete");
+  let privateKey: KeyObject;
+  let publicKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(privatePem);
+    publicKey = createPublicKey(publicPem);
+  } catch {
+    throw new Error("audit worker signing identity is invalid");
+  }
+  if (
+    privateKey.asymmetricKeyType !== "ed25519" ||
+    publicKey.asymmetricKeyType !== "ed25519" ||
+    !createPublicKey(privateKey)
+      .export({ type: "spki", format: "der" })
+      .equals(publicKey.export({ type: "spki", format: "der" }))
+  )
+    throw new Error("audit worker signing key pair does not match");
+  return { privateKey, publicKeyId };
 }
 
 function backendOf(options: AuditWorkerOptions): ExportStorage {
@@ -130,56 +166,91 @@ export function workerStorageFromEnv(
   return { destinationDirectory: env.AUDIT_EXPORT_DIRECTORY };
 }
 
+export function createAuditWorkerHealthServer(isReady: () => boolean): Server {
+  return createServer((request, response) => {
+    if (
+      request.method !== "GET" ||
+      !["/healthz", "/readyz"].includes(request.url ?? "")
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
+    const ready = request.url === "/healthz" || isReady();
+    response.writeHead(ready ? 200 : 503, { "content-type": "text/plain" });
+    response.end(ready ? "ok" : "not ready");
+  });
+}
+
 if (
   process.argv[1] &&
   import.meta.url === new URL(`file://${process.argv[1]}`).href
 ) {
-  const url = process.env.CONTROL_DATABASE_URL;
-  const pem = process.env.AUDIT_EXPORT_PRIVATE_KEY_PEM;
-  const publicKeyId = process.env.AUDIT_EXPORT_PUBLIC_KEY_ID;
-  const inventoryUrl = process.env.INVENTORY_DATABASE_URL;
-  const billingUrl = process.env.BILLING_DATABASE_URL;
-  if (
-    !url ||
-    !pem ||
-    !publicKeyId ||
-    (!inventoryUrl && !process.env.INVENTORY_SHARD_REGISTRY_FILE) ||
-    !billingUrl
-  )
+  const url = process.env.CONTROL_AUDIT_DATABASE_URL;
+  const billingUrl = process.env.BILLING_AUDIT_DATABASE_URL;
+  const registryFile = process.env.INVENTORY_AUDIT_SHARD_REGISTRY_FILE;
+  if (!url || !billingUrl || !registryFile)
     throw new Error(
-      "audit worker requires database URL, Ed25519 key and key ID",
+      "audit worker requires dedicated control/billing URLs and an inventory shard registry",
     );
+  const { privateKey, publicKeyId } = auditWorkerIdentityFromEnv(process.env);
   const backend = workerStorageFromEnv(process.env);
+  const sources = new AuditSources("", billingUrl, process.env, {
+    registryFileEnv: "INVENTORY_AUDIT_SHARD_REGISTRY_FILE",
+    service: "audit-export-worker",
+    roles: ["inventory_audit_reader"],
+  });
   const db = createDb(url);
-  const sources = new AuditSources(inventoryUrl ?? "", billingUrl);
-  const key = createPrivateKey(pem.replaceAll("\\n", "\n"));
+  let ready = false;
   let stopping = false;
+  const health = createAuditWorkerHealthServer(() => ready && !stopping);
+  const healthPort = Number(process.env.AUDIT_EXPORT_HEALTH_PORT ?? "8098");
+  if (!Number.isInteger(healthPort) || healthPort < 1 || healthPort > 65535)
+    throw new Error("AUDIT_EXPORT_HEALTH_PORT must be a valid TCP port");
+  await db.$queryRaw`SELECT 1`;
+  await sources.healthcheck();
+  await new Promise<void>((resolve, reject) => {
+    health.once("error", reject);
+    health.listen(healthPort, "0.0.0.0", () => {
+      health.off("error", reject);
+      resolve();
+    });
+  });
+  ready = true;
   process.once("SIGTERM", () => {
     stopping = true;
+    ready = false;
   });
   process.once("SIGINT", () => {
     stopping = true;
+    ready = false;
   });
   const run = async () => {
     try {
       while (!stopping) {
         const didWork = await processNextAuditExport(db, {
           ...backend,
-          privateKey: key,
+          privateKey,
           publicKeyId,
           sources,
-        }).catch((error: unknown) => {
-          // The job stays leased and is reclaimed after its lease expires.
-          console.error(
-            "audit export attempt failed",
-            error instanceof Error ? error.message : error,
-          );
-          return false;
-        });
+        })
+          .then((worked) => {
+            ready = true;
+            return worked;
+          })
+          .catch((error: unknown) => {
+            ready = false;
+            // The job stays leased and is reclaimed after its lease expires.
+            console.error(
+              "audit export attempt failed",
+              error instanceof Error ? error.message : error,
+            );
+            return false;
+          });
         if (!didWork && !stopping)
           await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } finally {
+      await new Promise<void>((resolve) => health.close(() => resolve()));
       await db.$disconnect();
       await sources.close();
     }

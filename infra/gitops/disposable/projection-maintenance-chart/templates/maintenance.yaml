@@ -1,0 +1,122 @@
+{{- $v := .Values -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" ($v.name | default "")) }}{{ fail "maintenance name is required" }}{{ end }}
+{{- if not (has $v.shard (list "s1" "s2" "s3" "s4")) }}{{ fail "maintenance shard must be s1-s4" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($v.image | default "")) }}{{ fail "maintenance image must be immutable" }}{{ end }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($v.rdsHost | default "")) }}{{ fail "maintenance requires a shard RDS host" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" ($v.credentialSecret | default "")) }}{{ fail "maintenance credential Secret required" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" ($v.caSecret | default "")) }}{{ fail "maintenance CA Secret required" }}{{ end }}
+{{- if ne $v.schema "public" }}{{ fail "first-cell maintenance schema must be public" }}{{ end }}
+{{- if not (regexMatch "^(10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3}|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3})/(1[6-9]|2[0-9]|3[0-2])$" (index $v.rdsCIDRs 0 | default "")) }}{{ fail "private RDS CIDRs required" }}{{ end }}
+{{- $labels := dict "app.kubernetes.io/name" "projection-history-maintenance" "app.kubernetes.io/instance" $v.name "greenguard.io/shard" $v.shard "greenguard.io/projection-history-maintenance" "true" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $v.name }}-initial
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 90
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: projection-maintenance
+          image: {{ $v.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/projection-maintain"]
+          env:
+            - name: PROJECTION_MAINTENANCE_URL
+              valueFrom: {secretKeyRef: {name: {{ $v.credentialSecret | quote }}, key: PROJECTION_MAINTENANCE_URL}}
+            - {name: PROJECTION_HISTORY_SCHEMA, value: {{ $v.schema | quote }}}
+            - {name: PROJECTION_HISTORY_HOT_WINDOW, value: {{ $v.hotWindow | quote }}}
+            - {name: PROJECTION_HISTORY_AHEAD_DAYS, value: {{ $v.aheadDays | quote }}}
+            - {name: PGCONNECT_TIMEOUT, value: "10"}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+      volumes:
+        - name: rds-ca
+          secret:
+            secretName: {{ $v.caSecret | quote }}
+            items: [{key: ca.pem, path: ca.pem}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $v.name }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  schedule: {{ $v.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 90
+      template:
+        metadata:
+          labels:
+            {{- toYaml $labels | nindent 12 }}
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: projection-maintenance
+              image: {{ $v.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["/projection-maintain"]
+              env:
+                - name: PROJECTION_MAINTENANCE_URL
+                  valueFrom: {secretKeyRef: {name: {{ $v.credentialSecret | quote }}, key: PROJECTION_MAINTENANCE_URL}}
+                - {name: PROJECTION_HISTORY_SCHEMA, value: {{ $v.schema | quote }}}
+                - {name: PROJECTION_HISTORY_HOT_WINDOW, value: {{ $v.hotWindow | quote }}}
+                - {name: PROJECTION_HISTORY_AHEAD_DAYS, value: {{ $v.aheadDays | quote }}}
+                - {name: PGCONNECT_TIMEOUT, value: "10"}
+              resources:
+                requests: {cpu: 50m, memory: 96Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+          volumes:
+            - name: rds-ca
+              secret:
+                secretName: {{ $v.caSecret | quote }}
+                items: [{key: ca.pem, path: ca.pem}]

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-projection-maintenance
+description: Scheduled, shard-local PostgreSQL projection history partition maintenance
+type: application
+version: 0.1.0

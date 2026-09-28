@@ -36,7 +36,9 @@ test("first-admin verifier rejects wrong issuer, wrong audience, expired and cli
   await assert.rejects(verify(await oidc.sign({}, { audience: "other-api" })));
   await assert.rejects(verify(await oidc.sign({}, { expiresInSec: -300 })));
   await assert.rejects(
-    verify(await oidc.sign({ sub: "machine@clients", gty: "client-credentials" })),
+    verify(
+      await oidc.sign({ sub: "machine@clients", gty: "client-credentials" }),
+    ),
   );
 });
 

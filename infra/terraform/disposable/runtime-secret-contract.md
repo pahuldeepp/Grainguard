@@ -10,8 +10,10 @@ from actual RDS addresses and bootstrap role passwords. The migration inventory
 is read from `_owner-migrations.tpl`; roles, database names, keys and TLS settings
 are fixed. Operational services do not receive central database fallback URLs.
 
-`shard_role_passwords` supplies exactly s1-s4, each with the full role key set in
-the bootstrap SQL. `shard_registry_passwords` supplies exactly these ten service
+`shard_role_passwords` supplies exactly s1-s4, each with the operational role
+keys in the bootstrap SQL. It explicitly excludes `CONTROL_*` and `BILLING_*`
+passwords, which are present only in the central `greenguard-rds-bootstrap`
+Secret. `shard_registry_passwords` supplies exactly these eleven service
 keys, each containing exactly s1-s4 passwords matching its bootstrap role:
 
 | Service | Database | Role |
@@ -26,6 +28,21 @@ keys, each containing exactly s1-s4 passwords matching its bootstrap role:
 | saga-orchestrator | greenguard_sagas | saga_app |
 | hardware-service | greenguard_hardware | hardware_app |
 | read-api | greenguard_read | read_query |
+| audit-export-worker | greenguard_inventory | inventory_audit_reader |
+
+When `enable_application_tree` is true, Terraform generates the
+`audit-export-worker-config` Secret from the dedicated central audit-reader
+passwords, `CONTROL_LOOKUP_TOKEN`, `shard_registry_passwords`, the disposable
+S3 bucket, and `audit_export_signing_material`. Supply exactly
+`AUDIT_EXPORT_PRIVATE_KEY_PEM`, `AUDIT_EXPORT_PUBLIC_KEY_PEM`,
+`AUDIT_EXPORT_PUBLIC_KEY_ID`, and `AUDIT_EXPORT_LINK_SECRET` through that
+sensitive variable; the worker validates that the Ed25519 keys match at
+startup. Terraform also copies the public key, link secret, bucket, region and
+billing URL into `tenant-control-plane-config` for the download API. Keep the
+private key out of that API Secret. These values enter encrypted Terraform
+state and Secrets Manager. The readiness contract checks generated Secret
+shape and key references offline; only live export/download acceptance proves
+the actual credentials and signature path against AWS.
 
 The routing sources remain `greenguard/<environment>/shard-routing/<service>`.
 Their Kubernetes names are `greenguard-shard-routing-<service>` and their only

@@ -6,13 +6,20 @@ The owned foundation includes VPC, NAT/EIP, EKS and nodes, RDS, disposable Secre
 
 The verified wrapper now records a cell scope before VPC creation and can
 recover a pre-EKS partial apply from state. It preflights inventory reads and
-simulates its AWS delete permissions before cleanup. Keep the state and the
-saved PV inventory until post-destroy inventory passes.
+simulates its AWS delete permissions before cleanup. It also saves a
+mode-0600 identity/managed-secret manifest before cleanup so an empty-state
+retry can rerun final inventory; keep it and the PV inventory until inventory
+passes.
 
 Remaining limitations:
 
 1. Terraform provider deletion permissions cannot be completely proven without attempting each delete. The wrapper checks inventory reads and simulates the out-of-state AWS deletes; an actual denial remains a resumable failure with local state intact.
-2. Native `terraform destroy` has no guaranteed post-destroy hook. The documented operator entry point is `./destroy-verified.sh`, which runs the final inventory after Terraform exits. Raw `terraform destroy` cannot truthfully be called verified.
+2. Native `terraform destroy` has no guaranteed post-destroy hook. The
+   `pre_destroy_cleanup` destroy provisioner requires an exact-scope marker
+   supplied by `./destroy-verified.sh`, which inventories after Terraform
+   exits. This is an operator guard, not a security boundary; a deliberate
+   caller can set the marker manually. Raw `terraform destroy` cannot provide
+   final inventory proof.
 
 Even after these source checks pass, live AWS destroy and final inventory are required. This checker does not claim that all billable resource classes can be found or that AWS eventual consistency has settled.
 
@@ -31,7 +38,8 @@ unreachable EKS, denied reads/deletes, preserved PV inventory, failed destroy,
 and leftover resources after destroy. These commands make no AWS calls.
 
 The expected current result is **one finding**: `raw_destroy_no_post_inventory`.
-Adding a marker or comment to Terraform cannot close it. Source checks and
+The scope marker makes accidental bare destroys stop, but does not add a
+post-destroy provisioner or close the inventory limitation. Source checks and
 stubbed fixtures establish the supported wrapper's contract, not a successful
 live AWS teardown. IAM simulation does not establish provider delete authority
 under every SCP or resource policy.

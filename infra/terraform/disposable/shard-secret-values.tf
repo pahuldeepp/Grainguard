@@ -10,7 +10,7 @@ variable "shard_role_passwords" {
 }
 
 variable "shard_registry_passwords" {
-  description = "Sensitive service => s1-s4 password maps for exactly the ten shard-routing services. Each must equal the service's actual bootstrap role password. Terraform derives immutable incarnations and endpoints."
+  description = "Sensitive service => s1-s4 password maps for shard-routing services. Each must equal the service's actual bootstrap role password. Terraform derives immutable incarnations and endpoints."
   type        = map(map(string))
   sensitive   = true
   default     = {}
@@ -29,6 +29,7 @@ locals {
     saga-orchestrator    = { role = "saga_app", database = "greenguard_sagas", password_key = "SAGA_DB_PASSWORD" }
     hardware-service     = { role = "hardware_app", database = "greenguard_hardware", password_key = "HARDWARE_DB_PASSWORD" }
     read-api             = { role = "read_query", database = "greenguard_read", password_key = "READ_QUERY_DB_PASSWORD" }
+    audit-export-worker  = { role = "inventory_audit_reader", database = "greenguard_inventory", password_key = "INVENTORY_AUDIT_READER_PASSWORD" }
   }
   # resource_id is RDS's immutable DbiResourceId, unlike its reusable identifier.
   # uuidv5 is deterministic and changes when the physical instance is replaced.
@@ -71,7 +72,7 @@ resource "aws_secretsmanager_secret_version" "shard_routing" {
   lifecycle {
     precondition {
       condition     = nonsensitive(toset(keys(var.shard_registry_passwords))) == toset(keys(local.shard_service_profiles)) && alltrue([for service, profile in local.shard_service_profiles : try(toset(keys(var.shard_registry_passwords[service])) == local.postgres_shard_ids && alltrue([for shard_id in local.postgres_shard_ids : var.shard_registry_passwords[service][shard_id] != "" && var.shard_registry_passwords[service][shard_id] == var.shard_role_passwords[shard_id][profile.password_key]]), false)])
-      error_message = "Exactly ten complete s1-s4 registry credential maps must match the approved bootstrap service role passwords."
+      error_message = "Every shard registry credential map must match the approved bootstrap service role passwords."
     }
     precondition {
       condition     = alltrue([for shard in values(aws_db_instance.shard) : length(shard.resource_id) > 0])
@@ -86,8 +87,8 @@ resource "aws_secretsmanager_secret_version" "shard_bootstrap" {
   secret_string = jsonencode(var.shard_role_passwords[each.key])
   lifecycle {
     precondition {
-      condition     = nonsensitive(toset(keys(var.shard_role_passwords))) == local.postgres_shard_ids && alltrue([for passwords in values(var.shard_role_passwords) : toset(keys(passwords)) == local.runtime_bootstrap_role_keys])
-      error_message = "Each shard must supply the exact complete bootstrap role profile."
+      condition     = nonsensitive(toset(keys(var.shard_role_passwords))) == local.postgres_shard_ids && alltrue([for passwords in values(var.shard_role_passwords) : toset(keys(passwords)) == local.runtime_shard_bootstrap_role_keys])
+      error_message = "Each shard must supply the exact operational bootstrap role profile and must exclude central control/billing credentials."
     }
   }
 }
@@ -100,7 +101,7 @@ data "aws_secretsmanager_secret_version" "shard_master" {
 
 locals {
   shard_pgbouncer_roles = merge(
-    { for service, profile in local.shard_service_profiles : profile.role => profile.password_key... },
+    { for service, profile in local.shard_service_profiles : profile.role => profile.password_key... if service != "audit-export-worker" },
     { inventory_projector = ["INVENTORY_PROJECTOR_PASSWORD"], telemetry_entitlement_projector = ["TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD"], read_entitlement_projector = ["READ_ENTITLEMENT_PROJECTOR_PASSWORD"] }
   )
   shard_data_secret_values = merge([for shard_id in local.postgres_shard_ids : {

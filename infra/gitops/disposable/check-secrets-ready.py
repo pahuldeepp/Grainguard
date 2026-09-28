@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -75,17 +76,22 @@ def expected_secrets(args):
     if not master.get("VersionId") or "AWSCURRENT" not in master.get("VersionStages", []):
         raise RuntimeError("RDS master AWSCURRENT version is missing")
 
-    releases = json.loads(CONTRACT.read_text())["releases"]
+    deployment = json.loads(CONTRACT.read_text())
+    releases = deployment["releases"]
     runtime_secrets = {}
+    application_secrets = {}
     for release in releases:
         if release["name"] == "dashboard":
             continue
         secret = release["secret"]
+        application_secrets[secret] = True
+        if release.get("kafka", True) is False:
+            continue
         principal = release.get("kafkaPrincipal", release["name"])
         if secret in runtime_secrets and runtime_secrets[secret] != principal:
             raise ValueError(f"{secret}: runtime Secret is assigned to conflicting Kafka principals")
         runtime_secrets[secret] = principal
-    names = sorted(runtime_secrets)
+    names = sorted(application_secrets)
     role_keys = set(re.findall(r"^\\getenv\s+\S+\s+(\S+)\s*$", SQL.read_text(), re.MULTILINE))
     if not role_keys:
         raise RuntimeError("RDS role password contract is empty")
@@ -98,6 +104,7 @@ def expected_secrets(args):
         "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth",
         "greenguard-kafka-admin-auth",
         "greenguard-mqtt-broker",
+        *[task["secret"] for task in deployment.get("scheduledTasks", [])],
     ])
     expected = {}
     for name in names:
@@ -143,6 +150,44 @@ def expected_secrets(args):
                     raise ValueError(f"{name}: exact MQTT worker username and password are required")
                 if any(key in source for key in ("MQTT_BROKER_URL", "MQTT_CA_FILE", "MQTT_CLIENT_ID")):
                     raise ValueError(f"{name}: MQTT endpoint, CA path, and client identity come from the pinned release")
+        if name == "audit-export-worker-config":
+            required = {
+                "CONTROL_AUDIT_DATABASE_URL", "BILLING_AUDIT_DATABASE_URL", "CONTROL_LOOKUP_TOKEN",
+                "AUDIT_EXPORT_PRIVATE_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_ID",
+                "AUDIT_EXPORT_S3_BUCKET", "AUDIT_EXPORT_S3_REGION",
+            }
+            if set(source) != required:
+                raise ValueError(f"{name}: exact least-privilege database, signing, and S3 settings are required")
+            if len(source["CONTROL_LOOKUP_TOKEN"].encode()) < 32:
+                raise ValueError(f"{name}: control lookup token must contain at least 32 bytes")
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", source["AUDIT_EXPORT_PUBLIC_KEY_ID"]):
+                raise ValueError(f"{name}: invalid public signing key id")
+            if "PRIVATE KEY" not in source["AUDIT_EXPORT_PRIVATE_KEY_PEM"] or "PUBLIC KEY" not in source["AUDIT_EXPORT_PUBLIC_KEY_PEM"]:
+                raise ValueError(f"{name}: signing key material must be PEM")
+            if not source["AUDIT_EXPORT_S3_BUCKET"] or not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]+", source["AUDIT_EXPORT_S3_REGION"]):
+                raise ValueError(f"{name}: S3 bucket and AWS region are required")
+            expected_databases = {
+                "CONTROL_AUDIT_DATABASE_URL": ("control_audit_worker", "greenguard_control"),
+                "BILLING_AUDIT_DATABASE_URL": ("billing_audit_reader", "greenguard_billing"),
+            }
+            for key, (role, database) in expected_databases.items():
+                parsed = urlparse(source[key])
+                if (parsed.scheme != "postgresql" or unquote(parsed.username or "") != role or
+                    unquote(parsed.password or "") == "" or parsed.hostname != db_host or
+                    parsed.port != 5432 or parsed.path != f"/{database}" or
+                    parse_qs(parsed.query) != {"sslmode": ["verify-full"], "sslrootcert": ["/etc/greenguard/rds/ca.pem"]}):
+                    raise ValueError(f"{name}: {key} must use the dedicated central role, database, and verified TLS")
+        maintenance_match = re.fullmatch(r"greenguard-(s[1-4])-projection-history-maintenance-config", name)
+        if maintenance_match:
+            if set(source) != {"PROJECTION_MAINTENANCE_URL", "PROJECTION_HISTORY_SCHEMA", "PROJECTION_HISTORY_HOT_WINDOW", "PROJECTION_HISTORY_AHEAD_DAYS"}:
+                raise ValueError(f"{name}: exact projection history maintenance configuration required")
+            parsed = urlparse(source["PROJECTION_MAINTENANCE_URL"])
+            if (parsed.scheme != "postgresql" or unquote(parsed.username or "") != "projection_history_maintainer" or
+                    unquote(parsed.password or "") == "" or not re.fullmatch(r"[a-zA-Z0-9.-]+\.rds\.amazonaws\.com", parsed.hostname or "") or
+                    parsed.port != 5432 or parsed.path != "/greenguard_read" or
+                    parse_qs(parsed.query) != {"sslmode": ["verify-full"], "sslrootcert": ["/rds-ca/ca.pem"]} or
+                    source["PROJECTION_HISTORY_SCHEMA"] != "public" or source["PROJECTION_HISTORY_HOT_WINDOW"] != "24h" or source["PROJECTION_HISTORY_AHEAD_DAYS"] != "3"):
+                raise ValueError(f"{name}: shard-local dedicated role, database, TLS, and bounded retention configuration required")
         if name == "greenguard-rds-bootstrap":
             if set(source) != role_keys:
                 raise ValueError(f"{name}: RDS bootstrap role keys are missing or unexpected")
@@ -239,6 +284,21 @@ def expected_secrets(args):
             "version": version,
             "master_version": master.get("VersionId", "") if name == "greenguard-rds-bootstrap" else "",
         }
+    if "audit-export-worker-config" in application_secrets:
+        if "tenant-control-plane-config" not in expected:
+            raise ValueError(
+                "audit-export-worker-config: tenant-control-plane-config is required for signed download setup"
+            )
+        api_config = expected["tenant-control-plane-config"]["data"]
+        worker_config = expected["audit-export-worker-config"]["data"]
+        required = {"AUDIT_EXPORT_S3_BUCKET", "AUDIT_EXPORT_S3_REGION", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_LINK_SECRET", "BILLING_DATABASE_URL"}
+        if not required.issubset(api_config) or len(api_config["AUDIT_EXPORT_LINK_SECRET"].encode()) < 32:
+            raise ValueError("tenant-control-plane-config: API audit export needs generated S3, public key, billing URL, and 32-byte link secret")
+        if api_config["AUDIT_EXPORT_PUBLIC_KEY_PEM"] != worker_config["AUDIT_EXPORT_PUBLIC_KEY_PEM"]:
+            raise ValueError("tenant-control-plane-config: API public key does not match the worker signing identity")
+        if api_config["AUDIT_EXPORT_S3_BUCKET"] != worker_config["AUDIT_EXPORT_S3_BUCKET"] or api_config["AUDIT_EXPORT_S3_REGION"] != worker_config["AUDIT_EXPORT_S3_REGION"]:
+            raise ValueError("tenant-control-plane-config: API and worker must use the same Terraform-owned S3 bucket and region")
+
     broker_jaas = expected["greenguard-kafka-auth"]["data"]["broker-jaas"]
     if not re.search(r'\busername="broker"\s+password="([^"]+)"', broker_jaas):
         raise ValueError("greenguard-kafka-auth: broker JAAS must authenticate the KRaft superuser")

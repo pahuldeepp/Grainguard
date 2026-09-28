@@ -32,6 +32,10 @@ class PreflightTests(unittest.TestCase):
             {"name": "cassandra-writer", "secret": "cassandra-writer-config"},
             {"name": "notification-service", "secret": "notification-service-config"},
             {"name": "notification-contacts-projector", "secret": "notification-contacts-projector-config", "kafkaPrincipal": "notification-service"},
+            {"name": "tenant-control-plane", "secret": "tenant-control-plane-config"},
+            {"name": "audit-export-worker", "secret": "audit-export-worker-config", "kafka": False},
+        ], "scheduledTasks": [
+            {"name": "projection-history-s1", "secret": "greenguard-s1-projection-history-maintenance-config"}
         ]}))
         self.sql = root / "init.sql"
         self.sql.write_text("\\getenv role_password ROLE_PASSWORD\n\\getenv other_password OTHER_PASSWORD\n\\getenv cdc_password CDC_DB_PASSWORD\n")
@@ -42,6 +46,22 @@ class PreflightTests(unittest.TestCase):
             "cassandra-writer-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "cassandra-writer", "KAFKA_SASL_PASSWORD": "dummy"},
             "notification-service-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
             "notification-contacts-projector-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "NOTIFICATION_STATE_TABLE": "greenguard-cell-state", "AWS_REGION": "us-east-1"},
+            "tenant-control-plane-config": {
+                "KAFKA_SASL_USERNAME": "tenant-control-plane", "KAFKA_SASL_PASSWORD": "dummy",
+                "AUDIT_EXPORT_S3_BUCKET": "cell-audit-bucket", "AUDIT_EXPORT_S3_REGION": "ca-central-1",
+                "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
+                "AUDIT_EXPORT_LINK_SECRET": "l" * 32,
+                "BILLING_DATABASE_URL": "postgresql://billing_app:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+            },
+            "audit-export-worker-config": {
+                "CONTROL_AUDIT_DATABASE_URL": "postgresql://control_audit_worker:secret@db.example.rds.amazonaws.com:5432/greenguard_control?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "BILLING_AUDIT_DATABASE_URL": "postgresql://billing_audit_reader:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "CONTROL_LOOKUP_TOKEN": "c" * 32,
+                "AUDIT_EXPORT_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----\nprivate-key\n-----END PRIVATE KEY-----",
+                "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
+                "AUDIT_EXPORT_PUBLIC_KEY_ID": "audit-key-v1",
+                "AUDIT_EXPORT_S3_BUCKET": "cell-audit-bucket", "AUDIT_EXPORT_S3_REGION": "ca-central-1",
+            },
             "greenguard-rds-bootstrap": {
                 "ROLE_PASSWORD": "dummy-role-password",
                 "OTHER_PASSWORD": "dummy-other-password",
@@ -70,8 +90,12 @@ class PreflightTests(unittest.TestCase):
             "greenguard-kafka-connect-auth": {"KAFKA_SASL_USERNAME": "connect", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="connect" password="dummy";', "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "SCHEMA_REGISTRY_BASIC_USER_INFO": "registry:dummy"},
             "greenguard-kafka-admin-auth": {"KAFKA_SASL_USERNAME": "admin", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="dummy";'},
             "greenguard-mqtt-broker": {"tls.crt": "-----BEGIN CERTIFICATE-----dummy", "tls.key": "-----BEGIN PRIVATE KEY-----dummy", "ca.crt": "-----BEGIN CERTIFICATE-----dummy", "passwords": "greenguard-hardware-worker:$7$dummy-hash", "acl": "user greenguard-hardware-worker\ntopic write greenguard/+/+/command\ntopic read greenguard/+/+/ack"},
+            "greenguard-s1-projection-history-maintenance-config": {
+                "PROJECTION_MAINTENANCE_URL": "postgresql://projection_history_maintainer:dummy@shard1.example.rds.amazonaws.com:5432/greenguard_read?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem",
+                "PROJECTION_HISTORY_SCHEMA": "public", "PROJECTION_HISTORY_HOT_WINDOW": "24h", "PROJECTION_HISTORY_AHEAD_DAYS": "3",
+            },
         }
-        clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "connect", "admin")
+        clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "tenant-control-plane", "connect", "admin")
         self.values["greenguard-kafka-auth"]["broker-jaas"] += " " + " ".join(
             f'user_{name}="dummy"' for name in clients
         )
@@ -136,7 +160,41 @@ class PreflightTests(unittest.TestCase):
     def test_complete_secrets_pass(self):
         status, output = self.run_preflight()
         self.assertEqual(status, 0)
-        self.assertIn("PASS 22 Secrets", output)
+        self.assertIn("PASS 25 Secrets", output)
+
+    def test_audit_worker_secret_is_validated_without_broad_kafka_credentials(self):
+        status, output = self.run_preflight()
+        self.assertEqual(status, 0)
+        self.assertNotIn("audit-export-worker-config: scoped Kafka", output)
+
+    def test_audit_worker_requires_control_plane_secret(self):
+        contract = json.loads(self.contract.read_text())
+        contract["releases"] = [
+            release for release in contract["releases"]
+            if release["name"] != "tenant-control-plane"
+        ]
+        self.contract.write_text(json.dumps(contract))
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("tenant-control-plane-config is required", output)
+
+    def test_audit_api_public_key_must_match_worker_signing_key(self):
+        self.values["tenant-control-plane-config"]["AUDIT_EXPORT_PUBLIC_KEY_PEM"] = "different"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("API public key does not match", output)
+
+    def test_audit_worker_must_use_dedicated_central_roles(self):
+        self.values["audit-export-worker-config"]["CONTROL_AUDIT_DATABASE_URL"] = self.values["audit-export-worker-config"]["CONTROL_AUDIT_DATABASE_URL"].replace("control_audit_worker", "control_app")
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("dedicated central role", output)
+
+    def test_projection_maintenance_secret_is_bound_to_dedicated_shard_role_and_tls(self):
+        self.values["greenguard-s1-projection-history-maintenance-config"]["PROJECTION_MAINTENANCE_URL"] = self.values["greenguard-s1-projection-history-maintenance-config"]["PROJECTION_MAINTENANCE_URL"].replace("projection_history_maintainer", "projection_migrator")
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("dedicated role, database, TLS", output)
 
     def test_mqtt_broker_secret_keys_must_be_exact(self):
         del self.values["greenguard-mqtt-broker"]["tls.key"]

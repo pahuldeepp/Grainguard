@@ -24,13 +24,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	url := getenv("PROJECTION_MIGRATION_URL")
+	url := getenv("PROJECTION_MAINTENANCE_URL")
 	if url == "" {
-		return errors.New("PROJECTION_MIGRATION_URL is required")
+		return errors.New("PROJECTION_MAINTENANCE_URL is required")
+	}
+	config, err := pgxpool.ParseConfig(url)
+	if err != nil || config.ConnConfig.User != "projection_history_maintainer" || config.ConnConfig.Database != "greenguard_read" {
+		return errors.New("maintenance URL must use the dedicated projection_history_maintainer role in greenguard_read")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, url)
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return errors.New("invalid maintenance database configuration")
 	}
