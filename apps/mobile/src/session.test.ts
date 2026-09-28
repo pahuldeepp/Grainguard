@@ -100,7 +100,11 @@ test("a token without a tenant claim uses the BFF membership for local tenant sc
     subject: "user-1",
   });
   assert.deepEqual(await h.session.identity(), identity);
-  assert.deepEqual(await h.session.getAccessToken().then(({ accessToken: _, ...scope }) => scope), identity);
+  const verified = await h.session.getAccessToken();
+  assert.deepEqual(
+    { tenantId: verified.tenantId, subject: verified.subject },
+    identity,
+  );
   assert.equal(h.membershipLookups(), 1);
 });
 
@@ -108,17 +112,23 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
   const h = harness();
   h.grants.push({ noTenantClaim: true });
   const verifying = new MobileSession(config, h.store, {
-    fetch: (async () => jsonResponse(200, {
-      access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
-      expires_in: 300,
-    })) as unknown as typeof fetch,
+    fetch: (async () =>
+      jsonResponse(200, {
+        access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+        expires_in: 300,
+      })) as unknown as typeof fetch,
     now: h.clock.now,
     crypto: defaultCrypto(),
-    resolveMembership: async () => ({ tenantId: "tenant-b", subject: "other-user" }),
+    resolveMembership: async () => ({
+      tenantId: "tenant-b",
+      subject: "other-user",
+    }),
   });
   const url = new URL(await verifying.beginSignIn());
   await assert.rejects(
-    verifying.completeSignIn(`greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`),
+    verifying.completeSignIn(
+      `greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`,
+    ),
     /does not match/,
   );
 });
@@ -126,16 +136,19 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
 test("a no-tenant token cannot enter offline state without a BFF membership resolver", async () => {
   const h = harness();
   const session = new MobileSession(config, h.store, {
-    fetch: (async () => jsonResponse(200, {
-      access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
-      expires_in: 300,
-    })) as unknown as typeof fetch,
+    fetch: (async () =>
+      jsonResponse(200, {
+        access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+        expires_in: 300,
+      })) as unknown as typeof fetch,
     now: h.clock.now,
     crypto: defaultCrypto(),
   });
   const url = new URL(await session.beginSignIn());
   await assert.rejects(
-    session.completeSignIn(`greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`),
+    session.completeSignIn(
+      `greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`,
+    ),
     /resolved by the BFF/,
   );
 });
