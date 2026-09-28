@@ -1,7 +1,12 @@
 import { ArgumentsHost, HttpException } from "@nestjs/common";
 import { BaseExceptionFilter } from "@nestjs/core";
 import { AuthError } from "@greenguard/tenant-auth";
+import { ServiceAuthError } from "@greenguard/tenant-auth/service-principals";
 import { LockNotAvailableError } from "../db/errors.js";
+import {
+  EntitlementExceededError,
+  TenantProjectionUnavailableError,
+} from "../inventory/entitlements.js";
 import {
   DeviceNotFoundError,
   DuplicateBinError,
@@ -12,6 +17,8 @@ import {
   VersionConflictError,
 } from "../inventory/errors.js";
 import { PreconditionRequiredError } from "./errors.js";
+import { ImportConflictError } from "../import/admission.js";
+import { CableNotFoundError } from "../inventory/cables.js";
 import type { ApiRequest, ApiResponse } from "./http.js";
 
 export interface Problem {
@@ -34,6 +41,14 @@ const AUTH_HEADERS: Record<number, Record<string, string>> = {
 };
 
 export function classify(error: unknown): Problem {
+  if (error instanceof ServiceAuthError) {
+    return {
+      status: error.status,
+      code: error.code,
+      title: AUTH_TITLES[error.status],
+      headers: AUTH_HEADERS[error.status],
+    };
+  }
   if (error instanceof AuthError) {
     return {
       status: error.status,
@@ -42,6 +57,20 @@ export function classify(error: unknown): Problem {
       headers: AUTH_HEADERS[error.status],
     };
   }
+  if (error instanceof EntitlementExceededError)
+    return {
+      status: 403,
+      code: "entitlement_exceeded",
+      title: "Forbidden",
+      detail: error.message,
+    };
+  if (error instanceof TenantProjectionUnavailableError)
+    return {
+      status: 503,
+      code: error.code,
+      title: "Service unavailable",
+      headers: { "Retry-After": "5" },
+    };
   if (error instanceof InvalidInputError)
     return {
       status: 400,
@@ -71,6 +100,13 @@ export function classify(error: unknown): Problem {
       title: "Conflict",
       detail: error.message,
     };
+  if (error instanceof ImportConflictError)
+    return {
+      status: 409,
+      code: "import_conflict",
+      title: "Conflict",
+      detail: error.message,
+    };
   if (
     error instanceof DuplicateSerialError ||
     error instanceof DuplicateBinError
@@ -96,7 +132,10 @@ export function classify(error: unknown): Problem {
       title: "Unprocessable request",
       detail: error.message,
     };
-  if (error instanceof DeviceNotFoundError)
+  if (
+    error instanceof DeviceNotFoundError ||
+    error instanceof CableNotFoundError
+  )
     return { status: 404, code: "not_found", title: "Not found" };
   if (error instanceof HttpException)
     return {

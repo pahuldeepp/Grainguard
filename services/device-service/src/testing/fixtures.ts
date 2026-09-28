@@ -4,7 +4,6 @@ import { createDb, type Db } from "../db/client.js";
 import {
   createBin,
   createSite,
-  createTenant,
   registerDevice,
   type CommandContext,
 } from "../inventory/repository.js";
@@ -40,7 +39,20 @@ async function query<T>(url: string, sql: string, params: unknown[]) {
 
 // Superuser: bypasses RLS, so tests can inspect what really was written.
 export const adminQuery = <T>(sql: string, params: unknown[] = []) =>
-  query<T>(adminUrl("greenguard_inventory"), sql, params);
+  query<T>(
+    adminUrl(new URL(env("INVENTORY_DIRECT_URL")).pathname.slice(1)),
+    sql,
+    params,
+  );
+
+// Test fixture only: inserts a control-plane-shaped tenant snapshot using the
+// local administrator. Runtime inventory_app has no INSERT privilege on tenants.
+export async function createTenant(_db: Db, tenantId: string, name: string) {
+  await adminQuery(
+    "INSERT INTO tenants (tenant_id,name) VALUES ($1::uuid,$2)",
+    [tenantId, name],
+  );
+}
 
 // inventory_app over a direct session, with no tenant context set.
 export const appQuery = <T>(sql: string, params: unknown[] = []) =>

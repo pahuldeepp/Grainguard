@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 import pg from "pg";
 import { LocalTestAdapter } from "./adapters.js";
-import { beginDelivery, finishDelivery, setPreference } from "./ledger.js";
+import {
+  beginDelivery,
+  expireOptionalHold,
+  finishDelivery,
+  OPTIONAL_HOLD_EXPIRED,
+  setPreference,
+} from "./ledger.js";
 import { migrate } from "./migrate.js";
 import { runMigrate } from "./migrate.js";
 import { InvalidTenantError, withTenant } from "./tenant.js";
@@ -62,6 +68,63 @@ test("concurrent duplicates never double-send", { skip }, async () => {
   assert.equal(adapter.delivered.size, 1);
   assert.equal(new Set(adapter.sendCalls).size, 1);
 });
+
+test(
+  "optional hold expiry records only a hold attempt and preserves terminal state",
+  { skip },
+  async () => {
+    const task = makeTask({ delivery_generation: 1 });
+    assert.deepEqual(await expireOptionalHold(pool!, task), {
+      action: "failed",
+    });
+    assert.deepEqual(await expireOptionalHold(pool!, task), {
+      action: "receipt",
+      outcome: "failed",
+      park: true,
+    });
+    assert.deepEqual(
+      await expireOptionalHold(pool!, { ...task, delivery_generation: 0 }),
+      {
+        action: "stale",
+      },
+    );
+    const row = await withTenant(pool!, task.tenant_id, async (client) => {
+      const delivery = await client.query(
+        "SELECT status, attempts, last_error FROM deliveries WHERE tenant_id = $1 AND intent_id = $2",
+        [task.tenant_id, task.intent_id],
+      );
+      const attempts = await client.query(
+        "SELECT kind, outcome, detail FROM delivery_attempts WHERE tenant_id = $1 AND intent_id = $2 ORDER BY attempt_no",
+        [task.tenant_id, task.intent_id],
+      );
+      return { delivery: delivery.rows[0], attempts: attempts.rows };
+    });
+    assert.equal(row.delivery.status, "failed");
+    assert.equal(row.delivery.attempts, 0);
+    assert.equal(row.delivery.last_error, OPTIONAL_HOLD_EXPIRED);
+    assert.deepEqual(row.attempts, [
+      { kind: "hold", outcome: "failed", detail: OPTIONAL_HOLD_EXPIRED },
+    ]);
+  },
+);
+
+test(
+  "optional hold expiry leaves an in-progress provider claim uncertain",
+  { skip },
+  async () => {
+    const task = makeTask();
+    assert.deepEqual(await beginDelivery(pool!, task), {
+      action: "send",
+      attempt: 1,
+    });
+    assert.deepEqual(await expireOptionalHold(pool!, task), {
+      action: "uncertain",
+    });
+    const row = await delivery(task.tenant_id, task.intent_id);
+    assert.equal(row?.status, "in_progress");
+    assert.equal(row?.attempts, 1);
+  },
+);
 
 test(
   "the terminal guard rejects any change to a finished delivery",
@@ -401,7 +464,7 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
   try {
     const url = new URL(process.env.NOTIFICATIONS_MIGRATION_URL!);
     url.pathname = `/${name}`;
-    assert.equal((await migrate(url.toString())).length, 2);
+    assert.equal((await migrate(url.toString())).length, 3);
     assert.equal((await migrate(url.toString())).length, 0);
     assert.deepEqual(
       await runMigrate((k) =>

@@ -26,6 +26,7 @@ import {
   listDevices,
   placeGrainLot,
   registerDevice,
+  registerPendingDevice,
   setDeviceStatus,
 } from "../inventory/repository.js";
 import { AuthGuard } from "./auth.guard.js";
@@ -40,6 +41,7 @@ import {
   parseObservedAt,
   parsePage,
   parseRegister,
+  parseRegisterPending,
   parseSite,
   parseStatus,
   toDeviceDto,
@@ -148,6 +150,23 @@ export class InventoryController {
       input,
     );
     res.setHeader("ETag", etag(result.bindingVersion));
+    res.setHeader("Location", `/v1/devices/${result.deviceId}`);
+    return result;
+  }
+
+  @Post("devices/provisioning")
+  async registerPending(
+    @Req() req: ApiRequest,
+    @Res({ passthrough: true }) res: ApiResponse,
+    @Body() body: unknown,
+  ) {
+    authorized(req, "admin");
+    const key = parseIdempotencyKey(header(req, "idempotency-key"));
+    const result = await registerPendingDevice(
+      this.db,
+      commandContext(req as Required<ApiRequest>, key),
+      parseRegisterPending(body),
+    );
     res.setHeader("Location", `/v1/devices/${result.deviceId}`);
     return result;
   }

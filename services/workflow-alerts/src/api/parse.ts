@@ -3,6 +3,7 @@ import { InvalidInputError } from "../alerts/errors.js";
 import type { Episode, EpisodeState } from "../alerts/policy.js";
 import { currentTraceparent } from "../alerts/trace.js";
 import { isUuid } from "../db/tenant.js";
+import type { ActorDisplay } from "./identity.js";
 import type { AlertRequest } from "./auth.js";
 
 export class PreconditionRequiredError extends Error {
@@ -55,7 +56,7 @@ export function correlate(req: AlertRequest): void {
 
 export const etag = (version: bigint | string) => `"${version}"`;
 
-export const toAlertDto = (e: Episode) => ({
+export const toAlertDto = (e: Episode, actor: ActorDisplay) => ({
   alertId: e.episodeId,
   ruleId: e.ruleId,
   binId: e.resourceId,
@@ -66,7 +67,15 @@ export const toAlertDto = (e: Episode) => ({
   openWindowStart: e.openWindowStart.toISOString(),
   openedAt: e.openedAt.toISOString(),
   acknowledgedAt: e.acknowledgedAt?.toISOString() ?? null,
-  acknowledgedBy: e.acknowledgedBy,
+  acknowledgedBy: !e.acknowledgedBy
+    ? null
+    : actor.isYou
+      ? "you"
+      : actor.handle
+        ? `member-${actor.handle}`
+        : "team-member",
+  actor,
+  escalatedAt: e.escalatedAt?.toISOString() ?? null,
   resolvedAt: e.resolvedAt?.toISOString() ?? null,
   escalationLevel: e.escalationLevel,
 });

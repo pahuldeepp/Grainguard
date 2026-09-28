@@ -1,3 +1,4 @@
+import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { createRequire } from "node:module";
 import kafkaJs, { type EachMessagePayload } from "kafkajs";
 import type { Db } from "../db/client.js";
@@ -8,6 +9,7 @@ const { CompressionCodecs, CompressionTypes, Kafka, logLevel } = kafkaJs;
 
 export const RISK_TOPICS = [
   "greenguard.risk.assessment.v1",
+  "greenguard.risk.assessment.v2",
   "greenguard.risk.assessment_invalidated.v1",
 ] as const;
 const QUARANTINE_TOPIC = "greenguard.quarantine.v1";
@@ -41,6 +43,7 @@ export async function startRiskKafkaConsumer(
     clientId: "workflow-alerts",
     brokers,
     logLevel: logLevel.ERROR,
+    ...kafkaSecurityFromEnv(),
   });
   const consumer = kafka.consumer({ groupId, allowAutoTopicCreation: false });
   consumer.on(consumer.events.CRASH, ({ payload }) => {

@@ -269,3 +269,80 @@ test("subscription verifies bearer, scopes reads and catches up after reconnect"
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("silent peers lose their connection slots and subscription polling stops", async () => {
+  let polls = 0;
+  const server = createServer();
+  const stop = attachSubscriptions(server, {
+    verify: async () => ({
+      ...principal,
+      expiresAt: new Date(Date.now() + 60_000),
+    }),
+    read: {
+      device: async () => ({ deviceId }) as never,
+      latest: async () => {
+        polls++;
+        return { deviceId, readingId: `r${polls}` } as never;
+      },
+    },
+    intervalMs: 250,
+    maxConnections: 1,
+    connectionInitTimeoutMs: 25,
+    heartbeatIntervalMs: 20,
+  });
+  server.listen(0);
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const url = `ws://127.0.0.1:${address.port}/graphql`;
+  const connect = async (autoPong = true) => {
+    const ws = new WebSocket(url, "graphql-transport-ws", {
+      headers: { Authorization: "Bearer valid" },
+      autoPong,
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    return ws;
+  };
+  try {
+    const noInit = await connect();
+    assert.equal(
+      await new Promise<number>((resolve) => noInit.once("close", resolve)),
+      4408,
+    );
+    const silent = await connect(false);
+    silent.send(JSON.stringify({ type: "connection_init" }));
+    assert.equal((await next(silent)).type, "connection_ack");
+    silent.send(
+      JSON.stringify({
+        id: "1",
+        type: "subscribe",
+        payload: {
+          extensions: {
+            persistedQuery: {
+              sha256Hash: operationHash(operations.deviceChanged),
+            },
+          },
+          variables: { deviceId },
+        },
+      }),
+    );
+    assert.equal((await next(silent)).type, "next");
+    assert.equal(
+      await new Promise<number>((resolve) => silent.once("close", resolve)),
+      1006,
+    );
+    const afterClose = polls;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(polls, afterClose, "dead peer polling must stop");
+    const recovered = await connect();
+    recovered.close();
+    await new Promise<void>((resolve) =>
+      recovered.once("close", () => resolve()),
+    );
+  } finally {
+    await stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

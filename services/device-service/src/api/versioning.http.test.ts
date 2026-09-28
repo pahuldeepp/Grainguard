@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createTenant } from "../inventory/repository.js";
+import { createTenant } from "../testing/fixtures.js";
 import { startApi } from "../testing/api.js";
 import type { VersionRegistry } from "./versioning/index.js";
 

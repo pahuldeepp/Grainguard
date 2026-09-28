@@ -16,6 +16,9 @@ datasource db {
 model Tenant {
   tenantId  String   @id @map("tenant_id") @db.Uuid
   name      String
+  state     String   @default("active")
+  homeRegion String @default("local") @map("home_region")
+  version   BigInt   @default(1)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   sites     Site[]
   grainLots GrainLot[]
@@ -49,6 +52,7 @@ model Bin {
   site        Site           @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
   devices     Device[]
   occupancies BinOccupancy[]
+  cables      BinCable[]
 
   @@id([tenantId, binId])
   @@unique([tenantId, siteId, binId])
@@ -88,6 +92,8 @@ model BinOccupancy {
 model Device {
   tenantId       String   @map("tenant_id") @db.Uuid
   deviceId       String   @map("device_id") @db.Uuid
+  assetId        String?  @map("asset_id") @db.Uuid
+  activeSagaId   String?  @map("active_saga_id") @db.Uuid
   siteId         String   @map("site_id") @db.Uuid
   binId          String?  @map("bin_id") @db.Uuid
   serialNumber   String   @map("serial_number")
@@ -99,10 +105,48 @@ model Device {
   site           Site     @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
   // Composite key keeps the bin in the same tenant and the same site as the device.
   bin            Bin?     @relation(fields: [tenantId, siteId, binId], references: [tenantId, siteId, binId], onDelete: Restrict, onUpdate: Restrict)
+  cables         BinCable[]
 
   @@id([tenantId, deviceId])
   @@unique([tenantId, serialNumber])
   @@map("devices")
+}
+
+// Layout versions are immutable in owner events. Removed identities are retained.
+model BinCable {
+  tenantId String @map("tenant_id") @db.Uuid
+  cableId String @map("cable_id") @db.Uuid
+  binId String @map("bin_id") @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+  label String
+  version BigInt @default(1)
+  status String @default("active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  bin Bin @relation(fields: [tenantId, binId], references: [tenantId, binId], onDelete: Restrict, onUpdate: Restrict)
+  device Device @relation(fields: [tenantId, deviceId], references: [tenantId, deviceId], onDelete: Restrict, onUpdate: Restrict)
+  sensors CableSensor[]
+
+  @@id([tenantId, cableId])
+  @@index([tenantId, binId, cableId])
+  @@index([tenantId, deviceId, cableId])
+  @@map("bin_cables")
+}
+
+model CableSensor {
+  tenantId String @map("tenant_id") @db.Uuid
+  sensorId String @map("sensor_id") @db.Uuid
+  cableId String @map("cable_id") @db.Uuid
+  label String
+  position Int
+  depthM Float? @map("depth_m")
+  status String @default("active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  cable BinCable @relation(fields: [tenantId, cableId], references: [tenantId, cableId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([tenantId, sensorId])
+  @@index([tenantId, cableId, position])
+  @@map("cable_sensors")
 }
 
 model CommandReceipt {
@@ -116,6 +160,26 @@ model CommandReceipt {
 
   @@id([tenantId, commandType, idempotencyKey])
   @@map("command_receipts")
+}
+
+// Last accepted source coordinate for one tenant-bound external inventory entity.
+model InventoryImportState {
+  tenantId            String   @map("tenant_id") @db.Uuid
+  sourceId            String   @map("source_id")
+  entityType          String   @map("entity_type")
+  externalId          String   @map("external_id")
+  entityId            String   @map("entity_id") @db.Uuid
+  connectorGeneration String   @map("connector_generation")
+  topic               String
+  partitionId         Int      @map("partition_id")
+  sourceOffset        BigInt   @map("source_offset")
+  payloadSha256       String   @map("payload_sha256")
+  responseBody        Json     @map("response_body")
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, sourceId, entityType, externalId])
+  @@unique([tenantId, entityType, entityId], map: "inventory_import_state_entity_key")
+  @@map("inventory_import_state")
 }
 
 model OutboxEvent {
@@ -151,5 +215,62 @@ model AuditEvent {
   occurredAt   DateTime @map("occurred_at") @db.Timestamptz(6)
 
   @@index([tenantId, resourceType, resourceId])
+  @@index([tenantId, occurredAt, auditId], map: "audit_events_export_page")
   @@map("audit_events")
+}
+
+model InventorySagaReceipt {
+  tenantId      String   @map("tenant_id") @db.Uuid
+  commandId     String   @map("command_id") @db.Uuid
+  sagaId        String   @map("saga_id") @db.Uuid
+  deviceId      String   @map("device_id") @db.Uuid
+  assetId       String   @map("asset_id") @db.Uuid
+  step          String
+  sagaVersion   BigInt   @map("saga_version")
+  fencingToken  BigInt   @map("fencing_token")
+  outcome       String
+  resultId      String   @map("result_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  results       InventorySagaResultOutbox[]
+
+  @@id([tenantId, commandId])
+  @@map("inventory_saga_receipts")
+}
+
+model InventorySagaResultOutbox {
+  tenantId      String   @map("tenant_id") @db.Uuid
+  resultId      String   @map("result_id") @db.Uuid
+  commandId     String   @map("command_id") @db.Uuid
+  sagaId        String   @map("saga_id") @db.Uuid
+  step          String
+  sagaVersion   BigInt   @map("saga_version")
+  fencingToken  BigInt   @map("fencing_token")
+  outcome       String
+  traceparent   String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  receipt       InventorySagaReceipt @relation(fields: [tenantId, commandId], references: [tenantId, commandId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([tenantId, resultId])
+  @@map("inventory_saga_result_outbox")
+}
+
+model TenantEntitlement {
+  tenantId String @id @map("tenant_id") @db.Uuid
+  planKey String @map("plan_key")
+  planVersion BigInt @map("plan_version")
+  limits Json
+  features Json
+  sourceVersion BigInt @map("source_version")
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
+
+  @@map("tenant_entitlements")
+}
+
+// ADR-0022: per-partition entitlement feed health; no tenant data.
+model EntitlementFeedHealth {
+  partitionId Int @id @map("partition_id")
+  verifiedAt DateTime @map("verified_at") @db.Timestamptz(6)
+
+  @@map("entitlement_feed_health")
 }

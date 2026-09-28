@@ -2,7 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { outboxRowToEvent, validateEvent } from "@greenguard/contracts";
-import { createTenant } from "../inventory/repository.js";
+import { createTenant } from "../testing/fixtures.js";
 import { startApi } from "../testing/api.js";
 import { adminQuery } from "../testing/fixtures.js";
 

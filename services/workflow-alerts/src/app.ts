@@ -17,11 +17,16 @@ import {
 import { ALERTS_DB, AlertsController } from "./api/alerts.controller.js";
 import { TenantGuard, VERIFIER, type Verifier } from "./api/auth.js";
 import { ProblemJsonFilter } from "./api/problem.js";
+import { AlertRulesController } from "./api/rules.controller.js";
+import { IDENTITY, IdentityDisplay } from "./api/identity.js";
+import { HISTORY_CURSOR, HistoryCursor } from "./api/history.js";
 import type { Db } from "./db/client.js";
 
 export interface AlertsAppOptions {
   db: Db;
   verifier?: Verifier;
+  actorHmacKey?: string;
+  historyCursorKey?: string;
   tracing?: Tracing;
   stopConsumer?: { close?: () => Promise<void> };
   consumerHealth?: { ready: boolean };
@@ -56,11 +61,23 @@ class Shutdown implements OnApplicationShutdown {
     @Inject("TRACING") private readonly tracing: Tracing | null,
     @Inject("CONSUMER")
     private readonly consumer: { close?: () => Promise<void> },
+    @Inject(VERIFIER) private readonly verifier: Verifier | null,
   ) {}
   async onApplicationShutdown() {
-    await this.consumer.close?.();
-    await this.db.$disconnect();
-    await this.tracing?.shutdown();
+    const failures: unknown[] = [];
+    for (const close of [
+      () => this.consumer.close?.(),
+      () => this.db.$disconnect(),
+      () => this.tracing?.shutdown(),
+      () => this.verifier?.close?.(),
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length) throw failures[0];
   }
 }
 
@@ -144,13 +161,21 @@ function requestRoute(req: Request) {
 // health probes only (the risk consumer does not need HTTP).
 export async function createAlertsApp(options: AlertsAppOptions) {
   const api = options.verifier !== undefined;
+  const identity = api
+    ? new IdentityDisplay(options.actorHmacKey as string)
+    : null;
+  const cursor = api
+    ? new HistoryCursor(options.historyCursorKey as string)
+    : null;
   const app = await NestFactory.create(
     {
       module: AlertsModule,
       controllers: api
-        ? [ProbeController, AlertsController]
+        ? [ProbeController, AlertsController, AlertRulesController]
         : [ProbeController],
       providers: [
+        { provide: IDENTITY, useValue: identity },
+        { provide: HISTORY_CURSOR, useValue: cursor },
         { provide: ALERTS_DB, useValue: options.db },
         { provide: "TRACING", useValue: options.tracing ?? null },
         { provide: "CONSUMER", useValue: options.stopConsumer ?? {} },

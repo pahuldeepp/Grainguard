@@ -23,14 +23,20 @@ export interface HandleOptions {
   beforeCommit?: () => Promise<void> | void;
 }
 
-function riskInput(event: DomainEvent) {
+export function riskInput(event: DomainEvent) {
   const p = event.payload;
   return {
     eventId: event.event_id,
     tenantId: event.tenant_id,
     deviceId: p["device_id"] as string,
     binId: p["bin_id"] as string,
-    assessmentVersion: BigInt(p["assessment_version"] as string),
+    // v2's assessment_version identifies its payload schema. The monotonic
+    // device stream sequence remains the envelope aggregate_version.
+    assessmentVersion: BigInt(
+      event.schema_version === 2
+        ? event.aggregate_version
+        : (p["assessment_version"] as string),
+    ),
     assessmentId: p["assessment_id"] as string,
     occurredAt: new Date(event.occurred_at),
     correlationId: event.correlation_id,

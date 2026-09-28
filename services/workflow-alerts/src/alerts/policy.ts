@@ -27,6 +27,7 @@ export interface Episode {
   openedAt: Date;
   acknowledgedAt: Date | null;
   acknowledgedBy: string | null;
+  acknowledgedByIssuer?: string | null;
   resolvedAt: Date | null;
   escalationLevel: number;
   escalatedAt: Date | null;

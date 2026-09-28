@@ -2,6 +2,8 @@ import type { Pool, PoolClient } from "pg";
 import type { Channel, Task } from "./task.js";
 import { withTenant } from "./tenant.js";
 
+export const OPTIONAL_HOLD_EXPIRED = "optional notification hold exhausted";
+
 export const TERMINAL = ["sent", "failed", "suppressed"] as const;
 export type Terminal = (typeof TERMINAL)[number];
 export type Status =
@@ -13,7 +15,7 @@ export function isTerminal(status: string): status is Terminal {
 
 /** What the worker must do next after the begin transaction commits. */
 export type Plan =
-  | { action: "receipt"; outcome: Terminal }
+  | { action: "receipt"; outcome: Terminal; park?: boolean }
   | { action: "stale" }
   | { action: "send"; attempt: number }
   | { action: "reconcile"; attempt: number; reconciles: number };
@@ -23,6 +25,7 @@ interface Row {
   attempts: number;
   reconciles: number;
   delivery_generation: number;
+  last_error?: string | null;
 }
 
 const SEVERITY_RANK: Record<string, number> = { warning: 1, critical: 2 };
@@ -41,7 +44,7 @@ async function lockDelivery(client: PoolClient, task: Task): Promise<Row> {
     ],
   );
   const { rows } = await client.query<Row>(
-    `SELECT status, attempts, reconciles, delivery_generation FROM deliveries
+    `SELECT status, attempts, reconciles, delivery_generation, last_error FROM deliveries
      WHERE tenant_id = $1 AND intent_id = $2 FOR UPDATE`,
     [task.tenant_id, task.intent_id],
   );
@@ -115,7 +118,13 @@ export async function beginDelivery(pool: Pool, task: Task): Promise<Plan> {
       };
     }
     if (isTerminal(row.status))
-      return { action: "receipt", outcome: row.status };
+      return {
+        action: "receipt",
+        outcome: row.status,
+        ...(row.status === "failed" && row.last_error === OPTIONAL_HOLD_EXPIRED
+          ? { park: true }
+          : {}),
+      };
     if (row.status === "in_progress" || row.status === "unknown")
       return {
         action: "reconcile",
@@ -134,6 +143,45 @@ export async function beginDelivery(pool: Pool, task: Task): Promise<Plan> {
     );
     await addAttempt(client, task, "send", "started", null);
     return { action: "send", attempt: row.attempts + 1 };
+  });
+}
+
+export type HoldExpiry =
+  | { action: "stale" }
+  | { action: "receipt"; outcome: Terminal; park: boolean }
+  | { action: "uncertain" }
+  | { action: "failed" };
+
+/** Exhaust a disabled optional send in one locked transaction. No provider send
+ * has started, so neither attempts nor an in_progress claim are created. */
+export async function expireOptionalHold(
+  pool: Pool,
+  task: Task,
+): Promise<HoldExpiry> {
+  return withTenant(pool, task.tenant_id, async (client) => {
+    const row = await lockDelivery(client, task);
+    if (task.delivery_generation < row.delivery_generation)
+      return { action: "stale" };
+    if (isTerminal(row.status))
+      return {
+        action: "receipt",
+        outcome: row.status,
+        park:
+          row.status === "failed" && row.last_error === OPTIONAL_HOLD_EXPIRED,
+      };
+    if (row.status === "in_progress" || row.status === "unknown")
+      return { action: "uncertain" };
+    if (task.delivery_generation > row.delivery_generation) {
+      await client.query(
+        `UPDATE deliveries SET delivery_generation = $3, status = 'received', attempts = 0,
+           reconciles = 0, provider_ref = NULL, last_error = NULL, terminal_at = NULL, updated_at = now()
+         WHERE tenant_id = $1 AND intent_id = $2`,
+        [task.tenant_id, task.intent_id, task.delivery_generation],
+      );
+    }
+    await setStatus(client, task, "failed", null, OPTIONAL_HOLD_EXPIRED);
+    await addAttempt(client, task, "hold", "failed", OPTIONAL_HOLD_EXPIRED);
+    return { action: "failed" };
   });
 }
 

@@ -23,6 +23,44 @@ test("honours PORT and HOST overrides", () => {
 });
 
 const base = { INVENTORY_DATABASE_URL: "postgres://x" };
+test("mesh control lookup HTTP requires opt-in and Service DNS; JWKS stays HTTPS", () => {
+  const importEnv = {
+    IMPORT_SOURCE_ID: "partner-main",
+    IMPORT_AUTH_ISSUER: "https://idp.example",
+    IMPORT_AUTH_AUDIENCE: "greenguard-import",
+    IMPORT_AUTH_JWKS_URL: "https://idp.example/jwks",
+    IMPORT_AUTH_TENANT_CLAIM: "gg_tenant",
+    CONTROL_LOOKUP_URL:
+      "http://tenant-control.greenguard.svc.cluster.local:8080",
+    CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+  };
+  assert.throws(() => readConfig({ ...base, ...importEnv }), /use https/);
+  assert.equal(
+    readConfig({ ...base, ...importEnv, GG_MESH_INTERNAL_HTTP: "1" }).importAuth
+      ?.controlUrl,
+    `${importEnv.CONTROL_LOOKUP_URL}/`,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        GG_MESH_INTERNAL_HTTP: "1",
+        CONTROL_LOOKUP_URL: "http://example.com",
+      }),
+    /use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        GG_MESH_INTERNAL_HTTP: "1",
+        IMPORT_AUTH_JWKS_URL: "http://idp.greenguard.svc",
+      }),
+    /use https/,
+  );
+});
 test("auth is optional but all-or-nothing", () => {
   assert.equal(readConfig(base).auth, undefined);
   assert.deepEqual(
@@ -36,6 +74,7 @@ test("auth is optional but all-or-nothing", () => {
       issuer: "https://idp.example",
       audience: "greenguard-api",
       jwksUrl: "https://idp.example/.well-known/jwks.json",
+      tokenMode: "audience",
     },
   );
   for (const partial of [
@@ -47,6 +86,35 @@ test("auth is optional but all-or-nothing", () => {
       () => readConfig({ ...base, ...partial }),
       /must be set together/,
     );
+});
+test("Cognito access mode requires mapped users and public client IDs", () => {
+  const cognito = {
+    ...base,
+    AUTH_TOKEN_MODE: "cognito-access",
+    AUTH_ISSUER:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example",
+    AUTH_JWKS_URL:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
+  };
+  assert.throws(() => readConfig(cognito), /AUTH_COGNITO_CLIENT_IDS/);
+  assert.throws(
+    () => readConfig({ ...cognito, AUTH_COGNITO_CLIENT_IDS: "ios" }),
+    /control-plane membership/,
+  );
+  assert.equal(
+    readConfig({
+      ...cognito,
+      AUTH_COGNITO_CLIENT_IDS: "ios",
+      AUTH_MEMBERSHIP_SOURCE: "control-plane",
+      CONTROL_PLANE_URL: "https://control.example",
+      CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+    }).auth?.tokenMode,
+    "cognito-access",
+  );
+  assert.throws(
+    () => readConfig({ ...base, AUTH_COGNITO_CLIENT_IDS: "ios" }),
+    /AUTH_COGNITO_CLIENT_IDS/,
+  );
 });
 test("the JWKS URL must be https, or loopback http for local development", () => {
   const withUrl = (AUTH_JWKS_URL: string) =>
@@ -67,6 +135,79 @@ test("the JWKS URL must be https, or loopback http for local development", () =>
   assert.throws(() => withUrl("http://idp.example/jwks"), /must use https/);
   assert.throws(() => withUrl("ftp://localhost/jwks"), /must use https/);
   assert.throws(() => withUrl("not a url"));
+});
+
+test("import service authentication is all-or-nothing and requires secure endpoints", () => {
+  const importEnv = {
+    IMPORT_SOURCE_ID: "partner-main",
+    IMPORT_AUTH_ISSUER: "https://idp.example",
+    IMPORT_AUTH_AUDIENCE: "greenguard-import",
+    IMPORT_AUTH_JWKS_URL: "https://idp.example/jwks",
+    IMPORT_AUTH_TENANT_CLAIM: "gg_tenant",
+    CONTROL_LOOKUP_URL: "https://control.example",
+    CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+  };
+  assert.equal(
+    readConfig({ ...base, ...importEnv }).importAuth?.tenantClaim,
+    "gg_tenant",
+  );
+  assert.equal(
+    readConfig({ ...base, ...importEnv }).importAuth?.sourceId,
+    "partner-main",
+  );
+  assert.equal(
+    readConfig({ ...base, CONTROL_LOOKUP_TOKEN: "x".repeat(32) }).importAuth,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      readConfig({ ...base, CONTROL_LOOKUP_URL: "https://control.example" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, ...importEnv, IMPORT_SOURCE_ID: "" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () =>
+      readConfig({ ...base, ...importEnv, IMPORT_SOURCE_ID: "invalid source" }),
+    /IMPORT_SOURCE_ID is invalid/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, IMPORT_AUTH_ISSUER: "https://idp.example" }),
+    /must be set together/,
+  );
+  assert.throws(
+    () => readConfig({ ...base, ...importEnv, CONTROL_LOOKUP_TOKEN: "short" }),
+    /at least 32 bytes/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        CONTROL_LOOKUP_URL: "http://control.example",
+      }),
+    /must use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        IMPORT_AUTH_JWKS_URL: "http://idp.example/jwks",
+      }),
+    /must use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        CONTROL_LOOKUP_URL: "https://user:secret@control.example",
+      }),
+    /cannot contain credentials/,
+  );
 });
 
 test("tracing is enabled only by a collector endpoint and validates its settings", () => {

@@ -83,3 +83,42 @@ npm run migrate -w services/workflow-alerts
 npm test -w @greenguard/workflow-alerts
 npm run coverage -w @greenguard/workflow-alerts
 ```
+
+## Owner alert reads and privacy (ADR-0023/0024)
+
+- `GET /v1/alert-rules?ids=` accepts 1–50 lowercase UUIDs, deduplicates them and
+  returns only caller-visible rules to viewer/operator/admin. `openScore` and
+  `clearScore` are risk-score hysteresis, not agronomic measurement limits.
+- `GET /v1/alerts/:id/transitions?limit&after&include` defaults to lifecycle rows,
+  limits pages to 1–100 (default 50), and permits `include=all` only for admins.
+  Unknown/foreign alerts return the same 404 before history/coverage reads.
+  Page, episode and coverage use one repeatable-read tenant transaction.
+  Ordering is version, timestamp (including microseconds), transition UUID.
+  Signed cursors bind tenant, alert, mode and full ordering position.
+- History `complete` describes retained lifecycle versions from opening through
+  the episode version, independently of page size or diagnostics. Missing
+  coverage returns `source.status=partial`; no historical score is fabricated.
+- All public alert DTOs use owner-mapped `{kind,isYou,handle}` actors; they expose
+  no raw subject, cause ID or event ID in history. `escalatedAt` is the stored
+  nullable episode timestamp. Service and device principals are denied.
+
+Authenticated startup requires server-only `ALERTS_ACTOR_HMAC_KEY` and
+`ALERTS_HISTORY_CURSOR_KEY`, each at least 32 bytes. Provision independent random
+keys through deployment secrets; rotate display keys knowing handles change,
+and rotate cursor keys knowing outstanding cursors expire. There is no hash or
+unsigned fallback. Audit pseudonyms use a separate HMAC purpose and full digest.
+New HTTP acknowledgements atomically persist the verified issuer in episode,
+transition and outbox metadata, retaining the existing v1 event payload bytes.
+
+Privacy compatibility release note: `acknowledgedBy` remains nullable text but
+now returns `you`, `member-<keyed handle>` or `team-member`. Legacy issuerless
+identities never claim “You” and return a null handle. Old API selections get
+this redaction without changing operation documents. Raw stored identities and
+historical outboxes still need the later retention/erasure policy in ADR-0024.
+For Cognito user access tokens, set `AUTH_TOKEN_MODE=cognito-access`,
+`AUTH_COGNITO_CLIENT_IDS`, `AUTH_ISSUER`, and `AUTH_JWKS_URL`. The runtime
+requires `AUTH_MEMBERSHIP_SOURCE=control-plane`, `CONTROL_PLANE_URL`,
+`CONTROL_LOOKUP_TOKEN`, and the membership Redis/Kafka settings used by the
+shared membership client. The token's issuer and subject are mapped to tenant
+roles by the control plane; tokens with no membership are denied. The default
+Dex audience mode remains unchanged.

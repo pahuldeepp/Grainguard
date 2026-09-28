@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import kafkaJs from "kafkajs";
-import { handleConsumerCrash, registerSnappyCodec } from "./kafka.js";
+import {
+  handleConsumerCrash,
+  registerSnappyCodec,
+  RISK_TOPICS,
+} from "./kafka.js";
 
 const { CompressionCodecs, CompressionTypes } = kafkaJs;
+
+test("subscribes to both risk assessment contract versions and invalidations", () => {
+  assert.deepEqual(RISK_TOPICS, [
+    "greenguard.risk.assessment.v1",
+    "greenguard.risk.assessment.v2",
+    "greenguard.risk.assessment_invalidated.v1",
+  ]);
+});
 
 test("Snappy codec decodes raw and Kafka Xerial-framed batches", async () => {
   registerSnappyCodec();

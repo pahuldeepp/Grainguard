@@ -199,12 +199,18 @@ export function attachSubscriptions(
         Math.max(1, identity.principal.expiresAt.getTime() - Date.now()),
       );
       const initTimeout = setTimeout(
-        () => ws.close(4408, "connection_init_timeout"),
+        () => {
+          ws.close(4408, "connection_init_timeout");
+          // A peer that ignores the close handshake must not retain a caller slot.
+          initCloseForce = setTimeout(() => ws.terminate(), 1_000);
+        },
         Math.max(1, options.connectionInitTimeoutMs ?? 10_000),
       );
+      let initCloseForce: ReturnType<typeof setTimeout> | undefined;
       let awaitingPong = false;
       const heartbeat = setInterval(
         () => {
+          if (ws.readyState !== WebSocket.OPEN) return;
           if (awaitingPong) {
             ws.terminate();
             return;
@@ -212,7 +218,7 @@ export function attachSubscriptions(
           awaitingPong = true;
           ws.ping();
         },
-        Math.max(1_000, options.heartbeatIntervalMs ?? 30_000),
+        Math.max(10, options.heartbeatIntervalMs ?? 30_000),
       );
       ws.on("pong", () => {
         awaitingPong = false;
@@ -403,6 +409,7 @@ export function attachSubscriptions(
       ws.on("close", () => {
         clearTimeout(expiry);
         clearTimeout(initTimeout);
+        if (initCloseForce) clearTimeout(initCloseForce);
         clearInterval(heartbeat);
         for (const cleanup of subscriptions.values()) cleanup();
         subscriptions.clear();

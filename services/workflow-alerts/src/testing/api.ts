@@ -1,18 +1,31 @@
-import { createTokenVerifier } from "@greenguard/tenant-auth";
+import { createMultiIssuerVerifier } from "@greenguard/tenant-auth/issuers";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import { createAlertsApp } from "../app.js";
 import { pooledDb } from "./fixtures.js";
 
 export async function startApi() {
   const issuer = await createTestIssuer();
+  const secondIssuer = await createTestIssuer({
+    issuer: "https://second-issuer.test",
+  });
+  const verifier = createMultiIssuerVerifier(
+    [issuer, secondIssuer].map((i) => ({
+      issuer: i.issuer,
+      audience: i.audience,
+      keys: { getKey: i.getKey },
+    })),
+  );
   const db = pooledDb(5);
   const app = await createAlertsApp({
     db,
-    verifier: createTokenVerifier({
-      issuer: issuer.issuer,
-      audience: issuer.audience,
-      keys: { getKey: issuer.getKey },
-    }),
+    actorHmacKey: "test-actor-key-at-least-32-bytes-long",
+    historyCursorKey: "test-cursor-key-at-least-32-bytes-long",
+    verifier: {
+      verify: async (authorization) => {
+        const result = await verifier.verify(authorization);
+        return { ...result.principal, issuer: result.issuer };
+      },
+    },
   });
   await app.listen(0, "127.0.0.1");
   const base = await app.getUrl();
@@ -38,5 +51,5 @@ export async function startApi() {
       json: (text ? JSON.parse(text) : undefined) as Record<string, unknown>,
     };
   }
-  return { db, token, call, close: () => app.close() };
+  return { db, token, call, issuer, secondIssuer, close: () => app.close() };
 }

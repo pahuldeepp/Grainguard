@@ -12,6 +12,14 @@ Run `npm run test -w @greenguard/bff` or
 `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_JWKS_URL`, and `SAGA_API_URL` (HTTPS or
 loopback HTTP), then run `node services/bff/dist/main.js`. The default port is
 4000 and `/graphql` accepts POST requests with an RS256 bearer token.
+For a Cognito user pool, opt in with `AUTH_TOKEN_MODE=cognito-access` and
+`AUTH_COGNITO_CLIENT_IDS` listing the public web/mobile client IDs. Configure
+`AUTH_ISSUER` and `AUTH_JWKS_URL` from that pool. Set `AUTH_AUDIENCE` only when
+access tokens use Cognito resource binding, to its exact API resource. This
+mode requires trusted GreenGuard membership mapping, preferably
+`AUTH_MEMBERSHIP_SOURCE=control-plane`, and rejects ID tokens, wrong clients,
+machine-shaped tokens and unrecognized `aud` values. The default remains the
+strict audience verifier for Dex.
 For Stage 09 machine credentials, set `CONTROL_PLANE_URL` to the private control
 plane endpoint and `CONTROL_LOOKUP_TOKEN` to the same internal lookup token
 configured on that service. Machine authentication fails closed if the lookup
@@ -98,3 +106,12 @@ development) to enable GraphQL alert list/detail and acknowledgement. The BFF
 forwards the verified bearer, `Idempotency-Key`, and the alert version as
 `If-Match`; the alert owner enforces tenant RLS and command concurrency. Alert
 lists accept a bounded page size and owner cursor.
+
+For an Istio deployment, set `GG_MESH_INTERNAL_HTTP=1` to permit `READ_API_URL`,
+`ALERT_API_URL`, and `SAGA_API_URL` to use HTTP only at Kubernetes Service DNS
+names such as `read-api.greenguard.svc.cluster.local`. Deploy this option only
+after the namespace and workloads have Istio sidecar injection, STRICT mTLS,
+source-specific AuthorizationPolicy, and default-deny NetworkPolicy with
+explicit service peers. The live acceptance gate must verify those policies and
+show plaintext/unauthorized pod traffic is denied. A successful Helm render
+does not prove that gate.

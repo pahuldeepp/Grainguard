@@ -36,14 +36,18 @@ export async function withTenant<T>(
   tenantId: string,
   work: (tx: Tx) => Promise<T>,
   lockTimeoutMs = 2000,
+  isolationLevel?: "RepeatableRead",
 ): Promise<T> {
   if (!isUuid(tenantId)) throw new InvalidTenantError();
   const lockTimeout = `${lockTimeoutMs}ms`;
   try {
-    return await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true), set_config('lock_timeout', ${lockTimeout}, true)`;
-      return work(tx);
-    });
+    return await db.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true), set_config('lock_timeout', ${lockTimeout}, true)`;
+        return work(tx);
+      },
+      { isolationLevel },
+    );
   } catch (error) {
     if (sqlState(error) === "55P03") throw new LockTimeoutError();
     throw error;

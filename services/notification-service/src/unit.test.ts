@@ -109,6 +109,7 @@ test("config validates input", () => {
   };
   const c = loadConfig((k) => env[k]);
   assert.equal(c.provider, "local");
+  assert.equal(c.httpHost, "127.0.0.1");
   assert.equal(c.prefetch, 16);
   assert.throws(() => loadConfig(() => undefined));
   assert.throws(() =>
@@ -126,6 +127,106 @@ test("config validates input", () => {
   assert.ok(unconfigured("sms") instanceof UnconfiguredAdapter);
   const local = adapterFor(c);
   assert.equal(local("email"), local("sms"));
+});
+
+test("runtime live provider selection resolves trusted warning contacts and sends email and SMS", async () => {
+  const env: Record<string, string> = {
+    NOTIFICATIONS_DATABASE_URL: "postgres://x",
+    RABBITMQ_URL: "amqp://x",
+    NOTIFICATIONS_PROVIDER: "live",
+    CONTROL_PLANE_URL: "https://control.example.test",
+    CONTROL_LOOKUP_TOKEN: "test-internal-token",
+    SENDGRID_API_KEY: "test-sendgrid-key",
+    SENDGRID_FROM_EMAIL: "sender@example.test",
+    TWILIO_ACCOUNT_SID: `AC${"a".repeat(32)}`,
+    TWILIO_AUTH_TOKEN: "test-twilio-token",
+    TWILIO_FROM_NUMBER: "+12045550123",
+  };
+  const config = loadConfig((key) => env[key]);
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
+  const fakeFetch: typeof fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).startsWith("https://control.example.test/")) {
+      assert.equal(
+        (init?.headers as Record<string, string>).authorization,
+        "Bearer test-internal-token",
+      );
+      return Response.json({
+        email: "recipient@example.test",
+        sms: "+12045550124",
+        version: "12",
+      });
+    }
+    if (String(url).includes("sendgrid"))
+      return new Response(null, {
+        status: 202,
+        headers: { "x-message-id": "test-message" },
+      });
+    return Response.json(
+      { sid: `SM${"b".repeat(32)}`, status: "queued" },
+      { status: 201 },
+    );
+  };
+  const select = adapterFor(config, { fetch: fakeFetch });
+  for (const channel of ["email", "sms"] as const) {
+    const task = makeTask({ channel });
+    const result = await select(channel).send(
+      { task, idempotencyKey: task.intent_id },
+      new AbortController().signal,
+    );
+    assert.equal(result.kind, "sent");
+    assert.equal(
+      calls.at(-2)?.url,
+      `https://control.example.test/v1/internal/notification-contacts/${task.tenant_id}`,
+    );
+  }
+  assert.equal(calls.filter((call) => call.url.includes("sendgrid")).length, 1);
+  assert.equal(calls.filter((call) => call.url.includes("twilio")).length, 1);
+  assert.match(String(calls[1].init?.body), /recipient@example.test/);
+  assert.equal(
+    new URLSearchParams(String(calls[3].init?.body)).get("To"),
+    "+12045550124",
+  );
+  const critical = makeTask({ severity: "critical" });
+  assert.deepEqual(
+    await select("email").send(
+      { task: critical, idempotencyKey: critical.intent_id },
+      new AbortController().signal,
+    ),
+    { kind: "rejected", reason: "invalid notification task" },
+  );
+  assert.equal(calls.length, 4);
+  const push = makeTask({ channel: "push" });
+  assert.deepEqual(
+    await select("push").send(
+      { task: push, idempotencyKey: push.intent_id },
+      new AbortController().signal,
+    ),
+    { kind: "rejected", reason: "unsupported notification channel" },
+  );
+  assert.deepEqual(
+    await select("push").reconcile(
+      push.intent_id,
+      new AbortController().signal,
+    ),
+    { kind: "not_found" },
+  );
+  assert.equal(calls.length, 4);
+});
+
+test("RabbitMQ worker rejects critical and unknown severity before flags, ledger or provider calls", async () => {
+  const { deps, broker, adapter } = makeDeps(noPool);
+  deps.optionalSendEnabled = async () => {
+    throw new Error("flag lookup must not run");
+  };
+  for (const severity of ["critical", "Critical", "warning ", "unknown"])
+    assert.equal(
+      await handleTask(deps, incoming(makeTask({ severity }))),
+      "reject",
+    );
+  assert.equal(deps.metrics.get("tasks_rejected"), 4);
+  assert.equal(adapter.delivered.size, 0);
+  assert.deepEqual(broker.published, []);
 });
 
 test("metrics have no tenant labels and report lag", async () => {
@@ -150,6 +251,29 @@ test("metrics have no tenant labels and report lag", async () => {
       status,
     );
   server.close();
+});
+
+test("critical HTTP dispatch endpoint is not exposed by the server worker", async () => {
+  const server = metricsServer(new Metrics(), new Semaphore(1)).listen(
+    0,
+    "127.0.0.1",
+  );
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  try {
+    assert.equal(
+      (
+        await fetch(`http://127.0.0.1:${port}/internal/dispatch`, {
+          method: "POST",
+        })
+      ).status,
+      404,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 });
 
 test("confirm broker resolves on confirm and rejects on nack", async () => {

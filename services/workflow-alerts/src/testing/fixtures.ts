@@ -101,6 +101,42 @@ export function riskEvent(
   };
 }
 
+export function uncalibratedRiskEventV2(stream: Stream) {
+  const event = riskEvent(stream, null);
+  return {
+    ...event,
+    schema_version: 2,
+    aggregate_version: "42",
+    payload: {
+      ...event.payload,
+      assessment_version: "2",
+      policy_id: randomUUID(),
+      policy_calibrated: false,
+      policy_provenance: { source: "synthetic_fixture", status: "draft" },
+      score: null,
+      severity: "insufficient_data" as const,
+      alert_eligible: false,
+      reasons: ["policy_not_calibrated"],
+    },
+  };
+}
+
+export function calibratedRiskEventV2(stream: Stream, score = 70) {
+  const event = riskEvent(stream, score);
+  return {
+    ...event,
+    schema_version: 2,
+    aggregate_version: "42",
+    payload: {
+      ...event.payload,
+      assessment_version: "2",
+      policy_id: randomUUID(),
+      policy_calibrated: true,
+      policy_provenance: { source: "approved_fixture", status: "active" },
+    },
+  };
+}
+
 export function invalidationEvent(
   stream: Stream,
   assessed: ReturnType<typeof riskEvent>,

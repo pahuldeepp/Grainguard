@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { initTracing } from "@greenguard/otel";
-import { createTokenVerifier } from "@greenguard/tenant-auth";
+import { startMembershipRuntime } from "@greenguard/membership-client";
 import { createAlertsApp } from "./app.js";
 import { readConfig } from "./config.js";
 import { createDb } from "./db/client.js";
@@ -9,6 +10,13 @@ import { startRiskKafkaConsumer } from "./consumer/kafka.js";
 export async function start(env: NodeJS.ProcessEnv) {
   const config = readConfig(env);
   const db = createDb(config.databaseUrl);
+  const tokenVerifier = config.auth
+    ? await startMembershipRuntime(
+        (name) => env[name],
+        (path) => readFileSync(path, "utf8"),
+        "workflow-alerts",
+      )
+    : undefined;
   const stopConsumer: { close?: () => Promise<void> } = {};
   const consumerHealth = {
     ready: config.kafkaBrokers.length === 0,
@@ -18,13 +26,18 @@ export async function start(env: NodeJS.ProcessEnv) {
     db,
     stopConsumer,
     consumerHealth,
-    verifier:
-      config.auth &&
-      createTokenVerifier({
-        issuer: config.auth.issuer,
-        audience: config.auth.audience,
-        keys: { jwksUrl: config.auth.jwksUrl },
-      }),
+    actorHmacKey: config.actorHmacKey,
+    historyCursorKey: config.historyCursorKey,
+    // This verifier validates exactly the configured issuer before returning.
+    verifier: tokenVerifier
+      ? {
+          verify: async (authorization) => ({
+            ...(await tokenVerifier.verify(authorization)),
+            issuer: config.auth!.issuer,
+          }),
+          close: () => tokenVerifier.close(),
+        }
+      : undefined,
     tracing:
       config.otlpEndpoint === undefined
         ? undefined

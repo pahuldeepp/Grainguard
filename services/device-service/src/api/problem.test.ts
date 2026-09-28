@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { HttpException } from "@nestjs/common";
 import { AuthError } from "@greenguard/tenant-auth";
 import { LockNotAvailableError } from "../db/errors.js";
+import { TenantProjectionUnavailableError } from "../inventory/entitlements.js";
 import {
   DeviceNotFoundError,
   DuplicateBinError,
@@ -38,6 +39,11 @@ test("every domain error maps to a stable HTTP status and code", () => {
     [new IdempotencyConflictError(), 409, "idempotency_conflict"],
     [new DuplicateBinError(), 409, "duplicate_resource"],
     [new LockNotAvailableError(), 409, "resource_locked"],
+    [
+      new TenantProjectionUnavailableError(),
+      503,
+      "tenant_projection_unavailable",
+    ],
     [new InvalidReferenceError(), 422, "invalid_reference"],
     [new DeviceNotFoundError(), 404, "not_found"],
     [new HttpException("x", 418), 418, "http_error"],
@@ -54,6 +60,10 @@ test("every domain error maps to a stable HTTP status and code", () => {
   assert.equal(
     classify(new LockNotAvailableError()).headers?.["Retry-After"],
     "1",
+  );
+  assert.equal(
+    classify(new TenantProjectionUnavailableError()).headers?.["Retry-After"],
+    "5",
   );
   assert.equal(
     classify(new AuthError(503, "auth_unavailable")).headers?.["Retry-After"],

@@ -23,6 +23,13 @@ import {
 } from "./api/auth.guard.js";
 import { correlationMiddleware } from "./api/context.js";
 import { DB, InventoryController } from "./api/inventory.controller.js";
+import { CablesController } from "./api/cables.controller.js";
+import { IMPORT_SOURCE_ID, ImportController } from "./import/controller.js";
+import {
+  IMPORT_VERIFIER,
+  ImportGuard,
+  type ImportVerifier,
+} from "./import/auth.js";
 import { ProblemFilter } from "./api/problem.js";
 import {
   createApiVersionMiddleware,
@@ -156,6 +163,8 @@ function redMiddleware(req: Request, res: Response, next: () => void) {
 export interface ApiOptions {
   db: Db;
   verifier: TokenVerifier;
+  importVerifier?: ImportVerifier;
+  importSourceId?: string;
   versions?: VersionRegistry;
   now?: () => Date;
   tracing?: Tracing;
@@ -165,6 +174,15 @@ class DbLifecycle implements OnModuleDestroy {
   constructor(@Inject(DB) private readonly db: Db) {}
   async onModuleDestroy() {
     await this.db.$disconnect();
+  }
+}
+
+class VerifierLifecycle implements OnModuleDestroy {
+  constructor(
+    @Inject(TOKEN_VERIFIER) private readonly verifier: TokenVerifier,
+  ) {}
+  async onModuleDestroy() {
+    await this.verifier.close?.();
   }
 }
 
@@ -178,11 +196,18 @@ class TracingLifecycle implements OnModuleDestroy {
 @Module({})
 class AppModule {}
 export async function createApp(probe: Probe, api?: ApiOptions) {
+  if (api?.importVerifier && !api.importSourceId)
+    throw new Error("importSourceId is required with importVerifier");
   const app = await NestFactory.create(
     {
       module: AppModule,
       controllers: api
-        ? [HealthController, InventoryController]
+        ? [
+            HealthController,
+            InventoryController,
+            CablesController,
+            ...(api.importVerifier ? [ImportController] : []),
+          ]
         : [HealthController],
       providers: [
         { provide: "DATABASE_PROBE", useValue: probe },
@@ -190,7 +215,15 @@ export async function createApp(probe: Probe, api?: ApiOptions) {
           ? [
               { provide: DB, useValue: api.db },
               { provide: TOKEN_VERIFIER, useValue: api.verifier },
+              VerifierLifecycle,
               AuthGuard,
+              ...(api.importVerifier
+                ? [
+                    { provide: IMPORT_VERIFIER, useValue: api.importVerifier },
+                    { provide: IMPORT_SOURCE_ID, useValue: api.importSourceId },
+                    ImportGuard,
+                  ]
+                : []),
               DbLifecycle,
               ...(api.tracing
                 ? [

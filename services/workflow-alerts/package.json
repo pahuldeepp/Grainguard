@@ -9,10 +9,11 @@
     "test": "npm run build && node --test --test-concurrency=1 \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test --test-concurrency=1 \"dist/**/*.test.js\"",
     "migrate": "prisma migrate deploy",
-    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts"
+    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security"
   },
   "dependencies": {
     "@greenguard/contracts": "0.1.0",
+    "@greenguard/membership-client": "0.1.0",
     "@greenguard/otel": "0.1.0",
     "@greenguard/tenant-auth": "0.1.0",
     "@nestjs/common": "12.0.4",
@@ -24,7 +25,8 @@
     "kafkajs-snappy": "1.1.0",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "@greenguard/kafka-security": "0.1.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

@@ -1,3 +1,4 @@
+import { allowedInternalUrl } from "./internal-url.js";
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
 
 export class AlertUpstreamError extends Error {
@@ -52,14 +53,7 @@ export class AlertClient {
     private readonly baseURL: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {
-    const url = new URL(baseURL);
-    if (
-      url.protocol !== "https:" &&
-      !(
-        url.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(url.hostname)
-      )
-    ) {
+    if (!allowedInternalUrl(baseURL)) {
       throw new Error("ALERT_API_URL must use HTTPS or loopback HTTP");
     }
   }

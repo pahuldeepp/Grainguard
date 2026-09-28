@@ -1,3 +1,5 @@
+import { allowedInternalUrl } from "./internal-url.js";
+
 export class ReadUpstreamError extends Error {
   constructor(
     readonly status: number,
@@ -123,14 +125,7 @@ export class ReadClient {
     policy: Partial<ReadPolicy> = {},
   ) {
     this.policy = { ...defaultPolicy, ...policy };
-    const url = new URL(baseURL);
-    if (
-      url.protocol !== "https:" &&
-      !(
-        url.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(url.hostname)
-      )
-    ) {
+    if (!allowedInternalUrl(baseURL)) {
       throw new Error("READ_API_URL must use HTTPS or loopback HTTP");
     }
     for (const value of [

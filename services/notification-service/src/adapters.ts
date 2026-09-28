@@ -11,11 +11,14 @@ export type SendResult =
   | { kind: "transient"; reason: string };
 
 export type ReconcileResult =
-  { kind: "sent"; providerRef: string } | { kind: "not_found" };
+  | { kind: "sent"; providerRef: string }
+  | { kind: "not_found" }
+  | { kind: "unknown"; reason: string };
 
 /**
- * Provider adapter. send() must honour idempotencyKey (a repeated key never produces a
- * second message); reconcile() answers whether a key was already delivered.
+ * Provider adapter. idempotencyKey is the stable delivery intent ID. Providers without
+ * native deduplication use it for correlation only: uncertain sends must reconcile and
+ * stay unknown unless delivery or non-delivery is proven. Never blindly resend them.
  */
 export interface ProviderAdapter {
   send(request: SendRequest, signal: AbortSignal): Promise<SendResult>;
@@ -78,7 +81,7 @@ function waitForAbort(signal: AbortSignal): Promise<never> {
   });
 }
 
-/** Real email/SMS/push providers arrive in Stage 10; until then these report transient. */
+/** Real credentials/providers arrive in Stage 10; no send was accepted in this adapter. */
 export class UnconfiguredAdapter implements ProviderAdapter {
   constructor(private readonly channel: string) {}
 

@@ -12,6 +12,7 @@ export const TOKEN_VERIFIER = "TOKEN_VERIFIER";
 
 export interface TokenVerifier {
   verify(authorizationHeader: string | undefined): Promise<Principal>;
+  close?(): void | Promise<void>;
 }
 
 // The tenant comes only from the verified token; no header or body field can select one.
