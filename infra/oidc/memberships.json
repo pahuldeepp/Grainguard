@@ -1,0 +1,20 @@
+[
+  {
+    "issuer": "http://127.0.0.1:5556/dex",
+    "subject": "Cgp1c2VyLWFsaWNlEgVsb2NhbA",
+    "tenantId": "0a0a0a0a-0000-4000-8000-00000000000a",
+    "roles": ["admin"]
+  },
+  {
+    "issuer": "http://127.0.0.1:5556/dex",
+    "subject": "Cgt1c2VyLXZpY3RvchIFbG9jYWw",
+    "tenantId": "0a0a0a0a-0000-4000-8000-00000000000a",
+    "roles": ["viewer"]
+  },
+  {
+    "issuer": "http://127.0.0.1:5556/dex",
+    "subject": "Cgh1c2VyLWJvYhIFbG9jYWw",
+    "tenantId": "0b0b0b0b-0000-4000-8000-00000000000b",
+    "roles": ["operator"]
+  }
+]

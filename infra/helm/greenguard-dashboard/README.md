@@ -19,3 +19,14 @@ The image value remains a required immutable OCI digest. This chart does not
 install Argo Rollouts, Prometheus, Istio, or their CRDs. Helm rendering proves
 manifest shape only; failed-analysis rollback must be demonstrated in a
 disposable Kubernetes cluster before Stage 12.6 can pass.
+
+For production browser login, set `publicOidc.enabled=true`, an HTTPS
+`publicOidc.authority`, public `clientId`, and either audience mode with
+`audience`, or Cognito access mode with optional HTTPS `resource`. The chart
+mounts a JSON ConfigMap at `/usr/share/nginx/html/config.json`, marks it
+read-only, sets the browser CSP issuer origin plus any required
+`publicOidc.connectOrigins` for token/userinfo endpoints, and rolls pods when values
+change. The dashboard refuses to start its production UI if this file is
+missing or invalid. Keep `publicOidc` values public; never include a client
+secret, password, signing key, or token. Terraform must register the web
+callback URL using the CloudFront hostname before browser sign-in can work.

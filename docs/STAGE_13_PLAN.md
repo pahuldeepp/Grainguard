@@ -24,6 +24,11 @@ evidence. None of those measurements currently exists.
 
 ## Live disposable-cell acceptance
 
+The [functional and physical iPhone runbook](runbooks/disposable-live-acceptance.md)
+defines the minimum deployed journeys and a fail-closed, offline evidence
+inventory check. It has no live evidence yet and does not certify the load,
+soak or availability targets below.
+
 | Exercise | Required observation |
 | --- | --- |
 | Baseline load | Web/API and event journeys succeed within approved SLOs; error, latency, saturation and cost are recorded. |

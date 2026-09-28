@@ -22,6 +22,10 @@ services:
       ALERTS_MIGRATOR_PASSWORD: ${ALERTS_MIGRATOR_PASSWORD:?Run make bootstrap}
       SAGA_DB_PASSWORD: ${SAGA_DB_PASSWORD:?Run make bootstrap}
       SAGA_MIGRATOR_PASSWORD: ${SAGA_MIGRATOR_PASSWORD:?Run make bootstrap}
+      HARDWARE_DB_PASSWORD: ${HARDWARE_DB_PASSWORD:?Run make bootstrap}
+      HARDWARE_MIGRATOR_PASSWORD: ${HARDWARE_MIGRATOR_PASSWORD:?Run make bootstrap}
+      CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD:?Run make bootstrap}
+      CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
@@ -42,6 +46,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
   telemetry-ingest:
+    # Private staging service: deliberately no host port. Public deployments need
+    # a trusted WAF/ingress per-source-IP limit before this container.
     image: ${IMAGE_PREFIX:-grainguard}/telemetry-ingest:${IMAGE_TAG:-local}
     build:
       context: ../..
@@ -53,13 +59,38 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
+  gateway:
+    image: ${IMAGE_PREFIX:-grainguard}/gateway:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    expose: ["4002"]
+    environment:
+      # Local staging only checks process health; supply real private upstreams for live use.
+      AUTH_ISSUER: ${AUTH_ISSUER:-https://staging.invalid/}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-greenguard-dashboard}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-https://staging.invalid/keys}
+      GATEWAY_BFF_URL: ${GATEWAY_BFF_URL:-http://bff:4000}
+      GATEWAY_READ_URL: ${GATEWAY_READ_URL:-http://read-api:4001}
+      GATEWAY_SAGA_URL: ${GATEWAY_SAGA_URL:-http://saga-api:8092}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4002/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
   dashboard:
     image: ${IMAGE_PREFIX:-grainguard}/dashboard:${IMAGE_TAG:-local}
     build:
       context: ../..
       dockerfile: apps/dashboard/Dockerfile
     ports: ["127.0.0.1:5174:8080"]
-    depends_on: [device-service, telemetry-ingest]
+    depends_on:
+      device-service: {condition: service_started}
+      telemetry-ingest: {condition: service_started}
+      gateway: {condition: service_healthy}
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
 volumes:

@@ -180,7 +180,7 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
         'app: istio-ingressgateway' \
         'kubernetes.io/metadata.name: "istio-system"' \
         'app.kubernetes.io/name: greenguard-dashboard' \
-        'app.kubernetes.io/instance: greenguard-dashboard'; do
+        'app.kubernetes.io/instance: dashboard'; do
         if ! grep -Fq "$expected" "$rendered"; then
           echo "$profile ingress policy is missing an expected edge/dashboard peer: $expected" >&2
           exit 1
@@ -190,7 +190,7 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
     device-service|telemetry-ingest)
       for expected in \
         'app.kubernetes.io/name: greenguard-dashboard' \
-        'app.kubernetes.io/instance: greenguard-dashboard'; do
+        'app.kubernetes.io/instance: dashboard'; do
         if ! grep -Fq "$expected" "$rendered"; then
           echo "$profile ingress policy is missing the dashboard peer selector: $expected" >&2
           exit 1
@@ -202,7 +202,7 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
         'app.kubernetes.io/name: gateway' \
         'app.kubernetes.io/instance: gateway' \
         'app.kubernetes.io/name: greenguard-bff' \
-        'app.kubernetes.io/instance: greenguard'; do
+        'app.kubernetes.io/instance: bff'; do
         if ! grep -Fq "$expected" "$rendered"; then
           echo "$profile ingress policy is missing an expected BFF/gateway peer: $expected" >&2
           exit 1
@@ -211,13 +211,13 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
       ;;
     workflow-alerts)
       grep -Fq 'app.kubernetes.io/name: greenguard-bff' "$rendered"
-      grep -Fq 'app.kubernetes.io/instance: greenguard' "$rendered"
+      grep -Fq 'app.kubernetes.io/instance: bff' "$rendered"
       ;;
     saga-api)
       grep -Fq 'app.kubernetes.io/name: gateway' "$rendered"
       grep -Fq 'app.kubernetes.io/instance: gateway' "$rendered"
       grep -Fq 'app.kubernetes.io/name: greenguard-bff' "$rendered"
-      grep -Fq 'app.kubernetes.io/instance: greenguard' "$rendered"
+      grep -Fq 'app.kubernetes.io/instance: bff' "$rendered"
       grep -Fq 'secretName: saga-api-mtls' "$rendered"
       grep -Fq 'tcpSocket:' "$rendered"
       ;;
@@ -228,6 +228,31 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
       fi
       ;;
   esac
+done
+
+for profile in tenant-control-plane billing-service notification-service \
+  jobs-worker cassandra-writer search-indexer; do
+  values="$service_chart/values/$profile.yaml"
+  helm lint "$service_chart" --values "$values" --set-string "image=$service_image"
+  helm template "$profile" "$service_chart" --namespace greenguard \
+    --values "$values" --set-string "image=$service_image" >"$rendered"
+  for expected in 'runAsNonRoot: true' 'readOnlyRootFilesystem: true' \
+    'allowPrivilegeEscalation: false' 'kind: NetworkPolicy' 'kind: Deployment'; do
+    if ! grep -Fq "$expected" "$rendered"; then
+      echo "$profile rendered manifest is missing required hardening: $expected" >&2
+      exit 1
+    fi
+  done
+  if [ "$profile" = search-indexer ]; then
+    if grep -Fq 'readinessProbe:' "$rendered" || \
+      ! grep -Fq 'claimName: search-indexer-quarantine' "$rendered"; then
+      echo "search-indexer must use a durable quarantine claim and no fake HTTP readiness probe" >&2
+      exit 1
+    fi
+  elif ! grep -Fq 'livenessProbe:' "$rendered"; then
+    echo "$profile is missing its HTTP liveness probe" >&2
+    exit 1
+  fi
 done
 
 for profile in hardware-service-worker eventbridge-bridge saga-worker; do
@@ -593,4 +618,6 @@ if grep -Fq '  replicas:' "$bff_rendered"; then
   exit 1
 fi
 
-echo "Dashboard, BFF, ten HTTP runtime profiles and three worker profiles linted; digest rejection, hardened defaults, optional mesh/OTel policy, HPA, KEDA, Argo Rollouts canary analysis, Saga mTLS references, worker isolation, ports/probes, ingress selectors, structured per-profile replica ownership/PDB/grace, scaling boundaries, and scheduling drift rejection checks passed."
+ruby infra/gitops/disposable/check-network-peers.rb
+
+echo "Dashboard, BFF, runtime API and worker profiles linted; digest rejection, hardened defaults, optional mesh/OTel policy, HPA, KEDA, Argo Rollouts canary analysis, Saga mTLS references, worker isolation, ports/probes, ingress selectors, rendered peer links, structured per-profile replica ownership/PDB/grace, scaling boundaries, and scheduling drift rejection checks passed."

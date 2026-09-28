@@ -2,7 +2,8 @@
 
 Status: **not end-to-end ready** (2026-09-27). `terraform apply` in
 `infra/terraform/disposable` currently describes a partial AWS foundation,
-private RDS/S3 data storage, HTTPS edge and Cognito issuer, not a working
+private RDS/S3 data storage, HTTPS edge, Cognito issuer and pinned controller
+bootstrap, not a working
 GreenGuard environment. No authenticated AWS apply/destroy or phone
 test has been run. Do not treat a successful Terraform exit as proof that the
 dashboard, mobile app, login or data flows are operational.
@@ -21,15 +22,15 @@ signing action; Terraform cannot install an app onto a personal device.
 
 | Layer | Present in repository | Required before an end-to-end apply can be claimed |
 | --- | --- | --- |
-| AWS foundation | Disposable root creates VPC, NAT, private EKS, node groups, ECR, KMS, logs and optional empty Secrets Manager containers | Authenticated plan/apply/destroy, account/region selection, spending limits, reachable cluster API |
-| Images | Dockerfiles and CI build/signing definitions; ECR repositories exist | Publish immutable dashboard/runtime digests to this account and supply exact digests to releases |
-| Data | Local Compose profiles and disposable Terraform for private RDS PostgreSQL and S3 audit storage; Redis/RabbitMQ manifests are being checked offline | PgBouncer, Kafka/Connect/schema registry, Cassandra, OpenSearch, MQTT, credentials, migrations, backups and service connectivity |
-| Services | Offline-validated Helm charts for dashboard, BFF and runtime profiles | Install every required release with env/Secret references, working probes, policies and actual internal service DNS |
+| AWS foundation | Disposable root creates VPC, NAT, private EKS, node groups, ECR, KMS, logs and optional empty Secrets Manager containers; VPC CNI policy support is configured from an exact add-on version | Authenticated plan/apply/destroy, account/region and supported add-on version selection, spending limits, reachable cluster API and live network-policy enforcement proof |
+| Images | All 20 required image names have Dockerfile/CI/ECR inventory entries; six newly packaged runtimes built locally | Publish signed immutable digests to this account and supply exact digests to releases |
+| Data | Private RDS/S3 Terraform, offline-checked Redis, RabbitMQ, Kafka and Schema Registry manifests, eleven digest-only PostgreSQL owner migration Jobs, and conditional PgBouncer/topic/Connect Argo children | Secure brokers and register connectors/schemas; add Cassandra, OpenSearch, MQTT, populated credentials, backups and service connectivity; apply migrations with real RDS credentials and prove RLS; current Kafka manifest lacks broker authorization |
+| Services | Offline-validated charts and a pinned-commit/digest Argo CD Application tree cover 21 releases | Supply actual env/Secret references, data and migration Applications, working probes, policies, and live internal service DNS; current tree is disabled by default |
 | Identity | Existing OAuth clients and local Dex fixture remain; disposable Terraform now defines Cognito public clients and hosted login; BFF has opt-in Cognito access-token validation | Invite real users, connect trusted issuer/JWKS/client IDs, seed tenant membership and prove login/revocation |
-| Public edge | Terraform defines CloudFront HTTPS/WAF/private ALB and an Istio ingress target group; static routing contract exists | Install controller and ingress, register targets, verify HTTPS, mTLS, auth policy, WAF and routing live |
+| Public edge | Terraform models CloudFront HTTPS/WAF/private ALB, seven locally archived controller Helm releases with SHA-256 locks, and an Istio ingress target group; static routing contract exists | Prove controller and ingress installation, registered targets, HTTPS, mTLS, auth policy, WAF and routing live |
 | Web | Dashboard serves a SPA with a runtime public OIDC config contract | Build/deploy image and prove browser callback, GraphQL and live workflows through the public edge |
-| iPhone | PKCE, Keychain, callback URL scheme, BFF client and configurable public HTTPS build profile | Configure the deployed auth/token and BFF URLs, Apple-sign and install the binary, then prove real-user login and alert flows on a phone |
-| Operations | Local observability/resilience/static gates | Cluster metrics/logs/traces, rollout/rollback, scaling, backup/restore, failure and cost acceptance |
+| iPhone | PKCE, Keychain, callback URL scheme, cold-start callback recovery, BFF client and configurable public HTTPS build profile | Configure the deployed auth/token and BFF URLs, Apple-sign and install the binary, then prove real-user login and alert flows on a phone |
+| Operations | Local observability/resilience/static gates and digest-pinned Argo observability child with offline OTLP/HTTP and scrape wiring | Live cluster metrics/logs/traces, dashboards and alerts, rollout/rollback, scaling, backup/restore, failure and cost acceptance |
 | Teardown | Disposable root has guarded pre-destroy cleanup and an account-scoped inventory; `destroy-verified.sh` runs destroy then inventory | Prove real destroy, remove remaining controller-created disks/DNS/logs, and inspect final AWS inventory; raw `terraform destroy` has no reliable post-destroy inventory exit status |
 
 The local Dex file under `infra/oidc` uses loopback HTTP, memory storage and

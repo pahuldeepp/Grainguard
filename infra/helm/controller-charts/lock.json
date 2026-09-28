@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "archives": [
+    {"name":"aws-load-balancer-controller","file":"aws-load-balancer-controller-1.14.0.tgz","version":"1.14.0","source":"https://aws.github.io/eks-charts","sha256":"f0c07f52c9b7cbd6ec6e806c73f37438837924cf8f6349e01dea373d47b6b8dc"},
+    {"name":"istio-base","file":"base-1.30.5.tgz","version":"1.30.5","source":"https://istio-release.storage.googleapis.com/charts","sha256":"585a2eff20163239121c8eff3d48a2498b5af458418b1a2eee9f282846fca635"},
+    {"name":"istiod","file":"istiod-1.30.5.tgz","version":"1.30.5","source":"https://istio-release.storage.googleapis.com/charts","sha256":"c91d0f8c102a377795da2145eb23912dc648a3277c973b9cfd0049a4d76f096a"},
+    {"name":"istio-ingressgateway","file":"gateway-1.30.5.tgz","version":"1.30.5","source":"https://istio-release.storage.googleapis.com/charts","sha256":"08ae2c62f52097094643b0c78d7053ef24ad04e96e27fc75b441254fbbb373cd"},
+    {"name":"keda","file":"keda-2.21.0.tgz","version":"2.21.0","source":"https://kedacore.github.io/charts","sha256":"a7da56bf41a33dad9d2fc82a6fdecee552fff947d80bf1e1dbcf4db0f9e26dee"},
+    {"name":"argo-rollouts","file":"argo-rollouts-2.43.2.tgz","version":"2.43.2","source":"https://argoproj.github.io/argo-helm","sha256":"35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679"},
+    {"name":"argocd","file":"argo-cd-10.9.2.tgz","version":"10.9.2","source":"https://argoproj.github.io/argo-helm","sha256":"970ced346a0ddc3e475a7ff780e9b9c2fdebc07d9a367d2edb6ef4f49832c24a"}
+  ]
+}

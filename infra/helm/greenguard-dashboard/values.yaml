@@ -19,6 +19,18 @@ pdb:
 service:
   port: 80
   containerPort: 8080
+# When enabled, mount public browser OIDC settings after the deployment URL is
+# known. The application fails closed if /config.json is absent in production.
+publicOidc:
+  enabled: false
+  authority: ""
+  clientId: ""
+  tokenMode: audience
+  audience: ""
+  resource: ""
+  # Browser token/userinfo endpoints can be on a different origin than issuer
+  # discovery (for example Cognito's hosted domain).
+  connectOrigins: []
 resources:
   requests:
     cpu: 100m

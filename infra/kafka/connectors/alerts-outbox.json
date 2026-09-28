@@ -26,5 +26,6 @@
   "transforms": "rawTopic",
   "transforms.rawTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
   "transforms.rawTopic.regex": "^greenguard_alerts\\.public\\.outbox_events$",
-  "transforms.rawTopic.replacement": "greenguard.raw.alerts.outbox"
+  "transforms.rawTopic.replacement": "greenguard.raw.alerts.outbox",
+  "message.prefix.exclude.list": ".*"
 }

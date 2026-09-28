@@ -13,6 +13,10 @@ services:
         max_replication_slots=10,
         -c,
         max_wal_senders=10,
+        # Many services, three Debezium connectors and parallel Go/Node test suites share
+        # this one dev instance; the default of 100 was exhausted at idle plus tests.
+        -c,
+        max_connections=250,
         -c,
         "max_slot_wal_keep_size=${POSTGRES_MAX_SLOT_WAL_KEEP_SIZE:-2GB}",
       ]
@@ -21,11 +25,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
       OBSERVABILITY_DB_PASSWORD: ${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
+      INVENTORY_PROJECTOR_PASSWORD: ${INVENTORY_PROJECTOR_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
       PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}
+      READ_ENTITLEMENT_PROJECTOR_PASSWORD: ${READ_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       READ_QUERY_DB_PASSWORD: ${READ_QUERY_DB_PASSWORD:?Run make bootstrap}
       PROJECTION_MIGRATOR_PASSWORD: ${PROJECTION_MIGRATOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
+      TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD: ${TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
       RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?Run make bootstrap}
       RISK_MIGRATOR_PASSWORD: ${RISK_MIGRATOR_PASSWORD:?Run make bootstrap}
@@ -37,6 +44,13 @@ services:
       ALERTS_MIGRATOR_PASSWORD: ${ALERTS_MIGRATOR_PASSWORD:?Run make bootstrap}
       SAGA_DB_PASSWORD: ${SAGA_DB_PASSWORD:?Run make bootstrap}
       SAGA_MIGRATOR_PASSWORD: ${SAGA_MIGRATOR_PASSWORD:?Run make bootstrap}
+      HARDWARE_DB_PASSWORD: ${HARDWARE_DB_PASSWORD:?Run make bootstrap}
+      HARDWARE_MIGRATOR_PASSWORD: ${HARDWARE_MIGRATOR_PASSWORD:?Run make bootstrap}
+      CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD:?Run make bootstrap}
+      CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
+      CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
+      BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?Run make bootstrap}
+      BILLING_MIGRATOR_PASSWORD: ${BILLING_MIGRATOR_PASSWORD:?Run make bootstrap}
     ports: ["127.0.0.1:55432:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data

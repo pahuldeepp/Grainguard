@@ -5,6 +5,9 @@ services:
       discovery.type: single-node
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: -Xms512m -Xmx512m
+      # This disposable test node shares a small CI disk with Kafka images.
+      # Production clusters retain Elasticsearch's disk-watermark safeguards.
+      cluster.routing.allocation.disk.threshold_enabled: "false"
     ports:
       - "127.0.0.1:19200:9200"
     healthcheck:

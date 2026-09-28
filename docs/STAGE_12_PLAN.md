@@ -41,6 +41,9 @@ Falco entry points exited 127 because their CLIs are absent. These results
 qualify local/static sub-slices only; cluster acceptance for the mesh,
 autoscaling, admission, runtime detection, canary rollout and staging remains
 pending. Stage 12 remains in progress; this is broader than AWS API setup alone.
+The [AWS one-command deployment audit](AWS_ONE_COMMAND_DEPLOYMENT.md) tracks
+the missing application, data, identity and edge layers required before
+`terraform apply`/`terraform destroy` can be described as an end-to-end switch.
 
 ## Constraints
 

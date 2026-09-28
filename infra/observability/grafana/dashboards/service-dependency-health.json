@@ -579,6 +579,89 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Read API cache hits and misses (5m rate)",
+      "description": "Cache lookup outcomes per second. An empty panel means the Read API cache metrics target is unavailable.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"hit\"}[5m]))",
+          "legendFormat": "{{job}} hits/s"
+        },
+        {
+          "expr": "sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"miss\"}[5m]))",
+          "legendFormat": "{{job}} misses/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "noValue": "Unknown / Read API cache target unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Read API cache hit ratio (5m)",
+      "description": "Hits divided by hits plus misses. No lookup traffic produces no ratio.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"hit\"}[5m])) / sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=~\"hit|miss\"}[5m]))) and on (job) (sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=~\"hit|miss\"}[5m])) > 0)",
+          "legendFormat": "{{job}} hit ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "No cache lookups / target unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ],
   "links": [

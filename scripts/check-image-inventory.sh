@@ -18,6 +18,12 @@ images=(
   'hardware-service:services/hardware-service/Dockerfile'
   'eventbridge-bridge:services/eventbridge-bridge/Dockerfile'
   'saga-orchestrator:services/saga-orchestrator/Dockerfile'
+  'tenant-control-plane:services/tenant-control-plane/Dockerfile'
+  'billing-service:services/billing-service/Dockerfile'
+  'notification-service:services/notification-service/Dockerfile'
+  'jobs-worker:services/jobs-worker/Dockerfile'
+  'cassandra-writer:services/cassandra-writer/Dockerfile'
+  'search-indexer:services/search-indexer/Dockerfile'
 )
 
 for image in "${images[@]}"; do

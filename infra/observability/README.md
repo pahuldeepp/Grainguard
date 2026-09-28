@@ -33,8 +33,12 @@ as Prometheus labels.
 Dashboards and rules are provisioned from this directory. App targets use their
 documented host development ports: telemetry-ingest 8080, CDC 8081, projection
 builder 8082, jobs worker 8095, device service 3001, workflow alerts 3004,
-notification service 8096, and risk engine 8086. Unavailable apps remain visibly
-down until started. HTTP RED labels use method,
+notification service 8096, risk engine 8086, and Read API cache metrics at
+`http://127.0.0.1:4001/metrics/cache`. The Service / Dependency Health dashboard
+shows five-minute hit and miss rates plus hit ratio from
+`greenguard_read_cache_events_total{event}`. It shows no ratio when there are no
+cache lookups. The cache counter has a bounded event label and no tenant or device
+labels. Unavailable apps remain visibly down until started. HTTP RED labels use method,
 route template, and status only; probe and metrics requests are excluded. Never
 add tenant/device/request identifiers to Prometheus labels. AWS collection is an
 opt-in profile. Set `AWS_REGION`, comma-separated `AWS_LAMBDA_FUNCTIONS`, and

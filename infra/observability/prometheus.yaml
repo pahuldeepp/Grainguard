@@ -73,6 +73,10 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: [host.docker.internal:8086]
+  - job_name: read-api-cache
+    metrics_path: /metrics/cache
+    static_configs:
+      - targets: [host.docker.internal:4001]
 
   - job_name: postgres-wal-slots
     static_configs:

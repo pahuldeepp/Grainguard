@@ -1,0 +1,14 @@
+FROM quay.io/debezium/connect@sha256:b79f70f10a4aa97445f61e1c7b6cc8f484018f59d9a90cabc8135d3ae70ad90b
+USER root
+RUN set -eu; \
+    archive=/tmp/confluent-avro-converter.zip; \
+    curl --fail --silent --show-error --location \
+      https://hub-downloads.confluent.io/api/plugins/confluentinc/kafka-connect-avro-converter/versions/7.9.1/confluentinc-kafka-connect-avro-converter-7.9.1.zip \
+      --output "$archive"; \
+    echo 'd2f18788cfcd039bd27442182d3ed52f4ae2611cd49e674fbd869c1a4ec08d47  /tmp/confluent-avro-converter.zip' | sha256sum --check --status; \
+    mkdir -p /kafka/connect/confluent-avro-converter; \
+    unzip -q "$archive" 'confluentinc-kafka-connect-avro-converter-7.9.1/lib/*' -d /tmp/converter; \
+    cp /tmp/converter/confluentinc-kafka-connect-avro-converter-7.9.1/lib/*.jar /kafka/connect/confluent-avro-converter/; \
+    chown -R kafka:kafka /kafka/connect/confluent-avro-converter; \
+    rm -rf "$archive" /tmp/converter
+USER kafka

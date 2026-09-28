@@ -47,6 +47,10 @@ the cluster and VPC. Other controller-created resources and services not yet
 defined here remain outside this workflow; it is not an account-wide zero-bill
 switch.
 
+The [end-to-end deployment audit](../../docs/AWS_ONE_COMMAND_DEPLOYMENT.md)
+lists the services, identity, images, edge and phone acceptance still missing
+before this root can be called a one-command GreenGuard deployment.
+
 Local static workflow (Terraform 1.16.4 and network access for the pinned AWS
 provider are required):
 

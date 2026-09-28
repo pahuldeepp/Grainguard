@@ -1,0 +1,29 @@
+name: greenguard-dev
+services:
+  notification-contacts-projector:
+    image: ${IMAGE_PREFIX:-grainguard}/notification-contacts-projector:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/notification-service/Dockerfile.contacts-projector
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      NOTIFICATION_STATE_TABLE: ${NOTIFICATION_STATE_TABLE:-greenguard_notification_state}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      CONTACTS_PROJECTOR_HTTP_HOST: 0.0.0.0
+      CONTACTS_PROJECTOR_HTTP_PORT: "8097"
+    depends_on:
+      kafka: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+      dynamodb-local: { condition: service_started }
+    ports: ["127.0.0.1:58097:8097"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8097/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

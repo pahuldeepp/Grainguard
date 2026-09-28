@@ -1,0 +1,30 @@
+collectors:
+  enabled: true
+  containerEngine:
+    enabled: true
+    pluginRef: ghcr.io/falcosecurity/plugins/plugin/container:0.7.4
+  kubernetes:
+    enabled: true
+    pluginRef: ghcr.io/falcosecurity/plugins/plugin/k8smeta:0.4.2
+
+falcoctl:
+  artifact:
+    follow:
+      enabled: false
+  config:
+    artifact:
+      install:
+        refs: [falco-rules:5.1.0]
+
+falco:
+  json_output: true
+  rule_matching: all
+
+falcosidekick:
+  enabled: true
+  config:
+    alertmanager:
+      # Set to the operator-owned Alertmanager URL, including http:// or https://, at install time.
+      hostport: ""
+      endpoint: /api/v2/alerts
+      minimumpriority: warning

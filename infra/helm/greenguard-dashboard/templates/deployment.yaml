@@ -60,12 +60,17 @@ spec:
         {{- if .Values.mesh.revision }}
         istio.io/rev: {{ .Values.mesh.revision | quote }}
         {{- end }}
-      {{- if .Values.observability.prometheus.enabled }}
+      {{- if or .Values.observability.prometheus.enabled .Values.publicOidc.enabled }}
       annotations:
+        {{- if .Values.publicOidc.enabled }}
+        checksum/public-config: {{ .Values.publicOidc | toJson | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.observability.prometheus.enabled }}
         prometheus.io/scrape: "true"
         prometheus.io/path: /stats/prometheus
         prometheus.io/port: {{ .Values.observability.prometheus.scrapePort | quote }}
         prometheus.istio.io/merge-metrics: {{ .Values.observability.prometheus.mergeMetrics | quote }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "greenguard-dashboard.fullname" . }}
@@ -99,6 +104,11 @@ spec:
       containers:
         - name: dashboard
           image: {{ .Values.image | quote }}
+          {{- if .Values.publicOidc.enabled }}
+          env:
+            - name: CSP_CONNECT_EXTRA
+              value: {{ join " " (prepend .Values.publicOidc.connectOrigins (printf "%s://%s" (urlParse .Values.publicOidc.authority).scheme (urlParse .Values.publicOidc.authority).host)) | quote }}
+          {{- end }}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -119,7 +129,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: {{ if .Values.publicOidc.enabled }}/config.json{{ else }}/healthz{{ end }}
               port: http
             periodSeconds: 5
           livenessProbe:
@@ -130,6 +140,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.publicOidc.enabled }}
+            - name: public-config
+              mountPath: /usr/share/nginx/html/config.json
+              subPath: config.json
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.publicOidc.enabled }}
+        - name: public-config
+          configMap:
+            name: {{ printf "%s-public-config" (include "greenguard-dashboard.fullname" .) | quote }}
+        {{- end }}

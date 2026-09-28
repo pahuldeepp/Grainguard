@@ -1,0 +1,57 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: greenguard-pod-baseline
+policies:
+  - ../greenguard-pod-baseline.yaml
+resources:
+  - valid-pod.yaml
+  - invalid-pod.yaml
+  - invalid-image-pod.yaml
+  - invalid-security-pod.yaml
+  - invalid-resources-pod.yaml
+  - invalid-ephemeral-pod.yaml
+  - invalid-ephemeral-security-pod.yaml
+results:
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - valid-api
+    result: pass
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-api
+    result: fail
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-image
+    result: fail
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-security
+    result: fail
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-resources
+    result: fail
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-ephemeral
+    result: fail
+  - isValidatingPolicy: true
+    kind: Pod
+    policy: greenguard/greenguard-pod-baseline
+    resources:
+      - invalid-ephemeral-security
+    result: fail

@@ -1,0 +1,26 @@
+# Opt-in local cache invalidator. Kafka and Redis Cluster are started separately.
+name: greenguard-cache
+services:
+  cache-invalidator:
+    image: ${IMAGE_PREFIX:-grainguard}/cache-invalidator:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: services/cache-invalidator/Dockerfile
+    environment:
+      HTTP_ADDR: 0.0.0.0:8091
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_GROUP_ID: greenguard-cache-invalidator-v1
+      READ_REDIS_CLUSTER_NODES: redis://redis-node-1:6379,redis://redis-node-2:6379,redis://redis-node-3:6379
+    networks: [events, redis]
+    ports: ["127.0.0.1:58091:8091"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    restart: unless-stopped
+networks:
+  events:
+    external: true
+    name: greenguard-dev_default
+  redis:
+    external: true
+    name: greenguard-redis_redis
