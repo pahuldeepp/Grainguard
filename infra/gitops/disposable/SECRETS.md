@@ -57,6 +57,16 @@ Kafka additionally requires `greenguard-kafka-auth` for broker and Registry
 server credentials and TLS material, `greenguard-kafka-ca` for client trust
 roots, `greenguard-kafka-connect-auth` for Connect client credentials, and
 `greenguard-kafka-admin-auth` for the topic bootstrap Job.
+Private MQTT additionally requires `greenguard-mqtt-broker` with exactly
+`tls.crt`, `tls.key`, `ca.crt`, `passwords` and `acl`; all are operator supplied.
+`hardware-service-config` requires `MQTT_USERNAME=greenguard-hardware-worker`
+and a nonempty `MQTT_PASSWORD`. The pinned worker release supplies the TLS
+endpoint, CA path, and stable client ID. Run `mqtt-chart/check-secret.py`
+against the synchronized Secret and the approved device inventory before
+enabling Argo; the generic sync only checks Secret shape/equality to AWS and
+cannot establish the certificate chain, exact per-device ACLs, or that the
+worker password matches its Mosquitto hash. Prove an authenticated worker
+connection and signed device acknowledgement in EKS.
 The server Secret contains `broker-jaas`, `registry-kafka-jaas`,
 `broker.keystore.p12`, `broker.truststore.p12`, `keystore-password`,
 `key-password`, `truststore-password`, `registry.keystore.p12`,

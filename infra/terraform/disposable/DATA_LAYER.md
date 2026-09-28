@@ -43,7 +43,7 @@ Other required data systems are still unowned by this Terraform root:
 | Redis | Local Compose cache | No AWS/EKS deployment, credential, persistence, or topology contract |
 | Cassandra | `infra/cassandra/compose.yaml` | No keyspace/schema migration or AWS/EKS deployment |
 | OpenSearch | `infra/search/` | No index/template migration or AWS/EKS deployment |
-| MQTT | `infra/mqtt/mosquitto.conf` | No durable broker/session deployment or device network endpoint |
+| MQTT | Digest-pinned private Argo broker with EBS claim, TLS/ACL Secret and worker-only NetworkPolicy | Broker/worker credential equality, live persistence and device-facing network endpoint remain unproved |
 | PgBouncer | `infra/compose/pgbouncer/pgbouncer.ini` | No RDS-aware config, TLS, secret sync, or EKS workload |
 
 Do not remove the disposable root's readiness gate or run an AWS apply based

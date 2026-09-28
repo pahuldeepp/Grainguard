@@ -1,5 +1,6 @@
 nameOverride: hardware-service-worker
 replicaCount: 1
+deploymentStrategy: Recreate
 terminationGracePeriodSeconds: 60
 pdb:
   enabled: false
@@ -10,6 +11,7 @@ service:
 networkPolicy:
   egressPods:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: greenguard-mqtt }, port: 8883 }
   ingressSources: []
 container:
   name: hardware-service-worker

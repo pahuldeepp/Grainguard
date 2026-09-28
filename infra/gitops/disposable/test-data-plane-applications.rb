@@ -19,7 +19,8 @@ values = {
       'rdsCa' => 'greenguard-rds-ca',
       'cdcCredentials' => 'greenguard-cdc-credentials'
     }
-  }
+  },
+  'mqttPlane' => {'enabled' => true, 'image' => digest, 'credentialSecret' => 'greenguard-mqtt-broker'}
 }
 
 render = lambda do |chart, fixture|
@@ -33,6 +34,13 @@ end
 output, error, status = render.call('applications-chart', values)
 abort "data plane Argo render failed: #{error}" unless status.success?
 apps = YAML.safe_load_stream(output).compact
+mqtt = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-mqtt' }
+abort 'private MQTT Application missing or ordered after worker' unless mqtt &&
+  mqtt.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '11' &&
+  mqtt.dig('spec', 'source', 'path') == 'infra/gitops/disposable/mqtt-chart' &&
+  mqtt.dig('spec', 'source', 'helm', 'valuesObject') == {'image' => digest, 'credentialSecret' => 'greenguard-mqtt-broker'} &&
+  mqtt.dig('spec', 'destination', 'namespace') == 'greenguard' &&
+  mqtt.dig('metadata', 'finalizers') == ['resources-finalizer.argocd.argoproj.io']
 registry = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-schema-registry' }
 abort 'Registry must follow ACL/topic bootstrap in wave 13' unless registry &&
   registry.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '13' &&
@@ -64,6 +72,20 @@ root_output, root_error, root_status = render.call('bootstrap-chart', values)
 abort "root data-plane render failed: #{root_error}" unless root_status.success?
 root_app = YAML.safe_load_stream(root_output).compact.fetch(0)
 abort 'root lost data-plane values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'dataPlane') == values.fetch('dataPlane')
+abort 'root lost MQTT values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'mqttPlane') == values.fetch('mqttPlane')
+
+bad = Marshal.load(Marshal.dump(values))
+bad['mqttPlane']['image'] = 'mosquitto:latest'
+_, _, invalid = render.call('applications-chart', bad)
+abort 'mutable MQTT image accepted' if invalid.success?
+_, _, invalid_root = render.call('bootstrap-chart', bad)
+abort 'root accepted mutable MQTT image' if invalid_root.success?
+bad = Marshal.load(Marshal.dump(values))
+bad['mqttPlane']['credentialSecret'] = 'wrong-secret'
+_, _, invalid = render.call('applications-chart', bad)
+abort 'incorrect MQTT credential Secret accepted' if invalid.success?
+_, _, invalid_root = render.call('bootstrap-chart', bad)
+abort 'root accepted incorrect MQTT credential Secret' if invalid_root.success?
 
 bad = Marshal.load(Marshal.dump(values))
 bad['dataPlane']['images']['kafka-connect'] = 'mutable:latest'

@@ -89,6 +89,7 @@ def expected_secrets(args):
         "greenguard-cassandra-auth", "greenguard-cassandra-tls",
         "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth",
         "greenguard-kafka-admin-auth",
+        "greenguard-mqtt-broker",
     ])
     expected = {}
     for name in names:
@@ -115,6 +116,11 @@ def expected_secrets(args):
                     raise ValueError(f"{name}: Schema Registry Basic credentials are required")
                 if source.get("SCHEMA_REGISTRY_URL") != "https://schema-registry.greenguard.svc.cluster.local:8081":
                     raise ValueError(f"{name}: Schema Registry URL must use the verified in-cluster HTTPS endpoint")
+            if name == "hardware-service-config":
+                if source.get("MQTT_USERNAME") != "greenguard-hardware-worker" or not source.get("MQTT_PASSWORD"):
+                    raise ValueError(f"{name}: exact MQTT worker username and password are required")
+                if any(key in source for key in ("MQTT_BROKER_URL", "MQTT_CA_FILE", "MQTT_CLIENT_ID")):
+                    raise ValueError(f"{name}: MQTT endpoint, CA path, and client identity come from the pinned release")
         if name == "greenguard-rds-bootstrap":
             if set(source) != role_keys:
                 raise ValueError(f"{name}: RDS bootstrap role keys are missing or unexpected")
@@ -167,6 +173,15 @@ def expected_secrets(args):
         elif name == "greenguard-kafka-ca":
             if set(source) != {"ca.crt", "registry-ca.crt"} or any("BEGIN CERTIFICATE" not in value for value in source.values()):
                 raise ValueError(f"{name}: exact Kafka and Registry PEM CA keys are required")
+        elif name == "greenguard-mqtt-broker":
+            if set(source) != {"tls.crt", "tls.key", "ca.crt", "passwords", "acl"}:
+                raise ValueError(f"{name}: exact broker TLS, password, and ACL keys are required")
+            if any("BEGIN CERTIFICATE" not in source[key] for key in ("tls.crt", "ca.crt")) or "PRIVATE KEY" not in source["tls.key"]:
+                raise ValueError(f"{name}: broker TLS material must be PEM")
+            if not re.search(r"(?m)^greenguard-hardware-worker:\$7\$", source["passwords"]):
+                raise ValueError(f"{name}: hashed worker principal is required")
+            if not re.search(r"(?m)^user greenguard-hardware-worker$", source["acl"]):
+                raise ValueError(f"{name}: worker ACL principal is required")
         elif name in {"greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth"}:
             keys = {"KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_SASL_JAAS_CONFIG"}
             if name == "greenguard-kafka-connect-auth":

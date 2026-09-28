@@ -67,6 +67,7 @@ class PreflightTests(unittest.TestCase):
             "greenguard-kafka-ca": {"ca.crt": "-----BEGIN CERTIFICATE-----dummy", "registry-ca.crt": "-----BEGIN CERTIFICATE-----dummy"},
             "greenguard-kafka-connect-auth": {"KAFKA_SASL_USERNAME": "connect", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="connect" password="dummy";', "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "SCHEMA_REGISTRY_BASIC_USER_INFO": "registry:dummy"},
             "greenguard-kafka-admin-auth": {"KAFKA_SASL_USERNAME": "admin", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="dummy";'},
+            "greenguard-mqtt-broker": {"tls.crt": "-----BEGIN CERTIFICATE-----dummy", "tls.key": "-----BEGIN PRIVATE KEY-----dummy", "ca.crt": "-----BEGIN CERTIFICATE-----dummy", "passwords": "greenguard-hardware-worker:$7$dummy-hash", "acl": "user greenguard-hardware-worker\ntopic write greenguard/+/+/command\ntopic read greenguard/+/+/ack"},
         }
         clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "connect", "admin")
         self.values["greenguard-kafka-auth"]["broker-jaas"] += " " + " ".join(
@@ -133,7 +134,13 @@ class PreflightTests(unittest.TestCase):
     def test_complete_secrets_pass(self):
         status, output = self.run_preflight()
         self.assertEqual(status, 0)
-        self.assertIn("PASS 20 Secrets", output)
+        self.assertIn("PASS 21 Secrets", output)
+
+    def test_mqtt_broker_secret_keys_must_be_exact(self):
+        del self.values["greenguard-mqtt-broker"]["tls.key"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact broker TLS", output)
 
     def test_notification_registry_url_must_use_internal_https(self):
         self.values["notification-service-config"]["SCHEMA_REGISTRY_URL"] = "http://schema-registry:8081"

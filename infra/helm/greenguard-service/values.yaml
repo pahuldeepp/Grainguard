@@ -3,6 +3,7 @@ image: ""
 nameOverride: ""
 fullnameOverride: ""
 replicaCount: 2
+deploymentStrategy: RollingUpdate
 terminationGracePeriodSeconds: 30
 autoscaling:
   hpa:

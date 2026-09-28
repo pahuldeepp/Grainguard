@@ -1,9 +1,8 @@
 # Disposable PgBouncer and streaming bootstrap
 
 These standalone Helm charts are offline implementation slices. PgBouncer,
-Kafka topics, Connect, connector registration, OpenSearch and Cassandra have conditional child Applications in
-the disposable Argo tree; MQTT is still an isolated candidate
-charts. `terraform apply` still has a closed readiness gate. Run
+Kafka topics, Connect, connector registration, OpenSearch, Cassandra and private MQTT have conditional child Applications in
+the disposable Argo tree. `terraform apply` still has a closed readiness gate. Run
 `ruby infra/gitops/disposable/check-data-plane.rb` for shape and inventory
 checks; `--ready` deliberately fails with the missing prerequisites.
 
@@ -53,7 +52,7 @@ checks; `--ready` deliberately fails with the missing prerequisites.
    Terraform derives the activator's single API Service `/32` from the
    EKS Service CIDR; compare it with `default/kubernetes` ClusterIP before
    activation in a live cluster. The CNI's Service NAT path also needs proof.
-   MQTT remains unwired because device access and credentials are incomplete.
+   The private MQTT broker is an Argo wave-11 child with a digest-pinned image, PVC, TLS/ACL Secret, and worker-only NetworkPolicy. Device access remains disabled until a controlled DNS name, device inventory, broker credentials, and live TLS/ACL tests are supplied.
    Prove Argo child health/order, mesh mTLS, egress policy,
    tenant data isolation, and a live BFF→Kafka→read/alert journey in EKS.
 

@@ -33,6 +33,12 @@
 {{- if ne ($cassandra.tlsSecret | default "") "greenguard-cassandra-tls" }}{{ fail "Cassandra TLS Secret name drifted" }}{{ end }}
 {{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/32$" ($cassandra.apiServerCIDR | default "")) }}{{ fail "Cassandra API Service needs an exact /32" }}{{ end }}
 {{- end }}
+{{- $mqtt := .Values.mqttPlane | default dict }}
+{{- if and (hasKey $mqtt "enabled") (not (kindIs "bool" $mqtt.enabled)) }}{{ fail "mqttPlane.enabled must be boolean" }}{{ end }}
+{{- if $mqtt.enabled }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($mqtt.image | default "")) }}{{ fail "MQTT image must be an immutable OCI digest" }}{{ end }}
+{{- if ne ($mqtt.credentialSecret | default "") "greenguard-mqtt-broker" }}{{ fail "MQTT broker Secret name drifted" }}{{ end }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -63,6 +69,8 @@ spec:
 {{ toYaml .Values.searchPlane | indent 10 }}
         cassandraPlane:
 {{ toYaml .Values.cassandraPlane | indent 10 }}
+        mqttPlane:
+{{ toYaml .Values.mqttPlane | indent 10 }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

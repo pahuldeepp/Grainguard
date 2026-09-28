@@ -61,7 +61,7 @@ DATA_EDGES = {
   'projection-builder' => %w[kafka],
   'cache-invalidator' => %w[kafka redis],
   'risk-engine' => %w[kafka],
-  'hardware-service-worker' => %w[kafka],
+  'hardware-service-worker' => %w[kafka mqtt],
   'eventbridge-bridge' => %w[kafka],
   'saga-api' => %w[kafka redis],
   'saga-worker' => %w[kafka],
@@ -73,7 +73,7 @@ DATA_EDGES = {
   'search-indexer' => %w[kafka]
 }.freeze
 DATA_PEERS = { 'kafka' => ['kafka', 29092], 'redis' => ['redis-cluster', 6379],
-               'rabbit' => ['rabbitmq', 5672] }.freeze
+               'rabbit' => ['rabbitmq', 5672], 'mqtt' => ['greenguard-mqtt', 8883] }.freeze
 
 def render(release, chart, profile)
   chart_dir = File.join(ROOT, 'infra/helm', chart)
@@ -124,6 +124,11 @@ data_policies = YAML.load_stream(File.read(File.join(ROOT, 'infra/kubernetes/dis
 data_workloads = %w[kafka rabbitmq redis-cluster].flat_map do |name|
   YAML.load_stream(File.read(File.join(ROOT, "infra/kubernetes/disposable-data/#{name}.yaml"))).compact
 end
+mqtt_output, mqtt_error, mqtt_status = Open3.capture3('helm', 'template', 'mqtt', File.join(ROOT, 'infra/gitops/disposable/mqtt-chart'), '--namespace', 'greenguard', '--set', "image=#{IMAGE}")
+abort "MQTT chart render failed: #{mqtt_error}" unless mqtt_status.success?
+mqtt_objects = YAML.load_stream(mqtt_output).compact
+data_workloads.concat(mqtt_objects.select { |object| object['kind'] == 'StatefulSet' })
+data_policies.concat(mqtt_objects.select { |object| object['kind'] == 'NetworkPolicy' })
 DATA_PEERS.each_value do |label, port|
   abort "#{label}: no matching data workload" unless data_workloads.any? do |item|
     item['kind'] == 'StatefulSet' && item.dig('spec', 'template', 'metadata', 'labels', 'app') == label &&
@@ -146,7 +151,9 @@ DATA_EDGES.each do |source, targets|
     ingress = data_policies.find { |policy| policy.dig('spec', 'podSelector', 'matchLabels') == { 'app' => label } }
     abort "#{source} -> #{target}: data ingress missing" unless ingress && ingress.dig('spec', 'ingress')&.any? do |rule|
       rule.fetch('ports', []).any? { |entry| entry['protocol'] == 'TCP' && entry['port'] == port } &&
-        rule.fetch('from', []).any? { |peer| peer['podSelector'] == {} }
+        rule.fetch('from', []).any? { |peer| target == 'mqtt' ?
+          peer.dig('namespaceSelector', 'matchLabels') == { 'kubernetes.io/metadata.name' => 'greenguard' } &&
+            peer.dig('podSelector', 'matchLabels') == rendered.fetch(source).fetch(:labels).slice('app.kubernetes.io/name', 'app.kubernetes.io/instance') : peer['podSelector'] == {} }
     end
   end
 end

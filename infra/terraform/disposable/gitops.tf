@@ -87,6 +87,16 @@ variable "cassandra_image_digest" {
   }
 }
 
+variable "mqtt_image_digest" {
+  description = "Immutable Mosquitto image for the private disposable MQTT broker."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.mqtt_image_digest == "" || can(regex("^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$", var.mqtt_image_digest))
+    error_message = "mqtt_image_digest must be a full immutable OCI digest reference."
+  }
+}
+
 locals {
   deployment_contract = jsondecode(file("${path.module}/../../gitops/disposable/contract.json"))
   required_images     = toset([for release in local.deployment_contract.releases : release.image])
@@ -96,7 +106,7 @@ locals {
   required_bootstrap_secret_names = toset(["greenguard-rds-bootstrap", "greenguard-rds-ca"])
   required_observability_images   = toset(["otel-collector", "prometheus", "grafana", "tempo", "loki"])
   required_data_plane_images      = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"])
-  required_data_plane_secrets     = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls"])
+  required_data_plane_secrets     = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls", "greenguard-mqtt-broker"])
   # These are public OIDC identifiers, never credentials. Sensitive runtime
   # inputs (database URLs, CONTROL_LOOKUP_TOKEN, broker credentials, etc.)
   # remain in the per-release Kubernetes Secret named by contract.json.
@@ -168,10 +178,17 @@ locals {
               { name = "KAFKA_SECURITY_PROTOCOL", value = "SASL_SSL" },
               { name = "KAFKA_SASL_MECHANISM", value = "PLAIN" },
               { name = "KAFKA_TLS_CA_FILE", value = "/etc/greenguard/kafka/ca.crt" },
-            ]
-          ) }
+            ],
+            release.name == "hardware-service-worker" ? [
+              { name = "MQTT_BROKER_URL", value = "tls://mqtt.greenguard.svc.cluster.local:8883" },
+              { name = "MQTT_CA_FILE", value = "/etc/greenguard/mqtt/ca.crt" },
+              { name = "MQTT_CLIENT_ID", value = "greenguard-hardware-worker" },
+            ] : []
+          ) },
+          release.name == "hardware-service-worker" ? { volumeMounts = [{ name = "mqtt-ca", mountPath = "/etc/greenguard/mqtt", readOnly = true }] } : {}
         )
-        kafka = { caSecretName = "greenguard-kafka-ca" }
+        kafka   = { caSecretName = "greenguard-kafka-ca" }
+        volumes = release.name == "hardware-service-worker" ? [{ name = "mqtt-ca", secret = { secretName = "greenguard-mqtt-broker", items = [{ key = "ca.crt", path = "ca.crt" }] } }] : []
       } : key => value if release.chart == "greenguard-service" },
       { for key, value in { mesh = { enabled = true, strictMtls = true } } : key => value if contains(
         toset(["greenguard-dashboard", "greenguard-bff", "greenguard-service"]),
@@ -236,6 +253,11 @@ resource "helm_release" "gitops_bootstrap" {
       # kubernetes.default. Confirm actual Service IP before live release.
       apiServerCIDR = "${cidrhost(aws_eks_cluster.cell.kubernetes_network_config[0].service_ipv4_cidr, 1)}/32"
     }
+    mqttPlane = {
+      enabled          = true
+      image            = var.mqtt_image_digest
+      credentialSecret = "greenguard-mqtt-broker"
+    }
   })]
 
   lifecycle {
@@ -262,6 +284,10 @@ resource "helm_release" "gitops_bootstrap" {
     precondition {
       condition     = var.cassandra_image_digest != ""
       error_message = "Application tree needs a digest-pinned Cassandra image and the cassandra-writer runtime digest for secure schema bootstrap."
+    }
+    precondition {
+      condition     = var.mqtt_image_digest != ""
+      error_message = "Application tree needs a digest-pinned private MQTT broker image."
     }
   }
 

@@ -29,10 +29,12 @@ spec:
       app.kubernetes.io/name: {{ include "greenguard-service.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   strategy:
-    type: RollingUpdate
+    type: {{ .Values.deploymentStrategy }}
+    {{- if eq .Values.deploymentStrategy "RollingUpdate" }}
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+    {{- end }}
   template:
     metadata:
       labels:

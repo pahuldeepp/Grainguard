@@ -19,3 +19,7 @@ cassandraPlane:
   authSecret: ""
   tlsSecret: ""
   apiServerCIDR: ""
+mqttPlane:
+  enabled: false
+  image: ""
+  credentialSecret: ""
