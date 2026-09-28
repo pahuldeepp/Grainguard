@@ -68,7 +68,12 @@ services:
         condition: service_healthy
     ports: ["127.0.0.1:56432:6432"]
     volumes:
-      - ../../.local/pgbouncer/userlist.txt:/run/pgbouncer/userlist.txt:ro
+      - type: bind
+        source: ../../.local/pgbouncer/userlist.txt
+        target: /run/pgbouncer/userlist.txt
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 6432"]
       interval: 2s
