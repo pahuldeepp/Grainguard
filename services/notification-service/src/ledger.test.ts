@@ -1,6 +1,8 @@
-import { readdir } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, rm } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import pg from "pg";
 import { LocalTestAdapter } from "./adapters.js";
@@ -465,8 +467,10 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
   });
   await admin.connect();
   const name = `notifications_test_${Date.now()}`;
-  await admin.query(`CREATE DATABASE ${name} OWNER notifications_migrator`);
+  let databaseCreated = false;
   try {
+    await admin.query(`CREATE DATABASE ${name} OWNER notifications_migrator`);
+    databaseCreated = true;
     const url = new URL(process.env.NOTIFICATIONS_MIGRATION_URL!);
     url.pathname = `/${name}`;
     assert.deepEqual(
@@ -489,10 +493,102 @@ test("migrations apply twice on a fresh database", { skip }, async () => {
     const broken = `${process.cwd()}/src/testing`;
     await assert.rejects(migrate(url.toString(), broken));
   } finally {
-    await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
-    await admin.end();
+    try {
+      if (databaseCreated)
+        await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
+    } finally {
+      await admin.end().catch(() => {});
+    }
   }
 });
+
+test(
+  "optional hold migration preserves historical hold_expired rows",
+  { skip },
+  async () => {
+    const admin = new pg.Client({
+      connectionString: process.env.POSTGRES_ADMIN_URL,
+    });
+    await admin.connect();
+    const name = `notifications_legacy_${Date.now()}`;
+    const migrationDir = await mkdtemp(
+      join(tmpdir(), "gg-notification-migrations-"),
+    );
+    const url = new URL(process.env.NOTIFICATIONS_MIGRATION_URL!);
+    url.pathname = `/${name}`;
+    let databaseCreated = false;
+    let legacyAdmin: pg.Client | undefined;
+    let verify: pg.Client | undefined;
+    try {
+      await admin.query(`CREATE DATABASE ${name} OWNER notifications_migrator`);
+      databaseCreated = true;
+      for (const file of [
+        "0001_delivery_ledger.sql",
+        "0002_delivery_generation.sql",
+      ]) {
+        await copyFile(join(MIGRATIONS_DIR, file), join(migrationDir, file));
+      }
+      assert.deepEqual(await migrate(url.toString(), migrationDir), [
+        "0001_delivery_ledger.sql",
+        "0002_delivery_generation.sql",
+      ]);
+
+      // Use the configured admin URL, changing only the scratch database name.
+      const adminUrl = new URL(process.env.POSTGRES_ADMIN_URL!);
+      adminUrl.pathname = `/${name}`;
+      legacyAdmin = new pg.Client({
+        connectionString: adminUrl.toString(),
+      });
+      await legacyAdmin.connect();
+      const tenantId = randomUUID();
+      const intentId = randomUUID();
+      await legacyAdmin.query(
+        "ALTER TABLE delivery_attempts DROP CONSTRAINT delivery_attempts_kind_check",
+      );
+      await legacyAdmin.query(
+        `ALTER TABLE delivery_attempts ADD CONSTRAINT delivery_attempts_kind_check
+         CHECK (kind IN ('send', 'reconcile', 'preference', 'hold_expired'))`,
+      );
+      await legacyAdmin.query(
+        `INSERT INTO deliveries (tenant_id,intent_id,channel,severity,correlation_id)
+         VALUES ($1,$2,'email','warning',$3)`,
+        [tenantId, intentId, randomUUID()],
+      );
+      await legacyAdmin.query(
+        `INSERT INTO delivery_attempts (tenant_id,intent_id,attempt_no,kind,outcome)
+         VALUES ($1,$2,1,'hold_expired','failed')`,
+        [tenantId, intentId],
+      );
+      await copyFile(
+        join(MIGRATIONS_DIR, "0003_optional_hold_attempt.sql"),
+        join(migrationDir, "0003_optional_hold_attempt.sql"),
+      );
+      assert.deepEqual(await migrate(url.toString(), migrationDir), [
+        "0003_optional_hold_attempt.sql",
+      ]);
+      verify = new pg.Client({ connectionString: adminUrl.toString() });
+      await verify.connect();
+      const result = await verify.query(
+        "SELECT kind FROM delivery_attempts WHERE tenant_id=$1",
+        [tenantId],
+      );
+      assert.deepEqual(result.rows, [{ kind: "hold_expired" }]);
+    } finally {
+      await Promise.all(
+        [legacyAdmin, verify].map(async (client) =>
+          client?.end().catch(() => {}),
+        ),
+      );
+      try {
+        if (databaseCreated)
+          await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
+      } finally {
+        await admin.end().catch(() => {});
+        await rm(migrationDir, { recursive: true, force: true });
+      }
+    }
+  },
+);
 
 test(
   "provider effect keeps the real ownership fence until ledger completion",

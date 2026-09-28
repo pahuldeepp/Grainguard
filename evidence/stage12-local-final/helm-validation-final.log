@@ -1,0 +1,99 @@
+bash scripts/helm-validate.sh
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-service
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+Expected autoscaler rejection: kind (autoscaler target kind/version drifted)
+Expected autoscaler rejection: apiVersion (autoscaler target kind/version drifted)
+Expected autoscaler rejection: kind (autoscaler target kind/version drifted)
+Expected autoscaler rejection: apiVersion (autoscaler target kind/version drifted)
+Expected autoscaler rejection: metricType (HPA CPU Resource/Utilization metric drifted)
+Expected autoscaler rejection: metricName (HPA CPU Resource/Utilization metric drifted)
+Expected autoscaler rejection: metricTarget (HPA CPU Resource/Utilization metric drifted)
+Expected scheduling rejection: selector (worker must select compute nodes)
+Expected scheduling rejection: toleration (worker must tolerate the compute NoSchedule taint)
+Expected scheduling rejection: topology (zone spread fields drifted)
+Expected scheduling rejection: priority (configured priority class drifted)
+Expected scheduling rejection: grace (shutdown grace drifted)
+==> Linting infra/helm/greenguard-dashboard
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+==> Linting infra/helm/greenguard-bff
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+Disposable network peers valid: 15 service links and 34 data links
+Dashboard, BFF, runtime API and worker profiles linted; digest rejection, hardened defaults, optional mesh/OTel policy, HPA, KEDA, Argo Rollouts canary analysis, Saga mTLS references, worker isolation, ports/probes, ingress selectors, rendered peer links, structured per-profile replica ownership/PDB/grace, scaling boundaries, and scheduling drift rejection checks passed.

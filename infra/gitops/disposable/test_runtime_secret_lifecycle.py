@@ -236,6 +236,29 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "endpoint"):
             lifecycle.validate_supplemental_profiles(scope, expected)
 
+    def test_audit_export_worker_registry_uses_inventory_audit_reader_profile(self):
+        scope = {**self.scope, "shard_bootstraps": {}}
+        expected = {}
+        shards = {}
+        for shard_id in ("s1", "s2", "s3", "s4"):
+            bootstrap_name = f"greenguard-{shard_id}-rds-bootstrap"
+            host, replica = f"{shard_id}.primary.example", f"{shard_id}.replica.example"
+            physical = {"host": host, "replica_hosts": [replica], "incarnation": f"10000000-0000-5000-8000-00000000000{shard_id[1]}"}
+            scope["shard_bootstraps"][bootstrap_name] = physical
+            expected[bootstrap_name] = {"data": {"INVENTORY_AUDIT_READER_PASSWORD": "audit-reader-pass"}}
+            def url(endpoint):
+                return f"postgresql://inventory_audit_reader:audit-reader-pass@{endpoint}:5432/greenguard_inventory?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+            shards[shard_id] = {"incarnation": physical["incarnation"], "primaryUrl": url(host), "replicaUrls": [url(replica)]}
+        manifest = {"formatVersion": 1, "service": "audit-export-worker", "database": "greenguard_inventory", "shards": shards}
+        name = "greenguard-shard-routing-audit-export-worker"
+        expected[name] = {"data": {"registry.json": json.dumps(manifest)}}
+        lifecycle.validate_supplemental_profiles(scope, expected)
+
+        wrong_role = json.loads(json.dumps(expected))
+        wrong_role[name]["data"]["registry.json"] = wrong_role[name]["data"]["registry.json"].replace("inventory_audit_reader", "inventory_app")
+        with self.assertRaisesRegex(RuntimeError, "shard role/endpoint/TLS"):
+            lifecycle.validate_supplemental_profiles(scope, wrong_role)
+
     def test_migration_owner_key_role_and_authority_contract(self):
         expected = {"greenguard-rds-bootstrap": {"data": {"PGHOST": "central.example", "CONTROL_MIGRATOR_PASSWORD": "fixture-pass"}},
                     "greenguard-control-migration": {"data": {"CONTROL_MIGRATION_URL": "postgresql://control_migrator:fixture-pass@central.example:5432/greenguard_control?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem"}}}

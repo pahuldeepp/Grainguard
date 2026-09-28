@@ -20,6 +20,7 @@ db-migrate: db-up build-otel
 	cd services/telemetry-ingest && go run ./cmd/migrate
 	$(MAKE) projection-migrate
 	$(MAKE) risk-migrate
+	npm run migrate -w @greenguard/notification-service
 	$(MAKE) jobs-migrate
 	$(MAKE) saga-migrate
 	$(MAKE) hardware-migrate

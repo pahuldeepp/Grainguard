@@ -1,0 +1,113 @@
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:60718"
+
+23 migrations found in prisma/migrations
+
+Applying migration `20260925090000_control_plane`
+Applying migration `20260925110000_membership_revocation`
+Applying migration `20260925120000_membership_identity_lookup_index`
+Applying migration `20260925130000_machine_credentials`
+Applying migration `20260925131000_machine_lookup_policy`
+Applying migration `20260925140000_flag_configurations`
+Applying migration `20260925141000_global_flags`
+Applying migration `20260925150000_entitlements`
+Applying migration `20260925160000_audit_exports`
+Applying migration `20260925160000_identity_connections`
+Applying migration `20260925170000_audit_csv`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260925181000_identity_domain_expiry`
+Applying migration `20260925185000_oauth_client_tenant_binding`
+Applying migration `20260925190000_audit_export_failures`
+Applying migration `20260925200000_jit_seat_denial_audit`
+Applying migration `20260925210000_notification_contacts`
+Applying migration `20260925220000_notification_contacts_cdc`
+Applying migration `20260928010000_tenant_placement`
+Applying migration `20260928130000_read_admission_leases`
+Applying migration `20260928160000_structured_move_evidence`
+Applying migration `20260928180000_audit_worker_role`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925090000_control_plane/
+    └─ migration.sql
+  └─ 20260925110000_membership_revocation/
+    └─ migration.sql
+  └─ 20260925120000_membership_identity_lookup_index/
+    └─ migration.sql
+  └─ 20260925130000_machine_credentials/
+    └─ migration.sql
+  └─ 20260925131000_machine_lookup_policy/
+    └─ migration.sql
+  └─ 20260925140000_flag_configurations/
+    └─ migration.sql
+  └─ 20260925141000_global_flags/
+    └─ migration.sql
+  └─ 20260925150000_entitlements/
+    └─ migration.sql
+  └─ 20260925160000_audit_exports/
+    └─ migration.sql
+  └─ 20260925160000_identity_connections/
+    └─ migration.sql
+  └─ 20260925170000_audit_csv/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260925181000_identity_domain_expiry/
+    └─ migration.sql
+  └─ 20260925185000_oauth_client_tenant_binding/
+    └─ migration.sql
+  └─ 20260925190000_audit_export_failures/
+    └─ migration.sql
+  └─ 20260925200000_jit_seat_denial_audit/
+    └─ migration.sql
+  └─ 20260925210000_notification_contacts/
+    └─ migration.sql
+  └─ 20260925220000_notification_contacts_cdc/
+    └─ migration.sql
+  └─ 20260928010000_tenant_placement/
+    └─ migration.sql
+  └─ 20260928130000_read_admission_leases/
+    └─ migration.sql
+  └─ 20260928160000_structured_move_evidence/
+    └─ migration.sql
+  └─ 20260928180000_audit_worker_role/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+✔ registry seeds four stable IDs; legacy organizations retain s1 and all metadata is protected (110.762042ms)
+✔ editing the onboarding ring affects only new tenants and immutable history preserves prior decisions (52.424916ms)
+✔ onboarding persists one ring suggestion and runtime resolution never rehashes (50.044333ms)
+✔ trusted onboarding override persists provenance without a public routing hint (16.113958ms)
+✔ resolver serializes epochs beyond JS precision and rejects offline shard ownership (45.690959ms)
+✔ registry incarnation is authoritative; replacements rotate only offline with the next version (44.329541ms)
+✔ move CAS advances once, requires receipts, blocks admission until activated and replays durably (62.714958ms)
+✔ baseline preparation is durable while writes stay active; quiescing starts only for cutover (31.313084ms)
+✔ empty or negative receipts never permit ownership switch or runtime reactivation (36.432042ms)
+✔ operation-bound receipt with a forged target identity cannot authorize placement CAS (36.199041ms)
+✔ only one concurrent move per tenant wins and conflicting operation reuse is rejected (20.889667ms)
+✔ pre-switch abort requires positive receipts and fences old epochs (32.679709ms)
+✔ immutable receipts and forced RLS isolate move ledgers (54.256584ms)
+✔ database enforces registry references, epoch monotonicity, and one live move (51.276167ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 969.35525
+risk migrations applied: 000001, 000002, 000003, 000004, 000005, 000006, 000007, 000008, 000009
+Scratch control and risk schemas migrated.
+Prepared tenant 089b42f6-6265-5e0c-b728-10c8d8512198 on s1; target s2 is registered.
+Tenant 089b42f6-6265-5e0c-b728-10c8d8512198 is quiescing for 068528a4-1e00-454d-9b8a-7a7a4e0ef392.
+Local tenant move passed: operation=068528a4-1e00-454d-9b8a-7a7a4e0ef392 tables=8 rows=1 sha256=498edc15e648473776e236e17df8e8335e7b8efd3e51150f6bcca6db7a7c2eaf; lease drained, source writer fenced, placement epoch 1→2, unrelated tenant preserved.

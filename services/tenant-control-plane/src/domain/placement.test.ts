@@ -388,8 +388,11 @@ test("move CAS advances once, requires receipts, blocks admission until activate
     await compareAndSetPlacement(db, tenantId, "1", target, op),
     done,
   );
+  // Change a UUID character outside its version/variant nibbles so the
+  // conflicting operation is guaranteed to differ from `op`.
+  const conflictingOperationId = `${op[0] === "0" ? "1" : "0"}${op.slice(1)}`;
   await assert.rejects(
-    beginPlacementMove(db, tenantId, "1", target, op.replace(/.$/, "0")),
+    beginPlacementMove(db, tenantId, "1", target, conflictingOperationId),
     PlacementConflictError,
   );
 });

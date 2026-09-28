@@ -305,18 +305,19 @@ def validate_supplemental_profiles(scope, expected):
                     raise RuntimeError(f"{name}: PgBouncer role/password profile mismatch")
         elif name.startswith("greenguard-shard-routing-"):
             service = name.removeprefix("greenguard-shard-routing-")
-            projector_profiles = {"read-entitlement-projector": ("read-api", "projection", "read_entitlement_projector", "READ_ENTITLEMENT_PROJECTOR_PASSWORD"),
-                                  "inventory-projector": ("device-service", "inventory", "inventory_projector", "INVENTORY_PROJECTOR_PASSWORD"),
-                                  "telemetry-entitlement-projector": ("telemetry-ingest", "telemetry", "telemetry_entitlement_projector", "TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD")}
-            if service not in set(service_owners) | set(projector_profiles) or set(record["data"]) != {"registry.json"}:
+            special_profiles = {"read-entitlement-projector": ("read-api", "projection", "read_entitlement_projector", "READ_ENTITLEMENT_PROJECTOR_PASSWORD"),
+                                "inventory-projector": ("device-service", "inventory", "inventory_projector", "INVENTORY_PROJECTOR_PASSWORD"),
+                                "telemetry-entitlement-projector": ("telemetry-ingest", "telemetry", "telemetry_entitlement_projector", "TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD"),
+                                "audit-export-worker": ("audit-export-worker", "inventory", "inventory_audit_reader", "INVENTORY_AUDIT_READER_PASSWORD")}
+            if service not in set(service_owners) | set(special_profiles) or set(record["data"]) != {"registry.json"}:
                 raise RuntimeError(f"{name}: registry service/key contract mismatch")
-            actual_service = projector_profiles[service][0] if service in projector_profiles else service
-            owner = projector_profiles[service][1] if service in projector_profiles else service_owners[service]
+            actual_service = special_profiles[service][0] if service in special_profiles else service
+            owner = special_profiles[service][1] if service in special_profiles else service_owners[service]
             profile = owners[owner]
             role = "read_query" if service == "read-api" else profile["role"]
             password_key = "READ_QUERY_DB_PASSWORD" if service == "read-api" else owner.upper() + "_DB_PASSWORD"
-            if service in projector_profiles:
-                role, password_key = projector_profiles[service][2:]
+            if service in special_profiles:
+                role, password_key = special_profiles[service][2:]
             manifest = json.loads(record["data"]["registry.json"])
             if set(manifest) != {"formatVersion", "service", "database", "shards"} or manifest["formatVersion"] != 1 or manifest["service"] != actual_service or manifest["database"] != profile["database"] or set(manifest["shards"]) != {"s1", "s2", "s3", "s4"}:
                 raise RuntimeError(f"{name}: complete registry contract mismatch")

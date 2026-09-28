@@ -1,0 +1,157 @@
+python3 scripts/check_plan.py
+Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.
+This check validates planning files only. Run make verify and make smoke for application checks.
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/compose/stage12-isolated.override.yaml up -d --wait --build
+ Image greenguard-dev-pgbouncer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 674B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 381B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 35B done
+#5 DONE 0.0s
+
+#6 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#6 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S -g 10001 pgbouncer && adduser -S -u 10001 -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:a57faec49263b6905b4357783390cb1b0a7b92f7516ca7cbca4097fb0ae3c3f1 done
+#9 exporting config sha256:9433f1bb8001ae78ea945bb2aea901bf970b7e8ee6202f1b2d62fe8805c69e1f done
+#9 exporting attestation manifest sha256:4eb7ba3a59929e8beed07e84f73bca9dfea8ea570b5a787dfb4aa5040f5ce7d5 done
+#9 exporting manifest list sha256:5e1ac18fbf964e546243401b85f9f4baf78d77b888eac894c6399d6a7a8e19ae done
+#9 naming to docker.io/library/greenguard-dev-pgbouncer:latest done
+#9 unpacking to docker.io/library/greenguard-dev-pgbouncer:latest done
+#9 DONE 0.0s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.0s
+ Image greenguard-dev-pgbouncer Built 
+time="2026-09-28T03:44:18-05:00" level=warning msg="Found orphan containers (greenguard-dev-mysql-cdc-1, greenguard-dev-connect-1, greenguard-dev-minio-1, greenguard-dev-dynamodb-local-1, greenguard-dev-opensearch-1, greenguard-dev-cassandra-1, greenguard-dev-mosquitto-1, greenguard-dev-elasticsearch-1, greenguard-dev-rabbitmq-1, greenguard-dev-schema-registry-1, greenguard-dev-kafka-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+ Container greenguard-dev-postgres-1 Recreate 
+ Container greenguard-dev-postgres-1 Recreated 
+ Container greenguard-dev-pgbouncer-1 Recreate 
+ Container greenguard-dev-pgbouncer-1 Recreated 
+ Container greenguard-dev-postgres-1 Starting 
+ Container greenguard-dev-postgres-1 Started 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-pgbouncer-1 Starting 
+ Container greenguard-dev-pgbouncer-1 Started 
+ Container greenguard-dev-pgbouncer-1 Waiting 
+ Container greenguard-dev-postgres-1 Waiting 
+ Container greenguard-dev-postgres-1 Healthy 
+ Container greenguard-dev-pgbouncer-1 Healthy 
+docker compose --env-file .env -f infra/compose/compose.yaml -f infra/compose/stage12-isolated.override.yaml exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
+psql:/docker-entrypoint-initdb.d/001-databases.sql:24: NOTICE:  role "postgres" has already been granted membership in role "tenant_ownership_bootstrap" by role "postgres"
+psql:/docker-entrypoint-initdb.d/001-databases.sql:47: NOTICE:  role "greenguard_observer" has already been granted membership in role "pg_monitor" by role "postgres"
+npm run build -w @greenguard/otel
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+npm run migrate -w services/device-service
+
+> @greenguard/device-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_inventory", schema "public" at "127.0.0.1:55433"
+
+21 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/workflow-alerts
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55433"
+
+6 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/tenant-control-plane
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:55433"
+
+23 migrations found in prisma/migrations
+
+Applying migration `20260928160000_structured_move_evidence`
+Applying migration `20260928180000_audit_worker_role`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260928160000_structured_move_evidence/
+    └─ migration.sql
+  └─ 20260928180000_audit_worker_role/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w @greenguard/billing-service
+
+> @greenguard/billing-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_billing", schema "public" at "127.0.0.1:55433"
+
+10 migrations found in prisma/migrations
+
+Applying migration `20260928180000_audit_export_reader`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260928180000_audit_export_reader/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+cd services/telemetry-ingest && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make projection-migrate
+cd services/projection-builder && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-migrate
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m risk_engine.migrate
+risk migrations applied: 000009
+/Applications/Xcode.app/Contents/Developer/usr/bin/make jobs-migrate
+cd services/jobs-worker && go run ./cmd/migrate
+2026/09/28 03:44:28 ERROR migration failed error="apply migrations: Dirty database version 7. Fix and force version."
+exit status 1
+make[1]: *** [jobs-migrate] Error 1
+make: *** [db-migrate] Error 2

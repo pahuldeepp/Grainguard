@@ -1,0 +1,190 @@
+Go/risk offline validation started: Mon Sep 28 08:57:12 UTC 2026
+
+=== packages/kafka-transport: gofmt ===
+=== packages/kafka-transport: go vet ===
+=== packages/kafka-transport: go test -race ===
+ok  	greenguard.local/kafka-transport	(cached)
+
+=== packages/go-common: gofmt ===
+=== packages/go-common: go vet ===
+=== packages/go-common: go test -race ===
+ok  	greenguard.local/go-common	(cached)
+
+=== packages/go-migrations: gofmt ===
+=== packages/go-migrations: go vet ===
+=== packages/go-migrations: go test -race ===
+ok  	greenguard.local/go-migrations	(cached)
+
+=== services/telemetry-ingest: gofmt ===
+=== services/telemetry-ingest: go vet ===
+=== services/telemetry-ingest: go test -race ===
+ok  	greenguard.local/telemetry-ingest	5.900s
+ok  	greenguard.local/telemetry-ingest/cmd/migrate	1.691s
+ok  	greenguard.local/telemetry-ingest/migrations	1.475s
+
+=== services/cdc-transformer: gofmt ===
+=== services/cdc-transformer: go vet ===
+=== services/cdc-transformer: go test -race ===
+ok  	greenguard.local/cdc-transformer	(cached)
+
+=== services/cache-invalidator: gofmt ===
+=== services/cache-invalidator: go vet ===
+=== services/cache-invalidator: go test -race ===
+ok  	greenguard.local/cache-invalidator	(cached)
+
+=== services/projection-builder: gofmt ===
+=== services/projection-builder: go vet ===
+=== services/projection-builder: go test -race ===
+ok  	greenguard.local/projection-builder	3.326s
+ok  	greenguard.local/projection-builder/cmd/maintain	(cached)
+ok  	greenguard.local/projection-builder/cmd/migrate	1.286s
+?   	greenguard.local/projection-builder/cmd/provision-version	[no test files]
+ok  	greenguard.local/projection-builder/history	(cached)
+ok  	greenguard.local/projection-builder/migrations	1.508s
+
+=== services/cassandra-writer: gofmt ===
+=== services/cassandra-writer: go vet ===
+=== services/cassandra-writer: go test -race ===
+ok  	greenguard.local/cassandra-writer	(cached)
+?   	greenguard.local/cassandra-writer/cmd/migrate	[no test files]
+ok  	greenguard.local/cassandra-writer/history	(cached)
+
+=== services/jobs-worker: gofmt ===
+=== services/jobs-worker: go vet ===
+=== services/jobs-worker: go test -race ===
+ok  	greenguard.local/jobs-worker	1.886s
+ok  	greenguard.local/jobs-worker/cmd/migrate	1.282s
+?   	greenguard.local/jobs-worker/migrations	[no test files]
+ok  	greenguard.local/jobs-worker/rabbit	(cached)
+
+=== services/saga-orchestrator: gofmt ===
+=== services/saga-orchestrator: go vet ===
+
+=== services/hardware-service: gofmt ===
+=== services/hardware-service: go vet ===
+=== services/hardware-service: go test -race ===
+ok  	greenguard.local/hardware-service/cmd/migrate	1.268s
+?   	greenguard.local/hardware-service/cmd/mqtt-fixture	[no test files]
+ok  	greenguard.local/hardware-service/cmd/worker	1.651s
+ok  	greenguard.local/hardware-service/hardware	1.788s
+ok  	greenguard.local/hardware-service/migrations	1.518s
+
+=== make saga-test ===
+cd services/saga-orchestrator && go test -race ./...
+ok  	greenguard.local/saga-orchestrator/cmd/api	(cached)
+?   	greenguard.local/saga-orchestrator/cmd/migrate	[no test files]
+ok  	greenguard.local/saga-orchestrator/cmd/worker	(cached)
+?   	greenguard.local/saga-orchestrator/migrations	[no test files]
+ok  	greenguard.local/saga-orchestrator/saga	(cached)
+
+=== make risk-test ===
+python3 -m venv .local/risk-venv
+.local/risk-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+cd services/risk-engine && ../../.local/risk-venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
+test_crash_before_commit_leaves_nothing_then_redelivery_applies_once (test_apply.ApplyFailureTest.test_crash_before_commit_leaves_nothing_then_redelivery_applies_once) ... ok
+test_data_rejections_quarantine_and_rls_denial_is_hard (test_apply.ApplyFailureTest.test_data_rejections_quarantine_and_rls_denial_is_hard) ... ok
+test_transient_errors_retry_with_bounded_backoff (test_apply.ApplyFailureTest.test_transient_errors_retry_with_bounded_backoff) ... ok
+test_transient_exhaustion_stops_without_commit (test_apply.ApplyFailureTest.test_transient_exhaustion_stops_without_commit) ... ok
+test_zero_attempt_policy_is_explicit (test_apply.ApplyFailureTest.test_zero_attempt_policy_is_explicit) ... ok
+test_backdated_lot_change_reports_affected_assessments (test_apply.ApplyInventoryTest.test_backdated_lot_change_reports_affected_assessments) ... ok
+test_binding_versions_never_regress (test_apply.ApplyInventoryTest.test_binding_versions_never_regress) ... ok
+test_invalidation_outbox_failure_rolls_back_lot_and_ledger (test_apply.ApplyInventoryTest.test_invalidation_outbox_failure_rolls_back_lot_and_ledger) ... ok
+test_lot_versions (test_apply.ApplyInventoryTest.test_lot_versions) ... ok
+test_stale_older_lot_version_is_ignored (test_apply.ApplyInventoryTest.test_stale_older_lot_version_is_ignored) ... ok
+test_additive_v2_measurements_apply_without_quarantine (test_apply.ApplyTelemetryTest.test_additive_v2_measurements_apply_without_quarantine) ... ok
+test_binding_mismatch_and_missing_binding (test_apply.ApplyTelemetryTest.test_binding_mismatch_and_missing_binding) ... ok
+test_duplicate_delivery_preserves_result_and_writes_nothing (test_apply.ApplyTelemetryTest.test_duplicate_delivery_preserves_result_and_writes_nothing) ... ok
+test_late_reading_scores_against_wheat_and_emits_valid_event (test_apply.ApplyTelemetryTest.test_late_reading_scores_against_wheat_and_emits_valid_event) ... ok
+test_not_ready_and_quarantine_roll_back_everything (test_apply.ApplyTelemetryTest.test_not_ready_and_quarantine_roll_back_everything) ... ok
+test_same_event_id_with_different_payload_is_quarantined (test_apply.ApplyTelemetryTest.test_same_event_id_with_different_payload_is_quarantined) ... ok
+test_unknown_grain_and_unbound_device (test_apply.ApplyTelemetryTest.test_unknown_grain_and_unbound_device) ... ok
+test_fixture_shape_round_trips_through_contract (test_apply.BuildEventTest.test_fixture_shape_round_trips_through_contract) ... ok
+test_record_is_immutable (test_apply.BuildEventTest.test_record_is_immutable) ... ok
+test_commits_only_after_effect_and_handles_duplicates (test_consumer.ConsumerTest.test_commits_only_after_effect_and_handles_duplicates) ... ok
+test_invalid_records_are_quarantined_and_do_not_block (test_consumer.ConsumerTest.test_invalid_records_are_quarantined_and_do_not_block) ... ok
+test_late_lot_change_is_counted (test_consumer.ConsumerTest.test_late_lot_change_is_counted) ... backdated lot change affects 1 earlier assessments
+ok
+test_not_ready_is_quarantined_only_after_the_bound (test_consumer.ConsumerTest.test_not_ready_is_quarantined_only_after_the_bound) ... ok
+test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives (test_consumer.ConsumerTest.test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives) ... ok
+test_quarantine_and_unavailable_fallback_reasons (test_consumer.ConsumerTest.test_quarantine_and_unavailable_fallback_reasons) ... ok
+test_quarantine_failure_stops_without_commit (test_consumer.ConsumerTest.test_quarantine_failure_stops_without_commit) ... ok
+test_endpoints_and_labels (test_consumer.HealthTest.test_endpoints_and_labels) ... ok
+test_adapter_contract (test_consumer.KafkaSourceTest.test_adapter_contract) ... ok
+test_default_client_factories (test_consumer.KafkaSourceTest.test_default_client_factories) ... %3|1790585856.202|FAIL|rdkafka#consumer-1| [thrd:127.0.0.1:1/bootstrap]: 127.0.0.1:1/bootstrap: Connect to ipv4#127.0.0.1:1 failed: Connection refused (after 0ms in state CONNECT)
+ok
+test_failures_are_hard (test_consumer.KafkaSourceTest.test_failures_are_hard) ... ok
+test_checkpoint_becomes_watermark_once_lot_partitions_are_applied (test_consumer.LotFeedTest.test_checkpoint_becomes_watermark_once_lot_partitions_are_applied) ... ok
+test_disabled_gate_trusts_open_intervals (test_consumer.LotFeedTest.test_disabled_gate_trusts_open_intervals) ... ok
+test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited (test_consumer.LotFeedTest.test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited) ... ok
+test_config_validation (test_consumer.MainTest.test_config_validation) ... ok
+test_main_installs_signal_handlers (test_consumer.MainTest.test_main_installs_signal_handlers) ... ok
+test_run_wires_collaborators_and_shuts_down (test_consumer.MainTest.test_run_wires_collaborators_and_shuts_down) ... ok
+test_database_sink_records_coordinates_and_digest (test_consumer.SinkTest.test_database_sink_records_coordinates_and_digest) ... ok
+test_checkpoint (test_join.EventParsingTest.test_checkpoint) ... ok
+test_fields_reject_trailing_newlines (test_join.EventParsingTest.test_fields_reject_trailing_newlines) ... ok
+test_fixtures_parse (test_join.EventParsingTest.test_fixtures_parse) ... ok
+test_inventory_rejections (test_join.EventParsingTest.test_inventory_rejections) ... ok
+test_rejections_have_stable_reasons (test_join.EventParsingTest.test_rejections_have_stable_reasons) ... ok
+test_binding_state (test_join.EventTimeJoinTest.test_binding_state) ... ok
+test_exact_boundaries_are_half_open (test_join.EventTimeJoinTest.test_exact_boundaries_are_half_open) ... ok
+test_late_wheat_reading_after_canola_replacement_uses_wheat (test_join.EventTimeJoinTest.test_late_wheat_reading_after_canola_replacement_uses_wheat) ... ok
+test_missing_or_overlapping_lot_state_is_not_ready (test_join.EventTimeJoinTest.test_missing_or_overlapping_lot_state_is_not_ready) ... ok
+test_open_interval_needs_a_fresh_lot_feed (test_join.EventTimeJoinTest.test_open_interval_needs_a_fresh_lot_feed) ... ok
+test_reading_after_replacement_uses_canola (test_join.EventTimeJoinTest.test_reading_after_replacement_uses_canola) ... ok
+test_backdated_placement_retracts_assessment_atomically_and_once (test_live_db.LiveRiskDatabaseTest.test_backdated_placement_retracts_assessment_atomically_and_once) ... ok
+test_connection_failures_are_transient_store_errors (test_live_db.LiveRiskDatabaseTest.test_connection_failures_are_transient_store_errors) ... ok
+test_duplicate_crash_and_replay (test_live_db.LiveRiskDatabaseTest.test_duplicate_crash_and_replay) ... ok
+test_event_time_join_and_contract_valid_outbox (test_live_db.LiveRiskDatabaseTest.test_event_time_join_and_contract_valid_outbox) ... ok
+test_every_unique_key_on_tenant_tables_is_tenant_scoped (test_live_db.LiveRiskDatabaseTest.test_every_unique_key_on_tenant_tables_is_tenant_scoped) ... ok
+test_forced_rls_isolates_tenants (test_live_db.LiveRiskDatabaseTest.test_forced_rls_isolates_tenants) ... ok
+test_invalid_measurements_quarantine_through_database_sink (test_live_db.LiveRiskDatabaseTest.test_invalid_measurements_quarantine_through_database_sink) ... ok
+test_overlapping_interval_is_excluded (test_live_db.LiveRiskDatabaseTest.test_overlapping_interval_is_excluded) ... ok
+test_policy_versions_select_by_bin_and_event_time_without_rewriting_history (test_live_db.LiveRiskDatabaseTest.test_policy_versions_select_by_bin_and_event_time_without_rewriting_history) ... ok
+test_runtime_role_limits (test_live_db.LiveRiskDatabaseTest.test_runtime_role_limits) ... ok
+test_same_ids_in_two_tenants_neither_collide_nor_leak (test_live_db.LiveRiskDatabaseTest.test_same_ids_in_two_tenants_neither_collide_nor_leak) ... ok
+test_stale_inventory_cannot_regress (test_live_db.LiveRiskDatabaseTest.test_stale_inventory_cannot_regress) ... ok
+test_sqlstate_classes (test_migrate.ClassifyTest.test_sqlstate_classes) ... ok
+test_applies_in_order_once_and_rejects_modified_history (test_migrate.MigrateTest.test_applies_in_order_once_and_rejects_modified_history) ... ok
+test_live_entry_point_is_idempotent (test_migrate.MigrateTest.test_live_entry_point_is_idempotent) ... <frozen runpy>:130: RuntimeWarning: 'risk_engine.migrate' found in sys.modules after import of package 'risk_engine', but prior to execution of 'risk_engine.migrate'; this may result in unpredictable behaviour
+ok
+test_main (test_migrate.MigrateTest.test_main) ... ok
+test_rejects_duplicate_versions_and_bad_names (test_migrate.MigrateTest.test_rejects_duplicate_versions_and_bad_names) ... ok
+test_repository_migrations_are_forward_only_and_named (test_migrate.MigrateTest.test_repository_migrations_are_forward_only_and_named) ... ok
+test_connection_loss_closes_and_reconnects (test_migrate.PgDatabaseUnitTest.test_connection_loss_closes_and_reconnects) ... ok
+test_algorithm_substitution_is_rejected (test_policy_auth.PolicyOIDCTest.test_algorithm_substitution_is_rejected) ... ok
+test_cognito_access_mode_accepts_only_mapped_human_access_tokens (test_policy_auth.PolicyOIDCTest.test_cognito_access_mode_accepts_only_mapped_human_access_tokens) ... ok
+test_http_publication_binds_verified_tenant_and_rejects_tenant_input (test_policy_auth.PolicyOIDCTest.test_http_publication_binds_verified_tenant_and_rejects_tenant_input) ... ok
+test_membership_mapping_overrides_signed_tenant_and_roles (test_policy_auth.PolicyOIDCTest.test_membership_mapping_overrides_signed_tenant_and_roles) ... ok
+test_membership_miss_is_denied_and_auth_header_is_strict (test_policy_auth.PolicyOIDCTest.test_membership_miss_is_denied_and_auth_header_is_strict) ... ok
+test_rejects_machine_device_and_non_admin_principals (test_policy_auth.PolicyOIDCTest.test_rejects_machine_device_and_non_admin_principals) ... ok
+test_rejects_wrong_issuer_audience_expiry_and_not_before (test_policy_auth.PolicyOIDCTest.test_rejects_wrong_issuer_audience_expiry_and_not_before) ... ok
+test_valid_signed_tenant_admin_returns_verified_principal (test_policy_auth.PolicyOIDCTest.test_valid_signed_tenant_admin_returns_verified_principal) ... ok
+test_active_policy_requires_scoring_thresholds_and_reachable_warning (test_policy_domain.PolicyValidationTest.test_active_policy_requires_scoring_thresholds_and_reachable_warning) ... ok
+test_calibration_requires_evidence_and_approval (test_policy_domain.PolicyValidationTest.test_calibration_requires_evidence_and_approval) ... ok
+test_measurement_validation_is_unit_aware_finite_and_optional (test_policy_domain.PolicyValidationTest.test_measurement_validation_is_unit_aware_finite_and_optional) ... ok
+test_policy_service_binds_tenant_role_and_calibration_approver (test_policy_domain.PolicyValidationTest.test_policy_service_binds_tenant_role_and_calibration_approver) ... ok
+test_unapproved_synthetic_values_are_draft_and_uncalibrated (test_policy_domain.PolicyValidationTest.test_unapproved_synthetic_values_are_draft_and_uncalibrated) ... ok
+test_additive_v2_measurements_are_accepted_without_changing_scoring (test_scoring.ScoringTest.test_additive_v2_measurements_are_accepted_without_changing_scoring) ... ok
+test_batch_change_selects_a_different_grain_policy (test_scoring.ScoringTest.test_batch_change_selects_a_different_grain_policy) ... ok
+test_boundaries_and_replay (test_scoring.ScoringTest.test_boundaries_and_replay) ... ok
+test_highest_allowed_threshold_keeps_critical_alert_eligible (test_scoring.ScoringTest.test_highest_allowed_threshold_keeps_critical_alert_eligible) ... ok
+test_invalid_inputs_and_policy_fail_closed (test_scoring.ScoringTest.test_invalid_inputs_and_policy_fail_closed) ... ok
+test_missing_inputs_do_not_generate_alerts (test_scoring.ScoringTest.test_missing_inputs_do_not_generate_alerts) ... ok
+test_all_four_routes_preserve_exact_epoch (test_shards.ShardTest.test_all_four_routes_preserve_exact_epoch) ... ok
+test_authority_latency_and_failure_metrics_are_bounded (test_shards.ShardTest.test_authority_latency_and_failure_metrics_are_bounded) ... ok
+test_entire_registry_validated_before_allocating (test_shards.ShardTest.test_entire_registry_validated_before_allocating) ... ok
+test_explicit_transport_ledger_and_all_shard_health_close (test_shards.ShardTest.test_explicit_transport_ledger_and_all_shard_health_close) ... ok
+test_failed_or_invalid_authority_never_queries_a_primary (test_shards.ShardTest.test_failed_or_invalid_authority_never_queries_a_primary) ... ok
+test_http_requires_tls_or_explicit_loopback_or_mesh (test_shards.ShardTest.test_http_requires_tls_or_explicit_loopback_or_mesh) ... ok
+test_sql_admission_precedes_business_and_failure_rolls_back (test_shards.ShardTest.test_sql_admission_precedes_business_and_failure_rolls_back) ... ok
+test_matching_admission_rls_stale_epoch_and_lock_drain (test_shards_live.ShardAdmissionLiveTest.test_matching_admission_rls_stale_epoch_and_lock_drain) ... skipped 'isolated shard acceptance URL absent'
+test_parses_additive_scalars_and_sensor_layout_provenance (test_telemetry_v2_events.TelemetryV2ParserTest.test_parses_additive_scalars_and_sensor_layout_provenance) ... ok
+test_rejects_unit_mismatch_duplicate_identity_and_missing_observations (test_telemetry_v2_events.TelemetryV2ParserTest.test_rejects_unit_mismatch_duplicate_identity_and_missing_observations) ... ok
+test_v1_and_v2_topic_schema_versions_are_not_interchangeable (test_telemetry_v2_events.TelemetryV2ParserTest.test_v1_and_v2_topic_schema_versions_are_not_interchangeable) ... ok
+
+----------------------------------------------------------------------
+Ran 97 tests in 1.998s
+
+OK (skipped=1)
+
+Go/risk offline validation completed: Mon Sep 28 08:57:37 UTC 2026

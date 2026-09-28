@@ -1,0 +1,66 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 692B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 381B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 35B done
+#5 DONE 0.0s
+
+#6 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#6 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S -g 10001 pgbouncer && adduser -S -u 10001 -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:f0e4962630124cf72b343541d72a683dccb6b3f4bc99ed4c7fcb02d5418fe6fe done
+#9 exporting config sha256:72b309d030f3a5fed9a237c61a9051c763ee313fccab3f6609aaf841cf18df7b done
+#9 exporting attestation manifest sha256:db31c3653b0182e07655ff7c46698ce1c8b92c375abba08300631036fcccc1d9 done
+#9 exporting manifest list sha256:bdd6fd267404865628c956a595497156bcd0387aa70b0a514c5fe197ea6919a8 done
+#9 naming to docker.io/library/gg-stage12-audit-4f66e1-pgbouncer:latest done
+#9 unpacking to docker.io/library/gg-stage12-audit-4f66e1-pgbouncer:latest done
+#9 DONE 0.0s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.0s
+
+ Image gg-stage12-audit-4f66e1-pgbouncer Building 
+ Image gg-stage12-audit-4f66e1-pgbouncer Built 
+ Network gg-stage12-audit-4f66e1_default Creating 
+ Volume gg-stage12-audit-4f66e1_postgres-data Creating 
+ Volume gg-stage12-audit-4f66e1_postgres-data Creating 
+ Network gg-stage12-audit-4f66e1_default Creating 
+ Volume gg-stage12-audit-4f66e1_postgres-data Created 
+ Volume gg-stage12-audit-4f66e1_postgres-data Created 
+ Network gg-stage12-audit-4f66e1_default Created 
+ Network gg-stage12-audit-4f66e1_default Created 
+ Container gg-stage12-audit-4f66e1-postgres-1 Creating 
+ Container gg-stage12-audit-4f66e1-postgres-1 Created 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Creating 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Created 
+ Container gg-stage12-audit-4f66e1-postgres-1 Starting 
+ Container gg-stage12-audit-4f66e1-postgres-1 Started 
+ Container gg-stage12-audit-4f66e1-postgres-1 Waiting 
+ Container gg-stage12-audit-4f66e1-postgres-1 Healthy 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Starting 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Started 
+ Container gg-stage12-audit-4f66e1-postgres-1 Waiting 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Waiting 
+ Container gg-stage12-audit-4f66e1-postgres-1 Healthy 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Healthy 
