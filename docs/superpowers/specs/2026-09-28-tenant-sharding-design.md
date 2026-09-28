@@ -1,7 +1,6 @@
 # Tenant sharding, read replicas and cache consistency
 
-Status: written specification awaiting user review. Architecture approved in
-conversation; implementation has not been approved against this written spec.
+Status: approved for implementation after user confirmed the four-shard topology and versioned consistent-hash onboarding assignment; execution in progress.
 Scope: finish one read replica per initial physical shard, then implement four-shard tenant routing and
 resumable short-pause moves across four local bundles, followed by disposable AWS
 acceptance. Existing replica/CDN edits remain candidates, not verified features.
