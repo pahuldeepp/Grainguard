@@ -21,7 +21,7 @@ resource "terraform_data" "deployment_readiness_gate" {
   lifecycle {
     precondition {
       condition     = var.allow_incomplete_foundation_plan
-      error_message = "This disposable root does not yet have end-to-end live acceptance. Controller and data-service bootstrap, populated Secrets, migrations, application health, Stage 11 telemetry, real-user tenant enrollment and web/iPhone acceptance need live proof. Secret-state security is also unresolved: sensitive inputs flow into aws_secretsmanager_secret_version and Helm release state/plan data; sensitive redaction does not keep values out of Terraform state. Do not apply until secret materialization avoids state exposure. Audit export is an additional first-cell blocker: Standard/Enterprise advertise audit_export, and the worker/S3 path is configured but still needs live signature, storage, and download acceptance. Do not apply it as a complete cell."
+      error_message = "This disposable root does not yet have end-to-end live acceptance. Controller and data-service bootstrap, populated Secrets, migrations, application health, Stage 11 telemetry, real-user tenant enrollment and web/iPhone acceptance need live proof. Secret payloads now use ephemeral Terraform inputs and AWS Secrets Manager write-only arguments; the mocked state-boundary fixture passed, but live secret synchronization and rotation still need acceptance. Audit export is an additional first-cell blocker: Standard/Enterprise advertise audit_export, and the worker/S3 path is configured but still needs live signature, storage, and download acceptance. Do not apply it as a complete cell."
     }
   }
 }

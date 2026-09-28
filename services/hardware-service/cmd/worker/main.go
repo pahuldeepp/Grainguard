@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -73,11 +75,18 @@ func run(ctx context.Context) error {
 	if err := ping(startupCtx); err != nil {
 		return fmt.Errorf("connect hardware database: %w", err)
 	}
-	client, err := hardware.KafkaClient(brokers)
+	var readiness workerReadiness
+	client, err := hardware.KafkaClientWithReadiness(brokers, readiness.consumerAssigned.Store)
 	if err != nil {
 		return err
 	}
 	defer client.CloseAllowingRebalance()
+	startupKafkaCtx, cancelKafkaPing := context.WithTimeout(ctx, 5*time.Second)
+	err = client.Ping(startupKafkaCtx)
+	cancelKafkaPing()
+	if err != nil {
+		return fmt.Errorf("connect hardware Kafka: %w", err)
+	}
 	store := hardware.Store{DB: db}
 	dispatcher := hardware.MQTTDispatcher{Store: store}
 	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
@@ -105,10 +114,12 @@ func run(ctx context.Context) error {
 		}
 	}
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		readiness.ackSubscribed.Store(false)
 		log.Printf("MQTT connection lost; reconnecting: %v", err)
 		requestReconnect()
 	})
 	opts.SetOnConnectHandler(func(mc mqtt.Client) {
+		readiness.ackSubscribed.Store(false)
 		ackSubscriptionMu.Lock()
 		if ackSubscriptionRunning {
 			ackResubscribePending = true
@@ -139,6 +150,7 @@ func run(ctx context.Context) error {
 						m.Ack()
 					})
 				}, 5*time.Second, 250*time.Millisecond, mqttSubscriptionTokenGranted, func() {
+					readiness.ackSubscribed.Store(true)
 					ackReadyOnce.Do(func() { close(ackSubscriptionReady) })
 				}, func(err error) {
 					log.Printf("MQTT ack subscription failed; retrying: %v", err)
@@ -157,6 +169,7 @@ func run(ctx context.Context) error {
 		}()
 	})
 	mqttClient := mqtt.NewClient(opts)
+	readiness.mqttConnected = mqttClient.IsConnected
 	dispatcher.Client = mqttClient
 	connectionDone := make(chan struct{})
 	go func() {
@@ -175,9 +188,16 @@ func run(ctx context.Context) error {
 	case <-ctx.Done():
 		return nil
 	}
-	return runWorkers(ctx,
-		dispatcher.Run,
-		(hardware.OutboxPublisher{Store: store, Client: client}).Run,
-		(hardware.Worker{Store: store, Client: client}).Run,
-	)
+	return common.RunHTTP(ctx, os.Getenv, ":8080", common.HealthHandler(readiness.ready, func(ctx context.Context) error {
+		return errors.Join(ping(ctx), client.Ping(ctx))
+	}, nil), net.Listen, func(ctx context.Context, server *http.Server, listener net.Listener) error {
+		return common.ServeWorker(ctx, server, listener, func(ctx context.Context) error {
+			readiness.serving.Store(true)
+			return runWorkers(ctx,
+				readiness.runWorker(dispatcher.Run),
+				readiness.runWorker((hardware.OutboxPublisher{Store: store, Client: client}).Run),
+				readiness.runWorker((hardware.Worker{Store: store, Client: client}).Run),
+			)
+		}, func() { readiness.serving.Store(false) }, nil, 5*time.Second)
+	})
 }

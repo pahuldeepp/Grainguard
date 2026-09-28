@@ -40,7 +40,7 @@ export function publicConfig(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     fail('Configuration must be a JSON object');
   const keys = ['authorizationEndpoint', 'tokenEndpoint', 'bffEndpoint', 'clientId', 'scope'];
-  if (Object.keys(input).some(key => ![...keys, 'audience'].includes(key)))
+  if (Object.keys(input).some(key => ![...keys, 'audience', 'audienceMode'].includes(key)))
     fail('Configuration contains an unexpected key; do not put secrets here');
   if (keys.some(key => typeof input[key] !== 'string' || !input[key]))
     fail(`Configuration requires: ${keys.join(', ')}`);
@@ -49,6 +49,16 @@ export function publicConfig(input) {
   if (input.audience !== undefined &&
     (typeof input.audience !== 'string' || !input.audience || input.audience.length > 200))
     fail('audience must be a nonempty public identifier');
+  if (input.audienceMode !== undefined && !['scope', 'query-param'].includes(input.audienceMode))
+    fail('audienceMode must be scope or query-param');
+  if (input.audience !== undefined && input.audienceMode === undefined)
+    fail('audience requires an explicit audienceMode');
+  if (input.audienceMode !== undefined && !input.audience)
+    fail('audienceMode requires an audience identifier');
+  if (input.audienceMode === 'scope' && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,99}$/.test(input.audience))
+    fail('scope audience mode requires a valid Dex client ID');
+  if (input.audienceMode === 'scope' && input.scope.split(/\s+/).includes(`audience:server:client_id:${input.audience}`))
+    fail('scope audience is added by the PKCE client; do not include it twice');
   if (input.scope.length > 500 || !input.scope.split(/\s+/).includes('openid'))
     fail('scope must include openid and be at most 500 characters');
   const bffEndpoint = httpsUrl(input.bffEndpoint, 'bffEndpoint');
@@ -61,6 +71,7 @@ export function publicConfig(input) {
     redirectUri: 'greenguard://auth/callback',
     scope: input.scope,
     ...(input.audience ? { audience: input.audience } : {}),
+    ...(input.audienceMode ? { audienceMode: input.audienceMode } : {}),
     bffEndpoint,
   };
 }

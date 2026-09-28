@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Isolated Risk-owner move safety exercise. It proves the owner-local fence and
-// copy, then expects control-plane cutover to fail closed because eight other
-// owner adapters do not yet exist. This is not multi-owner migration acceptance.
+// Isolated Risk-owner move acceptance. It verifies owner-local CDC fencing, atomic
+// copy receipt, target abort, and source reactivation, while the global control-plane
+// move still fails closed because the full owner adapter set is not integrated.
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -194,14 +194,18 @@ try {
     await import("../services/tenant-control-plane/dist/domain/placement.js");
   const leases =
     await import("../services/tenant-control-plane/dist/domain/read-leases.js");
+  const riskOwnerModule = pathToFileURL(
+    process.env.GG_RISK_OWNER_MODULE ?? resolve(root, "services/tenant-control-plane/dist/tenant-move/risk-owner.js"),
+  ).href;
   const {
+    abortRiskMoveTarget,
     activateRiskMoveTarget,
-    copyTenantSnapshot,
+    copyRiskTenantSnapshot,
     fenceRiskMoveSource,
     prepareRiskMoveTarget,
-    recordRiskMoveCopy,
-  } =
-    await import("../services/tenant-control-plane/dist/tenant-move/pg-owner.js");
+    reactivateRiskMoveSource,
+    assertRiskMoveEffectsDrained,
+  } = await import(riskOwnerModule);
   const control = createDb(environment.CONTROL_DATABASE_URL, 4);
   const actor = {
     issuer: "https://tenant-move.local",
@@ -359,6 +363,36 @@ try {
       await accepted.query("ROLLBACK").catch(() => {});
       accepted.release();
     }
+    // CDC history remains intentionally unmigratable. Prove both the adapter
+    // preflight and the owner SQL fence refuse a different tenant with outbox rows.
+    const outboxWriter = await connectScoped(adminSource, otherTenant, sourceIdentity);
+    try {
+      await outboxWriter.query(
+        `INSERT INTO outbox_events(event_id,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,occurred_at,correlation_id,causation_id,traceparent,payload) VALUES($1,$2,'device',$3,1,'risk.test',1,clock_timestamp(),$4,$5,'', '{}'::jsonb)`,
+        [randomUUID(), otherTenant, unrelatedDevice, randomUUID(), randomUUID()],
+      );
+      await outboxWriter.query("COMMIT");
+    } finally {
+      await outboxWriter.query("ROLLBACK").catch(() => {});
+      outboxWriter.release();
+    }
+    await assert.rejects(
+      assertRiskMoveEffectsDrained(adminSource, otherTenant),
+      /CDC outbox history/,
+    );
+    await assert.rejects(
+      adminSource.query(
+        `SELECT greenguard_internal.fence_tenant_move_source($1::uuid,$2::uuid,$3,$4::uuid,$5::bigint,$6,$7::uuid,$8::bigint)`,
+        [otherTenant, randomUUID(), sourceIdentity.shardId, sourceIdentity.incarnation, sourceIdentity.epoch,
+          targetIdentity.shardId, targetIdentity.incarnation, targetIdentity.epoch],
+      ),
+      /CDC outbox history/,
+    );
+    assert.equal(
+      (await adminSource.query("SELECT state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [otherTenant])).rows[0].state,
+      "active",
+    );
+
     const sourceFencedReceipt = await fenceRiskMoveSource(
       adminSource,
       tenantId,
@@ -367,7 +401,7 @@ try {
       targetIdentity,
     );
 
-    const copy = await copyTenantSnapshot(
+    const copy = await copyRiskTenantSnapshot(
       source,
       target,
       tenantId,
@@ -375,9 +409,9 @@ try {
       sourceIdentity,
       targetIdentity,
     );
-    assert.equal(copy.sourceSha256, copy.targetSha256);
-    assert.ok(BigInt(copy.rowCount) >= 1n);
-    const copyProof = await recordRiskMoveCopy(adminTarget, copy);
+    assert.equal(copy.evidence.sourceSha256, copy.evidence.targetSha256);
+    assert.ok(BigInt(copy.evidence.rowCount) >= 1n);
+    const copyProof = copy.receipt;
     for (const [key, proof] of [
       ["source_fenced", sourceFencedReceipt],
       ["target_prepared", preparedReceipt],
@@ -496,9 +530,49 @@ try {
       await unrelatedRead.query("ROLLBACK").catch(() => {});
       unrelatedRead.release();
     }
-    console.log(
-      `Risk-owner safety exercise passed: operation=${operationId} tables=${copy.tableCount} rows=${copy.rowCount} sha256=${copy.sourceSha256}; lease drain and source fence verified, copied data and unrelated tenant preserved, and cutover correctly refused with tenant still on s1/epoch 1 because all nine owner adapters are not implemented. This is not multi-owner move acceptance.`,
+    const targetAbortReceipt = await abortRiskMoveTarget(
+      adminTarget, tenantId, operationId, sourceIdentity, targetIdentity,
     );
+    assert.equal(targetAbortReceipt.owner, "risk");
+    assert.equal(targetAbortReceipt.state, "absent");
+    const sourceReactivatedReceipt = await reactivateRiskMoveSource(
+      adminSource, tenantId, operationId, sourceIdentity, targetIdentity, targetAbortReceipt,
+    );
+    assert.equal(sourceReactivatedReceipt.owner, "risk");
+    assert.equal(sourceReactivatedReceipt.epoch, targetIdentity.epoch);
+    assert.equal(
+      (await adminTarget.query("SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1", [tenantId])).rows[0].count,
+      0,
+    );
+    assert.equal(
+      (await adminSource.query("SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId])).rows[0].epoch,
+      targetIdentity.epoch,
+    );
+    const stillQuiescing = await placement.resolveTenant(control, tenantId);
+    assert.equal(stillQuiescing.state, "quiescing");
+    assert.equal(stillQuiescing.placementEpoch, "1");
+    console.log(
+      `Risk-owner isolated acceptance passed: operation=${operationId} tables=${copy.evidence.tableCount} rows=${copy.evidence.rowCount} sha256=${copy.evidence.sourceSha256}; atomic copy receipt, CDC history refusal, source fence, abort cleanup, and epoch-advanced owner reactivation verified. Global cutover remains refused because all nine owner adapters are not integrated.`,
+    );
+    const abortedTarget = await abortRiskMoveTarget(
+      adminTarget, tenantId, operationId, sourceIdentity, targetIdentity,
+    );
+    assert.equal(abortedTarget.owner, "risk");
+    assert.equal(abortedTarget.state, "absent");
+    const reactivatedSource = await reactivateRiskMoveSource(
+      adminSource, tenantId, operationId, sourceIdentity, targetIdentity, abortedTarget,
+    );
+    assert.equal(reactivatedSource.owner, "risk");
+    assert.equal(reactivatedSource.epoch, targetIdentity.epoch);
+    assert.equal(
+      (await adminTarget.query("SELECT count(*)::int AS count FROM device_bindings WHERE tenant_id=$1", [tenantId])).rows[0].count,
+      0,
+    );
+    assert.equal(
+      (await adminSource.query("SELECT state,placement_epoch::text AS epoch FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1", [tenantId])).rows[0].epoch,
+      targetIdentity.epoch,
+    );
+    console.log("Risk owner target abort removed imported rows and source reactivated at the advanced epoch; control-plane placement remains quiescing because owner-wide receipts are incomplete.");
   } finally {
     await Promise.all([
       source.end(),

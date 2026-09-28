@@ -1,11 +1,16 @@
 variable "runtime_secret_values" {
-  description = "Explicit runtime secret string maps, including real upstream credentials and CA/key material. Sensitive values enter encrypted Terraform state; use an approved encrypted backend. Terraform overrides environment-owned endpoints."
+  description = "Ephemeral runtime Secret payloads. Values are written only through Secrets Manager write-only arguments and are not stored in Terraform plans/state."
   type        = map(map(string))
   sensitive   = true
+  ephemeral   = true
   default     = {}
   validation {
     condition     = alltrue([for values in values(var.runtime_secret_values) : length(values) > 0 && alltrue([for key, value in values : length(key) > 0 && length(value) > 0])])
     error_message = "Runtime secret values must be nonempty string maps with nonempty keys and values."
+  }
+  validation {
+    condition     = alltrue([for name in keys(var.runtime_secret_values) : contains(var.secret_names, name)])
+    error_message = "Every supplied runtime secret payload name must be included in secret_names; generated-secret payload names are rejected by the runtime materialization precondition."
   }
 }
 
@@ -13,6 +18,7 @@ variable "audit_export_signing_material" {
   description = "Sensitive Ed25519 signing material for the disposable audit exporter. Supply matching PKCS#8 private and SPKI public PEMs, a key id, and a 32+ byte API link secret; worker startup validates the key pair."
   type        = map(string)
   sensitive   = true
+  ephemeral   = true
   default     = {}
   validation {
     condition = length(var.audit_export_signing_material) == 0 || (
@@ -92,7 +98,9 @@ locals {
     }
   } : {}
   generated_all_runtime_values = merge(local.generated_runtime_values, local.generated_projection_maintenance_values, local.generated_audit_export_values)
-  runtime_secret_input_names   = setunion(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))), nonsensitive(toset(keys(local.generated_all_runtime_values))))
+  # Secret names are public, state-stable resource keys. Never derive instance
+  # addresses or triggers from ephemeral payload values.
+  runtime_secret_input_names = var.secret_names
   runtime_secret_owned_values = {
     for name, values in merge(var.runtime_secret_values, local.generated_migration_values, local.generated_all_runtime_values) : name => merge(
       { for key, value in values : key => value if !contains([for config, profile in local.runtime_database_profiles : profile.key if !contains(["tenant-control-plane-config", "billing-service-config"], config)], key) },
@@ -122,18 +130,31 @@ locals {
     versions         = merge(local.runtime_secret_version_ids, local.shard_registry_secret_versions, local.shard_bootstrap_secret_versions, local.shard_data_secret_versions, local.projector_registry_secret_versions)
     sources          = merge({ for name, secret in aws_secretsmanager_secret.runtime : name => secret.name if contains(local.runtime_secret_input_names, name) }, local.shard_registry_secret_sources, local.shard_bootstrap_secret_sources, local.shard_data_secret_sources, local.projector_registry_secret_sources)
     shard_bootstraps = local.shard_bootstrap_scope
-    master_version   = try(data.aws_secretsmanager_secret_version.runtime_master[0].version_id, "")
+    master_version   = try(one([for version in data.aws_secretsmanager_secret_versions.runtime_master[0].versions : version.version_id if contains(version.version_stages, "AWSCURRENT")]), "")
   }
 }
 
 resource "aws_secretsmanager_secret_version" "runtime" {
-  for_each      = local.runtime_secret_input_names
-  secret_id     = aws_secretsmanager_secret.runtime[each.key].id
-  secret_string = jsonencode(local.runtime_secret_owned_values[each.key])
+  for_each  = var.secret_names
+  secret_id = aws_secretsmanager_secret.runtime[each.key].id
+  # A name/payload mismatch must reach the explanatory precondition below,
+  # rather than fail first with an opaque invalid map index.
+  secret_string_wo         = try(jsonencode(local.runtime_secret_owned_values[each.key]), jsonencode({}))
+  secret_string_wo_version = lookup(var.secret_version_counters, "runtime/${each.key}", 1)
   lifecycle {
     precondition {
       condition     = contains(var.secret_names, each.key) && !contains(["prod", "production"], lower(var.environment))
       error_message = "Runtime values require approved Terraform-owned containers in a non-production disposable environment."
+    }
+    precondition {
+      condition = nonsensitive(toset(keys(var.runtime_secret_values))) == setsubtract(
+        var.secret_names,
+        setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))
+        ) && length(setintersection(
+          nonsensitive(toset(keys(var.runtime_secret_values))),
+          setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))
+      )) == 0
+      error_message = "Application bootstrap requires exactly one caller payload for every approved non-generated runtime secret, with no missing, extra, or generated-secret payload names."
     }
     precondition {
       condition     = !contains(keys(local.runtime_secret_exact_keys), each.key) || try(toset(keys(var.runtime_secret_values[each.key])) == local.runtime_secret_exact_keys[each.key], false)
@@ -157,7 +178,7 @@ resource "terraform_data" "runtime_secret_sync" {
   depends_on       = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing, terraform_data.runtime_secret_cleanup]
   lifecycle {
     precondition {
-      condition     = local.runtime_secret_input_names == var.secret_names && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_migration_values))))) == 0 && length(setintersection(nonsensitive(toset(keys(var.runtime_secret_values))), nonsensitive(toset(keys(local.generated_all_runtime_values))))) == 0
+      condition     = toset(keys(var.runtime_secret_values)) == setsubtract(var.secret_names, setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))) && length(setintersection(toset(keys(var.runtime_secret_values)), setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values))))) == 0
       error_message = "Application bootstrap requires Terraform-owned values for every approved secret container and no extra values."
     }
   }
@@ -169,11 +190,12 @@ resource "terraform_data" "runtime_secret_sync" {
 }
 
 # RDS rotates its managed master credential independently of supplied role
-# passwords. Tracking only its public version ID resynchronizes bootstrap.
-data "aws_secretsmanager_secret_version" "runtime_master" {
-  count         = var.enable_application_tree ? 1 : 0
-  secret_id     = aws_db_instance.postgres.master_user_secret[0].secret_arn
-  version_stage = "AWSCURRENT"
+# passwords. This data source returns version metadata only; the singular
+# secret-version data source also returns SecretString and persists it.
+data "aws_secretsmanager_secret_versions" "runtime_master" {
+  count              = var.enable_application_tree ? 1 : 0
+  secret_id          = aws_db_instance.postgres.master_user_secret[0].secret_arn
+  include_deprecated = false
 }
 
 # Keep cleanup ownership in a resource with no create provisioner. Terraform

@@ -139,23 +139,6 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function digestRows(
-  tables: TenantTable[],
-  rowsByTable: Map<string, QueryResultRow[]>,
-): { sha256: string; rowCount: bigint } {
-  const hash = createHash("sha256");
-  let rowCount = 0n;
-  for (const table of tables) {
-    hash.update(`table:${table.name}\n`);
-    for (const row of rowsByTable.get(table.name) ?? []) {
-      hash.update(canonical(row));
-      hash.update("\n");
-      rowCount++;
-    }
-  }
-  return { sha256: hash.digest("hex"), rowCount };
-}
-
 async function assertOwner(
   client: PoolClient,
   tenantId: string,
@@ -307,12 +290,15 @@ export async function fenceRiskMoveSource(
   return receipt;
 }
 
+/** Persist Risk's copy proof on the target transaction's client. Call only from
+ * copyTenantSnapshot(onVerified): this makes the durable receipt atomic with the
+ * imported tenant rows and makes a post-COMMIT retry safely discoverable.
+ */
 export async function recordRiskMoveCopy(
-  pool: Pool,
+  targetClient: PoolClient,
   evidence: CopyEvidence,
 ): Promise<MoveReceipt> {
-  const receipt = await callReceipt(
-    pool,
+  const result = await targetClient.query<{ receipt: MoveReceipt }>(
     `SELECT greenguard_internal.record_tenant_move_copy($1::uuid,$2::uuid,$3,$4,$5::bigint,$6::integer) AS receipt`,
     [
       evidence.tenantId,
@@ -323,6 +309,9 @@ export async function recordRiskMoveCopy(
       evidence.tableCount,
     ],
   );
+  const receipt = result.rows[0]?.receipt;
+  if (!receipt || typeof receipt !== "object")
+    throw new Error("Risk copy receipt procedure returned no receipt");
   assertReceiptIdentity(
     receipt,
     evidence.tenantId,
@@ -331,6 +320,8 @@ export async function recordRiskMoveCopy(
     evidence.source,
     evidence.target,
   );
+  if (receipt.owner !== "risk")
+    throw new Error("Risk copy receipt has no Risk owner identity");
   if (
     receipt.sourceSha256 !== evidence.sourceSha256 ||
     receipt.targetSha256 !== evidence.targetSha256 ||
@@ -408,6 +399,10 @@ export async function copyTenantSnapshot(
   operationId: string,
   source: OwnerIdentity,
   target: OwnerIdentity,
+  onVerified?: (
+    targetClient: PoolClient,
+    evidence: CopyEvidence,
+  ) => Promise<void>,
 ): Promise<CopyEvidence> {
   if (!UUID.test(tenantId)) throw new Error("invalid tenant id");
   if (!UUID.test(operationId)) throw new Error("invalid move operation id");
@@ -428,23 +423,6 @@ export async function copyTenantSnapshot(
     ]);
     await assertOwner(sourceClient, tenantId, source, "fenced");
     const tables = await inspectTables(sourceClient);
-    const sourceRows = new Map<string, QueryResultRow[]>();
-    for (const table of tables) {
-      const selected = table.columns
-        .map((column) =>
-          table.types.get(column)?.startsWith("json")
-            ? `${identifier(column)}::text AS ${identifier(column)}`
-            : identifier(column),
-        )
-        .join(",");
-      const result = await sourceClient.query(
-        `SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`,
-        [tenantId],
-      );
-      sourceRows.set(table.name, result.rows);
-    }
-    const sourceEvidence = digestRows(tables, sourceRows);
-
     await targetClient.query("BEGIN");
     await targetClient.query("SELECT set_config('app.tenant_id',$1,true)", [
       tenantId,
@@ -465,50 +443,101 @@ export async function copyTenantSnapshot(
       [operationId],
     );
     await assertOwner(targetClient, tenantId, target, "prepared");
-    for (const table of tables) {
-      const existing = await targetClient.query(
-        `SELECT 1 FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid LIMIT 1`,
-        [tenantId],
-      );
-      if (existing.rowCount)
-        throw new Error(`target already contains tenant rows in ${table.name}`);
-      for (const row of sourceRows.get(table.name) ?? []) {
-        const columns = table.columns;
-        const values = columns.map((column) => row[column]);
-        const placeholders = columns.map(
-          (column, index) =>
-            `$${index + 1}${table.types.get(column)?.startsWith("json") ? `::${table.types.get(column)}` : ""}`,
-        );
-        await targetClient.query(
-          `INSERT INTO public.${identifier(table.name)} (${columns.map(identifier).join(",")}) VALUES (${placeholders.join(",")})`,
-          values,
-        );
-      }
-    }
-    const targetRows = new Map<string, QueryResultRow[]>();
-    for (const table of tables) {
-      const selected = table.columns
+    const sourceHash = createHash("sha256");
+    const targetHash = createHash("sha256");
+    let sourceRowCount = 0n;
+    let targetRowCount = 0n;
+    const pageSize = 500;
+    const selectedColumns = (table: TenantTable) =>
+      table.columns
         .map((column) =>
           table.types.get(column)?.startsWith("json")
             ? `${identifier(column)}::text AS ${identifier(column)}`
             : identifier(column),
         )
         .join(",");
-      const result = await targetClient.query(
-        `SELECT ${selected} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid ORDER BY ${table.primaryKey.map(identifier).join(",")}`,
+    const readPage = async (
+      client: PoolClient,
+      table: TenantTable,
+      cursor?: QueryResultRow,
+    ) => {
+      const keyColumns = table.primaryKey.map(identifier).join(",");
+      const values: unknown[] = [tenantId];
+      let after = "";
+      if (cursor) {
+        values.push(...table.primaryKey.map((column) => cursor[column]));
+        after = ` AND (${keyColumns}) > (${table.primaryKey.map((_, index) => `$${index + 2}`).join(",")})`;
+      }
+      values.push(pageSize);
+      const limit = `$${values.length}::integer`;
+      return client.query(
+        `SELECT ${selectedColumns(table)} FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid${after} ORDER BY ${keyColumns} LIMIT ${limit}`,
+        values,
+      );
+    };
+    for (const table of tables) {
+      sourceHash.update(`table:${table.name}\n`);
+      targetHash.update(`table:${table.name}\n`);
+      const existing = await targetClient.query(
+        `SELECT 1 FROM public.${identifier(table.name)} WHERE tenant_id=$1::uuid LIMIT 1`,
         [tenantId],
       );
-      targetRows.set(table.name, result.rows);
+      if (existing.rowCount)
+        throw new Error(`target already contains tenant rows in ${table.name}`);
+      let cursor: QueryResultRow | undefined;
+      let sourceTableRowCount = 0n;
+      for (;;) {
+        const page = await readPage(sourceClient, table, cursor);
+        for (const row of page.rows) {
+          sourceHash.update(canonical(row));
+          sourceHash.update("\n");
+          sourceRowCount++;
+          sourceTableRowCount++;
+          const values = table.columns.map((column) => row[column]);
+          const placeholders = table.columns.map(
+            (column, index) =>
+              `$${index + 1}${table.types.get(column)?.startsWith("json") ? `::${table.types.get(column)}` : ""}`,
+          );
+          await targetClient.query(
+            `INSERT INTO public.${identifier(table.name)} (${table.columns.map(identifier).join(",")}) VALUES (${placeholders.join(",")})`,
+            values,
+          );
+        }
+        if (page.rows.length < pageSize) break;
+        cursor = page.rows.at(-1);
+      }
+      cursor = undefined;
+      let targetTableRowCount = 0n;
+      for (;;) {
+        const page = await readPage(targetClient, table, cursor);
+        for (const row of page.rows) {
+          targetHash.update(canonical(row));
+          targetHash.update("\n");
+          targetTableRowCount++;
+          targetRowCount++;
+        }
+        if (page.rows.length < pageSize) break;
+        cursor = page.rows.at(-1);
+      }
+      // Compare per-table counts, so one table's missing rows cannot be hidden by
+      // another table's extra rows.
+      if (targetTableRowCount !== sourceTableRowCount)
+        throw new Error(`tenant row count mismatch in ${table.name}`);
     }
-    const targetEvidence = digestRows(tables, targetRows);
+    const sourceEvidence = {
+      sha256: sourceHash.digest("hex"),
+      rowCount: sourceRowCount,
+    };
+    const targetEvidence = {
+      sha256: targetHash.digest("hex"),
+      rowCount: targetRowCount,
+    };
     if (
       sourceEvidence.sha256 !== targetEvidence.sha256 ||
       sourceEvidence.rowCount !== targetEvidence.rowCount
     )
       throw new Error("tenant snapshot digest mismatch");
-    await targetClient.query("COMMIT");
-    await sourceClient.query("COMMIT");
-    return {
+    const evidence: CopyEvidence = {
       tenantId,
       operationId,
       source,
@@ -519,6 +548,13 @@ export async function copyTenantSnapshot(
       targetSha256: targetEvidence.sha256,
       verifiedAt: new Date().toISOString(),
     };
+    // Owner-specific durable copy evidence must commit atomically with imported
+    // tenant rows. Without this hook a crash after COMMIT but before receipt
+    // recording leaves an occupied prepared target that cannot be retried safely.
+    await onVerified?.(targetClient, evidence);
+    await targetClient.query("COMMIT");
+    await sourceClient.query("COMMIT");
+    return evidence;
   } catch (error) {
     await targetClient.query("ROLLBACK").catch(() => {});
     await sourceClient.query("ROLLBACK").catch(() => {});

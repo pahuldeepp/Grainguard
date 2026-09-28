@@ -50,16 +50,15 @@ const DEFAULT_SKEW_MS = 30_000;
 
 function identityOf(tokens: TokenSet): Identity {
   const claims = decodeClaims(tokens.accessToken);
-  const { tenant_id: tenantClaim, sub, iss } = claims;
+  const { sub, iss } = claims;
   if (typeof sub !== "string" || !sub) throw new Error("Token has no subject");
-  if (typeof tenantClaim === "string" && tenantClaim)
-    return { tenantId: tenantClaim, subject: sub };
-  // The local IdP (Dex) issues no tenant claim: GreenGuard maps membership to a
-  // tenant server side (ADR-0014). The BFF stays the authority; this value only
-  // scopes local caches and queues per user, and is never sent as a tenant.
+  // Tenant membership is first-party GreenGuard state, not an IdP claim. Even
+  // when an access token happens to contain tenant_id, this client cannot
+  // verify its signature and must ask the BFF to validate the token and resolve
+  // (issuer, subject) against authoritative membership before scoping local data.
   if (typeof iss === "string" && iss)
     return { tenantId: `unresolved@${iss}`, subject: sub };
-  throw new Error("Token has no tenant claim");
+  throw new Error("Token has no issuer");
 }
 
 // Tokens and the PKCE material live only in the injected SecureStore (Keychain

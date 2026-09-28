@@ -17,13 +17,14 @@ SPEC.loader.exec_module(gate)
 class WorkloadGateTests(unittest.TestCase):
     def setUp(self):
         self.cell = {"account_id": "123456789012", "region": "us-west-2", "environment": "dev", "cluster_name": "gg-test"}
-        self.contract = {"releases": [{"name": "bff", "image": "bff"}]}
+        self.contract = {"releases": [{"name": "bff", "image": "bff", "health": "/readyz"}]}
         self.image = "ghcr.io/pahuldeepp/grainguard/bff@sha256:" + "a" * 64
         self.release = {"gitops_revision": "b" * 40, "deployment_image_digests": {"bff": self.image}}
         labels = {"app.kubernetes.io/instance": "bff"}
         self.snapshot = {"items": [
             {"kind": "Deployment", "metadata": {"labels": labels, "generation": 2},
-             "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": "bff", "image": self.image}]}}},
+             "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": "bff", "image": self.image,
+                                                                                 "readinessProbe": {"httpGet": {"path": "/readyz"}}}]}}},
              "status": {"observedGeneration": 2, "updatedReplicas": 1, "readyReplicas": 1, "availableReplicas": 1, "replicas": 1}},
             {"kind": "Pod", "metadata": {"labels": labels}, "spec": {"containers": [{"name": "bff", "image": self.image}]},
              "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}],
@@ -33,6 +34,24 @@ class WorkloadGateTests(unittest.TestCase):
     def test_exact_healthy_release_passes(self):
         gate.inputs(self.cell, self.release, self.contract)
         self.assertEqual([], gate.readiness(self.snapshot, self.release, self.contract))
+
+    def test_deployment_contract_health_path_requires_matching_readiness_probe(self):
+        self.snapshot["items"][0]["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]["path"] = "/healthz"
+        self.assertIn("readiness probe differs", " ".join(gate.readiness(self.snapshot, self.release, self.contract)))
+        self.snapshot["items"][0]["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] = None
+        self.assertIn("readiness probe differs", " ".join(gate.readiness(self.snapshot, self.release, self.contract)))
+
+    def test_exec_readiness_contract_requires_exact_command(self):
+        contract = {"releases": [{"name": "bff", "image": "bff", "health": {
+            "type": "exec", "command": ["python", "-c", "check-ready"]}}]}
+        snapshot = copy.deepcopy(self.snapshot)
+        container = snapshot["items"][0]["spec"]["template"]["spec"]["containers"][0]
+        container["readinessProbe"] = {"exec": {"command": ["python", "-c", "check-ready"]}}
+        self.assertEqual([], gate.readiness(snapshot, self.release, contract))
+        container["readinessProbe"]["exec"]["command"][-1] = "wrong-check"
+        self.assertIn("readiness probe differs", " ".join(gate.readiness(snapshot, self.release, contract)))
+        container["readinessProbe"] = None
+        self.assertIn("readiness probe differs", " ".join(gate.readiness(snapshot, self.release, contract)))
 
     def test_inputs_reject_production_foreign_registry_mutable_and_missing_images(self):
         for mutate in [lambda cell, release: cell.update(environment="prod"),
@@ -93,6 +112,38 @@ class WorkloadGateTests(unittest.TestCase):
         self.snapshot["items"][0]["kind"] = "Rollout"
         self.assertIn("controller-aware", gate.readiness(self.snapshot, self.release, self.contract)[0])
 
+    def test_scheduled_shard_task_requires_cronjob_and_successful_initial_job(self):
+        task_image = "ghcr.io/pahuldeepp/grainguard/projection-builder@sha256:" + "d" * 64
+        self.release["deployment_image_digests"]["projection-builder"] = task_image
+        self.contract["scheduledTasks"] = [{"name": "projection-history-s1", "image": "projection-builder",
+                                            "schedule": "*/10 * * * *", "initialJob": "projection-history-s1-initial"}]
+        labels = {"app.kubernetes.io/instance": "projection-history-s1"}
+        self.snapshot["items"].extend([
+            {"kind": "CronJob", "metadata": {"labels": labels}, "spec": {
+                "schedule": "*/10 * * * *", "suspend": False,
+                "jobTemplate": {"spec": {"template": {"spec": {"containers": [{"image": task_image}]}}}},
+            }},
+            {"kind": "Job", "metadata": {"name": "projection-history-s1-initial", "labels": labels},
+             "spec": {"template": {"spec": {"containers": [{"image": task_image}]}}},
+             "status": {"succeeded": 1, "conditions": [{"type": "Complete", "status": "True"}]}},
+        ])
+        self.assertEqual([], gate.readiness(self.snapshot, self.release, self.contract))
+        self.snapshot["items"][-1]["status"] = {"succeeded": 0, "conditions": []}
+        self.assertIn("initial Job has not completed", " ".join(gate.readiness(self.snapshot, self.release, self.contract)))
+
+    def test_missing_or_suspended_shard_maintenance_blocks_acceptance(self):
+        self.contract["scheduledTasks"] = [{"name": "projection-history-s1", "image": "projection-builder",
+                                            "schedule": "*/10 * * * *", "initialJob": "projection-history-s1-initial"}]
+        self.release["deployment_image_digests"]["projection-builder"] = "ghcr.io/pahuldeepp/grainguard/projection-builder@sha256:" + "d" * 64
+        self.assertIn("expected exactly one CronJob", " ".join(gate.readiness(self.snapshot, self.release, self.contract)))
+        labels = {"app.kubernetes.io/instance": "projection-history-s1"}
+        image = self.release["deployment_image_digests"]["projection-builder"]
+        self.snapshot["items"].append({"kind": "CronJob", "metadata": {"labels": labels}, "spec": {
+            "schedule": "*/10 * * * *", "suspend": True,
+            "jobTemplate": {"spec": {"template": {"spec": {"containers": [{"image": image}]}}}},
+        }})
+        self.assertIn("schedule, suspension or immutable image", " ".join(gate.readiness(self.snapshot, self.release, self.contract)))
+
     def test_account_mismatch_stops_before_any_cluster_call(self):
         with patch.object(gate, "command", return_value="999999999999") as command:
             with self.assertRaisesRegex(ValueError, "account differs"):
@@ -115,6 +166,7 @@ class WorkloadGateTests(unittest.TestCase):
             self.assertEqual(self.snapshot, gate.collect(self.cell, "explicit-kubeconfig"))
             args = [call.args[0] for call in command.call_args_list]
             self.assertEqual(["sts", "eks", "--kubeconfig", "--kubeconfig", "--kubeconfig", "--kubeconfig"], [arg[1] for arg in args])
+            self.assertIn("deployments,statefulsets,pods,cronjobs,jobs", args[4])
             self.assertTrue(all("apply" not in arg and "delete" not in arg and "update-kubeconfig" not in arg for arg in args))
 
     def test_optional_rollout_discovery_collects_and_blocks_replaced_deployment(self):

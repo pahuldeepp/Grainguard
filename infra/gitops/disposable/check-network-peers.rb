@@ -170,6 +170,14 @@ abort 'hardware worker MQTT CA mount must be appended inside container.volumeMou
   gitops_terraform.match?(/volumeMounts\s*=\s*concat\([\s\S]*release\.name == "hardware-service-worker" \? \[\{ name = "mqtt-ca"/) &&
     !gitops_terraform.match?(/release\.name == "hardware-service-worker" \? \{ volumeMounts\s*=/)
 hardware_profile = YAML.load_file(File.join(ROOT, 'infra/helm/greenguard-service/values/hardware-service-worker.yaml'))
+abort 'hardware worker dependency readiness probes must be enabled without publishing a Service' unless
+  hardware_profile.dig('service', 'enabled') == false &&
+    hardware_profile.dig('probes', 'startup', 'enabled') == true &&
+    hardware_profile.dig('probes', 'startup', 'path') == '/readyz' &&
+    hardware_profile.dig('probes', 'readiness', 'enabled') == true &&
+    hardware_profile.dig('probes', 'readiness', 'path') == '/readyz' &&
+    hardware_profile.dig('probes', 'liveness', 'enabled') == true &&
+    hardware_profile.dig('probes', 'liveness', 'path') == '/healthz'
 hardware_mount_overlay = {
   'container' => {
     'volumeMounts' => Array(hardware_profile.dig('container', 'volumeMounts')) + [
@@ -193,6 +201,12 @@ Tempfile.create(['hardware-mount-overlay', '.yaml']) do |file|
   mount_names = Array(hardware_container && hardware_container['volumeMounts']).map { |mount| mount['name'] }
   abort 'hardware worker render must retain both MQTT CA and shard registry container mounts' unless
     %w[mqtt-ca shard-registry].all? { |name| mount_names.include?(name) }
+  abort 'hardware worker readiness probes need a named HTTP container port without a Service' unless
+    hardware_container&.dig('ports')&.any? { |port| port['name'] == 'http' && port['containerPort'] == 8080 } &&
+      hardware_container.dig('startupProbe', 'httpGet', 'path') == '/readyz' &&
+      hardware_container.dig('readinessProbe', 'httpGet', 'path') == '/readyz' &&
+      hardware_container.dig('livenessProbe', 'httpGet', 'path') == '/healthz' &&
+      !YAML.load_stream(mount_output).compact.any? { |item| item['kind'] == 'Service' }
 end
 _, rejected_error, rejected_status = Open3.capture3(
   'helm', 'template', 'reject-wide', File.join(ROOT, 'infra/helm/greenguard-service'),

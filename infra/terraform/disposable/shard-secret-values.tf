@@ -2,6 +2,7 @@ variable "shard_role_passwords" {
   description = "Sensitive complete bootstrap role/password maps for exactly s1-s4. These passwords also derive migration URLs; no endpoint or role is caller controlled."
   type        = map(map(string))
   sensitive   = true
+  ephemeral   = true
   default     = {}
   validation {
     condition     = length(var.shard_role_passwords) == 0 || (toset(keys(var.shard_role_passwords)) == toset(["s1", "s2", "s3", "s4"]) && alltrue([for passwords in values(var.shard_role_passwords) : alltrue([for password in values(passwords) : length(password) > 0])]))
@@ -13,6 +14,7 @@ variable "shard_registry_passwords" {
   description = "Sensitive service => s1-s4 password maps for shard-routing services. Each must equal the service's actual bootstrap role password. Terraform derives immutable incarnations and endpoints."
   type        = map(map(string))
   sensitive   = true
+  ephemeral   = true
   default     = {}
 }
 
@@ -59,16 +61,17 @@ locals {
   shard_bootstrap_secret_sources  = { for shard_id in local.postgres_shard_ids : "greenguard-${shard_id}-rds-bootstrap" => aws_secretsmanager_secret.shard["${shard_id}/bootstrap"].name if var.enable_application_tree }
   shard_bootstrap_scope = { for shard_id, shard in aws_db_instance.shard : "greenguard-${shard_id}-rds-bootstrap" => {
     instance       = shard.identifier, host = shard.address, master_arn = shard.master_user_secret[0].secret_arn,
-    master_version = try(data.aws_secretsmanager_secret_version.shard_master[shard_id].version_id, "")
+    master_version = try(one([for version in data.aws_secretsmanager_secret_versions.shard_master[shard_id].versions : version.version_id if contains(version.version_stages, "AWSCURRENT")]), "")
     incarnation    = local.shard_incarnations[shard_id]
     replica_hosts  = [for replica_id, replica in aws_db_instance.read_replica : replica.address if local.postgres_shard_replicas[replica_id].shard_id == shard_id]
   } if var.enable_application_tree }
 }
 
 resource "aws_secretsmanager_secret_version" "shard_routing" {
-  for_each      = var.enable_application_tree ? local.shard_service_profiles : {}
-  secret_id     = aws_secretsmanager_secret.shard_routing[each.key].id
-  secret_string = jsonencode(local.shard_registry_values[each.key])
+  for_each                 = var.enable_application_tree ? local.shard_service_profiles : {}
+  secret_id                = aws_secretsmanager_secret.shard_routing[each.key].id
+  secret_string_wo         = jsonencode(local.shard_registry_values[each.key])
+  secret_string_wo_version = lookup(var.secret_version_counters, "shard-routing/${each.key}", 1)
   lifecycle {
     precondition {
       condition     = nonsensitive(toset(keys(var.shard_registry_passwords))) == toset(keys(local.shard_service_profiles)) && alltrue([for service, profile in local.shard_service_profiles : try(toset(keys(var.shard_registry_passwords[service])) == local.postgres_shard_ids && alltrue([for shard_id in local.postgres_shard_ids : var.shard_registry_passwords[service][shard_id] != "" && var.shard_registry_passwords[service][shard_id] == var.shard_role_passwords[shard_id][profile.password_key]]), false)])
@@ -82,9 +85,10 @@ resource "aws_secretsmanager_secret_version" "shard_routing" {
 }
 
 resource "aws_secretsmanager_secret_version" "shard_bootstrap" {
-  for_each      = var.enable_application_tree ? local.postgres_shard_ids : toset([])
-  secret_id     = aws_secretsmanager_secret.shard["${each.key}/bootstrap"].id
-  secret_string = jsonencode(var.shard_role_passwords[each.key])
+  for_each                 = var.enable_application_tree ? local.postgres_shard_ids : toset([])
+  secret_id                = aws_secretsmanager_secret.shard["${each.key}/bootstrap"].id
+  secret_string_wo         = jsonencode(var.shard_role_passwords[each.key])
+  secret_string_wo_version = lookup(var.secret_version_counters, "shard-bootstrap/${each.key}", 1)
   lifecycle {
     precondition {
       condition     = nonsensitive(toset(keys(var.shard_role_passwords))) == local.postgres_shard_ids && alltrue([for passwords in values(var.shard_role_passwords) : toset(keys(passwords)) == local.runtime_shard_bootstrap_role_keys])
@@ -93,10 +97,10 @@ resource "aws_secretsmanager_secret_version" "shard_bootstrap" {
   }
 }
 
-data "aws_secretsmanager_secret_version" "shard_master" {
-  for_each      = var.enable_application_tree ? local.postgres_shard_ids : toset([])
-  secret_id     = aws_db_instance.shard[each.key].master_user_secret[0].secret_arn
-  version_stage = "AWSCURRENT"
+data "aws_secretsmanager_secret_versions" "shard_master" {
+  for_each           = var.enable_application_tree ? local.postgres_shard_ids : toset([])
+  secret_id          = aws_db_instance.shard[each.key].master_user_secret[0].secret_arn
+  include_deprecated = false
 }
 
 locals {
@@ -113,9 +117,10 @@ locals {
 }
 
 resource "aws_secretsmanager_secret_version" "shard_data" {
-  for_each      = var.enable_application_tree ? nonsensitive(toset(keys(local.shard_data_secret_values))) : toset([])
-  secret_id     = aws_secretsmanager_secret.shard[each.key].id
-  secret_string = jsonencode(local.shard_data_secret_values[each.key])
+  for_each                 = var.enable_application_tree ? nonsensitive(toset(keys(local.shard_data_secret_values))) : toset([])
+  secret_id                = aws_secretsmanager_secret.shard[each.key].id
+  secret_string_wo         = jsonencode(local.shard_data_secret_values[each.key])
+  secret_string_wo_version = lookup(var.secret_version_counters, "shard-data/${each.key}", 1)
   lifecycle {
     precondition {
       condition     = alltrue([for role, password_keys in local.shard_pgbouncer_roles : try(length(var.shard_role_passwords[split("/", each.key)[0]][password_keys[0]]) > 0 && !can(regex("[\"\\\\\r\n]", var.shard_role_passwords[split("/", each.key)[0]][password_keys[0]])), false)])
@@ -151,9 +156,10 @@ resource "aws_secretsmanager_secret" "projector_routing" {
 }
 
 resource "aws_secretsmanager_secret_version" "projector_routing" {
-  for_each      = var.enable_application_tree ? local.projector_registry_profiles : {}
-  secret_id     = aws_secretsmanager_secret.projector_routing[each.key].id
-  secret_string = jsonencode(local.projector_registry_values[each.key])
+  for_each                 = var.enable_application_tree ? local.projector_registry_profiles : {}
+  secret_id                = aws_secretsmanager_secret.projector_routing[each.key].id
+  secret_string_wo         = jsonencode(local.projector_registry_values[each.key])
+  secret_string_wo_version = lookup(var.secret_version_counters, "projector-routing/${each.key}", 1)
   lifecycle {
     precondition {
       condition     = alltrue([for shard_id in local.postgres_shard_ids : try(length(var.shard_role_passwords[shard_id][each.value.password_key]) > 0, false)])

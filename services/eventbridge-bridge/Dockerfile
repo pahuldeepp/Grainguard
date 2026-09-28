@@ -4,5 +4,6 @@ WORKDIR /app
 COPY services/eventbridge-bridge/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/eventbridge-bridge/bridge.py ./bridge.py
+COPY services/eventbridge-bridge/worker_health.py ./worker_health.py
 USER 10001:10001
 ENTRYPOINT ["python", "/app/bridge.py"]

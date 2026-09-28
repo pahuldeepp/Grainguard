@@ -1,15 +1,23 @@
 # Disposable runtime Secret ownership
 
-`runtime_secret_values` is a sensitive map of approved Kubernetes Secret names to
-nonempty string maps. Supply real upstream credentials and valid TLS/CA material.
-`secret_names` approves the AWS containers. Today, values flow into
-`aws_secretsmanager_secret_version.secret_string` and Terraform plans/state.
-Terraform's `sensitive` flag redacts normal CLI display; it does not remove
-values from plans or state. This conflicts with the no-secret-values-in-state
-deployment requirement. The default readiness gate must remain closed until
-secret materialization is refactored to keep values out of Terraform state and
-plans. An encrypted backend is still required for all other state, but is not
-a substitute for this requirement.
+`runtime_secret_values`, `audit_export_signing_material`, `shard_role_passwords`
+and `shard_registry_passwords` are sensitive ephemeral inputs. AWS Secrets
+Manager versions receive the payload only through the provider's write-only
+`secret_string_wo` argument; state stores the public version ID and the
+`secret_string_wo_version` counter, never the secret payload. Secret resource
+addresses and runtime sync triggers use public secret names, ARNs and version
+metadata, not secret contents. RDS master rotation metadata comes from the
+`aws_secretsmanager_secret_versions` data source, whose pinned provider schema
+does not include a secret-value field.
+
+Inject payloads through the approved protected runner environment. Do not put
+them in `.tfvars`, command-line arguments, saved plan files or logs. Increment
+the corresponding public `secret_version_counters` entry to rotate a payload;
+write-only arguments cannot detect payload changes themselves. The mocked
+provider sentinel test verifies that a secret payload is absent from Terraform
+output and fixture artifacts. This is offline state-boundary evidence, not live
+Secrets Manager synchronization/rotation acceptance. An encrypted backend is
+still required for all other state.
 
 Terraform derives the two central runtime database URLs and 38 migration URLs
 from actual RDS addresses and bootstrap role passwords. The migration inventory
@@ -45,10 +53,11 @@ S3 bucket, and `audit_export_signing_material`. Supply exactly
 sensitive variable; the worker validates that the Ed25519 keys match at
 startup. Terraform also copies the public key, link secret, bucket, region and
 billing URL into `tenant-control-plane-config` for the download API. Keep the
-private key out of that API Secret. These values enter encrypted Terraform
-state and Secrets Manager. The readiness contract checks generated Secret
-shape and key references offline; only live export/download acceptance proves
-the actual credentials and signature path against AWS.
+private key out of that API Secret. Secret payloads use ephemeral inputs and
+Secrets Manager write-only arguments, so Terraform plans/state do not retain
+them. The readiness contract checks generated Secret shape and key references
+offline; only live export/download acceptance proves the actual credentials
+and signature path against AWS.
 
 The routing sources remain `greenguard/<environment>/shard-routing/<service>`.
 Their Kubernetes names are `greenguard-shard-routing-<service>` and their only

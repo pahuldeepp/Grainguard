@@ -18,6 +18,28 @@ provided authorization/token endpoints must agree with issuer discovery. A
 provider incompatible with these requirements needs a separately reviewed
 client change; Terraform cannot adapt it silently.
 
+Set `existing_oidc.mobile_audience_mode` for the mobile authorization request.
+Use `scope` with Dex: Terraform exports the audience and mode, and the native
+PKCE client adds `audience:server:client_id:<audience>` to the scope parameter;
+it does not send an `audience=` query parameter. The Dex template must trust the
+audience client (`greenguard-dashboard`) from `greenguard-mobile`. Providers
+that specifically support the conventional `audience=` parameter can select
+`query-param`; this mode sends the audience as that parameter. Cognito remains
+unchanged and exports neither mobile audience field.
+
+For the repository's Dex provider, the relevant input fragment is:
+
+```hcl
+existing_oidc = {
+  # ...issuer/endpoints/client IDs...
+  audience             = "greenguard-dashboard"
+  mobile_audience_mode = "scope"
+}
+```
+
+For a generic provider that expects an `audience=` query parameter, use its
+registered API audience and set `mobile_audience_mode = "query-param"`.
+
 `identity_mode = "cognito"` explicitly opts into a disposable Cognito pool and
 public code-flow clients. Cognito uses `cognito-access`, a client-ID allowlist,
 and `openid profile email`; no legacy audience is inherited. Cognito outputs

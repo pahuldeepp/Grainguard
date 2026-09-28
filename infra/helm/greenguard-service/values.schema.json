@@ -164,11 +164,16 @@
       "required": ["enabled", "path", "periodSeconds"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "type": { "type": "string", "enum": ["http", "tcp"] },
+        "type": { "type": "string", "enum": ["http", "tcp", "exec"] },
         "path": { "type": "string", "pattern": "^/" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
         "periodSeconds": { "type": "integer", "minimum": 1 },
         "failureThreshold": { "type": "integer", "minimum": 1 }
-      }
+      },
+      "allOf": [{
+        "if": { "properties": { "type": { "const": "exec" } }, "required": ["type"] },
+        "then": { "required": ["command"] }
+      }]
     },
     "egressService": {
       "type": "object",

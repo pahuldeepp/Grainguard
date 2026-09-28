@@ -166,7 +166,7 @@
       "image": "hardware-service",
       "phase": "applications",
       "secret": "hardware-service-config",
-      "health": null
+      "health": "/readyz"
     },
     {
       "name": "eventbridge-bridge",
@@ -175,7 +175,10 @@
       "image": "eventbridge-bridge",
       "phase": "applications",
       "secret": "eventbridge-bridge-config",
-      "health": null
+      "health": {
+        "type": "exec",
+        "command": ["python", "-c", "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"]
+      }
     },
     {
       "name": "saga-api",
@@ -247,7 +250,10 @@
       "image": "search-indexer",
       "phase": "applications",
       "secret": "search-indexer-config",
-      "health": null
+      "health": {
+        "type": "exec",
+        "command": ["python", "-c", "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/readyz\", timeout=2)"]
+      }
     },
     {
       "name": "device-saga-worker",

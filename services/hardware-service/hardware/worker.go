@@ -88,10 +88,31 @@ func (w Worker) process(ctx context.Context, m transport.Message) error {
 
 // KafkaClient creates a fail-closed consumer with manual offset commits.
 func KafkaClient(brokers []string) (*kgo.Client, error) {
+	return KafkaClientWithReadiness(brokers, nil)
+}
+
+// KafkaClientWithReadiness reports when the consumer group has an assigned
+// partition, and clears that signal while ownership is being revoked or lost.
+// This is a stronger worker-readiness signal than merely reaching a broker.
+func KafkaClientWithReadiness(brokers []string, onAssignment func(bool)) (*kgo.Client, error) {
 	if len(brokers) == 0 {
 		return nil, errors.New("KAFKA_BROKERS required")
 	}
-	options, err := transport.SecureOptions(brokers, ConsumerGroup, []string{CommandTopic})
+	extra := []kgo.Opt{}
+	if onAssignment != nil {
+		extra = append(extra,
+			kgo.OnPartitionsAssigned(func(_ context.Context, _ *kgo.Client, assigned map[string][]int32) {
+				count := 0
+				for _, partitions := range assigned {
+					count += len(partitions)
+				}
+				onAssignment(count > 0)
+			}),
+			kgo.OnPartitionsRevoked(func(context.Context, *kgo.Client, map[string][]int32) { onAssignment(false) }),
+			kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) { onAssignment(false) }),
+		)
+	}
+	options, err := transport.SecureOptions(brokers, ConsumerGroup, []string{CommandTopic}, extra...)
 	if err != nil {
 		return nil, err
 	}

@@ -15,9 +15,26 @@ container:
   name: eventbridge-bridge
   command: ["python", "/app/bridge.py"]
 probes:
-  startup: { enabled: false, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
-  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
-  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+  startup:
+    enabled: true
+    type: exec
+    path: /healthz
+    command: [python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)']
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    path: /readyz
+    command: [python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/readyz", timeout=2)']
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    path: /healthz
+    command: [python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2)']
+    periodSeconds: 10
+    failureThreshold: 6
 scheduling:
   nodeSelector:
     greenguard.io/workload-class: compute

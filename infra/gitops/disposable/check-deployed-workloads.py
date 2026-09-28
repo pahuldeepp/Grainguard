@@ -93,6 +93,25 @@ def readiness(snapshot, release, contract):
         if not isinstance(template, list) or any(not isinstance(container, dict) for container in template):
             raise ValueError(f"{name}: invalid workload container template")
         runtime = [container["name"] for container in template if container.get("image") == expected_image]
+        expected_health = entry.get("health")
+        if expected_health and runtime:
+            runtime_container = next(container for container in template if container.get("name") == runtime[0])
+            probe = runtime_container.get("readinessProbe", {})
+            http_probe = probe.get("httpGet", {}) if isinstance(probe, dict) else {}
+            tcp_probe = probe.get("tcpSocket", {}) if isinstance(probe, dict) else {}
+            if isinstance(expected_health, str) and expected_health.startswith("/"):
+                health_matches = isinstance(http_probe, dict) and http_probe.get("path") == expected_health
+            elif isinstance(expected_health, str) and expected_health.startswith("tcp:") and expected_health[4:].isdigit():
+                health_matches = isinstance(tcp_probe, dict) and tcp_probe.get("port") == int(expected_health[4:])
+            elif (isinstance(expected_health, dict) and expected_health.get("type") == "exec"
+                  and set(expected_health) == {"type", "command"}
+                  and isinstance(expected_health.get("command"), list)):
+                exec_probe = probe.get("exec", {}) if isinstance(probe, dict) else {}
+                health_matches = isinstance(exec_probe, dict) and exec_probe.get("command") == expected_health["command"]
+            else:
+                health_matches = False
+            if not health_matches:
+                failures.append(f"{name}: readiness probe differs from deployment contract")
         if not current or not complete or len(runtime) != 1:
             failures.append(f"{name}: generation, replicas or immutable template image not ready")
         pods = [pod for pod in selected if pod.get("kind") == "Pod"]
@@ -115,6 +134,58 @@ def readiness(snapshot, release, contract):
                 failures.append(f"{name}: runtime container has not started and become ready")
             if pod_status.get("phase") != "Running" or not ready:
                 failures.append(f"{name}: pod readiness gate not satisfied")
+
+    # Scheduled maintenance is part of the deployed contract too. These
+    # sharded CronJobs are not Helm releases and therefore are invisible to
+    # the release loop above. Require both the recurring task and its initial
+    # Argo sync Job so a healthy API deployment cannot mask an unmaintained
+    # shard or a failed first partition bootstrap.
+    for task in contract.get("scheduledTasks", []):
+        name = task.get("name")
+        expected_image = release["deployment_image_digests"].get(task.get("image"))
+        if not isinstance(name, str) or not expected_image:
+            failures.append("scheduled task: invalid contract image or name")
+            continue
+        selected = [obj for obj in items
+                    if obj.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/instance") == name]
+        cronjobs = [obj for obj in selected if obj.get("kind") == "CronJob"]
+        if len(cronjobs) != 1:
+            failures.append(f"{name}: expected exactly one CronJob")
+        else:
+            cronjob = cronjobs[0]
+            spec = cronjob.get("spec", {})
+            job_template = spec.get("jobTemplate", {}) if isinstance(spec, dict) else {}
+            job_spec = job_template.get("spec", {}) if isinstance(job_template, dict) else {}
+            template = job_spec.get("template", {}) if isinstance(job_spec, dict) else {}
+            pod_spec = template.get("spec", {}) if isinstance(template, dict) else {}
+            containers = pod_spec.get("containers", []) if isinstance(pod_spec, dict) else []
+            if (not isinstance(spec, dict) or spec.get("schedule") != task.get("schedule")
+                    or spec.get("suspend") is True or not isinstance(containers, list)
+                    or sum(1 for container in containers if isinstance(container, dict)
+                           and container.get("image") == expected_image) != 1):
+                failures.append(f"{name}: schedule, suspension or immutable image differs from contract")
+        initial_name = task.get("initialJob")
+        initial_jobs = [obj for obj in selected if obj.get("kind") == "Job"
+                        and obj.get("metadata", {}).get("name") == initial_name]
+        if not isinstance(initial_name, str) or len(initial_jobs) != 1:
+            failures.append(f"{name}: expected exactly one completed initial Job")
+        else:
+            job = initial_jobs[0]
+            job_spec = job.get("spec", {})
+            template = job_spec.get("template", {}) if isinstance(job_spec, dict) else {}
+            pod_spec = template.get("spec", {}) if isinstance(template, dict) else {}
+            containers = pod_spec.get("containers", []) if isinstance(pod_spec, dict) else []
+            status = job.get("status", {})
+            conditions = status.get("conditions", []) if isinstance(status, dict) else []
+            succeeded = status.get("succeeded", 0) if isinstance(status, dict) else 0
+            if (not isinstance(containers, list)
+                    or sum(1 for container in containers if isinstance(container, dict)
+                           and container.get("image") == expected_image) != 1
+                    or not isinstance(conditions, list)
+                    or not any(condition.get("type") == "Complete" and condition.get("status") == "True"
+                               for condition in conditions if isinstance(condition, dict))
+                    or _integer(succeeded, "initial Job succeeded count") < 1):
+                failures.append(f"{name}: initial Job has not completed at the immutable image")
     return failures
 
 
@@ -152,7 +223,7 @@ def collect(cell, kubeconfig, deadline=None):
         raise ValueError("kubeconfig TLS trust differs from saved EKS cluster")
     if run(kubectl + ["get", "--raw=/readyz"]).strip() != "ok":
         raise ValueError("private EKS API is not ready/reachable from this runner")
-    snapshot = json.loads(run(kubectl + ["get", "deployments,statefulsets,pods", "--namespace", "greenguard", "-o", "json"]))
+    snapshot = json.loads(run(kubectl + ["get", "deployments,statefulsets,pods,cronjobs,jobs", "--namespace", "greenguard", "-o", "json"]))
     resources = run(kubectl + ["api-resources", "--api-group=argoproj.io", "--verbs=list", "-o", "name"]).splitlines()
     if "rollouts.argoproj.io" in resources:
         rollouts = json.loads(run(kubectl + ["get", "rollouts.argoproj.io", "--namespace", "greenguard", "-o", "json"]))

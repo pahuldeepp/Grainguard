@@ -54,16 +54,16 @@ class DeploymentGateWiringTests(unittest.TestCase):
         self.assertIn("default     = false", source)
         self.assertIn("count = var.allow_incomplete_foundation_plan ? 0 : 1", source)
         self.assertIn("Do not apply it as a complete cell", source)
-        self.assertIn("Secret-state security is also unresolved", source)
-        self.assertIn("sensitive redaction does not keep values out of Terraform state", source)
+        self.assertIn("Secret payloads now use ephemeral Terraform inputs and AWS Secrets Manager write-only arguments", source)
+        self.assertIn("mocked state-boundary fixture passed", source)
 
     def test_secret_state_exposure_is_connected_to_the_materialization_path(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
         shards = (ROOT / "shard-secret-values.tf").read_text()
         self.assertIn('resource "aws_secretsmanager_secret_version" "runtime"', runtime)
-        self.assertIn("secret_string = jsonencode(local.runtime_secret_owned_values[each.key])", runtime)
+        self.assertRegex(runtime, r"secret_string_wo\s*= try\(jsonencode\(local\.runtime_secret_owned_values\[each\.key\]\), jsonencode\(\{\}\)\)")
         self.assertIn('resource "aws_secretsmanager_secret_version" "shard_routing"', shards)
-        self.assertIn("secret_string = jsonencode(local.shard_registry_values[each.key])", shards)
+        self.assertRegex(shards, r"secret_string_wo\s*= jsonencode\(local\.shard_registry_values\[each\.key\]\)")
 
 
 if __name__ == "__main__":

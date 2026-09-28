@@ -59,8 +59,11 @@ The following Terraform outputs are public deployment configuration:
   (cd ../../../apps/mobile/shell && npm run configure:aws -- deployment.local.json)
   ```
 
-  The file contains only HTTPS endpoints, a public client ID, and scopes; it
-  contains no password, token or client secret. The physical iPhone build and
+  The file contains only HTTPS endpoints, public client IDs/audience selection,
+  and scopes; it contains no password, token or client secret. For Dex, set
+  `mobile_audience_mode = "scope"` and use audience `greenguard-dashboard`;
+  for a provider that supports the standard parameter, set
+  `mobile_audience_mode = "query-param"`. The physical iPhone build and
   its login/API journey still require a live device acceptance run.
 
 For the default existing OIDC provider, set `AUTH_TOKEN_MODE=audience`,

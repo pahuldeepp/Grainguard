@@ -9,7 +9,7 @@ variable "identity_mode" {
 }
 
 variable "existing_oidc" {
-  description = "Existing issuer must support discovery, Authorization Code + PKCE, and JWT access tokens with this audience. Register the exported web/mobile callbacks at that issuer."
+  description = "Existing issuer must support discovery, Authorization Code + PKCE, and JWT access tokens with this audience. Set mobile_audience_mode to scope for Dex cross-client scopes or query-param for providers that require audience=; register the exported callbacks."
   type = object({
     issuer                 = string
     jwks_url               = string
@@ -20,6 +20,9 @@ variable "existing_oidc" {
     audience               = string
     scopes                 = optional(list(string), ["openid", "profile", "email", "offline_access"])
     token_mode             = optional(string, "audience")
+    # Dex expresses the API audience as a cross-client scope; providers such as
+    # Auth0 may instead require the conventional `audience=` query parameter.
+    mobile_audience_mode = string
   })
   default = null
   validation {
@@ -35,9 +38,11 @@ variable "existing_oidc" {
       alltrue([for id in [var.existing_oidc.web_client_id, var.existing_oidc.mobile_client_id] : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$", id))]) &&
       length(trimspace(var.existing_oidc.audience)) > 0 && var.existing_oidc.audience == trimspace(var.existing_oidc.audience) && length(var.existing_oidc.audience) <= 200 &&
       var.existing_oidc.token_mode == "audience" &&
+      contains(["scope", "query-param"], var.existing_oidc.mobile_audience_mode) &&
+      (var.existing_oidc.mobile_audience_mode != "scope" || can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$", var.existing_oidc.audience))) &&
       toset(var.existing_oidc.scopes) == toset(["openid", "profile", "email", "offline_access"])
     )
-    error_message = "Existing OIDC requires valid public client IDs, a nonempty access-token audience, audience token mode, and the scopes currently requested by the dashboard: openid profile email offline_access."
+    error_message = "Existing OIDC requires valid public client IDs, a nonempty access-token audience, audience token mode, mobile_audience_mode scope or query-param, a Dex-valid client ID when using scope mode, and the scopes currently requested by the dashboard: openid profile email offline_access."
   }
 }
 
@@ -65,6 +70,7 @@ locals {
     audience               = ""
     scopes                 = ["openid", "profile", "email"]
     token_mode             = "cognito-access"
+    mobile_audience_mode   = null
   } : var.existing_oidc
   oidc_verifier_env = local.oidc_public == null ? [] : [
     { name = "AUTH_TOKEN_MODE", value = local.oidc_public.token_mode },
@@ -90,7 +96,10 @@ locals {
     bffEndpoint           = "https://${aws_cloudfront_distribution.api.domain_name}/graphql"
     clientId              = local.oidc_public.mobile_client_id
     scope                 = join(" ", local.oidc_public.scopes)
-  }, var.identity_mode == "existing-oidc" ? { audience = local.oidc_public.audience } : {})
+    }, var.identity_mode == "existing-oidc" ? {
+    audience     = local.oidc_public.audience
+    audienceMode = var.existing_oidc.mobile_audience_mode
+  } : {})
 }
 
 resource "aws_cognito_user_pool" "cell" {

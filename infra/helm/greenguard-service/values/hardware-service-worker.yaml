@@ -17,9 +17,9 @@ container:
   name: hardware-service-worker
   command: ["/usr/local/bin/hardware-worker"]
 probes:
-  startup: { enabled: false, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
-  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
-  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+  startup: { enabled: true, path: /readyz, periodSeconds: 5, failureThreshold: 60 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
 scheduling:
   nodeSelector:
     greenguard.io/workload-class: compute

@@ -7,7 +7,7 @@ class IdentityContractTest < Minitest::Test
   def test_existing_identity_is_default_and_requires_public_configuration
     assert_match(/variable "identity_mode".*?default = "existing-oidc"/m, SOURCE)
     assert_includes SOURCE, 'var.identity_mode == "cognito" || var.existing_oidc != null'
-    %w[issuer jwks_url authorization_endpoint token_endpoint web_client_id mobile_client_id audience scopes token_mode].each do |field|
+    %w[issuer jwks_url authorization_endpoint token_endpoint web_client_id mobile_client_id audience scopes token_mode mobile_audience_mode].each do |field|
       assert_match(/^\s+#{field}\s+=/, SOURCE)
     end
   end
@@ -24,13 +24,33 @@ class IdentityContractTest < Minitest::Test
     assert_includes SOURCE, 'var.existing_oidc.token_mode == "audience"'
     assert_includes SOURCE, 'length(trimspace(var.existing_oidc.audience)) > 0'
     assert_includes SOURCE, 'toset(var.existing_oidc.scopes) == toset(["openid", "profile", "email", "offline_access"])'
-    assert_includes SOURCE, 'var.identity_mode == "existing-oidc" ? { audience = local.oidc_public.audience } : {}'
+    assert_includes SOURCE, 'contains(["scope", "query-param"], var.existing_oidc.mobile_audience_mode)'
+    assert_match(/mobile_audience_mode\s+= string/, SOURCE)
+    assert_includes SOURCE, 'var.existing_oidc.mobile_audience_mode != "scope" || can(regex('
+    assert_includes SOURCE, 'audienceMode = var.existing_oidc.mobile_audience_mode'
+    assert_includes SOURCE, 'audience     = local.oidc_public.audience'
+    assert_includes SOURCE, 'scope                 = join(" ", local.oidc_public.scopes)'
     assert_includes SOURCE, 'mobile_callback        = "greenguard://auth/callback"'
     assert_includes SOURCE, '/auth/callback"'
     auth = File.read(File.expand_path('../../../apps/dashboard/src/auth.ts', __dir__))
     assert_includes auth, 'response_type: "code"'
     assert_includes auth, '"openid profile email offline_access"'
     assert_includes auth, 'user.access_token'
+  end
+
+  def test_dex_scope_mode_is_trusted_and_mobile_pkce_does_not_send_audience_query
+    dex = File.read(File.expand_path('../../oidc/dex.yaml.tpl', __dir__))
+    assert_includes dex, 'id: greenguard-dashboard'
+    assert_includes dex, 'trustedPeers:'
+    assert_match(/id: greenguard-dashboard.*?trustedPeers:\s+- greenguard-mobile/m, dex)
+    assert_includes dex, 'audience:server:client_id:greenguard-dashboard'
+    pkce = File.read(File.expand_path('../../../apps/mobile/src/pkce.ts', __dir__))
+    assert_includes pkce, 'audience:server:client_id:${config.audience}'
+    assert_includes pkce, 'config.audienceMode !== "scope"'
+    assert_includes pkce, 'params.set("audience", config.audience)'
+    pkce_tests = File.read(File.expand_path('../../../apps/mobile/src/pkce.test.ts', __dir__))
+    assert_includes pkce_tests, 'Dex scope audience is requested as a scope without an audience query parameter'
+    assert_includes pkce_tests, 'url.searchParams.has("audience"), false'
   end
 
   def test_verifier_and_public_configs_use_selected_identity

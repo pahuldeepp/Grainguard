@@ -30,13 +30,18 @@ set the incomplete-foundation override for a GreenGuard end-to-end deployment.
    availability zones, and an existing operator role ARN. Set `secret_names`
    only for secret containers this cell owns. Also select a region that supports
    CloudFront VPC origins and supply a compatible EBS CSI add-on version.
-   **Do not apply this root yet if the requirement is that secret values never
-   enter Terraform state or plans.** The current `aws_secretsmanager_secret_version`
-   resources store generated and supplied values in Terraform state; marking
-   variables `sensitive` only redacts normal CLI output. The default readiness
-   gate now reports this as an unresolved blocker. Refactor secret materialization
-   to avoid Terraform state exposure before deployment. Never use the incomplete
-   foundation override to bypass that gate.
+   Secret payload inputs are ephemeral and are written by AWS provider
+   `secret_string_wo` arguments. They are omitted from Terraform plan/state;
+   master-secret rotation tracking uses version metadata only. Never put secret
+   values in `terraform.tfvars`, command-line arguments, or saved plans; inject
+   them through the approved protected runner environment. Increment the
+   corresponding nonsecret `secret_version_counters` key when rotating a
+   payload, for example `runtime/device-service-config` or
+   `shard-bootstrap/s1`. The mocked no-state fixture verifies a sentinel secret
+   does not appear in Terraform output or generated artifacts. The normal
+   readiness gate remains closed for live secret synchronization/rotation and
+   the other end-to-end acceptance gaps. Never use the incomplete-foundation
+   override to bypass that gate.
    For a laptop-run deployment, either connect through a VPN/in-VPC runner to
    the private EKS API, or set `cluster_endpoint_public_access = true` and
    `cluster_endpoint_public_access_cidrs` to your operator's public `/32`

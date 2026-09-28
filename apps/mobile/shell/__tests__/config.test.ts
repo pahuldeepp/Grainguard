@@ -16,7 +16,9 @@ test('dev live config points at the local Dex client and holds no secret', () =>
   expect(LOCAL_DEV_CONFIG.authorizationEndpoint).toBe(
     'http://127.0.0.1:5556/dex/auth',
   );
-  expect(LOCAL_DEV_CONFIG.scope).toContain('audience:server:client_id:');
+  expect(LOCAL_DEV_CONFIG.audienceMode).toBe('scope');
+  expect(LOCAL_DEV_CONFIG.audience).toBe('greenguard-dashboard');
+  expect(LOCAL_DEV_CONFIG.scope).not.toContain('audience:server:client_id:');
   expect(JSON.stringify(LOCAL_DEV_CONFIG)).not.toMatch(/password|secret/i);
 });
 

@@ -5,6 +5,7 @@ WORKDIR /app
 COPY services/search-indexer/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/search-indexer/search_indexer.py ./search_indexer.py
+COPY services/search-indexer/worker_health.py ./worker_health.py
 RUN useradd --system --uid 10001 indexer
 USER 10001
 ENTRYPOINT ["python", "/app/search_indexer.py"]

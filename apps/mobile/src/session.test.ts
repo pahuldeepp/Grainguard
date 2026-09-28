@@ -33,6 +33,7 @@ function harness() {
   let refreshFailure: Response | null = null;
   let counter = 0;
   let membershipLookups = 0;
+  let membershipTenant = "tenant-authoritative";
   let currentNonce = "";
   const fetchFn = (async (_url: string, init: RequestInit) => {
     const body = new URLSearchParams(String(init.body));
@@ -45,7 +46,10 @@ function harness() {
       access_token: fakeJwt({
         ...(grant.noTenantClaim
           ? { iss: "http://127.0.0.1:5556/dex" }
-          : { tenant_id: grant.tenant ?? "tenant-a" }),
+          : {
+              iss: "https://issuer.example",
+              tenant_id: grant.tenant ?? "tenant-a",
+            }),
         sub: grant.sub ?? "user-1",
         n: counter,
       }),
@@ -62,7 +66,7 @@ function harness() {
     crypto: defaultCrypto(),
     resolveMembership: async () => {
       membershipLookups += 1;
-      return { tenantId: "tenant-authoritative", subject: "user-1" };
+      return { tenantId: membershipTenant, subject: "user-1" };
     },
   });
   const beginSignIn = session.beginSignIn.bind(session);
@@ -78,6 +82,7 @@ function harness() {
     requests,
     session,
     membershipLookups: () => membershipLookups,
+    setMembershipTenant: (tenantId: string) => { membershipTenant = tenantId; },
     failRefresh: (response: Response | null) => (refreshFailure = response),
   };
 }
@@ -90,10 +95,14 @@ async function signIn(h: ReturnType<typeof harness>) {
   );
 }
 
-test("sign-in stores tokens only in the secure store and reads identity from claims", async () => {
+test("sign-in resolves tenant membership through the BFF even when the token has tenant_id", async () => {
   const h = harness();
   const identity = await signIn(h);
-  assert.deepEqual(identity, { tenantId: "tenant-a", subject: "user-1" });
+  assert.deepEqual(identity, {
+    tenantId: "tenant-authoritative",
+    subject: "user-1",
+  });
+  assert.equal(h.membershipLookups(), 1);
   assert.ok([...h.store.data.keys()].some((k) => k.includes("tokens")));
   assert.equal(
     [...h.store.data.keys()].some((k) => k.includes("pkce")),
@@ -118,9 +127,8 @@ test("a token without a tenant claim uses the BFF membership for local tenant sc
   assert.equal(h.membershipLookups(), 1);
 });
 
-test("a token without a tenant claim rejects a mismatched BFF session", async () => {
+test("a token tenant claim cannot override a mismatched BFF membership", async () => {
   const h = harness();
-  h.grants.push({ noTenantClaim: true });
   let nonce = "";
   const verifying = new MobileSession(config, h.store, {
     fetch: (async () =>
@@ -146,13 +154,17 @@ test("a token without a tenant claim rejects a mismatched BFF session", async ()
   );
 });
 
-test("a no-tenant token cannot enter offline state without a BFF membership resolver", async () => {
+test("a token with tenant_id cannot enter offline state without a BFF membership resolver", async () => {
   const h = harness();
   let nonce = "";
   const session = new MobileSession(config, h.store, {
     fetch: (async () =>
       jsonResponse(200, {
-        access_token: fakeJwt({ iss: "https://issuer.example", sub: "user-1" }),
+        access_token: fakeJwt({
+          iss: "https://issuer.example",
+          sub: "user-1",
+          tenant_id: "attacker-controlled-tenant",
+        }),
         id_token: fakeJwt({ nonce }),
         expires_in: 300,
       })) as unknown as typeof fetch,
@@ -169,7 +181,7 @@ test("a no-tenant token cannot enter offline state without a BFF membership reso
   );
 });
 
-test("a token with neither tenant claim nor issuer is rejected", async () => {
+test("a token without issuer is rejected", async () => {
   const h = harness();
   h.grants.push({ noTenantClaim: true });
   const original = h.session;
@@ -189,7 +201,7 @@ test("a token with neither tenant claim nor issuer is rejected", async () => {
     bare.completeSignIn(
       `greenguard://auth/callback?code=c&state=${url.searchParams.get("state")}`,
     ),
-    /tenant/i,
+    /issuer/i,
   );
 });
 
@@ -242,7 +254,7 @@ test("transient refresh failure keeps tokens so the caller can retry later", asy
   h.failRefresh(jsonResponse(503, {}));
   await assert.rejects(h.session.getAccessToken(), /unavailable|transient/i);
   assert.deepEqual(await h.session.identity(), {
-    tenantId: "tenant-a",
+    tenantId: "tenant-authoritative",
     subject: "user-1",
   });
   h.failRefresh(null);
@@ -278,17 +290,20 @@ test("signing in as a different tenant over a live session clears caches", async
   await signIn(h);
   const reasons: string[] = [];
   h.session.onCleared((reason) => reasons.push(reason));
+  h.setMembershipTenant("tenant-b");
   h.grants.push({ tenant: "tenant-b", sub: "user-1" });
   const identity = await signIn(h);
   assert.equal(identity.tenantId, "tenant-b");
   assert.deepEqual(reasons, ["identity-change"]);
 });
 
-test("a token without a tenant claim is refused", async () => {
+test("an empty tenant claim still resolves authoritative membership", async () => {
   const h = harness();
   h.grants.push({ tenant: "" });
-  await assert.rejects(signIn(h), /tenant/);
-  assert.equal(await h.session.identity(), null);
+  assert.deepEqual(await signIn(h), {
+    tenantId: "tenant-authoritative",
+    subject: "user-1",
+  });
 });
 
 test("sign-out removes tokens and notifies listeners", async () => {

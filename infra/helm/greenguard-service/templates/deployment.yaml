@@ -10,9 +10,6 @@
 {{- if and .Values.observability.prometheus.enabled (not .Values.observability.prometheus.mergeMetrics) (ne (int .Values.observability.prometheus.scrapePort) 15090) -}}
 {{- fail "Envoy-only Istio metrics require mergeMetrics=false and scrapePort=15090" -}}
 {{- end }}
-{{- if and (not .Values.service.enabled) (or .Values.probes.startup.enabled .Values.probes.readiness.enabled .Values.probes.liveness.enabled) -}}
-{{- fail "HTTP probes require service.enabled=true so the named http container port is declared" -}}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -85,7 +82,7 @@ spec:
         - name: {{ .Values.container.name | quote }}
           image: {{ .Values.image | quote }}
           imagePullPolicy: IfNotPresent
-          {{- if .Values.service.enabled }}
+          {{- if or .Values.service.enabled .Values.probes.startup.enabled .Values.probes.readiness.enabled .Values.probes.liveness.enabled }}
           ports:
             - name: http
               containerPort: {{ .Values.service.containerPort }}
@@ -116,7 +113,11 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if .Values.probes.startup.enabled }}
           startupProbe:
-            {{- if eq (.Values.probes.startup.type | default "http") "tcp" }}
+            {{- if eq (.Values.probes.startup.type | default "http") "exec" }}
+            exec:
+              command:
+                {{- toYaml .Values.probes.startup.command | nindent 16 }}
+            {{- else if eq (.Values.probes.startup.type | default "http") "tcp" }}
             tcpSocket:
               port: {{ .Values.service.containerPort }}
             {{- else }}
@@ -129,7 +130,11 @@ spec:
           {{- end }}
           {{- if .Values.probes.readiness.enabled }}
           readinessProbe:
-            {{- if eq (.Values.probes.readiness.type | default "http") "tcp" }}
+            {{- if eq (.Values.probes.readiness.type | default "http") "exec" }}
+            exec:
+              command:
+                {{- toYaml .Values.probes.readiness.command | nindent 16 }}
+            {{- else if eq (.Values.probes.readiness.type | default "http") "tcp" }}
             tcpSocket:
               port: {{ .Values.service.containerPort }}
             {{- else }}
@@ -141,7 +146,11 @@ spec:
           {{- end }}
           {{- if .Values.probes.liveness.enabled }}
           livenessProbe:
-            {{- if eq (.Values.probes.liveness.type | default "http") "tcp" }}
+            {{- if eq (.Values.probes.liveness.type | default "http") "exec" }}
+            exec:
+              command:
+                {{- toYaml .Values.probes.liveness.command | nindent 16 }}
+            {{- else if eq (.Values.probes.liveness.type | default "http") "tcp" }}
             tcpSocket:
               port: {{ .Values.service.containerPort }}
             {{- else }}

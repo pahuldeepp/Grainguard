@@ -17,6 +17,7 @@ export interface AuthorizationConfig {
   redirectUri: string;
   scope: string;
   audience?: string;
+  audienceMode?: "scope" | "query-param";
 }
 
 const VERIFIER_BYTES = 32;
@@ -67,17 +68,24 @@ export function buildAuthorizationUrl(
   config: AuthorizationConfig,
   request: PkceRequest,
 ): string {
+  const scopes = new Set(config.scope.split(/\s+/).filter(Boolean));
+  if (config.audienceMode === "scope") {
+    if (!config.audience)
+      throw new Error("Scope audience mode requires an audience client ID");
+    scopes.add(`audience:server:client_id:${config.audience}`);
+  }
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
-    scope: config.scope,
+    scope: [...scopes].join(" "),
     state: request.state,
     nonce: request.nonce,
     code_challenge: request.challenge,
     code_challenge_method: "S256",
   });
-  if (config.audience) params.set("audience", config.audience);
+  if (config.audience && config.audienceMode !== "scope")
+    params.set("audience", config.audience);
   return `${config.authorizationEndpoint}?${params}`;
 }
 

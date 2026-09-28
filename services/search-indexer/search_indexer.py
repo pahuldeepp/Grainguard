@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from worker_health import WorkerHealth, start_health_server
 
 ALIAS = os.getenv("SEARCH_ALIAS", "greenguard-inventory")
 TOPICS = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
@@ -27,6 +28,14 @@ MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "site_id": {"type": "keyword"}, "bin_id": {"type": "keyword"},
     "updated_at": {"type": "date"},
 }}}
+HEALTH = WorkerHealth()
+HEALTH_SERVER = None
+
+
+def ensure_health_server() -> None:
+    global HEALTH_SERVER
+    if HEALTH_SERVER is None:
+        HEALTH_SERVER = start_health_server(HEALTH, port=int(os.getenv("HEALTH_PORT", "8080")))
 
 
 def document_hash(document: dict[str, Any]) -> str:
@@ -353,6 +362,10 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
             offset_reset: str = "earliest") -> None:
     from confluent_kafka import Consumer, TopicPartition  # imported only by the live runner
 
+    ensure_health_server()
+    HEALTH.set_ready(False)
+    HEALTH.heartbeat()
+
     protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "").strip().upper()
     mechanism = os.getenv("KAFKA_SASL_MECHANISM", "").strip().upper()
     user, password, ca_file = (os.getenv(name, "") for name in
@@ -367,7 +380,9 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
                     "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
                     "enable.ssl.certificate.verification": True}
     index = index_name(version)
-    elastic.create_index(index)
+    # Existing indices must have the expected strict mapping before the worker
+    # becomes ready to consume and commit offsets.
+    elastic.bootstrap_index(index)
     consumer = Consumer({"bootstrap.servers": bootstrap, "group.id": group,
                          "enable.auto.commit": False, "auto.offset.reset": offset_reset, **security})
     consumer.subscribe(list(TOPICS))
@@ -382,6 +397,8 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
     try:
         while not stopping:
             message = consumer.poll(1)
+            HEALTH.heartbeat()
+            HEALTH.set_ready(bool(consumer.assignment()))
             if message is None:
                 continue
             if message.error():
@@ -391,7 +408,9 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
             committed = consumer.commit(offsets=[TopicPartition(record.topic, record.partition, record.offset + 1)], asynchronous=False)
             if not committed or any(item.error for item in committed):
                 raise RuntimeError(f"Kafka offset commit failed: {committed}")
+            HEALTH.heartbeat()
     finally:
+        HEALTH.set_ready(False)
         consumer.close()
         for sig, handler in previous.items():
             signal.signal(sig, handler)

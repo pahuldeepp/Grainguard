@@ -51,7 +51,10 @@ class ShardBootstrapSecretScopeTest(unittest.TestCase):
             "toset(keys(passwords)) == local.runtime_shard_bootstrap_role_keys",
             shard_values,
         )
-        self.assertIn("secret_string = jsonencode(var.shard_role_passwords[each.key])", shard_values)
+        self.assertRegex(
+            shard_values,
+            r"secret_string_wo\s*= jsonencode\(var\.shard_role_passwords\[each\.key\]\)",
+        )
         # The filtered profile handed to the shard Secret cannot contain any
         # of the central-only keys even though they are found in the shared SQL.
         self.assertTrue(CENTRAL_ONLY.isdisjoint(operational_keys))

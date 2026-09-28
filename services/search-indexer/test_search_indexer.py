@@ -154,8 +154,11 @@ class IndexerTests(unittest.TestCase):
                     calls.append("init")
                 def subscribe(self, topics):
                     calls.append("subscribe")
+                def assignment(self):
+                    return [SimpleNamespace(topic=MODULE.TOPICS[0], partition=0)]
                 def poll(self, timeout):
                     if "polled" in calls:
+                        calls.append(MODULE.HEALTH.status("/readyz"))
                         raise RuntimeError("stop")
                     calls.append("polled")
                     return message
@@ -174,13 +177,15 @@ class IndexerTests(unittest.TestCase):
                         raise RuntimeError("write failed")
 
             kafka = SimpleNamespace(Consumer=Consumer, TopicPartition=lambda *args: args)
-            elastic = SimpleNamespace(create_index=lambda index: calls.append("index"))
+            elastic = SimpleNamespace(bootstrap_index=lambda index: calls.append("index"))
             with patch.dict(sys.modules, {"confluent_kafka": kafka}), patch.object(MODULE, "Indexer", Indexer):
                 with self.assertRaises(RuntimeError):
                     MODULE.consume(elastic, 1, "test-group", "broker", "quarantine")
             self.assertIn("process", calls)
             self.assertEqual("commit" in calls, not fail_processing)
             self.assertEqual(calls[-1], "close")
+            self.assertEqual(200 in calls, not fail_processing)
+            self.assertEqual(MODULE.HEALTH.status("/readyz"), 503)
             if not fail_processing:
                 self.assertLess(calls.index("process"), calls.index("commit"))
 
