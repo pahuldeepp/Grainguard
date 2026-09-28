@@ -29,9 +29,19 @@ data "aws_iam_policy_document" "eventbridge_bridge_pod_identity" {
       identifiers = ["pods.eks.amazonaws.com"]
     }
     condition {
-      test     = "ArnEquals"
-      variable = "aws:SourceArn"
+      test     = "StringEquals"
+      variable = "aws:RequestTag/eks-cluster-arn"
       values   = [aws_eks_cluster.cell.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/kubernetes-namespace"
+      values   = ["greenguard"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/kubernetes-service-account"
+      values   = ["eventbridge-bridge"]
     }
   }
 }
