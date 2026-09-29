@@ -1,0 +1,553 @@
+{
+  "schema_version": 1,
+  "currency": "USD",
+  "period": "month",
+  "generated": "2026-09-29",
+  "status": "UNMEASURED planning model. Every quantity is an assumption until the I13 calibration run; prices marked verified were read from the cited pages on the stated date.",
+  "caps": {
+    "infrastructure": 600,
+    "product_claude": 300,
+    "eval_claude": 100,
+    "total": 1000,
+    "owner_decision": "2026-09-29 (README R22)"
+  },
+  "headroom_target_usd": 100,
+  "assumptions": {
+    "region": "us-east-1 (us-west-2 spot-checked on r7g.xlarge: same On-Demand, same Spot as displayed)",
+    "demo_hours": "10 h/day, Mon-Fri = 217 h/month for scheduled Spot app nodes; data and system nodes 24x7 (730 h)",
+    "gpu_hours": 80,
+    "availability_zones": 1
+  },
+  "lean_lines": [
+    {
+      "id": "eks_control_plane",
+      "name": "EKS control plane, 1 cluster (standard support)",
+      "category": "compute",
+      "unit": "cluster-hour",
+      "unit_price": 0.1,
+      "quantity": 730,
+      "monthly_usd": 73.0,
+      "price_source": "https://aws.amazon.com/blogs/containers/amazon-eks-extended-support-for-kubernetes-versions-pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Extended support is $0.60/h; keep the cluster on a supported Kubernetes version."
+    },
+    {
+      "id": "system_node",
+      "name": "System node: 1 x t4g.large On-Demand (arm64, 2 vCPU, 8 GiB)",
+      "category": "compute",
+      "unit": "instance-hour",
+      "unit_price": 0.067,
+      "quantity": 730,
+      "monthly_usd": 48.91,
+      "price_source": "https://instances.vantage.sh/aws/ec2/t4g.large?region=us-east-1",
+      "source_kind": "aggregator",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Aggregator shows 3 decimals. Burstable: watch CPU credits; fallback m7g.large On-Demand $0.082/h (+$11.0/month)."
+    },
+    {
+      "id": "data_node",
+      "name": "Data node: 1 x r7g.xlarge On-Demand (arm64, 4 vCPU, 32 GiB)",
+      "category": "compute",
+      "unit": "instance-hour",
+      "unit_price": 0.2142,
+      "quantity": 730,
+      "monthly_usd": 156.37,
+      "price_source": "https://instances.vantage.sh/aws/ec2/r7g.xlarge?region=us-east-1",
+      "source_kind": "aggregator",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Stateful stores never on Spot. Replaces r7i.xlarge ($0.265/h). Graviton3 vCPU are cores, so CPU headroom is not worse; still UNMEASURED."
+    },
+    {
+      "id": "app_spot_nodes",
+      "name": "Spot app nodes: 2 x m7g.xlarge Spot, 217 h/month each (scheduled)",
+      "category": "compute",
+      "unit": "instance-hour",
+      "unit_price": 0.095,
+      "quantity": 434,
+      "monthly_usd": 41.23,
+      "price_source": "https://instances.vantage.sh/aws/ec2/m7g.xlarge?region=us-east-1",
+      "source_kind": "aggregator",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Spot figure moves (definition of the aggregator's Spot value not stated). m7i.xlarge Spot shown at $0.092: NodePool allows arm64 and amd64; priced at the higher. 217 h = 10 h x 5 weekdays x 52/12."
+    },
+    {
+      "id": "sandbox_pool",
+      "name": "Sandbox pool: m7i.xlarge On-Demand, 30 h/month, scale from 0",
+      "category": "compute",
+      "unit": "instance-hour",
+      "unit_price": 0.2016,
+      "quantity": 30,
+      "monthly_usd": 6.05,
+      "price_source": "https://instances.vantage.sh/aws/ec2/m7i.xlarge?region=us-east-1",
+      "source_kind": "aggregator",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "On-Demand per I12 2.2 (no reclaim mid-execution). gVisor AMI is x86 for the demo."
+    },
+    {
+      "id": "gpu_pool",
+      "name": "GPU pool: g6.xlarge Spot, 80 GPU-hours/month (I12 budget, alarm at 80 h)",
+      "category": "gpu",
+      "unit": "instance-hour",
+      "unit_price": 0.605,
+      "quantity": 80,
+      "monthly_usd": 48.4,
+      "price_source": "https://instances.vantage.sh/aws/ec2/g6.xlarge?region=us-east-1",
+      "source_kind": "aggregator",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "On-Demand $0.805/h. GPU stays x86 (vLLM/CUDA image). 80 h is the I12 2.2 cap, up from 40 h previously assumed in I00."
+    },
+    {
+      "id": "ebs_gp3",
+      "name": "EBS gp3 storage, GB-month equivalent (235 persistent + prorated node roots)",
+      "category": "storage",
+      "unit": "GB-month",
+      "unit_price": 0.08,
+      "quantity": 266,
+      "monthly_usd": 21.28,
+      "price_source": "https://aws.amazon.com/ebs/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Baseline 3,000 IOPS / 125 MB/s included. 235 GB persistent volumes + app roots 60 GB x 217/730 + GPU root 100 GB x 80/730 + sandbox root 50 GB x 30/730 = ~266."
+    },
+    {
+      "id": "ebs_snapshots",
+      "name": "EBS snapshots (Postgres, Cassandra, Kafka), ~100 GB stored",
+      "category": "storage",
+      "unit": "GB-month",
+      "unit_price": 0.05,
+      "quantity": 100,
+      "monthly_usd": 5.0,
+      "price_source": "none (price from memory)",
+      "source_kind": "memory",
+      "verified": false,
+      "date": "2026-09-29",
+      "note": "UNVERIFIED rate; verify at I13."
+    },
+    {
+      "id": "s3_storage",
+      "name": "S3 Standard, ~300 GB with lifecycle (noncurrent expiry 30 d, abort multipart, Glacier IR after 90 d)",
+      "category": "storage",
+      "unit": "GB-month",
+      "unit_price": 0.023,
+      "quantity": 300,
+      "monthly_usd": 6.9,
+      "price_source": "https://aws.amazon.com/s3/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Intelligent-Tiering rejected: monitoring fee per object and no benefit at 300 GB."
+    },
+    {
+      "id": "s3_put",
+      "name": "S3 PUT/COPY/POST, 200,000 requests",
+      "category": "storage",
+      "unit": "1000 requests",
+      "unit_price": 0.005,
+      "quantity": 200,
+      "monthly_usd": 1.0,
+      "price_source": "https://aws.amazon.com/s3/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "s3_get",
+      "name": "S3 GET, 2,000,000 requests",
+      "category": "storage",
+      "unit": "1000 requests",
+      "unit_price": 0.0004,
+      "quantity": 2000,
+      "monthly_usd": 0.8,
+      "price_source": "https://aws.amazon.com/s3/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "nat_hourly",
+      "name": "NAT gateway, 1 (single-AZ demo)",
+      "category": "network",
+      "unit": "hour",
+      "unit_price": 0.045,
+      "quantity": 730,
+      "monthly_usd": 32.85,
+      "price_source": "https://aws.amazon.com/vpc/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Page label said US East (Ohio); NAT list price is the same in us-east-1. Also priced the same per AZ for Regional NAT."
+    },
+    {
+      "id": "nat_data",
+      "name": "NAT data processing, ~60 GB (S3 gateway endpoint takes ECR layer pulls off the NAT)",
+      "category": "network",
+      "unit": "GB",
+      "unit_price": 0.045,
+      "quantity": 60,
+      "monthly_usd": 2.7,
+      "price_source": "https://aws.amazon.com/vpc/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "nat_eip",
+      "name": "Public IPv4 for the NAT gateway EIP",
+      "category": "network",
+      "unit": "hour",
+      "unit_price": 0.005,
+      "quantity": 730,
+      "monthly_usd": 3.65,
+      "price_source": "https://aws.amazon.com/vpc/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Omitted in the previous plan."
+    },
+    {
+      "id": "alb_hourly",
+      "name": "ALB, 1",
+      "category": "network",
+      "unit": "hour",
+      "unit_price": 0.0225,
+      "quantity": 730,
+      "monthly_usd": 16.43,
+      "price_source": "https://aws.amazon.com/elasticloadbalancing/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "alb_lcu",
+      "name": "ALB LCU, assumed 0.5 LCU average",
+      "category": "network",
+      "unit": "LCU-hour",
+      "unit_price": 0.008,
+      "quantity": 365,
+      "monthly_usd": 2.92,
+      "price_source": "https://aws.amazon.com/elasticloadbalancing/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Traffic is an UNMEASURED assumption."
+    },
+    {
+      "id": "alb_ipv4",
+      "name": "Public IPv4 for the ALB (2 AZ subnets)",
+      "category": "network",
+      "unit": "hour",
+      "unit_price": 0.005,
+      "quantity": 1460,
+      "monthly_usd": 7.3,
+      "price_source": "https://aws.amazon.com/vpc/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Rate verified; that an ALB holds one public IPv4 per AZ is AWS behaviour not re-checked here. Omitted in the previous plan."
+    },
+    {
+      "id": "cw_logs_ingest",
+      "name": "CloudWatch Logs ingestion, 10 GB (first 5 GB free)",
+      "category": "observability",
+      "unit": "GB billable",
+      "unit_price": 0.5,
+      "quantity": 5,
+      "monthly_usd": 2.5,
+      "price_source": "https://aws.amazon.com/cloudwatch/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "EKS control-plane and audit logs only; volume UNMEASURED."
+    },
+    {
+      "id": "cw_logs_storage",
+      "name": "CloudWatch Logs storage, 10 GB",
+      "category": "observability",
+      "unit": "GB-month",
+      "unit_price": 0.03,
+      "quantity": 10,
+      "monthly_usd": 0.3,
+      "price_source": "https://aws.amazon.com/cloudwatch/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "cw_alarms",
+      "name": "CloudWatch alarms, 15",
+      "category": "observability",
+      "unit": "alarm-month",
+      "unit_price": 0.1,
+      "quantity": 15,
+      "monthly_usd": 1.5,
+      "price_source": "https://aws.amazon.com/cloudwatch/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "cw_custom_metrics",
+      "name": "CloudWatch custom metrics (GPU node-hour guard etc.), 5",
+      "category": "observability",
+      "unit": "metric-month",
+      "unit_price": 0.3,
+      "quantity": 5,
+      "monthly_usd": 1.5,
+      "price_source": "https://aws.amazon.com/cloudwatch/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "kms_keys",
+      "name": "KMS customer-managed keys, 6",
+      "category": "security",
+      "unit": "key-month",
+      "unit_price": 1.0,
+      "quantity": 6,
+      "monthly_usd": 6.0,
+      "price_source": "https://aws.amazon.com/kms/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "kms_requests",
+      "name": "KMS requests, 500,000/month less 20,000 free = 48 x 10k",
+      "category": "security",
+      "unit": "10k requests",
+      "unit_price": 0.03,
+      "quantity": 48,
+      "monthly_usd": 1.44,
+      "price_source": "https://aws.amazon.com/kms/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "secrets_manager",
+      "name": "Secrets Manager, 2 secrets (rotating DB credentials); all other secrets in SSM Parameter Store",
+      "category": "security",
+      "unit": "secret-month",
+      "unit_price": 0.4,
+      "quantity": 2,
+      "monthly_usd": 0.8,
+      "price_source": "https://aws.amazon.com/secrets-manager/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "secrets_api",
+      "name": "Secrets Manager API calls (~18k/month via ESO)",
+      "category": "security",
+      "unit": "10k calls",
+      "unit_price": 0.05,
+      "quantity": 1.825,
+      "monthly_usd": 0.09,
+      "price_source": "https://aws.amazon.com/secrets-manager/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": ""
+    },
+    {
+      "id": "ssm_parameter_store",
+      "name": "SSM Parameter Store standard parameters (~25, SecureString via the KMS keys above)",
+      "category": "security",
+      "unit": "parameter-month",
+      "unit_price": 0.0,
+      "quantity": 25,
+      "monthly_usd": 0.0,
+      "price_source": "https://aws.amazon.com/systems-manager/pricing/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "Standard parameters are free; 4 KB limit, no rotation."
+    },
+    {
+      "id": "ecr_storage",
+      "name": "ECR private storage, ~30 GB (lifecycle keeps last 5 images per repo)",
+      "category": "storage",
+      "unit": "GB-month",
+      "unit_price": 0.1,
+      "quantity": 30,
+      "monthly_usd": 3.0,
+      "price_source": "none (price from memory)",
+      "source_kind": "memory",
+      "verified": false,
+      "date": "2026-09-29",
+      "note": "UNVERIFIED rate; same-Region pulls are free (verified on the ECR pricing page)."
+    },
+    {
+      "id": "misc_small",
+      "name": "Route 53 zone, SQS/EventBridge for Karpenter interruptions, misc",
+      "category": "other",
+      "unit": "lump sum",
+      "unit_price": 1.0,
+      "quantity": 1,
+      "monthly_usd": 1.0,
+      "price_source": "none (estimate)",
+      "source_kind": "memory",
+      "verified": false,
+      "date": "2026-09-29",
+      "note": "UNVERIFIED lump sum."
+    },
+    {
+      "id": "data_transfer_out",
+      "name": "Internet data transfer out (within the 100 GB/month free allowance)",
+      "category": "network",
+      "unit": "GB",
+      "unit_price": 0.09,
+      "quantity": 0,
+      "monthly_usd": 0.0,
+      "price_source": "https://aws.amazon.com/ec2/pricing/on-demand/",
+      "source_kind": "aws_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "note": "The 100 GB monthly free allowance is verified; the $0.09/GB tier rate is from memory and is not used at 0 GB."
+    }
+  ],
+  "lean_infrastructure_subtotal": 492.92,
+  "claude_product": {
+    "cap": 300,
+    "split": {
+      "customer_traffic": 220,
+      "local_dev_real_claude": 60,
+      "i6_e2e_and_calibration": 20
+    }
+  },
+  "claude_eval": {
+    "cap": 100,
+    "split": {
+      "t2_weekly_batches": 52,
+      "release_candidate_reserve": 30,
+      "online_eval_judge_and_recalibration": 18
+    }
+  },
+  "grand_total_at_caps": 892.92,
+  "headroom_usd": 107.08,
+  "scenarios": [
+    {
+      "id": "certification_month_always_on",
+      "description": "I13-G3/G9 soak and certification month: scheduled scale-down disabled, app pool 24x7",
+      "overrides": {
+        "app_spot_nodes": 1460,
+        "ebs_gp3": 308.2
+      },
+      "must_be_within_cap": true
+    },
+    {
+      "id": "cert_month_gpu_all_on_demand",
+      "description": "Informational worst case: certification month and all 80 GPU-hours On-Demand ($0.805/h). Exceeds the cap, hence the GPU dollar alarm.",
+      "overrides": {
+        "app_spot_nodes": 1460,
+        "ebs_gp3": 308.2,
+        "gpu_pool": 80
+      },
+      "price_overrides": {
+        "gpu_pool": 0.805
+      },
+      "must_be_within_cap": false
+    }
+  ],
+  "excluded_optional": [
+    {
+      "item": "AWS WAF on the ALB (Web ACL $5 + 3 rules $3 + 1M requests $0.60)",
+      "monthly_usd": 8.6,
+      "price_source": "https://aws.amazon.com/waf/pricing/",
+      "verified": true,
+      "reason": "Prod/G2 only; the demo ALB uses a security-group allow-list plus gateway rate limits. Adding it uses part of the headroom. Owner decision."
+    },
+    {
+      "item": "1-year Compute Savings Plan on the data and system nodes",
+      "monthly_usd": 0,
+      "reason": "Optional, not relied on: commitment risk. Vantage 1-yr Reserved shows r7g.xlarge $0.142/h vs $0.214 On-Demand, but Savings Plan rates were not verified."
+    }
+  ],
+  "claude_call_types": {
+    "models_per_mtok": {
+      "haiku_4_5": {
+        "in": 1.0,
+        "out": 5.0,
+        "cache_read": 0.1
+      },
+      "sonnet_5_5": {
+        "in": 2.0,
+        "out": 10.0,
+        "cache_read": 0.2
+      },
+      "opus_5_5": {
+        "in": 4.0,
+        "out": 20.0,
+        "cache_read": 0.4
+      }
+    },
+    "prompt_cache_min_prefix_tokens": 4096,
+    "static_prefix_tokens": 4000,
+    "tokens_k": {
+      "router": {
+        "in": 2.0,
+        "out": 0.1
+      },
+      "plan": {
+        "in": 5.0,
+        "out": 0.3,
+        "fresh_in_warm": 1.0,
+        "cache_read_warm": 4.0
+      },
+      "answer": {
+        "in": 5.0,
+        "out": 0.8,
+        "fresh_in_warm": 1.0,
+        "cache_read_warm": 4.0
+      }
+    },
+    "router_model": "haiku_4_5",
+    "route_weights": {
+      "haiku_4_5": 0.6,
+      "sonnet_5_5": 0.35,
+      "opus_5_5": 0.05
+    },
+    "question_uncached_usd": {
+      "haiku_4_5": 0.018,
+      "sonnet_5_5": 0.0335,
+      "opus_5_5": 0.0645
+    },
+    "question_warm_usd": {
+      "haiku_4_5": 0.0108,
+      "sonnet_5_5": 0.0191,
+      "opus_5_5": 0.0357
+    },
+    "weighted_question_uncached_usd": 0.0258,
+    "weighted_question_warm_target_usd": 0.015,
+    "message_batches_discount": 0.5
+  },
+  "free_plan_default": {
+    "advisor_turns_per_tenant_per_day": 10,
+    "routing": "haiku_4_5 only",
+    "demo_tenants": 25,
+    "per_tenant_daily_budget_usd": 0.2,
+    "cost_per_question_usd": 0.018,
+    "customer_traffic_budget_usd": 220,
+    "days": 30
+  }
+}

@@ -299,96 +299,111 @@ Offline corpus rows are an upper bound (every device in the corpus); until the R
 
 ## 5. Cost model
 
-Prices are AWS list prices in us-east-1 (us-west-2 is generally within a few percent, not checked), gathered by web search on 2026-09-29 from third-party price aggregators (doit.com, vantage.sh, holori, cloudburn and similar), **not** from the AWS Price List API. Rows marked "verified" were found in those sources; rows marked UNVERIFIED are from memory or derived, and Spot prices move by the hour. Re-verify every row in the AWS Pricing Calculator at I13. Claude prices are Anthropic first-party rates. **Claude on Amazon Bedrock is priced separately by AWS** and is UNVERIFIED here; I6 must confirm Bedrock prices, model IDs and feature parity before enabling it as the second channel (ADR-0024, README §8 Q4). Model aliases: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`, with Bedrock IDs mapped per provider and the served snapshot logged (R19).
+Prices are AWS list prices for us-east-1, re-verified on 2026-09-29 from two kinds of source, recorded per line in `cost_model.json` (`price_source`, `source_kind`, `verified`, `date`): (1) AWS's own pricing pages (`aws.amazon.com/.../pricing`, fetched as text; EKS from the AWS containers blog) for EKS, EBS, S3, NAT, ALB, KMS, CloudWatch, Secrets Manager, SSM, VPC endpoints and the data-transfer allowance; (2) the Vantage instances page (`instances.vantage.sh`, page stamped 2026-09-29) for EC2 On-Demand and Spot, because AWS's EC2 page does not render prices as text. Neither is the AWS Price List API; re-verify in the AWS Pricing Calculator at I13. The aggregator does not say whether its Spot figure is a minimum, an average or a current value, and Spot moves by the hour, so Spot lines are "verified as displayed, volatile". us-west-2 was spot-checked for r7g.xlarge only (same On-Demand $0.214, same Spot $0.082 as displayed). **Still UNVERIFIED (from memory or estimated): EBS snapshot $0.05/GB-month, ECR storage $0.10/GB-month, the $1 miscellaneous lump sum, the $0.09/GB internet-egress tier (used at 0 GB), interface VPC endpoint hourly rate ($0.01/h/AZ; only the $0.01/GB data rate was read), Savings Plan rates, and Claude on Amazon Bedrock** (priced separately by AWS; I6 must confirm prices, model IDs and feature parity before enabling it as the second channel, ADR-0024, README §8 Q4). Claude prices are Anthropic first-party rates. Model aliases: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`, with Bedrock IDs mapped per provider and the served snapshot logged (R19).
 
-| Item | Reference price (us-east-1) | Status |
+| Item | Reference price (us-east-1, 2026-09-29) | Status |
 | --- | --- | --- |
 | Claude Opus 5.5 | $4 in / $20 out per MTok; cache read $0.40 (0.1x input; the earlier $0.20 was a typo and did not reproduce the old $0.0432 figure) | first-party rate as previously recorded |
 | Claude Sonnet 5.5 | $2 / $10; cache read $0.20 | as above |
 | Claude Haiku 4.5 | $1 / $5; cache read $0.10; **minimum cacheable prefix 4,096 tokens: a shorter prefix is billed uncached** | as above; the 4,096 floor is a stated planning input |
 | Cache floor for Sonnet 5.5 / Opus 5.5 | not confirmed here; priced conservatively as the same 4,096 floor | UNVERIFIED (I6 checks) |
 | Message Batches | 50% of standard (evals and offline labelling only) | as above |
-| EKS control plane | $0.10/h per cluster (~$73/month), no free credit; Extended Support $0.60/h if a cluster is left on an out-of-support Kubernetes version | verified |
-| m7i.2xlarge (8 vCPU, 32 GiB) | On-Demand $0.4032/h; Spot from about $0.159/h (moves) | verified |
-| m7i.xlarge (4 vCPU, 16 GiB) | half of m7i.2xlarge: On-Demand about $0.2016/h, Spot about $0.08/h | derived, UNVERIFIED |
-| g6.xlarge (1× NVIDIA L4, 4 vCPU, 16 GiB) | On-Demand $0.8048/h; Spot from about $0.60/h (only ~25% below On-Demand, capacity not guaranteed) | verified |
-| RDS PostgreSQL db.t4g.large | $0.129/h Single-AZ, $0.258/h Multi-AZ; storage billed separately (gp3 about $0.115/GB-month) | instance verified, storage UNVERIFIED |
-| ElastiCache cache.t4g.small | $0.032/h (~$23/month) | verified |
-| OpenSearch Service t3.medium.search | $0.073/h; EBS billed separately | verified |
-| MSK Provisioned | kafka.t3.small $0.0456/h, kafka.m5.large $0.21/h per broker, storage $0.10/GB-month; 3 brokers minimum for multi-AZ | verified |
-| S3 | Standard $0.023/GB-month; Intelligent-Tiering frequent tier $0.023, infrequent $0.0125 after 30 days, Archive Instant $0.004 after 90 days; Glacier Instant Retrieval $0.004 stored, $0.03/GB retrieved | verified |
-| NAT gateway | $0.045/h (~$33/month) plus $0.045/GB processed | verified |
-| EBS gp3 | about $0.08/GB-month | UNVERIFIED |
-| Application Load Balancer | about $0.0225/h plus LCU charges (~$20–25/month at low traffic) | UNVERIFIED |
-| KMS | $1/key-month plus about $0.03 per 10,000 requests | UNVERIFIED |
-| CloudWatch Logs | about $0.50/GB ingested plus storage; the lean plan mostly avoids it by running Prometheus/Grafana/Loki in-cluster | UNVERIFIED |
+| EKS control plane | $0.10/h per cluster (~$73/month), no free credit; Extended Support $0.60/h if a cluster is left on an out-of-support Kubernetes version ([AWS blog](https://aws.amazon.com/blogs/containers/amazon-eks-extended-support-for-kubernetes-versions-pricing/)) | verified |
+| t4g.large (arm64, 2 vCPU, 8 GiB) | On-Demand $0.067/h; Spot $0.027/h ([Vantage](https://instances.vantage.sh/aws/ec2/t4g.large?region=us-east-1)); t3.large is $0.0832/h (verified) | verified |
+| r7g.xlarge (arm64, 4 vCPU, 32 GiB) | On-Demand $0.2142/h; Spot $0.082/h; 1-yr Reserved $0.142/h ([Vantage](https://instances.vantage.sh/aws/ec2/r7g.xlarge?region=us-east-1)); r7i.xlarge (x86) On-Demand $0.265/h, Spot $0.111/h | verified |
+| m7g.xlarge (arm64, 4 vCPU, 16 GiB) | On-Demand $0.163/h; Spot $0.095/h ([Vantage](https://instances.vantage.sh/aws/ec2/m7g.xlarge?region=us-east-1)); m7g.large On-Demand $0.082/h, Spot $0.052/h | verified |
+| m7i.xlarge (x86, 4 vCPU, 16 GiB) | On-Demand $0.2016/h; Spot $0.092/h ([Vantage](https://instances.vantage.sh/aws/ec2/m7i.xlarge?region=us-east-1)); m7i.large On-Demand $0.101/h, Spot $0.046/h; m7i.2xlarge On-Demand $0.4032/h, Spot about $0.159/h (earlier check) | verified (the earlier "derived, UNVERIFIED" m7i.xlarge Spot $0.08 was low by $0.012/h) |
+| g6.xlarge (1x NVIDIA L4, 4 vCPU, 16 GiB) | On-Demand $0.805/h; Spot $0.605/h; 1-yr Reserved $0.524/h ([Vantage](https://instances.vantage.sh/aws/ec2/g6.xlarge?region=us-east-1)). Spot is only ~25% below On-Demand and capacity is not guaranteed | verified |
+| EBS gp3 | $0.08/GB-month, 3,000 IOPS and 125 MB/s included; gp2 $0.10; io2 $0.125 plus $0.065/IOPS-month ([AWS](https://aws.amazon.com/ebs/pricing/)) | verified |
+| NAT gateway | $0.045/h plus $0.045/GB processed; public IPv4 $0.005/h ([AWS VPC pricing](https://aws.amazon.com/vpc/pricing/); the page labelled the NAT figure US East Ohio, same list price in us-east-1); S3 gateway endpoint free | verified |
+| Interface VPC endpoint | $0.01/GB first 1 PB ([AWS PrivateLink](https://aws.amazon.com/privatelink/pricing/)); $0.01/h per AZ from memory | rate per GB verified, hourly UNVERIFIED |
+| Application Load Balancer | $0.0225/h plus $0.008 per LCU-hour ([AWS](https://aws.amazon.com/elasticloadbalancing/pricing/)); public IPv4 $0.005/h per address | verified |
+| KMS | $1/key-month, $0.03 per 10,000 requests, 20,000 free ([AWS](https://aws.amazon.com/kms/pricing/)) | verified |
+| Secrets Manager / SSM Parameter Store | $0.40/secret-month and $0.05 per 10,000 calls ([AWS](https://aws.amazon.com/secrets-manager/pricing/)); SSM standard parameters free ([AWS](https://aws.amazon.com/systems-manager/pricing/)) | verified |
+| CloudWatch | Logs ingest $0.50/GB after the first 5 GB, storage $0.03/GB-month, custom metrics $0.30, alarms $0.10 ([AWS](https://aws.amazon.com/cloudwatch/pricing/)) | verified |
+| S3 | Standard $0.023/GB-month (first 50 TB), PUT $0.005 and GET $0.0004 per 1,000 ([AWS](https://aws.amazon.com/s3/pricing/)). Intelligent-Tiering tiers as recorded earlier ($0.0125 infrequent, $0.004 archive instant) | verified |
+| AWS WAF | Web ACL $5, $1/rule, $0.60/million requests ([AWS](https://aws.amazon.com/waf/pricing/)) | verified; not in the demo plan |
+| Data transfer | 100 GB/month free outbound across services ([AWS EC2 pricing](https://aws.amazon.com/ec2/pricing/on-demand/)); same-Region ECR pulls free | allowance verified, egress tier UNVERIFIED |
+| ECR storage, EBS snapshots | $0.10 and $0.05 per GB-month | UNVERIFIED |
+| Other services used elsewhere in this charter | RDS db.t4g.large $0.129/h Single-AZ; ElastiCache cache.t4g.small $0.032/h; OpenSearch t3.medium.search $0.073/h; MSK kafka.t3.small $0.0456/h, kafka.m5.large $0.21/h, storage $0.10/GB-month (used only in §5.2 and the removed Higher illustration) | as recorded on 2026-09-29 from aggregators, not re-checked |
 
-### 5.1 Demo environment: Lean plan of record and a Higher illustration, all UNMEASURED
+### 5.1 Demo environment: Lean plan of record, all UNMEASURED
 
-**Owner caps (2026-09-29, R22): $1,000/month total = infrastructure <= $600 + product Claude <= $300 + eval Claude <= $100.** Infrastructure and Claude are separate budgets and are added separately below. The **Lean** plan is the plan of record. The **Higher** variant is an illustration of managed services and **exceeds the infrastructure cap**; it is not a target.
+**Owner caps (2026-09-29, R22): $1,000/month total = infrastructure <= $600 + product Claude <= $300 + eval Claude <= $100.** Infrastructure and Claude are separate budgets and are added separately below. The Lean plan is the plan of record; the earlier "Higher" managed-services illustration ($1,032 infrastructure, exceeding the cap) is deleted because it used unverified prices and is not a target. Managed-service prices remain in the reference table for §5.2 only.
+
+**Result: infrastructure $492.92 (target <= $500, cap $600), grand total at caps $892.92, headroom $107.08 (target >= $100).** The earlier plan was $582 / $982 / $18. The lines below are also in `docs/intelligence/cost_model.json`, and `make intelligence-cost-check` recomputes them.
 
 **Lean topology (I13 aligns to this):**
 
-* **One small On-Demand managed `system` node group** (1 x t3.large). It runs only cluster add-ons (Karpenter controller, CoreDNS, EBS CSI controller, Argo CD, Kyverno, cert-manager, metrics-server, OTel collector). It exists so the Karpenter controller never runs on nodes Karpenter provisions.
-* **One On-Demand `data` node** (1 x r7i.xlarge, 4 vCPU, 32 GiB, tainted `workload=stateful`) for the stateful stores: Postgres (with PgBouncer), Kafka, Cassandra, OpenSearch and Redis. **These stores never run on Spot.**
-* **Spot general/app nodes via Karpenter** (2 x m7i.xlarge, NodePool `limits.cpu: 8`, `capacity-type: spot` only; no On-Demand fallback in Lean, so a Spot shortage degrades the demo instead of adding cost).
-* **Sandbox pool**: tainted, custom gVisor AMI (ADR-0024, §2.4), scales from 0, m7i.large Spot, no GPU. It is its own cost line, not part of the app pool.
-* **GPU pool**: g6.xlarge Spot, scales to zero, Karpenter `nvidia.com/gpu: 1` limit.
+* **One small On-Demand managed `system` node group** (1 x t4g.large, arm64). It runs only cluster add-ons (Karpenter controller, CoreDNS, EBS CSI controller, Argo CD, Kyverno, cert-manager, metrics-server, KEDA, OTel collector). It exists so the Karpenter controller never runs on nodes Karpenter provisions. t4g is burstable: alarm on CPU-credit balance; if it is sustained above the baseline, move to m7g.large On-Demand ($0.082/h, +$11/month).
+* **One On-Demand `data` node** (1 x r7g.xlarge, arm64, 4 vCPU, 32 GiB, tainted `workload=stateful`, 24x7) for Postgres (with PgBouncer), Kafka, Cassandra, OpenSearch and Redis. **These stores never run on Spot and are never scheduled off** (see rejected savings).
+* **Spot general/app nodes via Karpenter** (2 x m7g/m7i.xlarge, NodePool `limits.cpu: 8`, `capacity-type: spot` only, both architectures allowed so Spot has more pools to draw from; no On-Demand fallback in Lean). **Scheduled scale-down:** the app-pool Deployments are scaled to 0 outside demo hours by KEDA `cron` scalers (or kube-downscaler); Karpenter then removes the empty nodes (`consolidateAfter: 10m`). **Assumed demo hours (owner to confirm): 10 h/day, Monday to Friday = 217 h/month per node.** Persistent volumes (RabbitMQ, Prometheus, Loki, MLflow) stay attached and bill 24x7.
+* **Sandbox pool**: tainted, custom gVisor AMI (ADR-0024, §2.4), scales from 0, m7i.xlarge **On-Demand** (matches I12 §2.2; a Spot reclaim mid-execution would corrupt an eval), ~30 h/month including boot and consolidation. x86 for the demo.
+* **GPU pool**: g6.xlarge Spot, scales to zero, Karpenter `nvidia.com/gpu: 1` limit, **80 GPU-hours/month** (I12 §2.2 budget and alarm). This replaces the 40 h assumed before. **The GPU stays x86** (vLLM CUDA image, L4 host).
 
-**Platform components that run in the demo:** Postgres, Kafka (KRaft, RF1), Cassandra (1 node), OpenSearch (1 node, serves the existing search projection and the knowledge index), Redis, Debezium/Kafka Connect, Schema Registry and RabbitMQ (the last three are on the Spot app pool; RabbitMQ keeps a persistent EBS volume, and a Spot loss is a demo blip because outbox and DLQ replay recover in-flight work). Stage 10 optional profiles (MySQL, DynamoDB, Memcached, serverless, mobile) are **not** run.
+**Platform components that run in the demo:** Postgres, Kafka (KRaft, RF1), Cassandra (1 node), OpenSearch (1 node), Redis, Debezium/Kafka Connect, Schema Registry and RabbitMQ (the last three on the Spot app pool). Stage 10 optional profiles are not run.
 
-**Sizing check (requests; UNMEASURED, replaced by I13 measurements).** The earlier "3 x m7i.xlarge Spot = 48 GiB" assumption fails: it put stateful stores on Spot and had no room for Connect, Schema Registry and RabbitMQ. Replacement:
+**Architecture check for Graviton (arm64) on system, data and app nodes.** Images in `infra/kafka/compose.yaml` and `infra/compose/compose.yaml`, checked with `docker buildx imagetools inspect` on 2026-09-29, all publish linux/arm64: postgres:16-alpine, apache/kafka, cassandra, opensearchproject/opensearch:3.8.0, redis:7.4-alpine, rabbitmq:4.2-alpine, confluentinc/cp-schema-registry, quay.io/debezium/connect, node, golang, python, nginx-unprivileged, dex, mosquitto. Not verified: the locally built `grainguard/*` service images (Dockerfiles use the multi-arch bases above, but CI builds amd64 only today), the locally built `debezium-connect-avro`, and the Intelligence services and CPU model images (PyTorch/ONNX CPU wheels exist for arm64; I1-I8 must confirm). **Required before adopting arm64: multi-arch (amd64+arm64) image builds in CI (Stage 12) and an arm64 smoke run.** Until then the NodePools allow both architectures and the system/data node choice falls back to t3.large ($0.0832/h) and r7i.xlarge ($0.265/h), which costs +$11.8 and +$37.1 per month, infrastructure ~$542, still inside the cap.
+
+**Sizing check (requests; UNMEASURED, replaced by I13 measurements).** Memory and vCPU match the earlier x86 sizes (r7g.xlarge and r7i.xlarge are both 4 vCPU / 32 GiB; t4g.large and t3.large both 2 vCPU / 8 GiB; m7g.xlarge and m7i.xlarge both 4 vCPU / 16 GiB), so the requests carry over unchanged:
 
 | Node | Pods (GiB / vCPU requests) | Memory requested | vCPU requested | Allocatable (approx.) | Utilisation |
-| --- | --- | ---: | ---: | --- | --- |
-| Data, r7i.xlarge | Postgres+PgBouncer 4.25 / 0.75; Kafka 4.0 / 0.75; Cassandra 6.0 / 0.75; OpenSearch 6.0 / 0.75; Redis 1.0 / 0.1; DaemonSets ~0.3 vCPU | 21.25 | 3.1 + 0.3 = 3.4 | 29.5 GiB / 3.9 vCPU | 72% memory, 87% vCPU (CPU binds first) |
-| Spot app, 2 x m7i.xlarge | ~20 existing services 4.0 / 1.5; Connect 1.5 / 0.5; Schema Registry 0.75 / 0.25; RabbitMQ 1.0 / 0.25; 5 Intelligence services 3.0 / 1.0; CPU guard+embed+rerank models 3.0 / 1.25; MLflow 1.0 / 0.25; Prometheus+Grafana+Loki 3.0 / 0.75; Argo Workflows/Rollouts 1.0 / 0.25; DaemonSets 2 x 0.3 vCPU | 18.25 | 6.0 + 0.6 = 6.6 | 59 GiB / 7.6 vCPU | 31% memory, 87% vCPU |
-| System, t3.large | Karpenter 0.5, Argo CD 1.0, Kyverno 0.5, others ~1.5 | ~3.5 | ~1.2 | ~7 GiB / 1.9 vCPU | ~50% memory, ~63% vCPU |
+| --- | --- | --- | --- | --- | --- |
+| Data, r7g.xlarge | Postgres+PgBouncer 4.25 / 0.75; Kafka 4.0 / 0.75; Cassandra 6.0 / 0.75; OpenSearch 6.0 / 0.75; Redis 1.0 / 0.1; DaemonSets ~0.3 vCPU | 21.25 | 3.1 + 0.3 = 3.4 | 29.5 GiB / 3.9 vCPU | 72% memory, 87% vCPU (CPU binds first) |
+| Spot app, 2 x xlarge | ~20 existing services 4.0 / 1.5; Connect 1.5 / 0.5; Schema Registry 0.75 / 0.25; RabbitMQ 1.0 / 0.25; 5 Intelligence services 3.0 / 1.0; CPU guard+embed+rerank models 3.0 / 1.25; MLflow 1.0 / 0.25; Prometheus+Grafana+Loki 3.0 / 0.75; Argo Workflows/Rollouts 1.0 / 0.25; DaemonSets 2 x 0.3 vCPU | 18.25 | 6.0 + 0.6 = 6.6 | 59 GiB / 7.6 vCPU | 31% memory, 87% vCPU |
+| System, t4g.large | Karpenter 0.5, Argo CD 1.0, Kyverno 0.5, others ~1.5 | ~3.5 | ~1.2 | ~7 GiB / 1.9 vCPU | ~50% memory, ~63% vCPU |
 
-The data node has only about 13% vCPU headroom. If I5/I13 measure it CPU-bound, the fix is m7i.2xlarge On-Demand (+$101/month), which **breaks the $600 cap** and needs an owner decision; the alternative is dropping Cassandra from the demo profile.
+The data node has only about 13% vCPU headroom. If I5/I13 measure it CPU-bound, the fix is r7g.2xlarge On-Demand (derived, UNVERIFIED: 2 x $0.2142 = $0.4284/h, +$156/month), which **breaks the $600 cap** in a certification month and needs an owner decision; the alternative is dropping Cassandra from the demo profile.
 
-| Line | Lean sizing | Arithmetic | $/month |
+| Line | Lean sizing | Arithmetic (rate x quantity) | $/month |
 | --- | --- | --- | ---: |
-| EKS control plane | 1 cluster, single-AZ staging | 730 h x $0.10 = 73.0 | 73 |
-| System node group | 1 x t3.large On-Demand (UNVERIFIED rate $0.0832/h, from memory) | 730 x 0.0832 = 60.7 | 61 |
-| Data node | 1 x r7i.xlarge On-Demand (UNVERIFIED rate $0.2646/h, from memory) | 730 x 0.2646 = 193.2 | 193 |
-| Spot app nodes | 2 x m7i.xlarge Spot (UNVERIFIED, derived $0.08/h) | 2 x 730 x 0.08 = 116.8 | 117 |
-| Sandbox pool | m7i.large Spot, ~20 h/month, 0 when idle (UNVERIFIED ~$0.04/h) | 20 x 0.04 = 0.8 | 1 |
-| GPU pool | g6.xlarge Spot, ~40 h/month (~20 h QLoRA + ~20 h evals/demos) | 40 x 0.60 = 24.0 | 24 |
-| EBS gp3 | 300 GB (stores, node root volumes) | 300 x 0.08 = 24.0 | 24 |
-| S3 (features, MLflow, sim) | ~300 GB Intelligent-Tiering | 300 x 0.023 = 6.9 | 7 |
-| NAT gateway and egress | 1 NAT, ~100 GB | 730 x 0.045 + 100 x 0.045 = 32.9 + 4.5 = 37.4 | 37 |
-| ALB | 1 | ~22 | 22 |
-| Observability | Prometheus/Grafana/Loki in-cluster; CloudWatch for control-plane and audit logs only | ~15 | 15 |
-| KMS | ~6 keys, envelope encryption | 6 x 1 + ~2 requests = 8 | 8 |
-| **Infrastructure subtotal (Lean)** | | 73+61+193+117+1+24+24+7+37+22+15+8 | **582** |
-| **Claude, product (cap, R22)** | customer traffic + local/dev real-Claude (own key, <= $60) + I6 E2E test; a cap, not a forecast | cap | **300** |
+| EKS control plane | 1 cluster, standard support | 730 h x 0.10 | 73.00 |
+| System node | 1 x t4g.large On-Demand | 730 x 0.067 | 48.91 |
+| Data node | 1 x r7g.xlarge On-Demand | 730 x 0.2142 | 156.37 |
+| Spot app nodes | 2 x m7g.xlarge Spot, 217 h each (scheduled) | 434 x 0.095 | 41.23 |
+| Sandbox pool | m7i.xlarge On-Demand, 30 h | 30 x 0.2016 | 6.05 |
+| GPU pool | g6.xlarge Spot, 80 h | 80 x 0.605 | 48.40 |
+| EBS gp3 | ~266 GB-month equivalent: 235 GB persistent (Postgres 40, Kafka 20, Cassandra 40, OpenSearch 40, Redis 5, RabbitMQ 10, Prometheus/Loki/MLflow 30, system and data roots 50) plus prorated roots of scheduled nodes (app 60 x 217/730, GPU 100 x 80/730, sandbox 50 x 30/730) | 266 x 0.08 | 21.28 |
+| EBS snapshots (UNVERIFIED rate) | ~100 GB stored | 100 x 0.05 | 5.00 |
+| S3 storage | ~300 GB Standard with lifecycle | 300 x 0.023 | 6.90 |
+| S3 requests | 200k PUT, 2M GET | 200 x 0.005 + 2,000 x 0.0004 = 1.00 + 0.80 | 1.80 |
+| NAT gateway | 1 NAT, ~60 GB processed | 730 x 0.045 + 60 x 0.045 = 32.85 + 2.70 | 35.55 |
+| NAT public IPv4 | 1 EIP | 730 x 0.005 | 3.65 |
+| ALB | 1, ~0.5 LCU average | 730 x 0.0225 + 365 x 0.008 = 16.43 + 2.92 | 19.35 |
+| ALB public IPv4 | 2 addresses (2 AZ subnets) | 1,460 x 0.005 | 7.30 |
+| CloudWatch | logs 10 GB (5 billable) + 10 GB stored + 15 alarms + 5 custom metrics | 2.50 + 0.30 + 1.50 + 1.50 | 5.80 |
+| KMS | 6 keys, 500k requests | 6 x 1 + 48 x 0.03 = 6.00 + 1.44 | 7.44 |
+| Secrets Manager / SSM | 2 rotating secrets + ~18k calls; ~25 other secrets in SSM standard (free) | 2 x 0.40 + 1.825 x 0.05 = 0.80 + 0.09 | 0.89 |
+| ECR (UNVERIFIED rate) | ~30 GB | 30 x 0.10 | 3.00 |
+| Misc (UNVERIFIED) | Route 53 zone, SQS/EventBridge | lump sum | 1.00 |
+| Internet egress | inside 100 GB/month free allowance | 0 x 0.09 | 0.00 |
+| **Infrastructure subtotal (Lean)** | | 73.00 + 48.91 + 156.37 + 41.23 + 6.05 + 48.40 + 21.28 + 5.00 + 6.90 + 1.80 + 35.55 + 3.65 + 19.35 + 7.30 + 5.80 + 7.44 + 0.89 + 3.00 + 1.00 | **492.92** |
+| **Claude, product (cap, R22)** | customer traffic $220 + local/dev real-Claude (own key) $60 + I6 E2E and calibration $20; a cap, not a forecast | cap | **300** |
 | **Claude, eval (cap, R22)** | T0 $0 per PR; T1 self-hosted in GPU windows; T2 weekly via Message Batches <= $12/run (~$52/month) + $30 release-candidate reserve + $18 online-eval judge calls and recalibration | 52 + 30 + 18 = 100 | **100** |
-| **Grand total (Lean)** | | 582 + 300 + 100 | **982** |
+| **Grand total (Lean)** | | 492.92 + 300 + 100 | **892.92** |
 
-Checks: infrastructure 582 <= 600 (headroom $18, 3.0%); grand total 982 <= 1,000 (headroom $18). Headroom is thin and every input is UNMEASURED. Each of these breaks the infrastructure cap: Spot app nodes falling back to On-Demand (+$177: 2 x 730 x (0.2016 - 0.08)), a third Spot app node (+$58), m7i.2xlarge data node (+$101). Extra GPU hours cost $0.60 each, so at most ~30 more hours fit in the headroom. The AWS Budgets action and Karpenter limits (R22) enforce this in code.
+Checks: infrastructure 492.92 <= 500 (target) <= 600 (cap); grand total 892.92 <= 1,000; headroom $107.08 (10.7% of the total, 17.9% of the infrastructure cap). Every quantity is UNMEASURED.
 
-**Higher variant (illustration only, exceeds the cap).** Managed RDS/ElastiCache/OpenSearch and bigger Spot nodes; it omits the system/data nodes because managed services would replace them, and keeps Kafka in-cluster.
+**Scenarios that must still fit or be governed (from `cost_model.json`).** (1) **Certification/soak month** (I13-G3/G9 need 24x7 availability, so scheduled scale-down is switched off): app nodes 2 x 730 x 0.095 = 138.70 and EBS 308.2 GB, infrastructure **$593.77, inside the $600 cap by $6**. That month has no room for anything else; do not run the GPU beyond 80 h or add nodes. (2) Same month with all 80 GPU-hours On-Demand (0.805/h): $609.77, **over the cap**; therefore the GPU guard in I12 §2.2 adds a dollar alarm (GPU spend $60/month) next to the 80-hour alarm, and the `gpu-l4-od` pool stays gated. (3) Other breakers: a third Spot app node (about +$20.6 at scheduled hours, +$69 always-on), Spot app nodes falling back to On-Demand (2 x 217 x (0.163 - 0.095) = +$29.5 scheduled, +$99 always-on), r7g.2xlarge data node (+$156). The AWS Budgets action and Karpenter limits (R22) enforce this in code. AWS WAF ($8.60/month, verified) is **not** in the plan: prod and G2 only; the demo ALB uses a security-group allow-list plus gateway rate limits. Adding it uses $8.60 of the headroom (owner decision).
 
-| Line | Higher sizing | Arithmetic | $/month |
-| --- | --- | --- | ---: |
-| EKS control plane | same | 73 | 73 |
-| App nodes | 3 x m7i.2xlarge Spot (verified $0.159/h, moves) | 3 x 730 x 0.159 = 348 | 348 |
-| GPU pool | ~300 h, 25% On-Demand | 225 x 0.60 + 75 x 0.8048 = 135 + 60 = 195 | 195 |
-| EBS gp3 | 800 GB | 800 x 0.08 | 64 |
-| RDS PostgreSQL | db.t4g.large Single-AZ + 100 GB | 730 x 0.129 + 100 x 0.115 = 94 + 12 | 106 |
-| ElastiCache | cache.t4g.small | 730 x 0.032 | 23 |
-| OpenSearch Service | 1 x t3.medium.search + 50 GB EBS | 730 x 0.073 + 50 x 0.08 = 53 + 4 | 57 |
-| S3 | ~1 TB | 1,000 x 0.023 | 20 |
-| NAT and egress | ~300 GB | 33 + 13 | 46 |
-| ALB | 1 | ~25 | 25 |
-| Observability | adds CloudWatch/Container Insights or managed Grafana/Prometheus | ~60 | 60 |
-| KMS | ~10 keys | ~15 | 15 |
-| **Infrastructure subtotal (Higher)** | | 73+348+195+64+106+23+57+20+46+25+60+15 | **1,032** (exceeds the $600 cap by $432) |
-| Claude product + eval (caps) | | 300 + 100 | 400 |
-| **Grand total (Higher)** | | 1,032 + 400 | **1,432** (exceeds $1,000) |
+**Savings evaluated.**
 
-Notes. (a) AWS charges for the EKS control plane, a NAT gateway and an ALB; the ALB can be dropped (port-forward) in idle weeks, saving ~$22. (b) Replacing in-cluster Kafka with 3 x MSK kafka.t3.small plus 100 GB each adds about $130 (3 x 730 x 0.0456 = 100, plus 300 x 0.10 = 30), which the Lean plan cannot afford. (c) Multi-AZ RDS adds about $94. (d) The demo is single-AZ; production is multi-AZ (ADR-0024) and is priced in §5.2 only as order of magnitude. (e) Prices, disk sizes and hours are planning inputs, UNMEASURED until the I13 calibration run.
+| Option | Decision | Reasoning |
+| --- | --- | --- |
+| Graviton for system, data, app nodes | **Adopted, conditional on multi-arch images** | Data node 156.37 vs 193.45 on r7i (-$37.1), system 48.91 vs 60.74 (-$11.8). Spot app price is a wash (m7g $0.095 vs m7i $0.092), so the app pool allows both architectures and is priced at the higher. GPU, sandbox AMI stay x86. |
+| Scheduled scale-down of Spot app nodes | **Adopted** | 217 h vs 730 h: 2 x (730 - 217) x 0.095 = -$97.5. Stateless plus RabbitMQ on a persistent volume; the Debezium slot retains WAL while Connect is down (a 62-hour weekend is small at demo write rates; slot lag alarm still applies). Disabled in the certification month. |
+| Scheduled scale-down of sandbox and GPU pools | Already at zero when idle | Karpenter scale-from-zero and KEDA `fallback.replicas: 0`. |
+| Data node scheduled off (nights/weekends) | **Rejected** | Would save about $110 but stops Postgres, Kafka, Cassandra and OpenSearch together: WAL-slot, Kafka log and Cassandra commit-log recovery on every morning, one failed cold start breaks a demo day, and it contradicts the 30-day G9 measurement. Revisit only with a tested startup runbook. |
+| Spot for the data node or any stateful store | **Rejected** | Interruption mid-write on a single-node store loses availability and risks corruption; violates "never Spot" (I00 §5.1, I12 §2.2). |
+| Single NAT vs alternatives | **Single NAT kept** (already single) | Public subnets for nodes: saves $33 but gives every node a public IPv4 ($3.65 each) and breaks the private-subnet and known-egress-IP design (I12 §2.2). Interface endpoints for ECR, STS, KMS and Secrets Manager: about 5 x 730 x $0.01 = $36.5 in the demo, more than the NAT. NAT instance (fck-nat): saves about $25 but is unsupported, patched by us and a throughput cap; recorded as optional, not taken. **Adopted:** free S3 gateway endpoint, which keeps ECR layer pulls off the NAT data charge. |
+| EBS right-sizing, gp3 vs io | **gp3 kept; sized to about 266 GB-eq** | gp3 baseline (3,000 IOPS, 125 MB/s) covers a single-node demo; io2 at $0.125 plus $0.065/IOPS is never needed here. EBS is only ~4% of the total, so the saving is small (about -$2.7 vs 300 GB). Snapshots added (previously omitted). |
+| S3 lifecycle | **Adopted, small** | Standard with noncurrent-version expiry and Glacier IR after 90 days; Intelligent-Tiering rejected (per-object monitoring fee, nothing to tier at 300 GB). |
+| Secrets Manager to SSM Parameter Store | **Adopted** | 25 non-rotating secrets move to free standard parameters: -$10.0; keep 2 rotating secrets. |
+| Drop the ALB WAF in the demo | **Adopted, owner decision** | -$8.60; not a permanent removal (G2). |
+| 1-year Compute Savings Plan | **Optional, not relied on** | Reserved 1-yr shows r7g.xlarge $0.142/h vs $0.214 (-34%), but it is a commitment on a demo that may be shut down, and Savings Plan rates were not verified. If taken later on the always-on data and system nodes, it is extra headroom, never part of the plan of record. |
+| Higher illustration (managed RDS/ElastiCache/OpenSearch) | **Deleted** | Exceeded the cap by $432 and was built on unverified prices. |
+
+Notes. (a) AWS charges for the EKS control plane, a NAT gateway, an ALB and public IPv4; the ALB can be dropped (port-forward) in idle weeks, saving about $26.6 (ALB, LCU and both addresses). (b) Replacing in-cluster Kafka with 3 x MSK kafka.t3.small plus 100 GB each adds about $130, which the Lean plan cannot afford. (c) The demo is single-AZ; production is multi-AZ (ADR-0024) and is priced in §5.2 only as order of magnitude. (d) Prices, disk sizes and hours are planning inputs, UNMEASURED until the I13 calibration run. (e) Corrections made while verifying: public IPv4 charges (NAT and ALB, $10.95), EBS snapshots ($5), ECR ($3), Secrets Manager, CloudWatch alarms and metrics were missing from the earlier plan; GPU hours were 40 while I12 budgets 80.
 
 **Single cost source.** All figures in this section, the Claude call-type prices and the caps live in one machine-readable file, `docs/intelligence/cost_model.json`, created in I0 (§8.1 item 5). I06 (budgets, routing), I09 (eval spend), I12 (dashboards) and the G-I0-5 gate read that file. Prose numbers in section files are derived from it and are updated with it.
 
@@ -552,7 +567,7 @@ I0 is complete only when every item below has linked evidence under `evidence/` 
 | G-I0-2 | Every service in §2.1 has an owner DB, topics and README stub with "scaffolded, not implemented" status | 5/5 |
 | G-I0-3 | `capacity_assumptions.json` gains an `intelligence` block with A1–A14, and `scripts/capacity_model.py` (in an isolated copy, per CAPACITY_MODEL rules) reproduces §4.3 and §4.4 | Byte-identical numbers; `make check-plan` passes |
 | G-I0-4 | Each assumption A1–A14 is linked to the I-stage evidence file that will measure it | 14/14 |
-| G-I0-5 | `docs/intelligence/cost_model.json` exists and is the **single machine-readable cost source** read by I06, I09, I12 and the gates. It carries the §5.1 Lean lines and subtotal (582), the §5.2 call-type prices and weighted cost per question, the free-plan default, and the caps: infrastructure ≤ $600, product Claude ≤ $300, eval Claude ≤ $100, total ≤ $1,000 (R22). AWS Budgets alerts (50/90/100%) are defined as code | File present and its totals recompute to §5.1 (infrastructure 582, grand total 982); `terraform plan` or equivalent dry-run shows the budget resource (after ADR-0024) |
+| G-I0-5 | `docs/intelligence/cost_model.json` exists and is the **single machine-readable cost source** read by I06, I09, I12 and the gates. It carries the §5.1 Lean lines and subtotal (492.92), the §5.2 call-type prices and weighted cost per question, the free-plan default, and the caps: infrastructure ≤ $600, product Claude ≤ $300, eval Claude ≤ $100, total ≤ $1,000 (R22). AWS Budgets alerts (50/90/100%) are defined as code | File present and its totals recompute to §5.1 (infrastructure 492.92, grand total 892.92, headroom 107.08); `make intelligence-cost-check` passes and fails on any cap breach; `terraform plan` or equivalent dry-run shows the budget resource (after ADR-0024) |
 | G-I0-6 | `TECHNOLOGY_CATALOG.md` entries for new technology families | Every new family listed |
 | G-I0-7 | `architecture-guard` subagent review of this charter against CLAUDE.md invariants and the README | No unresolved blocking findings |
 
