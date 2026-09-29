@@ -58,3 +58,7 @@ docs/       blueprint, coverage matrix, backlog, ADRs, runbooks
 - Any new dependency is pinned and declared in `docs/TECHNOLOGY_CATALOG.md` if it's a new technology family.
 - CI (GitHub Actions + SonarQube quality gate, see [docs/CI_CD.md](docs/CI_CD.md)) is expected to pass — don't disable checks to get green.
 - Run `coderabbit review` (CLI already authenticated as `pahuldeepp`) on non-trivial changes before finishing; `.coderabbit.yaml` enforces assertive-profile checks on `services/**` (transaction boundaries, tenant isolation, graceful shutdown) and `.github/workflows/**` (untrusted PR handling, secret exposure, mandatory gates). Treat its request-changes verdicts as blocking, same as a human reviewer.
+
+## Intelligence track
+
+AI work follows [ADR-0023](docs/adr/0023-intelligence-track.md) and [docs/intelligence/README.md](docs/intelligence/README.md); the rules above (tenant isolation, outbox, evidence, pinned dependencies) apply unchanged.

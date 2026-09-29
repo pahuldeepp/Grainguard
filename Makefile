@@ -414,3 +414,7 @@ mysql-cdc-test: db-migrate
 design-check:
 	node --test scripts/design-check.test.mjs
 	node scripts/design-check.mjs --report=evidence/design-check-latest.md $(ARGS)
+
+.PHONY: intelligence-cost-check
+intelligence-cost-check:
+	node scripts/check-intelligence-cost.mjs

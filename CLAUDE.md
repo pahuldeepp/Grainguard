@@ -62,6 +62,10 @@ Build strictly in stage order; do not start a later stage's infrastructure early
 - Event and reading IDs are created once and never regenerated on retry or replay.
 - Contended state uses an explicit lock choice (see review P3); document it next to the migration.
 
+## GreenGuard Intelligence track
+
+AI work runs as a parallel, dependency-gated track I0–I13 ([ADR-0023](docs/adr/0023-intelligence-track.md)); the numbered stages stay strictly ordered; within the track each I-stage starts only when its `docs/intelligence/README.md` §5 dependencies meet their exit gates (linked evidence and green remote CI, or an owner-signed waiver). As of 2026-09-29 only I0 may proceed. Read [docs/intelligence/README.md](docs/intelligence/README.md) first — it is binding over the section files. Production cloud is AWS ([ADR-0024](docs/adr/0024-aws-platform.md)).
+
 ## Project subagents
 
 Defined in `.claude/agents/` (list them with `/agents`). Use `architecture-guard` before and after any stage work, `tenant-isolation-reviewer` on anything touching tenant data, and `stage-implementer` to build one backlog stage end to end.
