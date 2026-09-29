@@ -17,7 +17,7 @@
     "@types/ws": "^8.18.1",
     "dataloader": "2.2.3",
     "express": "5.2.1",
-    "graphql": "16.13.0",
+    "graphql": "17.0.2",
     "redis": "^5.1.1",
     "undici": "7.29.1",
     "ws": "^8.21.3"
