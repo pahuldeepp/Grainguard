@@ -410,7 +410,10 @@ Technologies introduced by the Intelligence track ([ADR-0023](adr/0023-intellige
 | LLM | vLLM, Ollama (local only), safetensors, Hugging Face Transformers/PEFT/TRL/bitsandbytes | I6, I11 | Self-hosted serving, QLoRA fine-tuning | Planned |
 | LLM | Prompt Guard 2, a small safety classifier, Presidio | I10 | Input/output guardrails on CPU | Planned |
 | Agents | LangGraph (+ Postgres checkpointer wrapper), MCP TypeScript SDK | I8 | Durable agent graph, tool boundary | Planned |
-| Retrieval | OpenSearch k-NN / hybrid search, a cross-encoder reranker, embedding model | I7 | Knowledge RAG | Planned |
+| Retrieval | **Pinecone** (serverless, Standard plan, AWS us-east-1; vectors + minimal metadata, namespace per tenant; [ADR-0029](adr/0029-pinecone-knowledge-vector-store.md)) | I7 | Knowledge vector store (third-party processor; integrated inference not used) | Planned |
+| Retrieval | **Pinecone Local** (Docker emulator `ghcr.io/pinecone-io/pinecone-local`; in-memory, no namespace support) | I7 | Optional wire-compatibility smoke test only; not the CI adapter | Planned (optional) |
+| Retrieval | PostgreSQL full-text search (`tsvector`, GIN) fused with Pinecone dense results by RRF; a cross-encoder reranker; embedding model | I7 | Hybrid lexical leg inside RLS; rerank; embeddings behind `model-gateway` | Planned |
+| Retrieval | OpenSearch (Stage 05d/10a) now **only telemetry search**, plus its k-NN as the local/CI `VectorStore` adapter | I7 | Local and PR-CI stand-in for the `pinecone` adapter (synthetic fixtures) | Planned (adapter only) |
 | Evals | promptfoo, garak, PyRIT (own harness for statistics) | I9, I10 | Eval and red-team suites | Planned |
 | Observability | OpenTelemetry GenAI semantic conventions, Tempo, Loki, Prometheus, Grafana | I12 | AI/ML telemetry | Planned |
-| Platform (AWS) | EKS, Karpenter, RDS PostgreSQL, MSK, ElastiCache, OpenSearch Service, KMS, Secrets Manager, ECR, Cosign, Kyverno, gVisor (self-installed) | I13, Stage 12 | Production deployment | Planned |
+| Platform (AWS) | EKS, Karpenter, RDS PostgreSQL, MSK, ElastiCache, OpenSearch Service (telemetry search), KMS, Secrets Manager, ECR, Cosign, Kyverno, gVisor (self-installed) | I13, Stage 12 | Production deployment | Planned |

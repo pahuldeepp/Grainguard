@@ -9,9 +9,9 @@
     "product_claude": 300,
     "eval_claude": 100,
     "total": 1000,
-    "owner_decision": "2026-09-29 (README R22)"
+    "owner_decision": "2026-09-29 (README R22); headroom target lowered from $100 to $50 on 2026-09-29 as an owner-accepted trade-off for choosing Pinecone (ADR-0029)"
   },
-  "headroom_target_usd": 100,
+  "headroom_target_usd": 50,
   "assumptions": {
     "region": "us-east-1 (us-west-2 spot-checked on r7g.xlarge: same On-Demand, same Spot as displayed)",
     "demo_hours": "10 h/day, Mon-Fri = 217 h/month for scheduled Spot app nodes; data and system nodes 24x7 (730 h)",
@@ -343,17 +343,17 @@
     },
     {
       "id": "secrets_manager",
-      "name": "Secrets Manager, 2 secrets (rotating DB credentials); all other secrets in SSM Parameter Store",
+      "name": "Secrets Manager, 6 secrets (2 rotating DB credentials + 4 Pinecone API keys: tenant index writer, tenant index reader, public index reader, public curator); all other secrets in SSM Parameter Store",
       "category": "security",
       "unit": "secret-month",
       "unit_price": 0.4,
-      "quantity": 2,
-      "monthly_usd": 0.8,
+      "quantity": 6,
+      "monthly_usd": 2.4,
       "price_source": "https://aws.amazon.com/secrets-manager/pricing/",
       "source_kind": "aws_official_page",
       "verified": true,
       "date": "2026-09-29",
-      "note": ""
+      "note": "Pinecone keys are not auto-rotated; they sit in Secrets Manager per ADR-0029 (owner brief) rather than SSM."
     },
     {
       "id": "secrets_api",
@@ -368,6 +368,26 @@
       "verified": true,
       "date": "2026-09-29",
       "note": ""
+    },
+    {
+      "id": "pinecone_standard",
+      "name": "Pinecone Standard, serverless (AWS us-east-1): $50/month minimum usage; demo usage is below the minimum, so the bill is the minimum",
+      "category": "vector_store",
+      "unit": "monthly minimum",
+      "unit_price": 50.0,
+      "quantity": 1,
+      "monthly_usd": 50.0,
+      "price_source": "https://www.pinecone.io/pricing/ ; unit formulas https://docs.pinecone.io/guides/manage-cost/understanding-cost",
+      "source_kind": "vendor_official_page",
+      "verified": true,
+      "date": "2026-09-29",
+      "usage_estimate_usd": {
+        "storage_1_gb_at_0.33": 0.33,
+        "write_units_2M_at_4_per_M": 8.0,
+        "read_units_100k_at_16_per_M": 1.6,
+        "total": 9.93
+      },
+      "note": "Minimum, storage $0.33/GB-month, writes ~$4/M and reads ~$16/M verified 2026-09-29 (page gives $4-$4.50 and $16-$18 by cloud/region; the low end is used, us-east-1 exact price not confirmed). Usage above is UNMEASURED and sits well under the minimum; if measured usage exceeds $50 the line becomes usage-priced. Starter (free) and the OpenSearch adapter cover dev and CI. PrivateLink needs Enterprise ($500/month), excluded."
     },
     {
       "id": "ssm_parameter_store",
@@ -426,7 +446,7 @@
       "note": "The 100 GB monthly free allowance is verified; the $0.09/GB tier rate is from memory and is not used at 0 GB."
     }
   ],
-  "lean_infrastructure_subtotal": 492.92,
+  "lean_infrastructure_subtotal": 544.52,
   "claude_product": {
     "cap": 300,
     "split": {
@@ -443,15 +463,24 @@
       "online_eval_judge_and_recalibration": 18
     }
   },
-  "grand_total_at_caps": 892.92,
-  "headroom_usd": 107.08,
+  "grand_total_at_caps": 944.52,
+  "headroom_usd": 55.48,
   "scenarios": [
     {
       "id": "certification_month_always_on",
-      "description": "I13-G3/G9 soak and certification month: scheduled scale-down disabled, app pool 24x7",
+      "description": "I13-G3/G9 soak and certification month: scheduled scale-down disabled, app pool 24x7. After ADR-0029 this exceeds the $600 infrastructure cap (Pinecone minimum), so it is informational and needs an owner decision (README section 8 Q23).",
       "overrides": {
         "app_spot_nodes": 1460,
         "ebs_gp3": 308.2
+      },
+      "must_be_within_cap": false
+    },
+    {
+      "id": "certification_soak_partial_always_on",
+      "description": "Cert month with the app pool always-on for about 16.7 days (400 h per node) and scheduled otherwise; fits the cap with Pinecone Standard. A full 30-day G9 soak needs the owner decision in Q23.",
+      "overrides": {
+        "app_spot_nodes": 800,
+        "ebs_gp3": 281.05
       },
       "must_be_within_cap": true
     },
@@ -481,6 +510,13 @@
       "item": "1-year Compute Savings Plan on the data and system nodes",
       "monthly_usd": 0,
       "reason": "Optional, not relied on: commitment risk. Vantage 1-yr Reserved shows r7g.xlarge $0.142/h vs $0.214 On-Demand, but Savings Plan rates were not verified."
+    },
+    {
+      "item": "Pinecone Enterprise plan for AWS PrivateLink and audit logs ($500/month minimum usage)",
+      "monthly_usd": 500,
+      "price_source": "https://www.pinecone.io/pricing/ ; https://docs.pinecone.io/guides/production/connect-to-aws-privatelink",
+      "verified": true,
+      "reason": "PrivateLink (Private Endpoints) requires the Enterprise plan. Production hardening item (I13); far outside the $1,000 demo budget. BYOC also needs Enterprise and its price is contact-sales (unpriced)."
     }
   ],
   "claude_call_types": {
@@ -549,5 +585,6 @@
     "cost_per_question_usd": 0.018,
     "customer_traffic_budget_usd": 220,
     "days": 30
-  }
+  },
+  "headroom_target_note": "Owner-accepted 2026-09-29: choosing Pinecone Standard ($50/month minimum, ADR-0029) reduces headroom from $107.08 to $55.48. Do not lower further."
 }

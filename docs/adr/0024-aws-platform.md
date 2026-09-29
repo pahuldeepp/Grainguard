@@ -20,7 +20,7 @@ The whole platform's production target is **Amazon Web Services**. Service mappi
 | Object storage | Amazon S3 with versioning and lifecycle. **One KMS CMK per environment with S3 Bucket Keys** (not one KMS key per tenant — that costs about $1/key-month and hits key quotas at 10k+ orgs); per-tenant separation is by tenant-pseudonym prefix, and per-tenant DEK envelope encryption (R23) is done by the application for content it stores | S3 Object Lock is not used for tenant data (Intelligence R6). **Audit exports follow ADR-0021** (SSE-S3 default, `aws:kms` optional, tenant-prefixed lifecycle) until that ADR is accepted; crypto-shred (R26) must be checked against its 7/8-day export retention. |
 | Keys and secrets | AWS KMS (per-environment CMK), Secrets Manager; per-tenant DEKs per Intelligence R23 | |
 | Redis | Amazon ElastiCache for Redis (cluster mode) | |
-| Search | Amazon OpenSearch Service (managed) for prod; single-node container locally | k-NN and hybrid search available; single-shard public knowledge index per Intelligence R11 |
+| Search | Amazon OpenSearch Service (managed) for prod; single-node container locally | Telemetry search only (Stage 05d/10a). Knowledge vectors are **not** in OpenSearch: they are in Pinecone ([ADR-0029](0029-pinecone-knowledge-vector-store.md)), a third-party managed service on AWS, so it appears in the subprocessor list, not in this AWS mapping |
 | Cassandra | Amazon Keyspaces evaluated at Stage 13; self-managed Cassandra (K8ssandra) on EKS for the demo | |
 | RabbitMQ | Amazon MQ for RabbitMQ or the RabbitMQ Cluster Operator | |
 | Edge | ALB/NLB + AWS WAF + Shield | Review gap O4 |
