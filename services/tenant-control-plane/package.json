@@ -23,7 +23,7 @@
     "@greenguard/tenant-auth": "0.1.0",
     "@nestjs/common": "12.0.4",
     "@nestjs/core": "12.0.4",
-    "@nestjs/platform-express": "12.0.4",
+    "@nestjs/platform-express": "12.1.0",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
     "pg": "8.23.0",
