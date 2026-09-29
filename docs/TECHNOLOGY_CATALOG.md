@@ -394,3 +394,23 @@ The feature-flag package pins `@openfeature/server-sdk@1.23.0` in
 `packages/feature-flags/package.json` and the root npm lockfile. This is a new
 rebuild dependency, not one of the 368 archived manifest entries; it supplies
 the OpenFeature evaluation API for tenant-scoped flags with safe defaults.
+
+## GreenGuard Intelligence additions (planned; declared before use)
+
+Technologies introduced by the Intelligence track ([ADR-0023](adr/0023-intelligence-track.md), [design](intelligence/README.md)). Versions are pinned in each stage's lockfile when it starts; no item here is installed yet. Production cloud is AWS ([ADR-0024](adr/0024-aws-platform.md)).
+
+| Family | Technology | Stage | Purpose | Status |
+|---|---|---|---|---|
+| ML | scikit-learn, LightGBM, statsmodels, SHAP | I2 | Classical ladder, calibration, explanations | Planned |
+| ML | PyTorch, ONNX Runtime, Optuna | I3–I5 | Deep forecasters, autoencoder, CPU serving | Planned |
+| ML | Chronos-2 / TimesFM / Moirai (baselines only) | I4 | Foundation time-series comparison | Planned (optional) |
+| MLOps | MLflow (tracking, registry), Argo Workflows | I2–I5, I11 | Experiments, model registry, pipelines | Planned |
+| Data | Parquet/PyArrow, Amazon S3 | I1 | Offline corpus and sequence windows | Planned |
+| LLM | Anthropic API (first-party), Claude on Amazon Bedrock (optional) | I6 | Hosted models behind `model-gateway` | Planned |
+| LLM | vLLM, Ollama (local only), safetensors, Hugging Face Transformers/PEFT/TRL/bitsandbytes | I6, I11 | Self-hosted serving, QLoRA fine-tuning | Planned |
+| LLM | Prompt Guard 2, a small safety classifier, Presidio | I10 | Input/output guardrails on CPU | Planned |
+| Agents | LangGraph (+ Postgres checkpointer wrapper), MCP TypeScript SDK | I8 | Durable agent graph, tool boundary | Planned |
+| Retrieval | OpenSearch k-NN / hybrid search, a cross-encoder reranker, embedding model | I7 | Knowledge RAG | Planned |
+| Evals | promptfoo, garak, PyRIT (own harness for statistics) | I9, I10 | Eval and red-team suites | Planned |
+| Observability | OpenTelemetry GenAI semantic conventions, Tempo, Loki, Prometheus, Grafana | I12 | AI/ML telemetry | Planned |
+| Platform (AWS) | EKS, Karpenter, RDS PostgreSQL, MSK, ElastiCache, OpenSearch Service, KMS, Secrets Manager, ECR, Cosign, Kyverno, gVisor (self-installed) | I13, Stage 12 | Production deployment | Planned |

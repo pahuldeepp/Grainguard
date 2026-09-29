@@ -48,3 +48,7 @@ The source audits provide exact file/line evidence. Use these as targeted regres
 Contract and owner documented; implementation wired at runtime; reproducible tests cover happy path, tenant isolation, duplicates and relevant failures; migration/rollback policy clear; logs/metrics/traces present; local and CI commands pass without suppression; operational failure/recovery described. Retain the source reference and coverage IDs in the implementation change.
 
 Archive console output after each stage while it is still available. Retained GitHub records are useful historical evidence; rerunning a pipeline creates new evidence and does not recover an expired original log.
+
+## Intelligence track
+
+A parallel AI track (I0–I13) with its own dependency table lives in [docs/intelligence/README.md](intelligence/README.md) under [ADR-0023](adr/0023-intelligence-track.md). It does not change the stage rows above.

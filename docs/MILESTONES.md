@@ -20,6 +20,15 @@ All 14 implementation milestones are defined in the [acceptance backlog](IMPLEME
 | 13    | Capacity, load, soak, chaos and resilience certification                   | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 14    | Recovery, regional operations, incident exercises and final coverage audit | Planned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
+## GreenGuard Intelligence track
+
+A parallel, dependency-gated AI track ([ADR-0023](adr/0023-intelligence-track.md), design in [docs/intelligence/](intelligence/README.md)). An I-stage starts only when its listed dependencies meet their exit gates; completion follows the same evidence rule as above.
+
+| Stage | Milestone | Status |
+| ----- | --------- | ------ |
+| I0 | Charter, workload/cost model, ADRs 0023–0024, catalog entries | In progress — design spec rev 3 written; ADR-0023 (parallel track) and ADR-0024 (AWS) accepted 2026-09-29; catalog entries added to `TECHNOLOGY_CATALOG.md`; workload recompute (AWS prices, R5 sensor model) and remaining owner questions (README §8) open |
+| I1–I13 | Data/simulator, classical and deep ML, online ML, model gateway, RAG, Grain Advisor, evals, AI security, fine-tuning, AI observability, production certification | Planned — implementation waits for GG-04 and GG-05 exit gates |
+
 The [coverage matrix](COVERAGE_MATRIX.md) tracks 141 architecture requirements; the [technology catalog](TECHNOLOGY_CATALOG.md) retains 368 historical entries and their intended destinations. The [scale plan](SCALE_AND_PRODUCTION_READINESS.md) defines the 10-million-account, organization and concurrent-user targets. Those targets require measured cell/fleet evidence and operational gates, not just a passing local setup.
 
 Calendar dates will be estimated from measured implementation throughput after the first vertical slice. Milestones currently specify scope, dependency and completion evidence, not promised delivery dates.
