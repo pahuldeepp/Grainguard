@@ -5,6 +5,7 @@ import { checkHealth } from "./health";
 import { ProvisioningApi, type AccessTokenProvider } from "./provisioning";
 import { ReadApi } from "./read-api";
 import { AlertsApi } from "./alerts-api";
+import { MlApi } from "./ml-api";
 import { type DashboardState, uiActions } from "./dashboard-state";
 import { AlertSummary } from "./AlertSummary";
 import { useOnline } from "./online";
@@ -31,6 +32,9 @@ const DeviceRollups = lazy(() =>
 );
 const BinReadings = lazy(() =>
   import("./BinReadings").then((m) => ({ default: m.BinReadings })),
+);
+const MlOperationsView = lazy(() =>
+  import("./MlOperationsView").then((m) => ({ default: m.MlOperationsView })),
 );
 const services = [
   {
@@ -63,6 +67,7 @@ const navItems = [
   { to: "/provisioning", label: "Provisioning", icon: "provisioning" },
   { to: "/devices", label: "Devices", icon: "devices" },
   { to: "/alerts", label: "Alerts", icon: "alerts" },
+  { to: "/ml", label: "ML operations", icon: "overview" },
 ] as const;
 
 function Overview({
@@ -136,6 +141,10 @@ export function App({
   );
   const alertsApi = useMemo(
     () => (getAccessToken ? new AlertsApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const mlApi = useMemo(
+    () => (getAccessToken ? new MlApi(getAccessToken) : null),
     [getAccessToken],
   );
   const [health, setHealth] = useState<(boolean | null)[]>([null, null]);
@@ -278,6 +287,26 @@ export function App({
             <Route
               path="/bins/:binId"
               element={<BinReadings api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/drift"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/performance"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/models"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/retraining"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
             />
           </Routes>
         </Suspense>

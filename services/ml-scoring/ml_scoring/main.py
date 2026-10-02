@@ -6,11 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
 import os
 import signal
+from urllib.parse import parse_qs, urlparse
 import socket
 import threading
 import hashlib
 import ipaddress
+import json
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
@@ -398,11 +401,16 @@ def _readiness_is_healthy(repository: PostgresRepository, gate: threading.Bounde
 
 def _health_server(repository: PostgresRepository, port: int, host: str = "127.0.0.1",
                    relay_failed: threading.Event | None = None,
-                   relay_degraded: threading.Event | None = None) -> ThreadingHTTPServer:
+                   relay_degraded: threading.Event | None = None,
+                   operations_supplier=None) -> ThreadingHTTPServer:
     readiness_gate = threading.BoundedSemaphore(1)
 
     class Handler(BaseHTTPRequestHandler):
         timeout = 5
+
+        def _internal_authorized(self) -> bool:
+            expected = os.environ.get("ML_OPERATIONS_TOKEN")
+            return not expected or self.headers.get("X-Internal-Token") == expected
 
         def do_GET(self) -> None:
             if self.path == "/livez":
@@ -414,9 +422,46 @@ def _health_server(repository: PostgresRepository, port: int, host: str = "127.0
                 )
                 self.send_response(200 if healthy else 503)
                 payload = b'{"status":"ready"}' if healthy else b'{"status":"not_ready"}'
+            elif urlparse(self.path).path == "/operations" and operations_supplier is not None:
+                if not self._internal_authorized():
+                    self.send_response(401)
+                    payload = b'{"error":"unauthorized"}'
+                else:
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        payload = json.dumps(operations_supplier(query.get("tenant_id", [""])[0]),
+                                             separators=(",", ":")).encode("utf-8")
+                        self.send_response(200)
+                    except PermissionError:
+                        self.send_response(403)
+                        payload = b'{"error":"tenant_not_allowed"}'
+                    except Exception:
+                        LOG.exception("ML operations snapshot failed")
+                        self.send_response(503)
+                        payload = b'{"error":"operations_unavailable"}'
             else:
                 self.send_response(404)
                 payload = b'{"error":"not_found"}'
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_POST(self) -> None:
+            path = urlparse(self.path).path
+            if not path.startswith("/operations/") or operations_supplier is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            if not self._internal_authorized():
+                self.send_response(401)
+                self.end_headers()
+                return
+            # Synthetic/shadow runtimes intentionally fail closed. This keeps
+            # operator controls visible and auditable without allowing an
+            # unvalidated model to enter production traffic.
+            self.send_response(409)
+            payload = b'{"message":"synthetic_model_not_promotable"}'
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -508,6 +553,9 @@ def run() -> None:
     outbox_failures = meter.create_counter("ml_scoring_shadow_outbox_failures_total")
     drift_persistence_failures = meter.create_counter("ml_scoring_drift_state_persistence_failures_total")
     latest_psi: dict[tuple[str, str, str, str], float] = {}
+    latest_psi_samples: dict[tuple[str, str, str, str], int] = {}
+    stats = {"predictions_total": 0, "inference_p95_ms": None}
+    stats_lock = threading.Lock()
     psi_lock = threading.Lock()
     register_psi_gauge(meter, latest_psi, psi_lock)
     drift_monitors = build_drift_monitors(model.manifest.drift_reference)
@@ -534,16 +582,51 @@ def run() -> None:
                 # Invalid or incompatible persisted state fails startup rather
                 # than silently resetting the drift sample window.
                 drift_monitors[feature_name].restore_state(state)
-        for feature_name, (psi_value, _sample_count) in prior_drift.items():
+        for feature_name, (psi_value, sample_count) in prior_drift.items():
             latest_psi[(feature_name, model.manifest.model_name,
                         model.manifest.model_version, "shadow")] = psi_value
+            latest_psi_samples[(feature_name, model.manifest.model_name,
+                                model.manifest.model_version, "shadow")] = sample_count
         drift_state_restored = True
         # Validate producer construction before advertising readiness; a failed
         # relay is a failed deployment, not a healthy scorer with stranded output.
         relay_producer = Producer(_outbox_producer_config(config))
+        def operations_snapshot(requested_tenant: str) -> dict[str, object]:
+            if requested_tenant != str(synthetic_tenant):
+                raise PermissionError("tenant is not part of this synthetic cell")
+            with psi_lock, stats_lock:
+                drift = [
+                    {"feature": feature, "psi": value,
+                     "sampleCount": latest_psi_samples.get((feature, name, version, mode), 0),
+                     "status": "elevated" if value is not None and value > 0.25 else "healthy"}
+                    for (feature, name, version, mode), value in latest_psi.items()
+                    if name == model.manifest.model_name and version == model.manifest.model_version
+                    and mode == "shadow"
+                ]
+                snapshot_stats = dict(stats)
+            return {
+                "capturedAt": datetime.now(timezone.utc).isoformat(),
+                "scorerReady": READY.is_set() and not relay_failed.is_set() and not relay_degraded.is_set(),
+                "predictionsTotal": snapshot_stats["predictions_total"],
+                "inferenceP95Ms": snapshot_stats["inference_p95_ms"],
+                "canaryPercentage": 0.0,
+                "model": {"name": model.manifest.model_name, "version": model.manifest.model_version,
+                          "mode": "shadow", "dataOrigin": model.manifest.data_origin,
+                          "productionEligible": model.manifest.production_eligible,
+                          "status": "healthy" if READY.is_set() else "unavailable"},
+                "models": [{"name": model.manifest.model_name, "version": model.manifest.model_version,
+                            "mode": "shadow", "dataOrigin": model.manifest.data_origin,
+                            "productionEligible": model.manifest.production_eligible,
+                            "status": "healthy" if READY.is_set() else "unavailable",
+                            "createdAt": ""}],
+                "drift": drift,
+                "performance": {"status": "unavailable", "brierScore": None,
+                                "sampleCount": 0, "evaluatedAt": None},
+                "retraining": {"status": "idle", "runId": None, "completedAt": None},
+            }
         health = _health_server(repository, int(os.environ.get("PORT", "8080")),
                                 os.environ.get("ML_HEALTH_BIND", "127.0.0.1"),
-                                relay_failed, relay_degraded)
+                                relay_failed, relay_degraded, operations_snapshot)
         consumer = Consumer(config)
         metadata = consumer.list_topics(timeout=5)
         if environment == "local-synthetic":
@@ -623,6 +706,10 @@ def run() -> None:
                     with psi_lock:
                         latest_psi[(feature_name, labels["model.name"],
                                     labels["model.version"], labels["mode"])] = psi_value
+                        latest_psi_samples[(feature_name, labels["model.name"],
+                                            labels["model.version"], labels["mode"])] = len(
+                                                drift_monitors[feature_name].export_state()["bins"]
+                                            )
                     if psi_value > 0.25:
                         LOG.warning("synthetic reference PSI breach for %s: %.4f",
                                     feature_name, psi_value)
@@ -658,6 +745,9 @@ def run() -> None:
                           "mode": "shadow"}
                 predictions.add(1, labels)
                 probability.record(result.probability, labels)
+                with stats_lock:
+                    stats["predictions_total"] += 1
+                    stats["inference_p95_ms"] = result.inference_ms
                 if result.inference_ms is not None:
                     inference_latency.record(result.inference_ms, labels)
             # Database transaction finishes before Kafka offset commit: replay is

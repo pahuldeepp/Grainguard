@@ -16,6 +16,11 @@ import {
   NotificationClient,
   NotificationUpstreamError,
 } from "./notifications.js";
+import {
+  MlOperationsUpstreamError,
+  type MlOperationsClient,
+  type MlAction,
+} from "./ml-operations.js";
 import type DataLoader from "dataloader";
 
 export interface BffContext {
@@ -26,6 +31,7 @@ export interface BffContext {
   read?: ReadClient;
   alerts?: AlertClient;
   notifications?: NotificationClient;
+  mlOperations?: MlOperationsClient;
   consistencyToken?: string;
   readDeadline?: number;
   readSignal?: AbortSignal;
@@ -63,6 +69,13 @@ export const typeDefs = `#graphql
   type NotificationEvent { kind: String!, outcome: String!, recordedAt: String }
   type NotificationAttempt { intentId: ID!, transitionVersion: String!, transition: String!, severity: String, channel: String!, deliveryGeneration: Int!, redriveCount: Int!, state: String!, reasonCode: String, queuedAt: String, firstAttemptAt: String, lastAttemptAt: String, resolvedAt: String, dispatchAttempts: Int, providerAttempts: Int, contactVersion: String, events: [NotificationEvent!]!, attemptsTruncated: Boolean! }
   type NotificationAttemptPage { items: [NotificationAttempt!]!, nextCursor: String, sources: NotificationSources!, complete: Boolean! }
+  type MlModelStatus { name: String!, version: String!, mode: String!, dataOrigin: String!, productionEligible: Boolean!, status: String! }
+  type MlDriftMetric { feature: String!, psi: Float, sampleCount: Int!, status: String! }
+  type MlPerformance { status: String!, brierScore: Float, sampleCount: Int!, evaluatedAt: String }
+  type MlModelVersion { name: String!, version: String!, mode: String!, dataOrigin: String!, productionEligible: Boolean!, status: String!, createdAt: String! }
+  type MlRetrainingStatus { status: String!, runId: String, completedAt: String }
+  type MlOperationsSnapshot { capturedAt: String!, scorerReady: Boolean!, predictionsTotal: Int!, inferenceP95Ms: Float, canaryPercentage: Float!, model: MlModelStatus!, models: [MlModelVersion!]!, drift: [MlDriftMetric!]!, performance: MlPerformance!, retraining: MlRetrainingStatus! }
+  type MlActionResult { action: String!, accepted: Boolean!, message: String!, runId: String }
   type AlertPage { items: [AlertView!]!, nextCursor: String }
   type AlertPageV2 { items: [AlertV2!]!, nextCursor: String }
   type AlertAcknowledgement { episodeId: ID!, state: String!, version: String!, eventId: ID! }
@@ -85,11 +98,15 @@ export const typeDefs = `#graphql
     alertDetailV2(id: ID!): AlertV2
     alertHistory(id: ID!, limit: Int!, after: String): AlertHistoryPage!
     alertNotifications(id: ID!, limit: Int!, after: String): NotificationAttemptPage!
+    mlOperations: MlOperationsSnapshot!
   }
   type Mutation {
     startProvisioning(deviceId: ID!, assetId: ID!, idempotencyKey: String!): ProvisioningSaga!
     redriveProvisioning(id: ID!, reason: String!): ProvisioningSaga!
     acknowledgeAlert(id: ID!, version: String!, idempotencyKey: String!): AlertAcknowledgement!
+    promoteMlModel(version: String!): MlActionResult!
+    rollbackMlModel(version: String): MlActionResult!
+    startMlRetraining: MlActionResult!
   }
   type Subscription { deviceChanged(deviceId: ID!): DeviceChange! }
 `;
@@ -99,7 +116,8 @@ function translate(error: unknown): never {
     error instanceof UpstreamError ||
     error instanceof ReadUpstreamError ||
     error instanceof AlertUpstreamError ||
-    error instanceof NotificationUpstreamError
+    error instanceof NotificationUpstreamError ||
+    error instanceof MlOperationsUpstreamError
   ) {
     throw new GraphQLError(error.code, {
       extensions: { code: error.code, httpStatus: error.status },
@@ -235,6 +253,19 @@ export const resolvers = {
           args.id,
           args.limit,
           args.after,
+        );
+      } catch (error) {
+        return translate(error);
+      }
+    },
+    async mlOperations(_: unknown, _args: unknown, context: BffContext) {
+      try {
+        requireRole(context.principal, "operator", "admin");
+        if (!context.mlOperations)
+          throw new MlOperationsUpstreamError(503, "ml_operations_unavailable");
+        return await context.mlOperations.snapshot(
+          context.principal,
+          context.authorization,
         );
       } catch (error) {
         return translate(error);
@@ -492,6 +523,15 @@ export const resolvers = {
         return translate(error);
       }
     },
+    async promoteMlModel(_: unknown, args: { version: string }, context: BffContext) {
+      return mlAction(context, "promote", args.version);
+    },
+    async rollbackMlModel(_: unknown, args: { version?: string }, context: BffContext) {
+      return mlAction(context, "rollback", args.version);
+    },
+    async startMlRetraining(_: unknown, _args: unknown, context: BffContext) {
+      return mlAction(context, "retrain");
+    },
     async startProvisioning(
       _: unknown,
       args: { deviceId: string; assetId: string; idempotencyKey: string },
@@ -607,6 +647,26 @@ function requiredAlerts(context: BffContext): AlertClient {
   if (!context.alerts)
     throw new AlertUpstreamError(503, "alerts_api_unavailable");
   return context.alerts;
+}
+
+async function mlAction(
+  context: BffContext,
+  action: MlAction,
+  version?: string,
+) {
+  try {
+    requireRole(context.principal, "operator", "admin");
+    if (!context.mlOperations)
+      throw new MlOperationsUpstreamError(503, "ml_operations_unavailable");
+    return await context.mlOperations.action(
+      context.principal,
+      context.authorization,
+      action,
+      version,
+    );
+  } catch (error) {
+    return translate(error);
+  }
 }
 
 export function createApolloServer(): ApolloServer<BffContext> {

@@ -130,3 +130,9 @@ failure. `streamVersion`
 remains the independent event stream version. History/search keep their owning
 store semantics and reject unsupported strict PostgreSQL minima. See the
 [consistency contract](../../docs/api/bff-read-consistency.md).
+
+Set `ML_OPERATIONS_URL` to the internal ML scorer URL to enable the operator-only
+`mlOperations` GraphQL query. The BFF supplies the verified tenant ID from the
+end-user principal; the browser cannot choose a tenant. If `ML_OPERATIONS_TOKEN`
+is configured, the BFF sends it as `X-Internal-Token` and the scorer rejects
+unauthenticated operations snapshots.

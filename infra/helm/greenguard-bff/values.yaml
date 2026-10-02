@@ -63,6 +63,10 @@ networkPolicy:
       namespace: greenguard
       release: tenant-control-plane
       port: 3010
+    - name: ml-scoring
+      namespace: greenguard
+      release: ml-scoring
+      port: 8080
   egressPods:
     - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
@@ -89,7 +93,7 @@ observability:
     enabled: false
     namespace: monitoring
     selector:
-      app.kubernetes.io/name: prometheus
+      app: prometheus
     # Istio merged mode is 15020; Envoy-only mode is 15090.
     mergeMetrics: true
     scrapePort: 15020

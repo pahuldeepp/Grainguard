@@ -22,6 +22,10 @@ export const operations = {
   alertDetail: `query AlertDetail($id: ID!) { alert(id: $id) { alertId ruleId binId state severity score version openedAt acknowledgedAt acknowledgedBy escalationLevel } }`,
   acknowledgeAlert: `mutation AcknowledgeAlert($id: ID!, $version: String!, $idempotencyKey: String!) { acknowledgeAlert(id: $id, version: $version, idempotencyKey: $idempotencyKey) { episodeId state version eventId } }`,
   deviceChanged: `subscription DeviceChanged($deviceId: ID!) { deviceChanged(deviceId: $deviceId) { consistencyToken deviceId readingId projectedAt streamVersion } }`,
+  mlOperations: `query MlOperations { mlOperations { capturedAt scorerReady predictionsTotal inferenceP95Ms canaryPercentage model { name version mode dataOrigin productionEligible status } drift { feature psi sampleCount status } retraining { status runId completedAt } } }`,
+  promoteMlModel: `mutation PromoteMlModel($version: String!) { promoteMlModel(version: $version) { action accepted message runId } }`,
+  rollbackMlModel: `mutation RollbackMlModel($version: String) { rollbackMlModel(version: $version) { action accepted message runId } }`,
+  startMlRetraining: `mutation StartMlRetraining { startMlRetraining { action accepted message runId } }`,
 } as const;
 
 export function operationHash(query: string): string {

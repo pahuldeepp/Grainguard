@@ -119,6 +119,46 @@ test("GraphQL rejects oversized history and search before the Read API", async (
   await server.stop();
 });
 
+test("ML operations are operator-only and preserve the verified tenant", async () => {
+  const seen: string[] = [];
+  const server = createApolloServer();
+  const result = await server.executeOperation(
+    { query: "{ mlOperations { model { version } scorerReady } }" },
+    {
+      contextValue: {
+        principal,
+        authorization: "Bearer token",
+        provisioning: new ProvisioningClient("http://127.0.0.1:8092"),
+        mlOperations: {
+          snapshot: async (caller) => {
+            seen.push(caller.tenantId);
+            return {
+              capturedAt: "2026-10-02T12:00:00Z",
+              scorerReady: true,
+              predictionsTotal: 1,
+              inferenceP95Ms: 2,
+              canaryPercentage: 0,
+              model: { name: "model", version: "v1", mode: "shadow", dataOrigin: "synthetic_grain_sim", productionEligible: false, status: "healthy" },
+              models: [{ name: "model", version: "v1", mode: "shadow", dataOrigin: "synthetic_grain_sim", productionEligible: false, status: "healthy", createdAt: "" }],
+              drift: [],
+              performance: { status: "unavailable", brierScore: null, sampleCount: 0, evaluatedAt: null },
+              retraining: { status: "idle", runId: null, completedAt: null },
+            };
+          },
+          action: async () => ({ action: "retrain", accepted: false, message: "synthetic_model_not_promotable" }),
+        },
+      },
+    },
+  );
+  assert.equal(result.body.kind, "single");
+  if (result.body.kind === "single") {
+    assert.equal(result.body.singleResult.errors, undefined);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.body.singleResult.data)), { mlOperations: { model: { version: "v1" }, scorerReady: true } });
+  }
+  assert.deepEqual(seen, [principal.tenantId]);
+  await server.stop();
+});
+
 test("GraphQL status maps saga and history from the owning API", async () => {
   const client = new ProvisioningClient("http://127.0.0.1:8092", async () =>
     Response.json({

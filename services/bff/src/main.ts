@@ -15,6 +15,8 @@ import { ReadClient } from "./read-client.js";
 import { createDeviceLoader } from "./device-loader.js";
 import { AlertClient } from "./alerts.js";
 import { NotificationClient } from "./notifications.js";
+import { HttpMlOperationsClient } from "./ml-operations.js";
+import type { MlOperationsClient } from "./ml-operations.js";
 import { attachSubscriptions } from "./subscriptions.js";
 import { LiveFeed, type LiveSubscriber } from "./live-feed.js";
 import {
@@ -40,6 +42,7 @@ export interface BffOptions {
   read?: ReadClient;
   alerts?: AlertClient;
   notifications?: NotificationClient;
+  mlOperations?: MlOperationsClient;
   server?: ApolloServer<BffContext>;
   rateLimiter?: RateLimiter;
   ready?: () => boolean;
@@ -193,6 +196,7 @@ export async function createApp(options: BffOptions) {
           read: options.read,
           alerts: options.alerts,
           notifications: options.notifications,
+          mlOperations: options.mlOperations,
         };
         context.deviceLoader = options.read
           ? createDeviceLoader(
@@ -326,6 +330,20 @@ if (
       ? new NotificationClient(
           process.env.JOBS_NOTIFICATION_API_URL,
           process.env.NOTIFICATION_DELIVERY_API_URL,
+        )
+      : undefined,
+    mlOperations: process.env.ML_OPERATIONS_URL
+      ? new HttpMlOperationsClient(
+          process.env.ML_OPERATIONS_URL,
+          async (input, init) => fetch(input, {
+            ...init,
+            headers: {
+              ...(init?.headers ?? {}),
+              ...(process.env.ML_OPERATIONS_TOKEN
+                ? { "X-Internal-Token": process.env.ML_OPERATIONS_TOKEN }
+                : {}),
+            },
+          }),
         )
       : undefined,
     rateLimiter,

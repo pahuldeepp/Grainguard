@@ -55,6 +55,11 @@ connectivity:
     ports: [53]
 networkPolicy:
   enabled: true
+  operationsSources:
+    - namespaceSelector:
+        kubernetes.io/metadata.name: greenguard
+      podSelector:
+        app.kubernetes.io/name: greenguard-bff
   healthProbeNamespaces:
     - selector:
         kubernetes.io/metadata.name: observability

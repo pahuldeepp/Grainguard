@@ -103,3 +103,14 @@ by GraphQL response extensions. Outages retain the old minimum. App creates a fr
 Cassandra history and search remain eventual unless the caller explicitly
 requests a minimum, which unsupported stores reject. See the
 [consistency contract](../../docs/api/bff-read-consistency.md).
+
+## ML operations
+
+Operators and administrators can open `/ml` for the ML operations view. It reads
+the operator-only `mlOperations` persisted GraphQL query and shows scorer
+readiness, prediction volume, inference latency, canary percentage, model
+metadata, PSI drift and retraining status. The page refreshes every 15 seconds.
+The UI always labels synthetic/shadow models as not production validated and
+does not expose promotion or retraining controls to ordinary tenant users.
+Set the BFF `ML_OPERATIONS_URL` to enable the query; an unavailable scorer is
+shown as a bounded error state rather than replaced with demo data.
