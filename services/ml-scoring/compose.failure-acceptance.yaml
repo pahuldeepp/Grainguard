@@ -1,0 +1,73 @@
+# Independent disposable cluster; never combine with compose.integration.yaml.
+x-kafka-environment: &kafka-environment
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+  KAFKA_LISTENERS: INTERNAL://:29092,HOST://:9092,CONTROLLER://:9093
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 1
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+  KAFKA_LOG_RETENTION_HOURS: 1
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+  KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+x-kafka: &kafka
+  image: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null"]
+    interval: 5s
+    timeout: 15s
+    retries: 40
+    start_period: 20s
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: greenguard_ml
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ml-failure-acceptance-admin-only
+    ports: ["127.0.0.1:${ML_FAILURE_PG_PORT:?harness selects disposable port}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d greenguard_ml"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes: [postgres-data:/var/lib/postgresql/data]
+  kafka-1:
+    <<: *kafka
+    ports: ["127.0.0.1:${ML_FAILURE_KAFKA_1_PORT:?harness selects disposable port}:9092"]
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:29092,HOST://127.0.0.1:${ML_FAILURE_KAFKA_1_PORT}
+    volumes: [kafka-1-data:/var/lib/kafka/data]
+  kafka-2:
+    <<: *kafka
+    ports: ["127.0.0.1:${ML_FAILURE_KAFKA_2_PORT:?harness selects disposable port}:9092"]
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:29092,HOST://127.0.0.1:${ML_FAILURE_KAFKA_2_PORT}
+    volumes: [kafka-2-data:/var/lib/kafka/data]
+  kafka-3:
+    <<: *kafka
+    ports: ["127.0.0.1:${ML_FAILURE_KAFKA_3_PORT:?harness selects disposable port}:9092"]
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:29092,HOST://127.0.0.1:${ML_FAILURE_KAFKA_3_PORT}
+    volumes: [kafka-3-data:/var/lib/kafka/data]
+volumes:
+  postgres-data:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:

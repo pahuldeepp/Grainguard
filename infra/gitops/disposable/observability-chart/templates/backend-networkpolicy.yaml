@@ -8,6 +8,17 @@ spec:
   ingress:
     - from: [{podSelector: {}}]
       ports: [{protocol: TCP, port: 4317}, {protocol: TCP, port: 4318}]
+    # The opt-in ML scorer runs in an isolated synthetic namespace. Permit only
+    # its synthetic-only pods to send OTLP into the shared telemetry pipeline.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-synthetic
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-scoring-synthetic
+              greenguard.io/data-class: synthetic
+      ports: [{protocol: TCP, port: 4317}]
     - from: [{podSelector: {matchLabels: {app: prometheus}}}]
       ports: [{protocol: TCP, port: 8890}]
   egress:

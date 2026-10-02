@@ -12,7 +12,12 @@ trace export on the seven services that currently read `OTEL_EXPORTER_OTLP_ENDPO
 they use the collector's port 4318. Other services do not become instrumented
 merely by setting a standard environment variable. Prometheus discovers
 `greenguard` pods with `prometheus.io/scrape=true` and scrapes their merged
-Istio metrics on port 15020. Its dedicated ServiceAccount has only namespaced
+Istio metrics on port 15020. It also scrapes the gateway's separate application
+RED listener on port 9464. That target is enabled only by explicit pod
+annotations; Prometheus has an injected Istio sidecar and the gateway accepts
+the metrics port only from the Prometheus service-account principal under
+strict mTLS. The gateway NetworkPolicy independently allows only the Prometheus
+pod selector on that port. No public Service or ingress exposes it. Prometheus's dedicated ServiceAccount has only namespaced
 pod get/list/watch access; it needs an API token for Kubernetes discovery.
 NetworkPolicies permit runtime OTLP ingress to the collector, collector export
 to Tempo and Loki, and Prometheus scrape ingress to the collector. Prometheus
@@ -28,3 +33,10 @@ render and negative digest checks. Cluster health, image availability, OTLP
 delivery, pod scraping, dashboard/rule provisioning, retention under load,
 all network peers and alert routing remain live Stage 11 acceptance work. Do not
 use this chart as proof of full production observability.
+
+The synthetic-only ML scorer dashboard/rules are provisioned into this same
+stack. Its PSI gauge remains absent until the model bundle's minimum 512
+accepted feature observations are accumulated. The local scorer acceptance
+proves OTLP transport for metrics, traces, and logs; deterministic Prometheus
+rule tests separately validate PSI alert behavior. The 30-minute firing
+duration is not claimed as live-fire tested by the 24-event scorer acceptance.

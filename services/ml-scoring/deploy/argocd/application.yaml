@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-ml-scoring-synthetic
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pahuldeepp/Grainguard.git
+    targetRevision: main
+    path: services/ml-scoring/deploy/chart
+    helm:
+      values: |
+        enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ml-synthetic
+  # No automated sync. Pruning is disabled explicitly for shared resources.
+  syncPolicy:
+    syncOptions:
+      - Prune=false

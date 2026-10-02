@@ -450,3 +450,8 @@ mysql-cdc-test: db-migrate
 design-check:
 	node --test scripts/design-check.test.mjs
 	node scripts/design-check.mjs --report=evidence/design-check-latest.md $(ARGS)
+
+.PHONY: observability-test-ml-rules
+observability-test-ml-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/ml-scoring.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/ml-scoring.test.yaml

@@ -1,0 +1,5 @@
+# Optional dependency for the synthetic-only LightGBM experiment.
+numpy==2.5.3
+lightgbm==4.7.0
+narwhals==2.26.0
+scipy==1.18.1

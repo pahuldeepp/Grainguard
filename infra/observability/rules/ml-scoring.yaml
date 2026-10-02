@@ -1,0 +1,44 @@
+groups:
+  - name: greenguard-ml-scoring
+    rules:
+      - alert: MLScoringFeatureDriftHigh
+        expr: greenguard_otel_ml_scoring_input_feature_psi{mode="shadow"} > 0.25
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "ML scoring input feature drift is elevated"
+          description: "PSI for {{ $labels.feature }} is above 0.25 for model {{ $labels.model_name }} ({{ $labels.model_version }}). Treat this as a synthetic/shadow signal until real-data validation is complete."
+          runbook_url: "docs/runbooks/ml-scoring-observability.md"
+      - alert: MLScoringShadowOutboxPublishFailures
+        expr: increase(greenguard_otel_ml_scoring_shadow_outbox_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "ML shadow prediction outbox publishing is failing"
+          description: "The ML scoring outbox failed to publish during the last five minutes; readiness or downstream shadow visibility may be degraded."
+          runbook_url: "docs/runbooks/ml-scoring-observability.md"
+      - alert: MLScoringDriftStatePersistenceFailures
+        expr: increase(greenguard_otel_ml_scoring_drift_state_persistence_failures_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "ML drift window state is not being persisted"
+          description: "Drift telemetry is available in process memory, but the durable window checkpoint failed to persist. A restart can lose the current window."
+          runbook_url: "docs/runbooks/ml-scoring-observability.md"
+      - alert: MLScoringInferenceP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, model_name, model_version) (
+              rate(greenguard_otel_ml_scoring_model_inference_milliseconds_bucket{mode="shadow"}[5m])
+            )
+          ) > 50
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "ML shadow inference p99 exceeds its latency guardrail"
+          description: "Model {{ $labels.model_name }} ({{ $labels.model_version }}) has p99 inference latency above 50 ms for ten minutes."
+          runbook_url: "docs/runbooks/ml-scoring-observability.md"

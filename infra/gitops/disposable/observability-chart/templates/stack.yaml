@@ -30,7 +30,10 @@ data:
     exporters:
       otlp/tempo: {endpoint: "tempo:4317", tls: {insecure: true}}
       otlphttp/loki: {endpoint: "http://loki:3100/otlp"}
-      prometheus: {endpoint: "0.0.0.0:8890", namespace: greenguard_otel}
+      prometheus:
+        endpoint: "0.0.0.0:8890"
+        namespace: greenguard_otel
+        add_metric_suffixes: true
     service:
       pipelines:
         traces: {receivers: [otlp], processors: [memory_limiter, attributes/redact, batch], exporters: [otlp/tempo]}
@@ -38,6 +41,7 @@ data:
         logs: {receivers: [otlp], processors: [memory_limiter, attributes/redact, batch], exporters: [otlphttp/loki]}
   prometheus.yaml: |
     global: {scrape_interval: 15s, evaluation_interval: 15s}
+    rule_files: ["/etc/prometheus/rules/*.yaml"]
     scrape_configs:
       - job_name: otel-collector
         static_configs: [{targets: ["otel-collector:8890"]}]
@@ -51,6 +55,17 @@ data:
           - {source_labels: [__meta_kubernetes_pod_container_port_number], action: keep, regex: "15090"}
           - {source_labels: [__meta_kubernetes_pod_ip], target_label: __address__, replacement: "$1:15020"}
           - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], target_label: __metrics_path__, regex: "(.+)"}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: greenguard_release}
+      - job_name: greenguard-gateway-app
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: {names: [greenguard]}
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_annotation_greenguard_io_app_metrics_scrape], action: keep, regex: "true"}
+          - {source_labels: [__meta_kubernetes_pod_phase], action: keep, regex: Running}
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], action: keep, regex: "9464"}
+          - {source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_greenguard_io_app_metrics_port], separator: ";", regex: "(.+);([0-9]+)", target_label: __address__, replacement: "$1:$2"}
+          - {source_labels: [__meta_kubernetes_pod_annotation_greenguard_io_app_metrics_path], target_label: __metrics_path__, regex: "(/metrics)"}
           - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: greenguard_release}
       - job_name: prometheus
         static_configs: [{targets: ["localhost:9090"]}]
@@ -85,6 +100,21 @@ data:
       - {name: Prometheus, uid: prometheus, type: prometheus, access: proxy, url: "http://prometheus:9090", isDefault: true}
       - {name: Tempo, uid: tempo, type: tempo, access: proxy, url: "http://tempo:3200"}
       - {name: Loki, uid: loki, type: loki, access: proxy, url: "http://loki:3100"}
+  grafana-dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: GreenGuard
+        orgId: 1
+        folder: GreenGuard
+        type: file
+        disableDeletion: true
+        editable: false
+        options:
+          path: /var/lib/grafana/dashboards
+  ml-scoring-dashboard.json: |
+{{ .Files.Get "files/ml-scoring-dashboard.json" | indent 4 }}
+  ml-scoring-rules.yaml: |
+{{ .Files.Get "files/ml-scoring-rules.yaml" | indent 4 }}
 {{- $components := dict
   "otel-collector" (dict "port" 4317 "extraPort" 4318 "metricsPort" 8890 "args" (list "--config=/etc/otel/config.yaml") "file" "otel.yaml" "configTarget" "/etc/otel/config.yaml" "dataPath" "")
   "prometheus" (dict "port" 9090 "args" (list "--config.file=/etc/prometheus/prometheus.yml" "--storage.tsdb.path=/prometheus" "--storage.tsdb.retention.time=24h" "--storage.tsdb.retention.size=1GB") "file" "prometheus.yaml" "configTarget" "/etc/prometheus/prometheus.yml" "dataPath" "/prometheus")
@@ -104,7 +134,12 @@ spec:
   strategy: {type: Recreate}
   selector: {matchLabels: {app: {{ $name }}}}
   template:
-    metadata: {labels: {app: {{ $name }}}}
+    metadata:
+      labels:
+        app: {{ $name }}
+{{- if eq $name "prometheus" }}
+        sidecar.istio.io/inject: "true"
+{{- end }}
     spec:
       serviceAccountName: {{ if eq $name "prometheus" }}greenguard-prometheus{{ else }}default{{ end }}
       automountServiceAccountToken: {{ eq $name "prometheus" }}
@@ -137,6 +172,13 @@ spec:
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
             - {name: config, mountPath: {{ $component.configTarget | quote }}, subPath: {{ $component.file }}, readOnly: true}
+{{- if eq $name "prometheus" }}
+            - {name: ml-scoring-rules, mountPath: /etc/prometheus/rules, readOnly: true}
+{{- end }}
+{{- if eq $name "grafana" }}
+            - {name: config, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: grafana-dashboards.yaml, readOnly: true}
+            - {name: ml-scoring-dashboard, mountPath: /var/lib/grafana/dashboards, readOnly: true}
+{{- end }}
 {{- if $component.dataPath }}
             - {name: data, mountPath: {{ $component.dataPath }}}
 {{- end }}
@@ -144,7 +186,23 @@ spec:
         - name: config
           configMap:
             name: greenguard-observability-config
-            items: [{key: {{ $component.file }}, path: {{ $component.file }}}]
+            items:
+              - {key: {{ $component.file }}, path: {{ $component.file }}}
+{{- if eq $name "grafana" }}
+              - {key: grafana-dashboards.yaml, path: grafana-dashboards.yaml}
+{{- end }}
+{{- if eq $name "prometheus" }}
+        - name: ml-scoring-rules
+          configMap:
+            name: greenguard-observability-config
+            items: [{key: ml-scoring-rules.yaml, path: ml-scoring.yaml}]
+{{- end }}
+{{- if eq $name "grafana" }}
+        - name: ml-scoring-dashboard
+          configMap:
+            name: greenguard-observability-config
+            items: [{key: ml-scoring-dashboard.json, path: ml-scoring.json}]
+{{- end }}
 {{- if $component.dataPath }}
         - {name: data, emptyDir: {sizeLimit: 2Gi}}
 {{- end }}

@@ -1,0 +1,69 @@
+# Opt-in only. The cluster-synthetic runtime requires isolated endpoints and verified TLS.
+enabled: false
+image:
+  repository: greenguard/ml-scoring-synthetic
+  tag: i4-transformer-bcf286ab98d45f8c
+  pullPolicy: IfNotPresent
+replicaCount: 1
+environment: cluster-synthetic
+syntheticTenantId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+model:
+  name: greenguard.hotspot-transition.classifier
+  version: i4-transformer-bcf286ab98d45f8c
+health:
+  port: 8080
+  bind: 0.0.0.0
+secretRefs:
+  database:
+    name: ml-scoring-runtime
+    key: database-url
+    caSecretName: ml-scoring-postgres-ca
+    caKey: root.crt
+  kafka:
+    name: ml-scoring-runtime
+    usernameKey: kafka-username
+    passwordKey: kafka-password
+    caSecretName: ml-scoring-kafka-ca
+    caKey: ca.crt
+connectivity:
+  kafka:
+    bootstrapServers: kafka.ml-synthetic.svc.cluster.local:9093
+    securityProtocol: SASL_SSL
+    saslMechanism: SCRAM-SHA-512
+    namespace: ml-synthetic
+    podSelector:
+      app.kubernetes.io/name: kafka
+    port: 9093
+  postgres:
+    namespace: ml-synthetic
+    podSelector:
+      app.kubernetes.io/name: postgresql
+    port: 5432
+  otel:
+    enabled: true
+    # Use the shared GreenGuard Stage 11 collector; it forwards metrics to the
+    # existing Prometheus/Grafana stack and traces/logs to Tempo/Loki.
+    endpoint: http://otel-collector.greenguard.svc.cluster.local:4317
+    namespace: greenguard
+    podSelector:
+      app: otel-collector
+    port: 4317
+  dns:
+    namespace: kube-system
+    podSelector:
+      k8s-app: kube-dns
+    ports: [53]
+networkPolicy:
+  enabled: true
+  healthProbeNamespaces:
+    - selector:
+        kubernetes.io/metadata.name: observability
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    cpu: "2"
+    memory: 3Gi
+terminationGracePeriodSeconds: 90
+tmpSizeLimit: 64Mi
