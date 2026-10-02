@@ -22,6 +22,16 @@ function completeCallback(manager: UserManager) {
   return callback;
 }
 
+const silentCallbacks = new WeakMap<UserManager, Promise<void>>();
+function completeSilentCallback(manager: UserManager) {
+  let callback = silentCallbacks.get(manager);
+  if (!callback) {
+    callback = manager.signinSilentCallback();
+    silentCallbacks.set(manager, callback);
+  }
+  return callback;
+}
+
 export function AuthGate() {
   const navigate = useNavigate();
   const manager = useMemo(createAuthManager, []);
@@ -55,10 +65,20 @@ export function AuthGate() {
     manager.events.addAccessTokenExpired(renew);
     const initialize = async () => {
       try {
-        const next =
-          window.location.pathname === "/auth/callback"
-            ? await completeCallback(manager)
-            : await manager.getUser();
+        if (window.location.pathname === "/auth/silent-callback") {
+          await completeSilentCallback(manager);
+          if (active) setReady(true);
+          return;
+        }
+        let next = window.location.pathname === "/auth/callback"
+          ? await completeCallback(manager)
+          : await manager.getUser();
+        // Tokens stay in memory. On a full reload, recover the session through
+        // the IdP's existing browser session instead of persisting credentials.
+        if (!next || next.expired) {
+          try { next = await manager.signinSilent(); }
+          catch { next = null; }
+        }
         update(next);
         if (window.location.pathname === "/auth/callback") {
           navigate(returnPathFor(next?.state), { replace: true });

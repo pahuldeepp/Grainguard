@@ -45,6 +45,7 @@ export function oidcConfiguration() {
     authority,
     client_id: clientId,
     redirect_uri: `${origin}/auth/callback`,
+    silent_redirect_uri: `${origin}/auth/silent-callback`,
     post_logout_redirect_uri: origin,
     response_type: "code",
     // Cognito issues refresh tokens for the code flow without an
