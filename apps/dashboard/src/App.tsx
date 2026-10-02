@@ -6,6 +6,7 @@ import { ProvisioningApi, type AccessTokenProvider } from "./provisioning";
 import { ReadApi } from "./read-api";
 import { AlertsApi } from "./alerts-api";
 import { MlApi } from "./ml-api";
+import { BillingApi } from "./billing-api";
 import { type DashboardState, uiActions } from "./dashboard-state";
 import { AlertSummary } from "./AlertSummary";
 import { useOnline } from "./online";
@@ -36,6 +37,7 @@ const BinReadings = lazy(() =>
 const MlOperationsView = lazy(() =>
   import("./MlOperationsView").then((m) => ({ default: m.MlOperationsView })),
 );
+const BillingView = lazy(() => import("./BillingView").then((m) => ({ default: m.BillingView })));
 const services = [
   {
     name: "Device service",
@@ -68,6 +70,7 @@ const navItems = [
   { to: "/devices", label: "Devices", icon: "devices" },
   { to: "/alerts", label: "Alerts", icon: "alerts" },
   { to: "/ml", label: "ML operations", icon: "overview" },
+  { to: "/billing", label: "Billing", icon: "overview" },
 ] as const;
 
 function Overview({
@@ -147,6 +150,7 @@ export function App({
     () => (getAccessToken ? new MlApi(getAccessToken) : null),
     [getAccessToken],
   );
+  const billingApi = useMemo(() => (getAccessToken ? new BillingApi(getAccessToken) : null), [getAccessToken]);
   const [health, setHealth] = useState<(boolean | null)[]>([null, null]);
   useEffect(() => {
     const controller = new AbortController();
@@ -308,6 +312,7 @@ export function App({
               path="/ml/retraining"
               element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
             />
+            <Route path="/billing" element={<BillingView api={billingApi} sessionId={sessionId} />} />
           </Routes>
         </Suspense>
       </main>

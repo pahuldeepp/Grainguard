@@ -16,6 +16,7 @@ import { createDeviceLoader } from "./device-loader.js";
 import { AlertClient } from "./alerts.js";
 import { NotificationClient } from "./notifications.js";
 import { HttpMlOperationsClient } from "./ml-operations.js";
+import { BillingClient } from "./billing.js";
 import type { MlOperationsClient } from "./ml-operations.js";
 import { attachSubscriptions } from "./subscriptions.js";
 import { LiveFeed, type LiveSubscriber } from "./live-feed.js";
@@ -43,6 +44,7 @@ export interface BffOptions {
   alerts?: AlertClient;
   notifications?: NotificationClient;
   mlOperations?: MlOperationsClient;
+  billing?: BillingClient;
   server?: ApolloServer<BffContext>;
   rateLimiter?: RateLimiter;
   ready?: () => boolean;
@@ -197,6 +199,7 @@ export async function createApp(options: BffOptions) {
           alerts: options.alerts,
           notifications: options.notifications,
           mlOperations: options.mlOperations,
+          billing: options.billing,
         };
         context.deviceLoader = options.read
           ? createDeviceLoader(
@@ -345,6 +348,9 @@ if (
             },
           }),
         )
+      : undefined,
+    billing: process.env.BILLING_API_URL
+      ? new BillingClient(process.env.BILLING_API_URL)
       : undefined,
     rateLimiter,
     ready: () => !stopping && rateReady,

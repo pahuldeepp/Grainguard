@@ -22,6 +22,7 @@ import {
   type MlAction,
 } from "./ml-operations.js";
 import type DataLoader from "dataloader";
+import { BillingUpstreamError, type BillingClient } from "./billing.js";
 
 export interface BffContext {
   principal: Principal;
@@ -32,6 +33,7 @@ export interface BffContext {
   alerts?: AlertClient;
   notifications?: NotificationClient;
   mlOperations?: MlOperationsClient;
+  billing?: BillingClient;
   consistencyToken?: string;
   readDeadline?: number;
   readSignal?: AbortSignal;
@@ -76,6 +78,10 @@ export const typeDefs = `#graphql
   type MlRetrainingStatus { status: String!, runId: String, completedAt: String }
   type MlOperationsSnapshot { capturedAt: String!, scorerReady: Boolean!, predictionsTotal: Int!, inferenceP95Ms: Float, canaryPercentage: Float!, model: MlModelStatus!, models: [MlModelVersion!]!, drift: [MlDriftMetric!]!, performance: MlPerformance!, retraining: MlRetrainingStatus! }
   type MlActionResult { action: String!, accepted: Boolean!, message: String!, runId: String }
+  type BillingSubscription { status: String!, planKey: String!, entitlementPlanKey: String!, currentPeriodEnd: String, cancelAtPeriodEnd: Boolean, version: String }
+  type BillingUsage { meter: String!, periodStart: String!, periodEnd: String!, state: String!, total: String! }
+  type BillingSnapshot { subscription: BillingSubscription!, usage: [BillingUsage!]! }
+  type BillingAction { commandId: ID!, status: String!, url: String }
   type AlertPage { items: [AlertView!]!, nextCursor: String }
   type AlertPageV2 { items: [AlertV2!]!, nextCursor: String }
   type AlertAcknowledgement { episodeId: ID!, state: String!, version: String!, eventId: ID! }
@@ -99,6 +105,8 @@ export const typeDefs = `#graphql
     alertHistory(id: ID!, limit: Int!, after: String): AlertHistoryPage!
     alertNotifications(id: ID!, limit: Int!, after: String): NotificationAttemptPage!
     mlOperations: MlOperationsSnapshot!
+    billing: BillingSnapshot!
+    billingCommand(id: ID!): BillingAction!
   }
   type Mutation {
     startProvisioning(deviceId: ID!, assetId: ID!, idempotencyKey: String!): ProvisioningSaga!
@@ -107,6 +115,8 @@ export const typeDefs = `#graphql
     promoteMlModel(version: String!): MlActionResult!
     rollbackMlModel(version: String): MlActionResult!
     startMlRetraining: MlActionResult!
+    startBillingCheckout(plan: String!, successUrl: String!, cancelUrl: String!, idempotencyKey: String!): BillingAction!
+    openBillingPortal(returnUrl: String!, idempotencyKey: String!): BillingAction!
   }
   type Subscription { deviceChanged(deviceId: ID!): DeviceChange! }
 `;
@@ -118,6 +128,7 @@ function translate(error: unknown): never {
     error instanceof AlertUpstreamError ||
     error instanceof NotificationUpstreamError ||
     error instanceof MlOperationsUpstreamError
+    || error instanceof BillingUpstreamError
   ) {
     throw new GraphQLError(error.code, {
       extensions: { code: error.code, httpStatus: error.status },
@@ -270,6 +281,19 @@ export const resolvers = {
       } catch (error) {
         return translate(error);
       }
+    },
+    async billing(_: unknown, _args: unknown, context: BffContext) {
+      try {
+        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
+        return await context.billing.snapshot(context.principal, context.authorization);
+      } catch (error) { return translate(error); }
+    },
+    async billingCommand(_: unknown, args: { id: string }, context: BffContext) {
+      try {
+        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.command(context.principal, context.authorization, args.id);
+        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
+      } catch (error) { return translate(error); }
     },
     // Verified identity only (ADR-0014 membership mapping); lets the UI hide
     // actions the caller's role cannot perform. The API still enforces roles.
@@ -531,6 +555,20 @@ export const resolvers = {
     },
     async startMlRetraining(_: unknown, _args: unknown, context: BffContext) {
       return mlAction(context, "retrain");
+    },
+    async startBillingCheckout(_: unknown, args: { plan: string; successUrl: string; cancelUrl: string; idempotencyKey: string }, context: BffContext) {
+      try {
+        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.checkout(context.principal, context.authorization, args.plan, args.successUrl, args.cancelUrl, args.idempotencyKey);
+        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
+      } catch (error) { return translate(error); }
+    },
+    async openBillingPortal(_: unknown, args: { returnUrl: string; idempotencyKey: string }, context: BffContext) {
+      try {
+        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.portal(context.principal, context.authorization, args.returnUrl, args.idempotencyKey);
+        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
+      } catch (error) { return translate(error); }
     },
     async startProvisioning(
       _: unknown,

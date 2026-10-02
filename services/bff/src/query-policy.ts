@@ -26,6 +26,10 @@ export const operations = {
   promoteMlModel: `mutation PromoteMlModel($version: String!) { promoteMlModel(version: $version) { action accepted message runId } }`,
   rollbackMlModel: `mutation RollbackMlModel($version: String) { rollbackMlModel(version: $version) { action accepted message runId } }`,
   startMlRetraining: `mutation StartMlRetraining { startMlRetraining { action accepted message runId } }`,
+  billing: `query Billing { billing { subscription { status planKey entitlementPlanKey currentPeriodEnd cancelAtPeriodEnd version } usage { meter periodStart periodEnd state total } } }`,
+  billingCommand: `query BillingCommand($id: ID!) { billingCommand(id: $id) { commandId status url } }`,
+  startBillingCheckout: `mutation StartBillingCheckout($plan: String!, $successUrl: String!, $cancelUrl: String!, $idempotencyKey: String!) { startBillingCheckout(plan: $plan, successUrl: $successUrl, cancelUrl: $cancelUrl, idempotencyKey: $idempotencyKey) { commandId status url } }`,
+  openBillingPortal: `mutation OpenBillingPortal($returnUrl: String!, $idempotencyKey: String!) { openBillingPortal(returnUrl: $returnUrl, idempotencyKey: $idempotencyKey) { commandId status url } }`,
 } as const;
 
 export function operationHash(query: string): string {
