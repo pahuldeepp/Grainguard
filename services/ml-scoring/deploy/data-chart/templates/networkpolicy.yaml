@@ -1,0 +1,53 @@
+{{- if .Values.enabled }}
+{{- include "ml-synthetic-data.validate" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ml-synthetic-kafka
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ml-synthetic-kafka
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-synthetic
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-scoring-synthetic
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-synthetic
+          podSelector:
+            matchLabels:
+              greenguard.io/kafka-bootstrap: "true"
+      ports:
+        - {protocol: TCP, port: 9093}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-synthetic-kafka
+      ports:
+        - {protocol: TCP, port: 9094}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-synthetic-kafka
+      ports:
+        - {protocol: TCP, port: 9094}
+{{- end }}

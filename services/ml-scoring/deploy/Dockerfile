@@ -17,6 +17,9 @@ RUN python -m pip install --no-cache-dir --require-hashes \
     && rm -rf /root/.cache /tmp/requirements.lock
 
 COPY --chown=10001:10001 services/ml-scoring/ml_scoring /app/ml_scoring
+COPY --chown=10001:10001 services/ml-scoring/migrations /app/migrations
+COPY --chown=10001:10001 services/ml-scoring/deploy/migrate_cluster.py /app/migrate_cluster.py
+COPY --chown=10001:10001 services/ml-scoring/deploy/seed_synthetic_fixture.py /app/seed_synthetic_fixture.py
 COPY --chown=10001:10001 ml/deep_learning/sequence_models.py /app/ml/deep_learning/sequence_models.py
 COPY --chown=10001:10001 ml/deep_learning/comparison_contract.py /app/ml/deep_learning/comparison_contract.py
 COPY --chown=10001:10001 evidence/model-registry/greenguard.hotspot-transition.classifier/i4-transformer-bcf286ab98d45f8c \

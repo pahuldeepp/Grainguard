@@ -12,7 +12,7 @@ CHART = ROOT / "services/ml-scoring/deploy/chart"
 class DeployChartTests(unittest.TestCase):
     def render(self, *values):
         return subprocess.run(
-            ["helm", "template", "review", str(CHART), *values],
+            ["helm", "template", "review", str(CHART), "--set", "cell=unit-test", "--set", "image.allowTagFallback=true", *values],
             capture_output=True, text=True, check=False,
         )
 
@@ -37,6 +37,11 @@ class DeployChartTests(unittest.TestCase):
         self.assertEqual(image.group(1), model_version.group(1))
         self.assertIn('sizeLimit: "64Mi"', result.stdout)
 
+    def test_cluster_synthetic_requires_exact_cell_label(self):
+        result = self.render("--set", "enabled=true", "--set-string", "cell=")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cell is required in cluster-synthetic mode", result.stderr)
+
     def test_chart_image_and_model_versions_match_bundled_model(self):
         values = (CHART / "values.yaml").read_text()
         dockerfile = (CHART.parents[0] / "Dockerfile").read_text()
@@ -60,6 +65,37 @@ class DeployChartTests(unittest.TestCase):
         )
         manifest = json.loads(manifest_path.read_text())
         self.assertEqual(model_version.group(1), manifest["model_version"])
+
+    def test_enabled_chart_uses_immutable_digest_for_all_containers_and_jobs(self):
+        digest = "sha256:" + "a" * 64
+        result = self.render(
+            "--set", "enabled=true",
+            "--set", "syntheticFixtureSeed.enabled=true",
+            "--set", f"image.digest={digest}",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count(f'image: "greenguard/ml-scoring-synthetic@{digest}"'), 3)
+        self.assertNotIn("greenguard/ml-scoring-synthetic:i4-transformer", result.stdout)
+
+    def test_enabled_chart_requires_explicit_local_tag_opt_in(self):
+        result = self.render("--set", "enabled=true", "--set", "image.allowTagFallback=false")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("image.digest is required", result.stderr)
+
+    def test_fixture_rejects_incomplete_grid(self):
+        result = self.render("--set", "enabled=true", "--set", "syntheticFixtureSeed.enabled=true", "--set", "syntheticFixtureSeed.count=383")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly 384", result.stderr)
+
+    def test_enabled_chart_rejects_invalid_image_digest(self):
+        for digest in ("sha256:abcd", "sha256:" + "A" * 64, "sha512:" + "a" * 64):
+            with self.subTest(digest=digest):
+                result = self.render(
+                    "--set", "enabled=true",
+                    "--set-string", f"image.digest={digest}",
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("image.digest must be sha256", result.stderr)
 
     def test_enabled_chart_rejects_multiple_stateful_consumers(self):
         result = self.render("--set", "enabled=true", "--set", "replicaCount=2")

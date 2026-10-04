@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: scorer
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "ml-scoring.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: health
@@ -72,6 +72,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secretRefs.database.name | quote }}
                   key: {{ .Values.secretRefs.database.key | quote }}
+            - name: ML_OPERATIONS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.operations.name | quote }}
+                  key: {{ .Values.secretRefs.operations.tokenKey | quote }}
             - name: PGSSLROOTCERT
               value: /var/run/postgres-tls/root.crt
             - name: KAFKA_BOOTSTRAP_SERVERS

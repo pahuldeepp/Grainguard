@@ -15,7 +15,7 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: ml-synthetic
-  # No automated sync. Pruning is disabled explicitly for shared resources.
   syncPolicy:
     syncOptions:
+      - CreateNamespace=true
       - Prune=false

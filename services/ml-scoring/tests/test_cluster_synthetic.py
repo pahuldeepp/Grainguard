@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
+import socket
 import tempfile
+import urllib.error
+import urllib.request
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -14,6 +18,38 @@ from ml_scoring.store import InMemoryRepository
 
 
 class ClusterSyntheticGuardTests(unittest.TestCase):
+    def test_cluster_operations_endpoint_requires_exact_internal_token(self):
+        token = "t" * 48
+        with patch.dict(os.environ, {"ML_ENVIRONMENT": "cluster-synthetic", "ML_OPERATIONS_TOKEN": token}, clear=True):
+            server = _health_server(
+                InMemoryRepository(), 0, host="127.0.0.1",
+                operations_supplier=lambda tenant: {"tenant_id": tenant, "count": 3},
+            )
+            try:
+                url = f"http://127.0.0.1:{server.server_port}/operations?tenant_id=synthetic-fixture"
+                for headers in ({}, {"X-Internal-Token": "wrong"}):
+                    with self.subTest(headers=headers), self.assertRaises(urllib.error.HTTPError) as error:
+                        urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=3)
+                    self.assertEqual(error.exception.code, 401)
+                with socket.create_connection(("127.0.0.1", server.server_port), timeout=3) as client:
+                    client.sendall(b"GET /operations?tenant_id=synthetic-fixture HTTP/1.1\r\nHost: localhost\r\nX-Internal-Token: \xff\r\nConnection: close\r\n\r\n")
+                    response = client.recv(1024)
+                self.assertIn(b"401 Unauthorized", response)
+                request = urllib.request.Request(url, headers={"X-Internal-Token": token})
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(json.load(response), {"tenant_id": "synthetic-fixture", "count": 3})
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_cluster_operations_rejects_missing_or_short_token_at_startup(self):
+        for token in ("", "short"):
+            with self.subTest(token_length=len(token)), patch.dict(
+                    os.environ, {"ML_ENVIRONMENT": "cluster-synthetic", "ML_OPERATIONS_TOKEN": token}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "ML_OPERATIONS_TOKEN"):
+                    _health_server(InMemoryRepository(), 0, operations_supplier=lambda _tenant: {})
+
     def test_postgres_accepts_only_namespace_service_verified_tls_and_mounted_ca(self):
         with tempfile.NamedTemporaryFile() as ca, patch.dict(os.environ, {"PGSSLROOTCERT": ca.name}, clear=True):
             validate_cluster_synthetic_postgres_dsn(

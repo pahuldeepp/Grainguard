@@ -1,0 +1,105 @@
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-synthetic-kafka-bootstrap
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+data:
+  bootstrap.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    [[ "${KAFKA_ADMIN_PASSWORD:-}" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo 'admin credential format rejected' >&2; exit 1; }
+    umask 077
+    cat > /tmp/kafka-client.properties <<EOF
+    security.protocol=SASL_SSL
+    sasl.mechanism=SCRAM-SHA-512
+    sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="ml_synthetic_admin" password="${KAFKA_ADMIN_PASSWORD}";
+    ssl.truststore.type=PEM
+    ssl.truststore.location=/etc/greenguard/kafka/ca.crt
+    EOF
+    for attempt in $(seq 1 90); do
+      if /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties >/dev/null 2>&1; then
+        break
+      fi
+      if [[ "$attempt" == 90 ]]; then echo 'synthetic broker did not become available' >&2; exit 1; fi
+      sleep 2
+    done
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --create --if-not-exists --topic {{ .Values.kafka.topics.input }} --partitions {{ int64 .Values.kafka.partitions }} --replication-factor 1 --config cleanup.policy=delete --config retention.ms={{ int64 .Values.kafka.retentionMs }}
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --create --if-not-exists --topic {{ .Values.kafka.topics.shadow }} --partitions {{ int64 .Values.kafka.partitions }} --replication-factor 1 --config cleanup.policy=delete --config retention.ms={{ int64 .Values.kafka.retentionMs }}
+    /opt/kafka/bin/kafka-acls.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --add --allow-principal User:{{ .Values.kafka.scorerUser }} --operation Read --operation Describe --topic {{ .Values.kafka.topics.input }} --resource-pattern-type literal
+    /opt/kafka/bin/kafka-acls.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --add --allow-principal User:{{ .Values.kafka.scorerUser }} --operation Write --operation Describe --topic {{ .Values.kafka.topics.shadow }} --resource-pattern-type literal
+    /opt/kafka/bin/kafka-acls.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --add --allow-principal User:{{ .Values.kafka.scorerUser }} --operation Read --group {{ .Values.kafka.group }} --resource-pattern-type literal
+    /opt/kafka/bin/kafka-acls.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --add --allow-principal User:{{ .Values.kafka.fixtureUser }} --operation Write --operation Describe --topic {{ .Values.kafka.topics.input }} --resource-pattern-type literal
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --describe --topic {{ .Values.kafka.topics.input }} >/dev/null
+    /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka.ml-synthetic.svc.cluster.local:9093 --command-config /tmp/kafka-client.properties --describe --topic {{ .Values.kafka.topics.shadow }} >/dev/null
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-synthetic-kafka-bootstrap
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 240
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ml-synthetic-kafka-bootstrap
+        greenguard.io/data-class: synthetic
+        greenguard.io/kafka-bootstrap: "true"
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/bootstrap/bootstrap.sh"]
+          env:
+            - name: KAFKA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaAuth | quote }}
+                  key: admin-password
+          volumeMounts:
+            - {name: bootstrap, mountPath: /bootstrap, readOnly: true}
+            - {name: tls, mountPath: /etc/greenguard/kafka, readOnly: true}
+            - {name: temporary, mountPath: /tmp}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: ml-synthetic-kafka-bootstrap
+            defaultMode: 0555
+        - name: tls
+          secret:
+            secretName: {{ .Values.secrets.kafkaTls | quote }}
+            defaultMode: 0440
+            items:
+              - {key: ca.crt, path: ca.crt}
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+{{- end }}

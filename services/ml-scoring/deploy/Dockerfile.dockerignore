@@ -1,7 +1,11 @@
 **
 !services
 !services/ml-scoring
+!services/ml-scoring/migrations
+!services/ml-scoring/migrations/**
 !services/ml-scoring/deploy
+!services/ml-scoring/deploy/migrate_cluster.py
+!services/ml-scoring/deploy/seed_synthetic_fixture.py
 !services/ml-scoring/deploy/requirements.lock
 !services/ml-scoring/ml_scoring
 !services/ml-scoring/ml_scoring/**

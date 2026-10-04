@@ -1,0 +1,76 @@
+{
+  "status": "PASS",
+  "failure": null,
+  "resource_label": "greenguard.io/local-acceptance=gg-ml-data-b52c284a8b",
+  "passed_assertions": [
+    "PostgreSQL initialized with chart UID, TLS config and generated role init SQL",
+    "Kafka SCRAM storage format and authenticated TLS topic/ACL bootstrap",
+    "Verified-TLS schema migration with dedicated migration DSN",
+    "ml_app and ml_migrator are non-superuser and NOBYPASSRLS",
+    "Authenticated idempotent fixture published 384 synthetic telemetry events",
+    "Missing/wrong operations token denied401; cross-tenant denied403; authorized synthetic model snapshot200",
+    "Real scorer persisted prediction and published outbox event; authenticated Kafka consumer read matching-tenant shadow event",
+    "Zero own labeled containers, volumes or networks after cleanup"
+  ],
+  "rendered_charts": {
+    "data-chart": {
+      "sha256": "8f035642c62f5104e65ce42054d500ac0a5b595cdb9b67951a72fd6a4269c7a4",
+      "source_files": {
+        "services/ml-scoring/deploy/data-chart/Chart.yaml": "a66e0fdeab7e77bf2321c40c0d8c13deb3d6b4eda8358aded075fed9eee6e5af",
+        "services/ml-scoring/deploy/data-chart/README.md": "6a2e776e64694b19a01b34cd3b43a6db7bdf9c33f6f2cd45cc3e26c630bdad97",
+        "services/ml-scoring/deploy/data-chart/templates/_helpers.tpl": "df02adaabe9c682cdd1a931cd6aef650992a80f7abee12fadfdfaa66b16ae2c8",
+        "services/ml-scoring/deploy/data-chart/templates/kafka-bootstrap.yaml": "559f3223ed729adbe093e296c0607fa32217f669077c1546fd8d9338ef7ad273",
+        "services/ml-scoring/deploy/data-chart/templates/kafka.yaml": "f3c241556b8661edabe2613fdccf4572829bad02959b9dd5c867d9bb4d6f280f",
+        "services/ml-scoring/deploy/data-chart/templates/networkpolicy.yaml": "ca179ef2cec2381c2da5938d73dbdf77fcd2d8eb2258f0ddf8b0ef6678dceb8e",
+        "services/ml-scoring/deploy/data-chart/templates/postgres.yaml": "c6fa841c4ec8f622ad64006f426fc045d273bccc40ace7c9c8937dfd51d490ef",
+        "services/ml-scoring/deploy/data-chart/values.yaml": "7caed5368baabb3289c8348c4cd3a28aeb35345c71fccc9c77a2c8db1773da61"
+      }
+    },
+    "chart": {
+      "sha256": "6ea6d9a84448cd1598f006e0c5aea1db3dfde66a389fafd282140b3677c226d3",
+      "source_files": {
+        "services/ml-scoring/deploy/chart/Chart.yaml": "0df7265f8094e897e74db7a9d5d42e8aa6845b1b10f89b811ee8452afbd3e326",
+        "services/ml-scoring/deploy/chart/templates/_helpers.tpl": "d001f279c4443bdef8864b63ccc9bbebeebbb4e7ab540c4d0d89e74ac17ba14e",
+        "services/ml-scoring/deploy/chart/templates/deployment.yaml": "93e09cd37ba3830dd87e0e87feb62f78346c0ee544aa3d11b45e354729d0fcc9",
+        "services/ml-scoring/deploy/chart/templates/migration-job.yaml": "40cf65da6270baa29b93ee2c455ec1824c15fa51726b4355e41d531120c32b1c",
+        "services/ml-scoring/deploy/chart/templates/networkpolicy.yaml": "7620a80ce3bd7235c1914815c4a6b0f1ef66df41f959d1104cf048bedefa8ee4",
+        "services/ml-scoring/deploy/chart/templates/service.yaml": "b2566e52e481a379d64379ed4036da7fe6ecd24221c6b10b801b03b054bf702d",
+        "services/ml-scoring/deploy/chart/templates/synthetic-fixture-job.yaml": "a226f812c34f22b9c02010a6b512509ec4d64c21d5c60f1d935f1ec9b2b31857",
+        "services/ml-scoring/deploy/chart/values.yaml": "92cc6d4b8868d16e97e6a71e5498bf525469c5fb0d165b2ca2ea8b84b146c02b"
+      }
+    }
+  },
+  "source_overlay_sha256": {
+    "/app/migrate_cluster.py": "aab155d63bd681b043c2a54b4ca393f1242a1273d6fc1916357579b6eb37c7c9",
+    "/app/migrations/000001_ml_scoring_shadow.up.sql": "2d95987762da46df687143ea950f513efabb435362f0557711f388e57241222f",
+    "/app/migrations/000002_ml_drift_status.up.sql": "2506cf1c2b00e2798304653a520c9bc31c55319b2107a0a014338f892fb7832b",
+    "/app/migrations/000003_durable_drift_window.up.sql": "4fe00a9916b9ba9839b87919a97d528d694c64765b92d69d00b2decb17784500",
+    "/app/ml_scoring/__init__.py": "fa657ec7f9121af952ed315467c10f626da9c86b015c71e4e1486792fcdaca03",
+    "/app/ml_scoring/analytics.py": "492467bbd627dfdd017d4c66c9648ad9aa3c9d71d910d7873b43f6602a8a1757",
+    "/app/ml_scoring/comparison_report.py": "4de9eb344bc1adfea44e6cb9b02729b7754b2de2a3927fa8dbe2feb0b9ff21c8",
+    "/app/ml_scoring/contracts.py": "783e10cc5f70fc9b0e45d45118aa9aa98f676e2fb4ffc0d931404073a7a3f9a4",
+    "/app/ml_scoring/deployment.py": "49aac16f71c4c808277dadb472333130c17446c4ceb29656299a210295da167f",
+    "/app/ml_scoring/events.py": "a396129f2929b47999d1d968262e3a221aaeb05638019cd252582a344efbfd03",
+    "/app/ml_scoring/local_guard.py": "26209e3b3eb0ef7352798f622adc14787d5cc6274b8c8e20f07cd27d2983f771",
+    "/app/ml_scoring/main.py": "7ece4f0e90a5e31c1f0c6ab9815467e7839ca474a35294b9471e4531e4ae642d",
+    "/app/ml_scoring/outbox.py": "7f9a1bba8bae93e3047cf8b1a0f186e2125eceb6a459e1329be0f65fa6a5816f",
+    "/app/ml_scoring/processor.py": "9e958bc783927a7dffd6df8017588358208bb6237b9ab2b3a5134f92108ef0ed",
+    "/app/ml_scoring/registry.py": "a2a444e13f32dd65c5ea1ce9e15ded883b3062adebb39f0091a8236e27a44d71",
+    "/app/ml_scoring/store.py": "017a6c32ca331ba35da26a02e84230cb1a81feed445324e1e500e04ec9c9c970",
+    "/app/seed_synthetic_fixture.py": "2f104dea4f9ad6208de10864389313495eed81f7b2db6ed65ccbf2e463196672"
+  },
+  "local_memory_caps_mib": {
+    "postgres": 768,
+    "kafka": 1536,
+    "helper_or_scorer": 512
+  },
+  "scorer_image": "sha256:6e6b998b5584e5d1626ddef713de01fb3af5ff51d99005fe020154d79dccec33",
+  "scorer_source_overlay": true,
+  "fidelity_limits": [
+    "Docker network substitutes Kubernetes DNS",
+    "No Kubernetes NetworkPolicy, Argo reconciliation or PVC/EBS lifecycle validation",
+    "Local memory caps differ from chart limits",
+    "Cached scorer image with current mounted application/migration source; CI image provenance unverified"
+  ],
+  "sanitized_output": "PASS chart-equivalent PostgreSQL verified TLS, dedicated roles, schema migration, Kafka TLS/SCRAM topic and ACL bootstrap, authenticated fixture input, scorer prediction, outbox publication and real Kafka shadow consumption; operations authentication and tenant denial\n"
+}

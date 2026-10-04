@@ -1,0 +1,35 @@
+enabled: false
+namespace: ml-synthetic
+cell: ""
+images:
+  postgres: postgres@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+  kafka: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
+storage:
+  className: gp3
+  postgresSize: 8Gi
+  kafkaSize: 16Gi
+secrets:
+  postgres: ml-synthetic-postgres-auth
+  postgresTls: ml-synthetic-postgres-auth
+  kafkaAuth: ml-synthetic-kafka-auth
+  kafkaTls: ml-synthetic-kafka-tls
+kafka:
+  clusterId: MkU3OEVBNTcwNTJENDM2Qk
+  adminUser: ml_synthetic_admin
+  scorerUser: ml_scoring
+  fixtureUser: ml_fixture
+  brokerPort: 9093
+  controllerPort: 9094
+  partitions: 3
+  topics:
+    input: greenguard.telemetry.recorded.v1
+    shadow: greenguard.ml.prediction.shadow.v1
+  group: greenguard-ml-scoring-synthetic-shadow
+  retentionMs: 172800000
+resources:
+  postgres:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  kafka:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: "2", memory: 2Gi}

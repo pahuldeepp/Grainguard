@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import socket
 import threading
 import hashlib
+import hmac
 import ipaddress
 import json
 import time
@@ -410,7 +411,16 @@ def _health_server(repository: PostgresRepository, port: int, host: str = "127.0
 
         def _internal_authorized(self) -> bool:
             expected = os.environ.get("ML_OPERATIONS_TOKEN")
-            return not expected or self.headers.get("X-Internal-Token") == expected
+            if expected:
+                supplied = self.headers.get("X-Internal-Token", "")
+                try:
+                    expected_bytes = expected.encode("ascii")
+                    supplied_bytes = supplied.encode("ascii")
+                except UnicodeEncodeError:
+                    return False
+                return len(expected_bytes) >= 32 and hmac.compare_digest(supplied_bytes, expected_bytes)
+            return (os.environ.get("ML_ENVIRONMENT") == "local-synthetic"
+                    and host in {"127.0.0.1", "::1", "localhost"})
 
         def do_GET(self) -> None:
             if self.path == "/livez":
@@ -479,6 +489,10 @@ def _health_server(repository: PostgresRepository, port: int, host: str = "127.0
             os.environ.get("ML_ENVIRONMENT") != "cluster-synthetic"
             or os.environ.get("ML_ALLOW_REMOTE_HEALTH_BIND") != "true"):
         raise RuntimeError("remote health bind is allowed only in the explicit cluster-synthetic profile")
+    if os.environ.get("ML_ENVIRONMENT") == "cluster-synthetic" and len(os.environ.get("ML_OPERATIONS_TOKEN", "")) < 32:
+        raise RuntimeError("cluster-synthetic operations require ML_OPERATIONS_TOKEN of at least 32 characters")
+    if os.environ.get("ML_OPERATIONS_TOKEN") and len(os.environ["ML_OPERATIONS_TOKEN"]) < 32:
+        raise RuntimeError("ML_OPERATIONS_TOKEN must contain at least 32 characters when configured")
     server = HealthServer((host, port), Handler)
     threading.Thread(target=server.serve_forever, name="health-server", daemon=True).start()
     return server
@@ -488,6 +502,8 @@ def run() -> None:
     environment = os.environ.get("ML_ENVIRONMENT")
     if environment not in {"local-synthetic", "cluster-synthetic"}:
         raise RuntimeError("this prototype may run only with ML_ENVIRONMENT=local-synthetic or cluster-synthetic")
+    if environment == "cluster-synthetic" and len(os.environ.get("ML_OPERATIONS_TOKEN", "")) < 32:
+        raise RuntimeError("cluster-synthetic operations require ML_OPERATIONS_TOKEN of at least 32 characters")
     if os.environ.get("ML_SHADOW_ENABLED") != "true":
         raise RuntimeError("scoring is disabled; set ML_SHADOW_ENABLED=true only for an isolated synthetic environment")
     try:
