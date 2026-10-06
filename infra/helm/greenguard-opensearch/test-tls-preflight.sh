@@ -44,7 +44,7 @@ helm template greenguard-opensearch "$root/infra/helm/greenguard-opensearch" \
   --set "image=opensearchproject/opensearch@sha256:$(printf 'a%.0s' {1..64})" \
   --set "bootstrap.image=example/search-indexer@sha256:$(printf 'b%.0s' {1..64})" \
   > "$temp/render.yaml"
-ruby -ryaml -e 'o=YAML.safe_load_stream(File.read(ARGV[0])).compact.find{|x|x["kind"]=="StatefulSet"}; print o.dig("spec","template","spec","initContainers",0,"args",0)' \
+ruby -ryaml -e 'o=YAML.load_stream(File.read(ARGV[0])).compact.find{|x|x["kind"]=="StatefulSet"}; print o.dig("spec","template","spec","initContainers",0,"args",0)' \
   "$temp/render.yaml" > "$temp/preflight.sh"
 
 docker run --rm --user 1000:1000 --entrypoint /bin/sh \

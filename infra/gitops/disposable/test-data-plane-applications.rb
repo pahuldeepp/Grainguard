@@ -41,7 +41,7 @@ end
 
 output, error, status = render.call('applications-chart', values)
 abort "data plane Argo render failed: #{error}" unless status.success?
-apps = YAML.safe_load_stream(output).compact
+apps = YAML.load_stream(output).compact
 mqtt = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-mqtt' }
 abort 'private MQTT Application missing or ordered after worker' unless mqtt &&
   mqtt.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '11' &&
@@ -99,7 +99,7 @@ abort 'Connector registration shard hosts were not attached by Application name'
 
 root_output, root_error, root_status = render.call('bootstrap-chart', values)
 abort "root data-plane render failed: #{root_error}" unless root_status.success?
-root_app = YAML.safe_load_stream(root_output).compact.fetch(0)
+root_app = YAML.load_stream(root_output).compact.fetch(0)
 abort 'root lost data-plane values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'dataPlane') == values.fetch('dataPlane')
 abort 'root lost MQTT values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'mqttPlane') == values.fetch('mqttPlane')
 
@@ -144,8 +144,8 @@ bad = Marshal.load(Marshal.dump(values))
 bad['dataPlane']['enabled'] = false
 disabled_output, disabled_error, disabled_status = render.call('applications-chart', bad)
 abort "disabled data-plane render failed: #{disabled_error}" unless disabled_status.success?
-abort 'Registry must not start without ACL/topic child' if YAML.safe_load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-schema-registry' }
-disabled_apps = YAML.safe_load_stream(disabled_output).compact
+abort 'Registry must not start without ACL/topic child' if YAML.load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-schema-registry' }
+disabled_apps = YAML.load_stream(disabled_output).compact
 abort 'data-plane child rendered while disabled' if disabled_apps.any? { |item| expected.key?(item.dig('metadata', 'name')) }
 
 puts 'Data-plane Argo children, ordering, pinned values, and reject fixtures pass.'

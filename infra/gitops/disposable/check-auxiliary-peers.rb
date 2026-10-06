@@ -7,7 +7,7 @@ image = 'example.test/greenguard/audit@sha256:' + ('a' * 64)
 render = lambda do |name, chart, *args|
   output, error, status = Open3.capture3('helm', 'template', name, File.join(root, chart), '--namespace', 'greenguard', *args)
   abort "#{name}: Helm render failed: #{error}" unless status.success?
-  YAML.safe_load_stream(output).compact
+  YAML.load_stream(output).compact
 end
 
 clients = {

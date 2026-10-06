@@ -9,7 +9,7 @@ bootstrap_image = "example/search-indexer@sha256:#{'b' * 64}"
 base = ['helm', 'template', 'greenguard-opensearch', chart, '--namespace', 'greenguard', '--set', "image=#{image}", '--set', "bootstrap.image=#{bootstrap_image}"]
 output, error, status = Open3.capture3(*base)
 abort "OpenSearch chart render failed: #{error}" unless status.success?
-objects = YAML.safe_load_stream(output).compact
+objects = YAML.load_stream(output).compact
 kind = ->(name) { objects.find { |object| object['kind'] == name } }
 statefulset = kind.call('StatefulSet') or abort 'OpenSearch StatefulSet missing'
 pod = statefulset.dig('spec', 'template', 'spec')
@@ -56,7 +56,7 @@ _, _, without_digest = Open3.capture3(*base.take(6))
 abort 'OpenSearch without image digest rendered' if without_digest.success?
 bootstrap_output, bootstrap_error, bootstrap_status = Open3.capture3(*base, '--set', 'bootstrap.enabled=true')
 abort "OpenSearch bootstrap render failed: #{bootstrap_error}" unless bootstrap_status.success?
-bootstrap_objects = YAML.safe_load_stream(bootstrap_output).compact
+bootstrap_objects = YAML.load_stream(bootstrap_output).compact
 job = bootstrap_objects.find { |object| object['kind'] == 'Job' } or abort 'OpenSearch bootstrap Job missing'
 job_container = job.dig('spec', 'template', 'spec', 'containers', 0)
 abort 'bootstrap image or command mismatch' unless job_container['image'] == bootstrap_image && job_container.dig('args', 0).include?('python /app/search_indexer.py bootstrap --version 1') && job_container.dig('args', 0).include?('quitquitquit')

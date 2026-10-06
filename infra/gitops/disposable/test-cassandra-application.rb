@@ -25,7 +25,7 @@ render = lambda do |chart, fixture|
 end
 output, error, status = render.call('applications-chart', values)
 abort "Cassandra Argo render failed: #{error}" unless status.success?
-app = YAML.safe_load_stream(output).compact.find { |item| item.dig('metadata', 'name') == 'greenguard-cassandra' }
+app = YAML.load_stream(output).compact.find { |item| item.dig('metadata', 'name') == 'greenguard-cassandra' }
 abort 'Cassandra child missing' unless app
 abort 'Cassandra ordering, source or ownership wrong' unless
   app.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '24' &&
@@ -40,7 +40,7 @@ abort 'Cassandra image and Secret values drifted' unless
   }
 root_output, root_error, root_status = render.call('bootstrap-chart', values)
 abort "root Cassandra render failed: #{root_error}" unless root_status.success?
-root_app = YAML.safe_load_stream(root_output).compact.fetch(0)
+root_app = YAML.load_stream(root_output).compact.fetch(0)
 abort 'root lost Cassandra values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'cassandraPlane') == values.fetch('cassandraPlane')
 
 %w[image migratorImage authSecret tlsSecret apiServerCIDR].each do |key|
@@ -55,5 +55,5 @@ bad = Marshal.load(Marshal.dump(values))
 bad['cassandraPlane']['enabled'] = false
 disabled_output, disabled_error, disabled_status = render.call('applications-chart', bad)
 abort "disabled Cassandra render failed: #{disabled_error}" unless disabled_status.success?
-abort 'disabled Cassandra still rendered' if YAML.safe_load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-cassandra' }
+abort 'disabled Cassandra still rendered' if YAML.load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-cassandra' }
 puts 'Cassandra Argo child, ordering, pinned values, and reject fixtures pass.'

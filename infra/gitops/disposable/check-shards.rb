@@ -33,7 +33,7 @@ def render(root, chart, values)
     file.flush
     output, error, status = Open3.capture3('helm','template','shards',File.join(root,chart),'-f',file.path)
     raise "#{chart}: #{error}" unless status.success?
-    YAML.safe_load_stream(output).compact
+    YAML.load_stream(output).compact
   end
 end
 apps = render(root,'applications-chart',values)

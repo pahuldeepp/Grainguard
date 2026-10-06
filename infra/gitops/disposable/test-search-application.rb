@@ -23,7 +23,7 @@ end
 
 output, error, status = render.call('applications-chart', values)
 abort "search Argo render failed: #{error}" unless status.success?
-apps = YAML.safe_load_stream(output).compact
+apps = YAML.load_stream(output).compact
 app = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-opensearch' }
 abort 'OpenSearch child missing' unless app
 abort 'OpenSearch ordering, source or ownership wrong' unless
@@ -38,7 +38,7 @@ abort 'OpenSearch image/bootstrap values drifted' unless
 
 root_output, root_error, root_status = render.call('bootstrap-chart', values)
 abort "root search render failed: #{root_error}" unless root_status.success?
-root_app = YAML.safe_load_stream(root_output).compact.fetch(0)
+root_app = YAML.load_stream(root_output).compact.fetch(0)
 abort 'root lost search values' unless root_app.dig('spec', 'source', 'helm', 'valuesObject', 'searchPlane') == values.fetch('searchPlane')
 
 %w[image bootstrapImage].each do |key|
@@ -59,6 +59,6 @@ bad = Marshal.load(Marshal.dump(values))
 bad['searchPlane']['enabled'] = false
 disabled_output, disabled_error, disabled_status = render.call('applications-chart', bad)
 abort "disabled search render failed: #{disabled_error}" unless disabled_status.success?
-abort 'disabled search still rendered' if YAML.safe_load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-opensearch' }
+abort 'disabled search still rendered' if YAML.load_stream(disabled_output).compact.any? { |item| item.dig('metadata', 'name') == 'greenguard-opensearch' }
 
 puts 'Search Argo child, ordering, pinned values, and reject fixtures pass.'

@@ -19,7 +19,7 @@ end
 
 rendered, error, status = render(chart, names.to_h { |name| [name, digest] })
 abort "observability render failed: #{error}" unless status.success?
-objects = YAML.safe_load_stream(rendered).compact
+objects = YAML.load_stream(rendered).compact
 deployments = objects.select { |item| item['kind'] == 'Deployment' }
 services = objects.select { |item| item['kind'] == 'Service' }
 service_accounts = objects.select { |item| item['kind'] == 'ServiceAccount' }
@@ -83,7 +83,7 @@ gateway_render, gateway_error, gateway_status = Open3.capture3(
   '--values', gateway_values, '--set-string', "image=#{gateway_image}"
 )
 abort "gateway chart render failed: #{gateway_error}" unless gateway_status.success?
-gateway_objects = YAML.safe_load_stream(gateway_render).compact
+gateway_objects = YAML.load_stream(gateway_render).compact
 gateway_deployment = gateway_objects.find do |item|
   item['kind'] == 'Deployment' && item.dig('metadata', 'name') == 'gateway'
 end

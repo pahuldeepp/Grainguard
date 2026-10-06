@@ -59,7 +59,7 @@ workers.each do |name, (image, command, registry)|
     file.write(extra.to_yaml); file.flush
     output, error, status = Open3.capture3('helm', 'template', name, chart, '--namespace', 'greenguard', '-f', File.join(chart, 'values', "#{name}.yaml"), '-f', file.path)
     abort "#{name}: Helm render failed #{error}" unless status.success?
-    docs = YAML.safe_load_stream(output).compact
+    docs = YAML.load_stream(output).compact
     deployment = docs.find { |doc| doc['kind'] == 'Deployment' }
     abort "#{name}: no deployment" unless deployment
     spec = deployment.dig('spec', 'template', 'spec')
@@ -118,7 +118,7 @@ Tempfile.create(['worker-root-', '.yaml']) do |file|
   file.write({'cell' => 'offline-cell', 'repositoryUrl' => 'https://example.test/repo.git', 'revision' => 'b' * 40, 'releases' => releases, 'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, digest] }}.to_yaml); file.flush
   output, error, status = Open3.capture3('helm', 'template', 'worker-root', File.join(root, 'applications-chart'), '-f', file.path)
   abort "worker Argo render failed #{error}" unless status.success?
-  apps = YAML.safe_load_stream(output).compact.select { |doc| workers.key?(doc.dig('spec', 'source', 'helm', 'releaseName')) }
+  apps = YAML.load_stream(output).compact.select { |doc| workers.key?(doc.dig('spec', 'source', 'helm', 'releaseName')) }
   abort 'worker Argo release inventory incomplete' unless apps.length == workers.length
   apps.each do |app|
     abort 'worker lifecycle/order drift' unless app.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '30' && app.dig('metadata', 'finalizers') == ['resources-finalizer.argocd.argoproj.io']

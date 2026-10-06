@@ -43,7 +43,7 @@ render = lambda do |chart, values|
 end
 out, err, status = render.call('applications-chart', VALUES)
 abort "Argo managed-Dex render failed: #{err}" unless status.success?
-apps = YAML.safe_load_stream(out).compact
+apps = YAML.load_stream(out).compact
 app = apps.find { |item| item.dig('metadata', 'name') == 'greenguard-managed-dex' }
 abort 'Managed Dex Argo Application missing' unless app
 abort 'Managed Dex application identity/revision/values drifted' unless
@@ -77,32 +77,32 @@ rds_values = {
 }
 out, err, status = render.call('rds-bootstrap-chart', rds_values)
 abort "Managed Dex RDS bootstrap render failed: #{err}" unless status.success?
-rds_objects = YAML.safe_load_stream(out).compact
+rds_objects = YAML.load_stream(out).compact
 rds_job = rds_objects.find { |item| item['kind'] == 'Job' }
 abort 'Managed Dex central database initialization flag missing' unless
   rds_job.dig('spec', 'template', 'spec', 'containers', 0, 'args').include?('GG_MANAGED_DEX=1')
 rds_values_without_dex = rds_values.merge('managedDex' => false)
 out, err, status = render.call('rds-bootstrap-chart', rds_values_without_dex)
 abort "Non-Dex RDS bootstrap regression render failed: #{err}" unless status.success?
-plain_config = YAML.safe_load_stream(out).compact.find { |item| item['kind'] == 'ConfigMap' }
+plain_config = YAML.load_stream(out).compact.find { |item| item['kind'] == 'ConfigMap' }
 abort 'RDS bootstrap revision does not change when the Dex database toggle changes' if
   plain_config.dig('metadata', 'name') == rds_objects.find { |item| item['kind'] == 'ConfigMap' }.dig('metadata', 'name')
 
 edge_values = {'cell' => 'gg-test', 'accountId' => '123456789012', 'region' => 'us-east-2', 'targetGroupARN' => VALUES.dig('edgeRouting', 'targetGroupARN'), 'dexEnabled' => true}
 out, err, status = render.call('edge-routing-chart', edge_values)
 abort "Dex edge route render failed: #{err}" unless status.success?
-virtual_service = YAML.safe_load_stream(out).compact.find { |item| item['kind'] == 'VirtualService' }
+virtual_service = YAML.load_stream(out).compact.find { |item| item['kind'] == 'VirtualService' }
 route_names = virtual_service.dig('spec', 'http').map { |route| route['name'] }
 abort 'Dex route is not ahead of the general BFF path' unless route_names.index('managed-dex') < route_names.index('bff')
 disabled_route_values = edge_values.merge('dexEnabled' => false)
 out, err, status = render.call('edge-routing-chart', disabled_route_values)
 abort "Disabled Dex edge route render failed: #{err}" unless status.success?
-disabled_vs = YAML.safe_load_stream(out).compact.find { |item| item['kind'] == 'VirtualService' }
+disabled_vs = YAML.load_stream(out).compact.find { |item| item['kind'] == 'VirtualService' }
 abort 'Dex route remains exposed when managed Dex is disabled' if disabled_vs.dig('spec', 'http').any? { |route| route['name'] == 'managed-dex' }
 
 out, err, status = render.call('dex-chart', VALUES.fetch('managedDex').merge('cell' => VALUES.fetch('cell')))
 abort "Dex workload chart render failed: #{err}" unless status.success?
-objects = YAML.safe_load_stream(out).compact
+objects = YAML.load_stream(out).compact
 workload = objects.find { |item| item.dig('kind') == 'Deployment' }
 config = objects.find { |item| item.dig('kind') == 'ConfigMap' }
 abort 'Dex deployment is not digest-pinned / secret-backed' unless

@@ -165,6 +165,7 @@ resource "aws_s3_bucket_ownership_controls" "audit_exports" {
   rule { object_ownership = "BucketOwnerEnforced" }
 }
 
+#trivy:ignore:AWS-0132 disposable cell: SSE-S3 is deliberate so the export worker role needs no KMS key policy; objects stay private and TLS-only
 resource "aws_s3_bucket_server_side_encryption_configuration" "audit_exports" {
   depends_on = [terraform_data.destroy_inventory_sentinel]
   bucket     = aws_s3_bucket.audit_exports.id

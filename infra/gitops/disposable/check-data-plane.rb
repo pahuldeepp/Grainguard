@@ -16,7 +16,7 @@ render = lambda do |chart, values|
   flags = values.flat_map { |key, value| ['--set-string', "#{key}=#{value}"] }
   output, error, status = Open3.capture3('helm', 'template', chart, path, '--namespace', 'greenguard', *flags)
   abort "#{chart} render failed: #{error}" unless status.success?
-  YAML.safe_load_stream(output).compact
+  YAML.load_stream(output).compact
 end
 
 digest = "example.test/disposable@sha256:#{'a' * 64}"

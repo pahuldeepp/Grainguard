@@ -12,11 +12,11 @@ abort 'Argo child Application health customization missing' unless
 
 data_rendered, data_error, data_status = Open3.capture3('kubectl', 'kustomize', File.join(root, '../../kubernetes/disposable-data'))
 abort "data Kustomize failed: #{data_error}" unless data_status.success?
-data_objects = YAML.safe_load_stream(data_rendered).compact
+data_objects = YAML.load_stream(data_rendered).compact
 abort 'Schema Registry must not gate broker bootstrap wave' if data_objects.any? { |object| object.dig('metadata', 'name') == 'schema-registry' }
 registry_rendered, registry_error, registry_status = Open3.capture3('kubectl', 'kustomize', File.join(root, '../../kubernetes/disposable-data/registry'))
 abort "Registry Kustomize failed: #{registry_error}" unless registry_status.success?
-registry_objects = YAML.safe_load_stream(registry_rendered).compact
+registry_objects = YAML.load_stream(registry_rendered).compact
 abort 'Registry child must own Service and Deployment only' unless registry_objects.map { |object| [object['kind'], object.dig('metadata', 'name')] }.sort == [['Deployment', 'schema-registry'], ['Service', 'schema-registry']]
 quarantine_claim = data_objects.find { |object| object['kind'] == 'PersistentVolumeClaim' && object.dig('metadata', 'name') == 'search-indexer-quarantine' }
 abort 'search-indexer claim must not deadlock data health before its consumer starts' unless
@@ -119,7 +119,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   # path, so a value discarded by the bootstrap chart cannot pass this gate.
   bootstrap, bootstrap_error, bootstrap_status = Open3.capture3('helm', 'template', 'bootstrap', File.join(root, 'bootstrap-chart'), '--namespace', 'argocd', '-f', file.path)
   abort "bootstrap chart failed: #{bootstrap_error}" unless bootstrap_status.success?
-  root_application = YAML.safe_load_stream(bootstrap).compact.find { |object| object['kind'] == 'Application' }
+  root_application = YAML.load_stream(bootstrap).compact.find { |object| object['kind'] == 'Application' }
   propagated = root_application.dig('spec', 'source', 'helm', 'valuesObject')
   abort 'ClickHouse configuration discarded by bootstrap' unless propagated['clickhousePlane'] == values['clickhousePlane']
   abort 'edge routing configuration discarded by bootstrap' unless propagated['edgeRouting'] == values['edgeRouting']
@@ -130,7 +130,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   chart = File.join(root, 'applications-chart')
   rendered, error, status = Open3.capture3('helm', 'template', 'applications', chart, '--namespace', 'argocd', '-f', file.path)
   abort "application chart failed: #{error}" unless status.success?
-  apps = YAML.safe_load_stream(rendered).compact
+  apps = YAML.load_stream(rendered).compact
   actual = apps.map { |app| app.fetch('metadata').fetch('name').delete_prefix('greenguard-') }
   expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate', 'clickhouse', 'edge-routing', 'managed-dex', 'live-acceptance-probes']
   abort "application inventory drift: #{actual.sort} != #{expected.sort}" unless actual.sort == expected.sort
@@ -215,7 +215,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   file.flush
   root_rendered, root_error, root_status = Open3.capture3('helm', 'template', 'bootstrap', File.join(root, 'bootstrap-chart'), '--namespace', 'argocd', '-f', file.path)
   abort "bootstrap chart failed: #{root_error}" unless root_status.success?
-  root_app = YAML.safe_load_stream(root_rendered).compact.fetch(0)
+  root_app = YAML.load_stream(root_rendered).compact.fetch(0)
   abort 'root does not point to applications chart' unless root_app.fetch('spec').fetch('source').fetch('path') == 'infra/gitops/disposable/applications-chart'
   abort 'root does not pass every release' unless root_app.fetch('spec').fetch('source').fetch('helm').fetch('valuesObject').fetch('releases').length == releases.length
   abort 'root does not pass the owner migration contract' unless root_app.fetch('spec').fetch('source').fetch('helm').fetch('valuesObject').fetch('ownerMigrations') == values.fetch('ownerMigrations')
@@ -250,7 +250,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
     args += ['--set', 'profile=api'] if chart_name == 'greenguard-service'
     mesh_rendered, mesh_error, mesh_status = Open3.capture3(*args)
     abort "#{chart_name} strict-mesh render failed: #{mesh_error}" unless mesh_status.success?
-    mesh_objects = YAML.safe_load_stream(mesh_rendered).compact
+    mesh_objects = YAML.load_stream(mesh_rendered).compact
     abort "#{chart_name} lacks STRICT PeerAuthentication" unless mesh_objects.any? { |item|
       item['kind'] == 'PeerAuthentication' && item.dig('spec', 'mtls', 'mode') == 'STRICT'
     }

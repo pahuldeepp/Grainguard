@@ -27,7 +27,7 @@ class RetirementChartTest < Minitest::Test
   def documents(values)
     output, error, status = render(values)
     assert status.success?, error
-    YAML.safe_load_stream(output).compact
+    YAML.load_stream(output).compact
   end
 
   def test_ordinary_registration_receives_no_cdc_password_or_sql_access

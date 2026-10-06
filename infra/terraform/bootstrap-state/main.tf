@@ -18,6 +18,7 @@ resource "aws_s3_bucket_versioning" "state" {
   }
 }
 
+#trivy:ignore:AWS-0132 state bucket for a disposable cell uses SSE-S3; versioned, private and TLS-only
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
 

@@ -11,7 +11,7 @@ PROFILE = ROOT / "infra/helm/greenguard-service/values/tenant-bootstrap-worker.y
 
 
 def ruby_yaml_load(text, stream=False):
-    expression = "YAML.safe_load_stream(STDIN.read).compact.to_json" if stream else "YAML.safe_load(STDIN.read).to_json"
+    expression = "YAML.load_stream(STDIN.read).compact.to_json" if stream else "YAML.safe_load(STDIN.read).to_json"
     result = subprocess.run(["ruby", "-ryaml", "-rjson", "-e", f"print({expression})"], input=text, capture_output=True, text=True, check=False)
     if result.returncode:
         raise AssertionError(f"YAML parse failed: {result.stderr}")

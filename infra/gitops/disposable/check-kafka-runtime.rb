@@ -15,7 +15,7 @@ image = "example.invalid/greenguard@sha256:#{'a' * 64}"
   command += ['-f', File.join(root, 'infra/helm', chart, 'values/read-api.yaml')] if chart == 'greenguard-service'
   output, error, status = Open3.capture3(*command)
   abort "#{chart} render failed: #{error}" unless status.success?
-  pod = YAML.safe_load_stream(output).compact.find { |item| %w[Deployment Rollout].include?(item['kind']) }.dig('spec', 'template', 'spec')
+  pod = YAML.load_stream(output).compact.find { |item| %w[Deployment Rollout].include?(item['kind']) }.dig('spec', 'template', 'spec')
   container = pod.fetch('containers').first
   abort "#{chart} lost Kafka CA mount" unless container.fetch('volumeMounts').any? { |item| item['name'] == 'kafka-ca' && item['mountPath'] == '/etc/greenguard/kafka' && item['readOnly'] == true }
   abort "#{chart} lost CA-only Secret projection" unless pod.fetch('volumes').any? { |item| item['name'] == 'kafka-ca' && item.dig('secret', 'secretName') == 'greenguard-kafka-ca' && item.dig('secret', 'items').map { |entry| entry['key'] }.sort == %w[ca.crt registry-ca.crt] }

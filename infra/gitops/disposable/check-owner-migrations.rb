@@ -32,7 +32,7 @@ end
 end
 output, error, status = render.call('owner-migrations-chart', values)
 abort error unless status.success?
-migration_docs = YAML.safe_load_stream(output).compact
+migration_docs = YAML.load_stream(output).compact
 jobs = migration_docs.select { |d| d['kind']=='Job' }
 expected = %w[central].product(central) + %w[s1 s2 s3 s4].product(operational)
 actual = jobs.map { |job| [job.dig('metadata', 'labels', 'greenguard.io/migration-scope'), job.dig('metadata', 'labels', 'greenguard.io/migration-owner')] }
@@ -52,7 +52,7 @@ jobs.each do |job|
 end
 output, error, status = render.call('migration-gate-chart', values)
 abort error unless status.success?
-gate_docs = YAML.safe_load_stream(output).compact
+gate_docs = YAML.load_stream(output).compact
 gate = gate_docs.find { |d| d['kind']=='Job' }; role = gate_docs.find { |d| d['kind']=='Role' }
 abort 'gate can inspect unrelated Jobs' unless role.dig('rules',0,'resourceNames').sort == names.sort
 abort 'migration acceptance Job selector label missing' unless gate.dig('metadata', 'labels', 'greenguard.io/migration-gate') == 'true'
@@ -72,7 +72,7 @@ end
 root_values = {'revision'=>values['revision'], 'cell'=>'test-cell', 'repositoryUrl'=>'https://example.test/repo.git', 'observabilityImages'=>%w[otel-collector prometheus grafana tempo loki].to_h { |name| [name,digest] }, 'ownerMigrations'=>values.reject { |k,_| k=='revision' }}
 output, error, status = render.call('applications-chart', root_values)
 abort error unless status.success?
-apps = YAML.safe_load_stream(output).compact
+apps = YAML.load_stream(output).compact
 migration = apps.find { |d| d.dig('metadata','name')=='greenguard-owner-migrations' }
 gate_app = apps.find { |d| d.dig('metadata','name')=='greenguard-migration-gate' }
 abort 'migration owner Application missing' unless migration.dig('spec','source','path').end_with?('owner-migrations-chart')

@@ -13,7 +13,7 @@ abort 'RDS replication role adaptation missing' unless sql.include?('GRANT rds_r
 
 rendered, error, status = Open3.capture3('helm', 'template', 'rds-bootstrap', File.join(root, 'rds-bootstrap-chart'), '--namespace', 'greenguard')
 abort "RDS bootstrap chart render failed: #{error}" unless status.success?
-objects = YAML.safe_load_stream(rendered).compact
+objects = YAML.load_stream(rendered).compact
 abort 'expected one ConfigMap and one Job' unless objects.map { |object| object.fetch('kind') }.sort == %w[ConfigMap Job]
 job = objects.find { |object| object.fetch('kind') == 'Job' }
 container = job.dig('spec', 'template', 'spec', 'containers').fetch(0)
@@ -40,7 +40,7 @@ Tempfile.create(['rds-bootstrap-values-', '.yaml']) do |file|
   file.flush
   shard_output, shard_error, shard_status = Open3.capture3('helm', 'template', 'rds-bootstrap', File.join(root, 'rds-bootstrap-chart'), '--namespace', 'greenguard', '-f', file.path)
   abort "operational RDS bootstrap chart render failed: #{shard_error}" unless shard_status.success?
-  shard_objects = YAML.safe_load_stream(shard_output).compact
+  shard_objects = YAML.load_stream(shard_output).compact
   login_job = shard_objects.find { |object| object.dig('metadata', 'name').include?('-login-') && object.fetch('kind') == 'Job' }
   abort 'operational shard login Job missing' unless login_job
   login_container = login_job.dig('spec', 'template', 'spec', 'containers').fetch(0)
@@ -51,7 +51,7 @@ Tempfile.create(['rds-bootstrap-values-', '.yaml']) do |file|
   rotated_values = operational_values.merge('tenantBootstrapVersion' => 'version-rotation-3')
   rotated_output, rotated_error, rotated_status = Open3.capture3('helm', 'template', 'rds-bootstrap', File.join(root, 'rds-bootstrap-chart'), '--namespace', 'greenguard', '--set', 'operationalOnly=true', '--set', "rdsHost=#{rotated_values['rdsHost']}", '--set', "name=#{rotated_values['name']}", '--set', "credentialSecret=#{rotated_values['credentialSecret']}", '--set', "tenantBootstrapSecret=#{rotated_values['tenantBootstrapSecret']}", '--set', "tenantBootstrapVersion=#{rotated_values['tenantBootstrapVersion']}", '--set', "tenantBootstrapRole=#{rotated_values['tenantBootstrapRole']}")
   abort "rotated RDS bootstrap render failed: #{rotated_error}" unless rotated_status.success?
-  rotated_job = YAML.safe_load_stream(rotated_output).compact.find { |object| object.fetch('kind') == 'Job' && object.dig('metadata', 'name').include?('-login-') }
+  rotated_job = YAML.load_stream(rotated_output).compact.find { |object| object.fetch('kind') == 'Job' && object.dig('metadata', 'name').include?('-login-') }
   abort 'tenant bootstrap version rotation did not change the login Job identity' unless rotated_job && rotated_job.dig('metadata', 'name') != login_job.dig('metadata', 'name')
   abort 'login Job must not receive app/migrator credentials via envFrom' if login_container.key?('envFrom')
   abort 'login Job must have a bounded deadline and no API token' unless login_job.dig('spec', 'activeDeadlineSeconds').to_i.positive? && login_job.dig('spec', 'template', 'spec', 'automountServiceAccountToken') == false

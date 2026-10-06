@@ -7,7 +7,7 @@ base = ['helm', 'template', 'bff', chart, '--namespace', 'greenguard', '--set-st
 check = lambda do |args, namespace, name, release, port|
   output, error, status = Open3.capture3(*(base + args))
   abort "BFF render failed: #{error}" unless status.success?
-  objects = YAML.safe_load_stream(output).compact
+  objects = YAML.load_stream(output).compact
   policy = objects.find { |object| object['kind'] == 'NetworkPolicy' } or abort 'network policy missing'
   abort 'egress policy disabled' unless policy.dig('spec', 'policyTypes').include?('Egress')
   matches = policy.dig('spec', 'egress').select do |rule|

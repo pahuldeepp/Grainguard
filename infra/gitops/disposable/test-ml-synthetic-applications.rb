@@ -29,7 +29,7 @@ Tempfile.create(['ml-synthetic-apps-', '.yaml']) do |file|
   file.flush
   output, error, status = Open3.capture3('helm', 'template', 'ml-synthetic-test', chart, '--namespace', 'argocd', '-f', file.path)
   abort "ML synthetic Argo render failed: #{error}" unless status.success?
-  apps = YAML.safe_load_stream(output).compact
+  apps = YAML.load_stream(output).compact
   expected = {
     'greenguard-ml-synthetic-data' => ['10', 'services/ml-scoring/deploy/data-chart'],
     'greenguard-ml-synthetic-scorer' => ['20', 'services/ml-scoring/deploy/chart']

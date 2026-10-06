@@ -26,7 +26,7 @@ class MigrationRevisionTest < Minitest::Test
       file.write(values.to_yaml); file.flush
       output, error, status = Open3.capture3('helm', 'template', 'test', File.join(ROOT, chart), '--values', file.path)
       assert status.success?, error
-      YAML.safe_load_stream(output).compact
+      YAML.load_stream(output).compact
     end
   end
 

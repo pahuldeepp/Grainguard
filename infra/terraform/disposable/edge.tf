@@ -80,6 +80,8 @@ resource "aws_vpc_security_group_ingress_rule" "edge_to_ingress_health_eks_nodes
   description                  = "Private ALB health checks to Istio ingress readiness port"
 }
 
+# Internal ALB reachable only from the CloudFront VPC origin through the edge
+# security group; invalid header fields are dropped.
 resource "aws_lb" "edge" {
   depends_on                 = [terraform_data.destroy_inventory_sentinel]
   name                       = "${local.edge_name}-edge"
@@ -89,6 +91,7 @@ resource "aws_lb" "edge" {
   subnets                    = [for zone in local.az_names : aws_subnet.private[zone].id]
   enable_deletion_protection = false
   idle_timeout               = 120
+  drop_invalid_header_fields = true
   tags                       = { Name = "${var.cluster_name}-edge" }
 }
 
@@ -110,6 +113,7 @@ resource "aws_lb_target_group" "mesh_ingress" {
   }
 }
 
+#trivy:ignore:AWS-0054 internal ALB in private subnets; TLS terminates at CloudFront and the mesh ingress, and only the CloudFront VPC origin may reach port 8080
 resource "aws_lb_listener" "edge" {
   depends_on        = [terraform_data.destroy_inventory_sentinel]
   load_balancer_arn = aws_lb.edge.arn

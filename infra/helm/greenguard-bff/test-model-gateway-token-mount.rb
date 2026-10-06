@@ -12,14 +12,14 @@ end
 
 stdout, stderr, status = render.call([])
 abort "default BFF render failed: #{stderr}" unless status.success?
-default_deployment = YAML.safe_load_stream(stdout).compact.find { |object| object['kind'] == 'Deployment' }
+default_deployment = YAML.load_stream(stdout).compact.find { |object| object['kind'] == 'Deployment' }
 default_pod = default_deployment.dig('spec', 'template', 'spec')
 abort 'disabled token feature must not inject an init container' unless (default_pod['initContainers'] || []).empty?
 abort 'disabled token feature must not mount a secret' if (default_pod['volumes'] || []).any? { |volume| volume['name'].to_s.include?('model-gateway-token') }
 
 stdout, stderr, status = render.call(['--set', 'modelGatewayTokens.enabled=true'])
 abort "enabled BFF render failed: #{stderr}" unless status.success?
-deployment = YAML.safe_load_stream(stdout).compact.find { |object| object['kind'] == 'Deployment' }
+deployment = YAML.load_stream(stdout).compact.find { |object| object['kind'] == 'Deployment' }
 pod = deployment.dig('spec', 'template', 'spec')
 init = pod.fetch('initContainers').find { |container| container['name'] == 'materialize-model-gateway-tokens' } or abort 'token materializer missing'
 abort 'token init must run non-root as the BFF UID' unless init.dig('securityContext', 'runAsUser') == 101
