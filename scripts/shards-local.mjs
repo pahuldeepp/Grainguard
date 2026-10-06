@@ -9,7 +9,7 @@ import {
   chmodSync,
   existsSync,
 } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import pg from "pg";
@@ -19,7 +19,20 @@ const environment = {
   ...parseEnv(readFileSync(resolve(root, ".env"), "utf8")),
   ...process.env,
 };
-const composeSecretFile = resolve(root, ".local/sharding/compose.env");
+const stateDir = resolve(
+  root,
+  environment.GG_SHARD_LOCAL_STATE_DIR ?? ".local/sharding",
+);
+const relativeStateDir = relative(root, stateDir);
+if (
+  environment.GG_SHARD_LOCAL_STATE_DIR &&
+  (!relativeStateDir.startsWith(`work${sep}`) ||
+    relativeStateDir.includes(`..${sep}`))
+)
+  throw new Error(
+    "GG_SHARD_LOCAL_STATE_DIR must stay under the ignored work/ directory for isolated acceptance",
+  );
+const composeSecretFile = resolve(stateDir, "compose.env");
 mkdirSync(dirname(composeSecretFile), { recursive: true, mode: 0o700 });
 if (!existsSync(composeSecretFile)) {
   writeFileSync(
@@ -60,7 +73,7 @@ const compose = [
   "--env-file",
   ".env",
   "--env-file",
-  ".local/sharding/compose.env",
+  composeSecretFile,
   "-f",
   "infra/compose/shards.compose.yaml",
   "--profile",
@@ -127,6 +140,63 @@ async function waitFor(predicate, label) {
   }
   throw new Error(`${label} did not complete within 30 seconds`);
 }
+async function bootstrapTenantOnOwners(index, tenant, shardId, incarnation) {
+  for (const [owner, database] of owners) {
+    const bootstrap = pool(index, "postgres", "POSTGRES_PASSWORD", database);
+    const client = await bootstrap.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE tenant_ownership_bootstrap");
+      await client.query(
+        "SELECT greenguard_internal.prepare_tenant_ownership($1::uuid,$2::text,$3::uuid,$4::bigint)",
+        [tenant, shardId, incarnation, 1],
+      );
+      const prepared = await client.query(
+        "SELECT receipt_version,tenant_id::text,shard_id,shard_incarnation::text,placement_epoch::text,state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,$4::bigint)",
+        [tenant, shardId, incarnation, 1],
+      );
+      assert.deepEqual(
+        prepared.rows[0],
+        {
+          receipt_version: "tenant-ownership-bootstrap-v2",
+          tenant_id: tenant,
+          shard_id: shardId,
+          shard_incarnation: incarnation,
+          placement_epoch: "1",
+          state: "prepared",
+        },
+        `${owner} prepared receipt must match the exact placement`,
+      );
+      await client.query(
+        "SELECT greenguard_internal.activate_tenant_ownership($1::uuid,$2::text,$3::uuid,$4::bigint)",
+        [tenant, shardId, incarnation, 1],
+      );
+      const active = await client.query(
+        "SELECT receipt_version,tenant_id::text,shard_id,shard_incarnation::text,placement_epoch::text,state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,$4::bigint)",
+        [tenant, shardId, incarnation, 1],
+      );
+      assert.deepEqual(
+        active.rows[0],
+        {
+          receipt_version: "tenant-ownership-bootstrap-v2",
+          tenant_id: tenant,
+          shard_id: shardId,
+          shard_incarnation: incarnation,
+          placement_epoch: "1",
+          state: "active",
+        },
+        `${owner} active receipt must match the exact placement`,
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+      await bootstrap.end();
+    }
+  }
+}
 async function smoke() {
   const schemas = new Map();
   const systemIds = new Set();
@@ -168,10 +238,7 @@ async function smoke() {
       );
       assert.equal(identity.rows[0].shard_id, shardId);
       const incarnation = JSON.parse(
-        readFileSync(
-          resolve(root, ".local/sharding/incarnations.json"),
-          "utf8",
-        ),
+        readFileSync(resolve(stateDir, "incarnations.json"), "utf8"),
       )[shardId];
       assert.match(
         incarnation,
@@ -243,32 +310,7 @@ async function smoke() {
           await databaseAdmin.end();
         }
       }
-      const bootstrap = await pool(
-        index,
-        "postgres",
-        "POSTGRES_PASSWORD",
-        "read",
-      );
-      try {
-        await bootstrap.query("SET ROLE tenant_ownership_bootstrap");
-        const snapshot = JSON.stringify([
-          {
-            tenantId: tenant,
-            shardId,
-            shardIncarnation: incarnation,
-            placementEpoch: 1,
-            state: "active",
-          },
-        ]);
-        const seeded = await bootstrap.query(
-          "SELECT greenguard_internal.seed_tenant_ownership($1::jsonb,$2,$3::uuid,1) AS imported",
-          [snapshot, shardId, incarnation],
-        );
-        assert.equal(seeded.rows[0].imported, 1);
-      } finally {
-        await bootstrap.query("RESET ROLE").catch(() => {});
-        await bootstrap.end();
-      }
+      await bootstrapTenantOnOwners(index, tenant, shardId, incarnation);
       const placement = { shardId, incarnation, epoch: "1" };
       await tenantQuery(
         admin,
@@ -394,10 +436,7 @@ async function smoke() {
         {
           shardId,
           incarnation: JSON.parse(
-            readFileSync(
-              resolve(root, ".local/sharding/incarnations.json"),
-              "utf8",
-            ),
+            readFileSync(resolve(stateDir, "incarnations.json"), "utf8"),
           )[shardId],
           epoch: "1",
         },
@@ -559,7 +598,7 @@ else if (mode === "registry") {
       },
     ]),
   );
-  const directory = resolve(root, ".local/sharding");
+  const directory = stateDir;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   writeFileSync(
     resolve(directory, "incarnations.json"),
@@ -625,7 +664,7 @@ else if (mode === "registry") {
   writeFileSync(readPath, JSON.stringify(readConfig, null, 2), { mode: 0o600 });
   chmodSync(readPath, 0o600);
   console.log(
-    "Private endpoint registry written to .local/sharding/registry.json (credentials omitted from output)",
+    `Private endpoint registry written to ${relative(root, resolve(stateDir, "registry.json"))} (credentials omitted from output)`,
   );
 } else
   throw new Error(

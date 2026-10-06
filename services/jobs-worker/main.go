@@ -71,10 +71,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		db, healthDB = pool, pool
 	}
 	metrics := &Metrics{DBPool: pool}
+	httpServer := serveHTTP(cfg.HTTPAddr, metrics, healthDB, &notificationAPI{db: db, issuer: cfg.AuthIssuer, audience: cfg.AuthAudience, jwksURL: cfg.AuthJWKSURL, cursorKey: cfg.CursorHMACKey, client: authHTTP, memberships: memberships, membershipPath: membershipPath, membershipCheckedAt: time.Now(), membershipLastSuccess: time.Now(), membershipSource: cfg.MembershipSource, controlPlaneURL: cfg.ControlPlaneURL, controlLookupToken: cfg.ControlLookupToken, allowInsecureMembership: cfg.AllowInsecureMembership, controlMeshMTLS: cfg.ControlMeshMTLS})
+	if cfg.APIOnly {
+		slog.Info("notification history API only; background delivery is disabled")
+		return httpServer(ctx)
+	}
 	pub := rabbit.NewPublisher(cfg.RabbitURL, nil)
 	defer pub.Close()
 	dispatcher := &Dispatcher{DB: db, Pub: pub, Policy: cfg.Policy, Workers: cfg.Workers, Batch: cfg.Batch, Interval: 500 * time.Millisecond, Metrics: metrics}
-	parts := []component{dispatcher.Run, receiptLoop(cfg, db, metrics), serveHTTP(cfg.HTTPAddr, metrics, healthDB, &notificationAPI{db: db, issuer: cfg.AuthIssuer, audience: cfg.AuthAudience, jwksURL: cfg.AuthJWKSURL, cursorKey: cfg.CursorHMACKey, client: authHTTP, memberships: memberships, membershipPath: membershipPath, membershipCheckedAt: time.Now(), membershipLastSuccess: time.Now(), membershipSource: cfg.MembershipSource, controlPlaneURL: cfg.ControlPlaneURL, controlLookupToken: cfg.ControlLookupToken, allowInsecureMembership: cfg.AllowInsecureMembership, controlMeshMTLS: cfg.ControlMeshMTLS})}
+	parts := []component{dispatcher.Run, receiptLoop(cfg, db, metrics), httpServer}
 	if len(cfg.KafkaBrokers) > 0 {
 		src, err := newKafkaSource(cfg.KafkaBrokers, cfg.KafkaGroup, cfg.AlertsTopic)
 		if err != nil {

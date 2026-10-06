@@ -45,7 +45,10 @@ class DeploymentGateWiringTests(unittest.TestCase):
         gate = resource_block(source, "terraform_data", "deployed_workload_acceptance")
         self.assertIn("count = var.enable_application_tree ? 1 : 0", gate)
         self.assertIn("triggers_replace = helm_release.gitops_bootstrap[0].metadata.revision", gate)
-        self.assertIn("depends_on       = [helm_release.gitops_bootstrap]", gate)
+        dependencies = re.search(r"depends_on\s*=\s*\[(.*?)\]", gate, re.S)
+        self.assertIsNotNone(dependencies, "application acceptance dependencies are missing")
+        self.assertIn("helm_release.gitops_bootstrap", dependencies.group(1))
+        self.assertIn("terraform_data.destroy_inventory_sentinel", dependencies.group(1))
         self.assertIn("run-deployed-workloads.py", gate)
         self.assertIn("GG_DISPOSABLE_ACCEPTANCE_TIMEOUT_SECONDS", gate)
         self.assertIn("migration_gate_image_digest", gate)
@@ -53,13 +56,16 @@ class DeploymentGateWiringTests(unittest.TestCase):
         self.assertIn("migration_sql_image_digest", gate)
         self.assertNotIn("on_failure", gate)
 
-    def test_offline_readiness_gate_stays_closed_by_default(self):
+    def test_readiness_gate_rejects_infrastructure_only_apply(self):
         source = (ROOT / "readiness.tf").read_text()
-        self.assertIn("default     = false", source)
-        self.assertIn("count = var.allow_incomplete_foundation_plan ? 0 : 1", source)
-        self.assertIn("Do not apply it as a complete cell", source)
-        self.assertIn("Secret payloads now use ephemeral Terraform inputs and AWS Secrets Manager write-only arguments", source)
-        self.assertIn("mocked state-boundary fixture passed", source)
+        gate = resource_block(source, "terraform_data", "deployment_readiness_gate")
+        self.assertNotIn("allow_incomplete_foundation_plan", source)
+        self.assertIn("condition     = var.enable_application_tree", gate)
+        self.assertIn("Refusing an infrastructure-only GreenGuard apply", gate)
+        self.assertIn(
+            'resource "terraform_data" "deployed_workload_acceptance"',
+            (ROOT / "gitops.tf").read_text(),
+        )
 
     def test_secret_state_exposure_is_connected_to_the_materialization_path(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
@@ -68,6 +74,16 @@ class DeploymentGateWiringTests(unittest.TestCase):
         self.assertRegex(runtime, r"secret_string_wo\s*= try\(jsonencode\(local\.runtime_secret_owned_values\[each\.key\]\), jsonencode\(\{\}\)\)")
         self.assertIn('resource "aws_secretsmanager_secret_version" "shard_routing"', shards)
         self.assertRegex(shards, r"secret_string_wo\s*= jsonencode\(local\.shard_registry_values\[each\.key\]\)")
+
+    def test_ai_enablement_requires_complete_source_inventory_and_images(self):
+        runtime = (ROOT / "ai-runtime.tf").read_text()
+        images = (ROOT / "ai-gitops.tf").read_text()
+        inventory = (ROOT.parent.parent / "gitops/disposable/platform-image-inventory.json").read_text()
+        self.assertIn("!var.ai_runtime_enabled || (var.ai_runtime_sources_complete", runtime)
+        self.assertIn('default     = false', images[images.index('variable "ai_runtime_sources_complete"'):])
+        ai_images = __import__("json").loads(inventory)["ai_runtime_images"]
+        self.assertEqual({entry["status"] for entry in ai_images}, {"source_present"})
+        self.assertEqual(len(ai_images), 7)
 
 
 if __name__ == "__main__":

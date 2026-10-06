@@ -78,7 +78,7 @@ abort 'Kafka ACL Job must be bounded, non-root and use the admin Secret/CA' unle
   acl_pod.fetch('volumes').any? { |item| item.dig('secret', 'secretName') == 'greenguard-kafka-ca' } &&
   acl_container.fetch('args').first.include?('--command-config /tmp/kafka-client.properties')
 known_topics = topic_copy.lines.map { |line| line.split('|', 2).first }.to_set
-known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane]
+known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane telemetry-sinks telemetry-replay]
 acl_principals = []
 acl_copy.lines.each do |line|
   next if line.start_with?('#') || line.strip.empty?

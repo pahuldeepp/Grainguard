@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-ai-runtime
+description: Opt-in disposable AI owner runtimes with exact secret and migration prerequisites
+type: application
+version: 0.1.0

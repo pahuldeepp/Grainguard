@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // notificationAPI exposes only the jobs-worker-owned, bounded warning-intent ledger.
@@ -366,26 +367,17 @@ func (a *notificationAPI) readinessHandler(db any) http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"status":"not_configured"}`))
 			return
 		}
-		reader, ok := db.(catalogReader)
-		if !ok {
-			http.Error(w, `{"status":"unavailable"}`, http.StatusServiceUnavailable)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		var roleOK, rlsOK, policyOK bool
-		err := reader.QueryRow(ctx, `SELECT current_user='jobs_app' AND NOT r.rolsuper AND NOT r.rolbypassrls
-			AND NOT EXISTS (SELECT 1 FROM pg_roles elevated WHERE elevated.rolbypassrls
-				AND pg_has_role(current_user, elevated.oid, 'USAGE'))
-			FROM pg_roles r WHERE r.rolname=current_user`).Scan(&roleOK)
-		if err == nil {
-			err = reader.QueryRow(ctx, `SELECT c.relrowsecurity AND c.relforcerowsecurity,
-				p.qual LIKE '%app.tenant_id%'
-				FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-				JOIN pg_policies p ON p.schemaname=n.nspname AND p.tablename=c.relname AND p.policyname='tenant_isolation'
-				WHERE n.nspname=current_schema() AND c.relname='notification_intents'`).Scan(&rlsOK, &policyOK)
+		var err error
+		if shards, ok := db.(*common.ShardedDB); ok {
+			err = shards.ForEachPrimary(ctx, func(_ string, pool *pgxpool.Pool) error { return notificationCatalogReady(ctx, pool) })
+		} else if reader, ok := db.(catalogReader); ok {
+			err = notificationCatalogReady(ctx, reader)
+		} else {
+			err = errors.New("notification history database unavailable")
 		}
-		if err != nil || !roleOK || !rlsOK || !policyOK {
+		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"status":"unavailable"}`))
@@ -393,6 +385,28 @@ func (a *notificationAPI) readinessHandler(db any) http.HandlerFunc {
 		}
 		_, _ = w.Write([]byte("ready\n"))
 	}
+}
+
+func notificationCatalogReady(ctx context.Context, reader catalogReader) error {
+	var roleOK, rlsOK, policyOK bool
+	err := reader.QueryRow(ctx, `SELECT current_user='jobs_app' AND NOT r.rolsuper AND NOT r.rolbypassrls
+			AND NOT EXISTS (SELECT 1 FROM pg_roles elevated WHERE elevated.rolbypassrls
+				AND pg_has_role(current_user, elevated.oid, 'USAGE'))
+			FROM pg_roles r WHERE r.rolname=current_user`).Scan(&roleOK)
+	if err == nil {
+		err = reader.QueryRow(ctx, `SELECT c.relrowsecurity AND c.relforcerowsecurity,
+				p.qual LIKE '%app.tenant_id%'
+				FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+				JOIN pg_policies p ON p.schemaname=n.nspname AND p.tablename=c.relname AND p.policyname='tenant_isolation'
+				WHERE n.nspname=current_schema() AND c.relname='notification_intents'`).Scan(&rlsOK, &policyOK)
+	}
+	if err != nil {
+		return err
+	}
+	if !roleOK || !rlsOK || !policyOK {
+		return errors.New("notification history catalog is unsafe")
+	}
+	return nil
 }
 
 type intentCursor struct{ Tenant, Alert, Version, Channel, Intent string }

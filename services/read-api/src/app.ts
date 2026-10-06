@@ -28,7 +28,14 @@ import {
   type Principal,
 } from "@greenguard/tenant-auth";
 import type { ReadBackends } from "./backends.js";
+import { historyRollups, RollupScanLimit } from "./history-rollup.js";
 import { BulkheadFull } from "./bulkhead.js";
+import {
+  decodeHistoryCursor,
+  encodeHistoryCursor,
+  type HistoryCursor,
+  requireHistoryCursorSecret,
+} from "./history-cursor.js";
 import {
   assertHistoryRange,
   defaultHistoryEntitlements,
@@ -63,6 +70,31 @@ function limit(value: unknown): number {
     throw new InputError("invalid_limit");
   return n;
 }
+function historyOrder(a: Record<string, unknown>, b: Record<string, unknown>) {
+  const timeA = new Date(a.observed_at as string | number | Date).getTime();
+  const timeB = new Date(b.observed_at as string | number | Date).getTime();
+  const idA = String(a.reading_id);
+  const idB = String(b.reading_id);
+  return timeB - timeA || (idA < idB ? -1 : idA > idB ? 1 : 0);
+}
+function mergeHistoryRows(
+  postgres: Record<string, unknown>[],
+  cassandra: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const row of cassandra) {
+    if (typeof row.reading_id !== "string")
+      throw new Error("invalid_cassandra_history_row");
+    byId.set(row.reading_id, row);
+  }
+  for (const row of postgres) {
+    if (typeof row.reading_id !== "string")
+      throw new Error("invalid_postgres_history_row");
+    // PostgreSQL wins if the stores overlap at the retention seam.
+    byId.set(row.reading_id, row);
+  }
+  return [...byId.values()].sort(historyOrder);
+}
 const ZONED_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 function range(from: unknown, to: unknown, now: Date) {
@@ -94,6 +126,7 @@ export interface AppOptions {
   ready?: () => Promise<boolean>;
   entitlements?: HistoryEntitlements;
   readAuthority?: ReadLeaseAuthority;
+  historyCursorSecret?: string;
 }
 export function createApp(options: AppOptions) {
   const margin = options.hotBoundaryMarginMs ?? 300_000;
@@ -101,6 +134,9 @@ export function createApp(options: AppOptions) {
     throw new Error("invalid hot boundary margin");
   const safeHotStart = (now: Date) =>
     now.getTime() - (options.hotWindowMs ?? 86_400_000) + margin;
+  const historyCursorSecret = requireHistoryCursorSecret(
+    options.historyCursorSecret ?? process.env.READ_HISTORY_CURSOR_SECRET,
+  );
   const app = express();
   const sendJson = async (res: Response, value: unknown) => {
     const ctx = readContext.getStore();
@@ -186,6 +222,15 @@ export function createApp(options: AppOptions) {
         controller.signal,
       );
       active();
+      if (
+        "actor" in principal &&
+        principal.actor === "greenguard-mcp" &&
+        (req.method !== "GET" ||
+          !/^\/devices\/[0-9a-f-]{36}\/(?:latest|current|readings|rollups|risk)$/i.test(
+            req.path,
+          ))
+      )
+        throw new AuthError(403, "insufficient_role");
       if (principal.principalType === "service") {
         if (!principal.scopes?.includes("read:telemetry"))
           throw new AuthError(403, "insufficient_role");
@@ -430,64 +475,170 @@ export function createApp(options: AppOptions) {
   router.get("/devices/:deviceId/readings", async (req, res) => {
     const now = (options.now ?? (() => new Date()))();
     const { from, to } = range(req.query.from, req.query.to, now);
-    const source =
-      from.getTime() >= safeHotStart(now) ? "postgres" : "cassandra";
-    if (source === "cassandra") requireEventualStore();
+    const tenantId = res.locals.tenantId as string;
+    const deviceId = uuid(req.params.deviceId as string);
+    const pageSize = limit(req.query.limit);
+    const context = readContext.getStore();
+    const placement = context?.lease
+      ? {
+          shardId: context.lease.route.shardId,
+          shardIncarnation: context.lease.route.shardIncarnation,
+          placementEpoch: context.lease.route.placementEpoch,
+        }
+      : undefined;
+    if (req.query.after !== undefined && typeof req.query.after !== "string")
+      throw new InputError("invalid_cursor");
+    if (req.query.cursor !== undefined) throw new InputError("invalid_cursor");
+    const expectedCursorContext = {
+      tenantId,
+      deviceId,
+      from,
+      to,
+      limit: pageSize,
+      placement,
+    };
+    let cursor: HistoryCursor | undefined;
+    try {
+      cursor = req.query.after
+        ? decodeHistoryCursor(
+            req.query.after,
+            expectedCursorContext,
+            historyCursorSecret,
+            now.getTime(),
+          )
+        : undefined;
+    } catch {
+      throw new InputError("invalid_cursor");
+    }
+    // Retention may prune PostgreSQL between pages. Move the seam forward with
+    // time so Cassandra serves that interval while the signed keyset stays fixed.
+    const hotStart = new Date(
+      Math.max(cursor?.hotStart.getTime() ?? -Infinity, safeHotStart(now)),
+    );
+    const after = cursor?.after;
+    const postgresFrom = new Date(Math.max(from.getTime(), hotStart.getTime()));
+    const cassandraTo = new Date(Math.min(to.getTime(), hotStart.getTime()));
+    const usePostgres = postgresFrom < to;
+    const useCassandra = from < cassandraTo;
+    if (useCassandra) requireEventualStore();
+    await assertHistoryRange(
+      options.entitlements ?? defaultHistoryEntitlements,
+      tenantId,
+      from,
+      to,
+    );
+    // Each source is asked for a bounded lookahead page. The whole request fails
+    // if either selected source fails; partial history must never look complete.
+    const [postgresRows, cassandraRows] = await Promise.all([
+      usePostgres
+        ? options.backends.hotReadings({
+            tenantId,
+            deviceId,
+            from: postgresFrom,
+            to,
+            limit: pageSize + 1,
+            ...(after ? { after } : {}),
+          })
+        : Promise.resolve([]),
+      useCassandra
+        ? options.backends.history.list({
+            tenantId,
+            deviceId,
+            from,
+            to: cassandraTo,
+            limit: pageSize + 1,
+            ...(after ? { after } : {}),
+          })
+        : Promise.resolve([]),
+    ]);
+    const merged = mergeHistoryRows(
+      postgresRows as unknown as Record<string, unknown>[],
+      cassandraRows as Record<string, unknown>[],
+    );
+    const items = merged.slice(0, pageSize);
+    const last = items.at(-1);
+    const nextCursor =
+      merged.length > pageSize && last
+        ? encodeHistoryCursor(
+            { ...expectedCursorContext, hotStart },
+            {
+              observedAt: new Date(last.observed_at as string | number | Date),
+              readingId: String(last.reading_id),
+            },
+            historyCursorSecret,
+            now.getTime(),
+          )
+        : null;
+    await sendJson(res, {
+      data: items,
+      nextCursor,
+      sources: { postgres: usePostgres, cassandra: useCassandra },
+    });
+  });
+  router.get("/devices/:deviceId/rollups", async (req, res) => {
+    const now = (options.now ?? (() => new Date()))();
+    const { from, to } = range(req.query.from, req.query.to, now);
+    const hotStart = new Date(safeHotStart(now));
+    const useCassandra = from < hotStart;
+    if (useCassandra) requireEventualStore();
     await assertHistoryRange(
       options.entitlements ?? defaultHistoryEntitlements,
       res.locals.tenantId,
       from,
       to,
     );
-    const q = {
-      tenantId: res.locals.tenantId as string,
+    const bucket = req.query.bucket;
+    if (bucket !== "hour" && bucket !== "day")
+      throw new InputError("invalid_bucket");
+    const query = {
+      tenantId: res.locals.tenantId,
       deviceId: uuid(req.params.deviceId as string),
       from,
       to,
       limit: limit(req.query.limit),
     };
-    // Neither postgres listReadings nor Cassandra HistoryQuery supports a tuple cursor.
-    // Until both support (observed_at, reading_id), report full pages as truncated;
-    // never ignore a cursor or invent a continuation that skips equal timestamps.
-    if (req.query.cursor !== undefined) throw new InputError("invalid_cursor");
-    // Pruning is not aligned to now - window. The margin also sends crossing ranges
-    // to Cassandra, which retains the full requested range.
-    const data =
-      source === "postgres"
-        ? await options.backends.hotReadings(q)
-        : await options.backends.history.list(q);
-    await sendJson(res, { data, source, truncated: data.length === q.limit });
+    const data = useCassandra
+      ? await historyRollups(options.backends, query, bucket, hotStart)
+      : await options.backends.rollup(query, bucket);
+    const source = useCassandra
+      ? to > hotStart
+        ? "hybrid"
+        : "cassandra"
+      : "postgres";
+    await sendJson(res, { data, source });
   });
-  router.get("/devices/:deviceId/rollups", async (req, res) => {
+  router.get("/devices/:deviceId/risk", async (req, res) => {
     const now = (options.now ?? (() => new Date()))();
     const { from, to } = range(req.query.from, req.query.to, now);
+    const tenantId = res.locals.tenantId as string;
+    if (
+      Object.keys(req.query).some(
+        (key) => !["from", "to", "limit"].includes(key),
+      )
+    )
+      throw new InputError("invalid_query");
+    const size = limit(req.query.limit);
     await assertHistoryRange(
       options.entitlements ?? defaultHistoryEntitlements,
-      res.locals.tenantId,
+      tenantId,
       from,
       to,
     );
-    if (from.getTime() < safeHotStart(now))
-      throw new InputError("rollup_outside_hot_window");
-    const bucket = req.query.bucket;
-    if (bucket !== "hour" && bucket !== "day")
-      throw new InputError("invalid_bucket");
-    const data = await options.backends.rollup(
-      {
-        tenantId: res.locals.tenantId,
-        deviceId: uuid(req.params.deviceId as string),
-        from,
-        to,
-        limit: limit(req.query.limit),
-      },
-      bucket,
-    );
-    await sendJson(res, { data, source: "postgres" });
+    const data = await options.backends.deviceRisk({
+      tenantId,
+      deviceId: uuid(req.params.deviceId as string),
+      from,
+      to,
+      limit: size,
+    });
+    if (Buffer.byteLength(JSON.stringify(data), "utf8") > 256 * 1024)
+      throw new ResponseTooLarge();
+    await sendJson(res, { data, source: "postgres", from, to });
   });
   router.get("/search", async (req, res) => {
     requireEventualStore();
     const q = req.query.q;
-    if (typeof q !== "string" || !q.trim() || q.length > 200)
+    if (typeof q !== "string" || q.length > 200)
       throw new InputError("invalid_query");
     const data = await options.backends.search.search(
       res.locals.tenantId,
@@ -500,6 +651,10 @@ export function createApp(options: AppOptions) {
   // Express recognises an error handler only by its four declared parameters.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
+    if (error instanceof RollupScanLimit) {
+      res.status(422).json({ code: error.message });
+      return;
+    }
     if (error instanceof ResponseTooLarge) {
       res.status(422).json({ code: error.message });
       return;

@@ -1,0 +1,43 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: greenguard-ai-parser-{{ trunc 12 (sha256sum .Values.cell) }}
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - {apiGroups: [""], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [pods]}
+  matchConditions:
+    - {name: parser-namespace, expression: "request.namespace == 'greenguard-parser'"}
+  validations:
+    - expression: "has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'greenguard-parser-runsc' && object.spec.serviceAccountName == 'knowledge-parser'"
+      message: "Only the exact runsc parser identity may run in the parser namespace"
+    - expression: "has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false && object.spec.restartPolicy == 'Never' && has(object.spec.activeDeadlineSeconds) && object.spec.activeDeadlineSeconds <= 210"
+      message: "Parser pods require no credentials, no restart, and bounded execution"
+    - expression: {{ printf "object.spec.containers.size() == 1 && object.spec.containers[0].name == 'parser' && object.spec.containers[0].image == '%s' && (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0)" .Values.images.parser | quote }}
+      message: "Only the approved immutable parser image may execute"
+    - expression: "object.spec.containers.all(c, !has(c.envFrom) && (!has(c.env) || c.env.all(e, e.name == 'KNOWLEDGE_PARSER_OCR' && has(e.value) && e.value == 'true')) && has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true)"
+      message: "Parser environment must contain no Secret references and root filesystem must be read only"
+    - expression: "has(object.spec.volumes) && object.spec.volumes.size() == 1 && object.spec.volumes[0].name == 'scratch' && has(object.spec.volumes[0].emptyDir) && object.spec.volumes[0].emptyDir.medium == 'Memory' && object.spec.volumes[0].emptyDir.sizeLimit == '32Mi'"
+      message: "Parser storage is restricted to bounded scratch memory"
+    - expression: "object.spec.containers.all(c, has(c.resources) && has(c.resources.limits) && quantity(c.resources.limits['memory']).compareTo(quantity('512Mi')) <= 0 && quantity(c.resources.limits['cpu']).compareTo(quantity('1')) <= 0 && quantity(c.resources.limits['ephemeral-storage']).compareTo(quantity('64Mi')) <= 0)"
+      message: "Parser resources must remain inside the fixed sandbox bounds"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: greenguard-ai-parser-{{ trunc 12 (sha256sum .Values.cell) }}
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  policyName: greenguard-ai-parser-{{ trunc 12 (sha256sum .Values.cell) }}
+  validationActions: [Deny]
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: parser-budget, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  hard: {pods: "8", requests.cpu: "2", requests.memory: 2Gi, limits.cpu: "8", limits.memory: 4Gi}
+{{- end }}

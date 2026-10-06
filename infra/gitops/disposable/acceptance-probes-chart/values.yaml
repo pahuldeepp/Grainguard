@@ -1,0 +1,12 @@
+clickhouseEnabled: false
+membershipEnabled: false
+namespace: greenguard
+cell: ""
+revision: ""
+clickhouseImage: ""
+tenantControlPlaneImage: ""
+membershipAudience: ""
+clickhouseSecret: greenguard-telemetry-clickhouse-config
+controlPlaneSecret: tenant-control-plane-config
+identitySecret: greenguard-dex-config
+accessTokenSecret: greenguard-acceptance-oidc-token

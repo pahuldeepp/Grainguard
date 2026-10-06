@@ -23,6 +23,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront_origin" {
 }
 
 resource "aws_security_group" "edge" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "${local.edge_name}-"
   description = "Private GreenGuard CloudFront VPC origin ALB"
   vpc_id      = aws_vpc.cell.id
@@ -30,6 +31,7 @@ resource "aws_security_group" "edge" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "cloudfront_to_edge" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   security_group_id = aws_security_group.edge.id
   prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin.id
   ip_protocol       = "tcp"
@@ -39,6 +41,7 @@ resource "aws_vpc_security_group_ingress_rule" "cloudfront_to_edge" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "edge_to_ingress_pods" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   security_group_id = aws_security_group.edge.id
   cidr_ipv4         = var.vpc_cidr
   ip_protocol       = "tcp"
@@ -48,6 +51,7 @@ resource "aws_vpc_security_group_egress_rule" "edge_to_ingress_pods" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "edge_to_ingress_health" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   security_group_id = aws_security_group.edge.id
   cidr_ipv4         = var.vpc_cidr
   ip_protocol       = "tcp"
@@ -57,6 +61,7 @@ resource "aws_vpc_security_group_egress_rule" "edge_to_ingress_health" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "edge_to_ingress_eks_nodes" {
+  depends_on                   = [terraform_data.destroy_inventory_sentinel]
   security_group_id            = aws_eks_cluster.cell.vpc_config[0].cluster_security_group_id
   referenced_security_group_id = aws_security_group.edge.id
   ip_protocol                  = "tcp"
@@ -66,6 +71,7 @@ resource "aws_vpc_security_group_ingress_rule" "edge_to_ingress_eks_nodes" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "edge_to_ingress_health_eks_nodes" {
+  depends_on                   = [terraform_data.destroy_inventory_sentinel]
   security_group_id            = aws_eks_cluster.cell.vpc_config[0].cluster_security_group_id
   referenced_security_group_id = aws_security_group.edge.id
   ip_protocol                  = "tcp"
@@ -75,6 +81,7 @@ resource "aws_vpc_security_group_ingress_rule" "edge_to_ingress_health_eks_nodes
 }
 
 resource "aws_lb" "edge" {
+  depends_on                 = [terraform_data.destroy_inventory_sentinel]
   name                       = "${local.edge_name}-edge"
   internal                   = true
   load_balancer_type         = "application"
@@ -86,6 +93,7 @@ resource "aws_lb" "edge" {
 }
 
 resource "aws_lb_target_group" "mesh_ingress" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "ggmsh-"
   port        = 8080
   protocol    = "HTTP"
@@ -103,6 +111,7 @@ resource "aws_lb_target_group" "mesh_ingress" {
 }
 
 resource "aws_lb_listener" "edge" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   load_balancer_arn = aws_lb.edge.arn
   port              = 8080
   protocol          = "HTTP"
@@ -113,7 +122,8 @@ resource "aws_lb_listener" "edge" {
 }
 
 resource "aws_cloudfront_vpc_origin" "edge" {
-  tags = { Cell = var.cluster_name }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  tags       = { Cell = var.cluster_name }
   lifecycle {
     precondition {
       condition     = contains(local.edge_supported_regions, var.aws_region)
@@ -149,10 +159,11 @@ data "aws_cloudfront_origin_request_policy" "all_except_host" {
 # One WAF ACL protects both AWS-owned distribution hostnames. CloudFront WAF
 # must be managed in us-east-1 even when EKS is in a different region.
 resource "aws_wafv2_web_acl" "edge" {
-  provider = aws.global
-  name     = "${local.edge_name}-edge"
-  scope    = "CLOUDFRONT"
-  tags     = { Cell = var.cluster_name }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  provider   = aws.global
+  name       = "${local.edge_name}-edge"
+  scope      = "CLOUDFRONT"
+  tags       = { Cell = var.cluster_name }
 
   default_action {
     allow {}
@@ -204,6 +215,7 @@ resource "aws_wafv2_web_acl" "edge" {
 }
 
 resource "aws_cloudfront_cache_policy" "static_assets" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name        = "${var.cluster_name}-static-assets"
   min_ttl     = 0
   default_ttl = 86400
@@ -218,6 +230,7 @@ resource "aws_cloudfront_cache_policy" "static_assets" {
 }
 
 resource "aws_cloudfront_distribution" "web" {
+  depends_on          = [terraform_data.destroy_inventory_sentinel]
   enabled             = true
   comment             = "${var.cluster_name} dashboard"
   default_root_object = "index.html"
@@ -270,6 +283,7 @@ resource "aws_cloudfront_distribution" "web" {
 }
 
 resource "aws_cloudfront_distribution" "api" {
+  depends_on          = [terraform_data.destroy_inventory_sentinel]
   enabled             = true
   comment             = "${var.cluster_name} mobile BFF"
   price_class         = "PriceClass_100"

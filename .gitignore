@@ -4,12 +4,16 @@ __pycache__/
 dist/
 build/
 coverage/
+storybook-static/
+test-results/
+playwright-report/
 .env
 .env.*
 !.env.example
 *.tfstate
 *.tfstate.*
 .terraform/
+cdk.out/
 .DS_Store
 evidence/private/
 
@@ -18,6 +22,7 @@ evidence/private/
 *.tsbuildinfo
 services/device-service/src/generated/
 services/workflow-alerts/src/generated/
+services/tenant-control-plane/src/generated/
 services/search-indexer/coverage.xml
 services/risk-engine/coverage.xml
 .omc/

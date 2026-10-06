@@ -32,7 +32,9 @@ function completeSilentCallback(manager: UserManager) {
   return callback;
 }
 
-async function boundedSilentRestore(manager: UserManager): Promise<User | null> {
+async function boundedSilentRestore(
+  manager: UserManager,
+): Promise<User | null> {
   try {
     return await Promise.race([
       manager.signinSilent(),
@@ -84,9 +86,10 @@ export function AuthGate() {
           if (active) setReady(true);
           return;
         }
-        let next = window.location.pathname === "/auth/callback"
-          ? await completeCallback(manager)
-          : await manager.getUser();
+        let next =
+          window.location.pathname === "/auth/callback"
+            ? await completeCallback(manager)
+            : await manager.getUser();
         // Tokens stay in memory. On a full reload, recover the session through
         // the IdP's existing browser session instead of persisting credentials.
         if (!next || next.expired) {

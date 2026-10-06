@@ -5,13 +5,14 @@ import { AuthError } from "@greenguard/tenant-auth";
 import { validateEvent } from "@greenguard/contracts";
 import {
   adminQuery,
+  createActiveTenantFixture,
   outboxEvents,
   runtimeDb,
   uniqueSubject,
 } from "../testing/fixtures.js";
 import { SeatLimitError } from "./entitlements.js";
 import { identityIdOf } from "./ids.js";
-import { createOrganization, lookupMembership, type Actor } from "./store.js";
+import { lookupMembership, type Actor } from "./store.js";
 import { DomainConflictError } from "./errors.js";
 import {
   createIdentityConnection,
@@ -35,12 +36,7 @@ async function setup() {
     issuer: "https://first.example/dex",
     subject: uniqueSubject("sso-admin"),
   };
-  const result = await createOrganization(
-    db,
-    admin,
-    { name: "SSO test" },
-    cmd(),
-  );
+  const result = await createActiveTenantFixture(db, admin, "SSO test", cmd());
   return { admin, tenantId: result.body.tenantId as string };
 }
 const verified = async () => true;

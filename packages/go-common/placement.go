@@ -16,6 +16,11 @@ import (
 )
 
 var ErrPlacementUnavailable = errors.New("tenant placement unavailable")
+
+// ErrTenantPlacementNotFound represents an authenticated 404 from the
+// authoritative placement service. It is distinct from outages and auth
+// failures so event consumers can preserve unroutable records in quarantine.
+var ErrTenantPlacementNotFound = errors.New("tenant placement not found")
 var ErrTenantQuiescing = errors.New("tenant placement is not active")
 var ErrTenantAdmissionRejected = errors.New("durable tenant placement admission rejected")
 
@@ -96,6 +101,9 @@ func (r *HTTPPlacementResolver) Resolve(ctx context.Context, tenant string) (Ten
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		r.Invalidate(tenant)
+		if response.StatusCode == http.StatusNotFound {
+			return TenantPlacement{}, ErrTenantPlacementNotFound
+		}
 		return TenantPlacement{}, ErrPlacementUnavailable
 	}
 	var body struct {
@@ -168,7 +176,7 @@ func (r *HTTPPlacementResolver) Invalidate(tenant string) {
 // IsPlacementPaused distinguishes repairable ownership admission from poison
 // data. Event offsets/work receipts must remain uncommitted during a pause.
 func IsPlacementPaused(err error) bool {
-	return errors.Is(err, ErrTenantQuiescing) || errors.Is(err, ErrPlacementUnavailable) || errors.Is(err, ErrInvalidTenantPlacement) || ownershipAdmissionRejected(err)
+	return errors.Is(err, ErrTenantQuiescing) || errors.Is(err, ErrPlacementUnavailable) || errors.Is(err, ErrTenantPlacementNotFound) || errors.Is(err, ErrInvalidTenantPlacement) || ownershipAdmissionRejected(err)
 }
 
 func ownershipAdmissionRejected(err error) bool {

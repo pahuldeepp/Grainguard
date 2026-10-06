@@ -25,7 +25,10 @@ class TerraformHealthAdapterTests(unittest.TestCase):
             owner["name"]: f"ghcr.io/pahuldeepp/grainguard/migration-{owner['name']}@sha256:" + "c" * 64
             for owner in json.loads((runner.BASE / "owner-migration-inventory.json").read_text())
         }, "migration_gate_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-gate@sha256:" + "d" * 64,
-            "migration_sql_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-sql@sha256:" + "e" * 64}
+            "migration_sql_image_digest": "ghcr.io/pahuldeepp/grainguard/migration-sql@sha256:" + "e" * 64,
+            "ml_synthetic_enabled": False, "ml_synthetic_scorer_image_digest": "",
+            "managed_dex_enabled": True, "membership_acceptance_enabled": False,
+            "clickhouse_image_digest": "ghcr.io/pahuldeepp/grainguard/clickhouse@sha256:" + "f" * 64}
 
     def test_creates_ephemeral_kubeconfig_and_invokes_scoped_readiness_gate(self):
         calls = []

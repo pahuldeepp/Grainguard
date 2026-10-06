@@ -21,13 +21,21 @@ RUN if [ "$REQUIRE_OIDC_CONFIG" = "true" ]; then \
     fi
 COPY package*.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY services/bff/package.json services/bff/package.json
 COPY services/device-service/package.json services/device-service/package.json
+COPY packages/kafka-security/package.json packages/kafka-security/package.json
+COPY packages/membership-client/package.json packages/membership-client/package.json
 COPY packages/otel/package.json packages/otel/package.json
 COPY packages/tenant-auth/package.json packages/tenant-auth/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci
+COPY packages/kafka-security packages/kafka-security
+COPY packages/membership-client packages/membership-client
+COPY packages/tenant-auth packages/tenant-auth
+COPY services/bff/src/query-policy.ts services/bff/src/query-policy.ts
 COPY apps/dashboard apps/dashboard
-RUN npm run build --workspace @greenguard/dashboard
+RUN npm run build -w @greenguard/membership-client \
+    && npm run build --workspace @greenguard/dashboard
 FROM nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b12a702dc98bb82226d2d9a508
 # Rendered with envsubst at start; set CSP_CONNECT_EXTRA to the OIDC issuer origin.
 ENV CSP_CONNECT_EXTRA=""

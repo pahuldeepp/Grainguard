@@ -28,8 +28,11 @@ export async function executeOperation<T>(
   onWatermark?: (token: string) => void,
   deadline = Date.now() + 8000,
   isCurrent?: () => boolean,
+  signal?: AbortSignal,
 ): Promise<T> {
+  signal?.throwIfAborted();
   const token = await getAccessToken();
+  signal?.throwIfAborted();
   if (isCurrent && !isCurrent())
     throw new GraphqlOperationError("session_changed");
   if (!token) throw new Error(messages.signIn);
@@ -48,8 +51,14 @@ export async function executeOperation<T>(
         persistedQuery: { version: 1, sha256Hash: await operationHash(query) },
       },
     }),
-    signal: AbortSignal.timeout(Math.max(1, Math.ceil(remaining))),
+    signal: signal
+      ? AbortSignal.any([
+          signal,
+          AbortSignal.timeout(Math.max(1, Math.ceil(remaining))),
+        ])
+      : AbortSignal.timeout(Math.max(1, Math.ceil(remaining))),
   });
+  signal?.throwIfAborted();
   if (!response.ok)
     throw new Error(`${messages.request} (${response.status}).`);
   const payload = (await response.json()) as {
@@ -60,6 +69,7 @@ export async function executeOperation<T>(
       extensions?: { code?: string; httpStatus?: number };
     }[];
   };
+  signal?.throwIfAborted();
   if (payload.errors?.length)
     throw new GraphqlOperationError(
       payload.errors[0].extensions?.code ?? payload.errors[0].message,

@@ -127,6 +127,13 @@ variable "image_repositories" {
   description = "Immutable ECR repository names provisioned for runtime releases and separately built migration/tool images."
   type        = set(string)
   default = [
+    "knowledge-service",
+    "knowledge-indexer",
+    "knowledge-parser",
+    "grain-advisor",
+    "model-gateway",
+    "model-gateway-usage",
+    "mcp-gateway",
     "dashboard",
     "bff",
     "gateway",
@@ -160,6 +167,22 @@ variable "image_repositories" {
     "migration-notifications",
     "migration-gate",
     "migration-sql",
+    "ml-scoring-synthetic",
+    "otel-collector",
+    "prometheus",
+    "grafana",
+    "tempo",
+    "loki",
+    "pgbouncer",
+    "kafka-topics",
+    "kafka-connect",
+    "connector-registration",
+    "opensearch",
+    "cassandra",
+    "mqtt",
+    "clickhouse",
+    "telemetry-sinks",
+    "clamav",
   ]
 }
 
@@ -203,4 +226,30 @@ variable "tags" {
   description = "Additional non-sensitive resource tags."
   type        = map(string)
   default     = {}
+}
+
+variable "enable_disposable_destroy_sentinel" {
+  description = "Enable the post-destroy inventory sentinel in the disposable cell root; leave disabled for shared platform root users."
+  type        = bool
+  default     = false
+}
+
+variable "target_account_id" {
+  description = "Exact AWS account allowed for the disposable cell. Required when the disposable destroy sentinel is enabled."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.target_account_id == "" ? !var.enable_disposable_destroy_sentinel : can(regex("^[0-9]{12}$", var.target_account_id))
+    error_message = "Set target_account_id to the 12-digit disposable AWS account ID when the destroy sentinel is enabled."
+  }
+}
+
+variable "managed_dex_image_digest" {
+  description = "Immutable official Dex OCI image digest used only for identity_mode=managed-dex."
+  type        = string
+  default     = "ghcr.io/dexidp/dex:v2.41.1@sha256:bc7cfce7c17f52864e2bb2a4dc1d2f86a41e3019f6d42e81d92a301fad0c8a1d"
+  validation {
+    condition     = can(regex("^ghcr\\.io/dexidp/dex:v2\\.[0-9]+\\.[0-9]+@sha256:[a-f0-9]{64}$", var.managed_dex_image_digest))
+    error_message = "managed_dex_image_digest must be a versioned Dex image pinned to an OCI SHA-256 digest."
+  }
 }

@@ -5,6 +5,7 @@ import argparse
 import base64
 import binascii
 import json
+import ipaddress
 import re
 import subprocess
 import sys
@@ -26,15 +27,61 @@ KAFKA_KEYS = KAFKA_BINARY_KEYS | {
 # tenant-control-plane-config into each one before Kubernetes materialization.
 CONTROL_LOOKUP_SECRET_CONSUMERS = {
     "bff-config", "gateway-config", "device-service-config", "read-api-config",
-    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config",
+    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config", "billing-service-config",
     "projection-builder-config", "risk-engine-config", "jobs-worker-config",
     "hardware-service-config", "saga-api-config", "saga-worker-config",
     "tenant-control-plane-config", "audit-export-worker-config",
 }
 
 
+def validate_billing_service_secret(source):
+    """Validate provider and return-origin inputs without echoing secret values."""
+    if not re.fullmatch(r"(?:sk|rk)_test_[A-Za-z0-9]+", source.get("STRIPE_API_KEY", "")):
+        raise ValueError("billing-service-config: a Stripe test-mode API key is required")
+
+    webhook_secrets = [value.strip() for value in source.get("STRIPE_WEBHOOK_SECRETS", "").split(",")]
+    if not 1 <= len(webhook_secrets) <= 2 or any(
+        not re.fullmatch(r"whsec_[A-Za-z0-9]+", value) for value in webhook_secrets
+    ):
+        raise ValueError("billing-service-config: one or two Stripe webhook signing secrets are required")
+
+    encoded_key = source.get("BILLING_INBOX_ENCRYPTION_KEY", "")
+    if not re.fullmatch(r"[A-Za-z0-9+/]{43}=", encoded_key):
+        raise ValueError("billing-service-config: a base64 32-byte inbox encryption key is required")
+    try:
+        decoded_key = base64.b64decode(encoded_key, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("billing-service-config: a base64 32-byte inbox encryption key is required") from error
+    if len(decoded_key) != 32:
+        raise ValueError("billing-service-config: a base64 32-byte inbox encryption key is required")
+
+    origins = [value.strip() for value in source.get("BILLING_RETURN_ORIGINS", "").split(",")]
+    if not origins or any(not value for value in origins):
+        raise ValueError("billing-service-config: deployed HTTPS return origins are required")
+    for origin in origins:
+        parsed = urlparse(origin)
+        hostname = parsed.hostname or ""
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError("billing-service-config: return origins must be deployed HTTPS origins") from error
+        try:
+            ipaddress.ip_address(hostname)
+            is_ip_address = True
+        except ValueError:
+            is_ip_address = False
+        if (
+            parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or
+            parsed.path or parsed.query or parsed.fragment or origin != f"https://{parsed.netloc}" or
+            not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}", hostname) or
+            hostname.lower() == "localhost" or is_ip_address or
+            (port is not None and not 1 <= port <= 65535)
+        ):
+            raise ValueError("billing-service-config: return origins must be deployed HTTPS origins")
+
+
 def secret_bytes(name, data):
-    return {key: (base64.b64decode(value, validate=True) if name == "greenguard-kafka-auth" and key in KAFKA_BINARY_KEYS
+    return {key: (base64.b64decode(value, validate=True) if (name == "greenguard-kafka-auth" and key in KAFKA_BINARY_KEYS) or (name == "greenguard-cassandra-tls" and key == "server.p12")
                   else value.encode("utf-8")) for key, value in data.items()}
 
 
@@ -115,6 +162,7 @@ def expected_secrets(args):
         "greenguard-kafka-admin-auth",
         "greenguard-mqtt-broker",
         *[task["secret"] for task in deployment.get("scheduledTasks", [])],
+        *deployment.get("operatorSecrets", []),
     ])
     expected = {}
     for name in names:
@@ -160,6 +208,11 @@ def expected_secrets(args):
                     raise ValueError(f"{name}: exact MQTT worker username and password are required")
                 if any(key in source for key in ("MQTT_BROKER_URL", "MQTT_CA_FILE", "MQTT_CLIENT_ID")):
                     raise ValueError(f"{name}: MQTT endpoint, CA path, and client identity come from the pinned release")
+        if name == "billing-service-config":
+            validate_billing_service_secret(source)
+        if name == "entitlement-heartbeat-config":
+            if set(source) != {"KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"}:
+                raise ValueError(f"{name}: only the heartbeat Kafka broker and scoped credentials are allowed")
         if name == "audit-export-worker-config":
             required = {
                 "CONTROL_AUDIT_DATABASE_URL", "BILLING_AUDIT_DATABASE_URL", "CONTROL_LOOKUP_TOKEN",
@@ -234,6 +287,11 @@ def expected_secrets(args):
         elif name == "greenguard-cassandra-tls":
             if set(source) != {"server.p12", "keystore-password", "ca.crt"}:
                 raise ValueError(f"{name}: Cassandra TLS keys are missing or unexpected")
+            try:
+                if not base64.b64decode(source["server.p12"], validate=True):
+                    raise ValueError("empty")
+            except (binascii.Error, ValueError) as error:
+                raise ValueError(f"{name}: server.p12 must contain base64 PKCS12 bytes") from error
         elif name == "greenguard-kafka-auth":
             if set(source) != KAFKA_KEYS:
                 raise ValueError(f"{name}: Kafka/Registry auth keys are missing or unexpected")
@@ -259,6 +317,25 @@ def expected_secrets(args):
                 raise ValueError(f"{name}: hashed worker principal is required")
             if not re.search(r"(?m)^user greenguard-hardware-worker$", source["acl"]):
                 raise ValueError(f"{name}: worker ACL principal is required")
+        elif name in {"greenguard-telemetry-archive-config", "greenguard-telemetry-clickhouse-config", "greenguard-telemetry-replay-config"}:
+            required = {"KAFKA_BROKERS", "KAFKA_SECURITY_PROTOCOL", "KAFKA_SASL_MECHANISM", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_TLS_CA_FILE"}
+            if name in {"greenguard-telemetry-archive-config", "greenguard-telemetry-replay-config"}:
+                required |= {"TELEMETRY_ARCHIVE_BUCKET", "AWS_REGION"}
+            if name == "greenguard-telemetry-clickhouse-config":
+                required |= {"CLICKHOUSE_URL", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD"}
+            if set(source) != required:
+                raise ValueError(f"{name}: exact telemetry sink keys are missing or unexpected")
+            expected_principal = "telemetry-replay" if name == "greenguard-telemetry-replay-config" else "telemetry-sinks"
+            if source["KAFKA_SECURITY_PROTOCOL"] != "SASL_SSL" or source["KAFKA_SASL_MECHANISM"] != "PLAIN" or source["KAFKA_SASL_USERNAME"] != expected_principal:
+                raise ValueError(f"{name}: Kafka telemetry workload must use its dedicated SASL_SSL principal")
+            if len(source["KAFKA_SASL_PASSWORD"]) < 24 or ("CLICKHOUSE_PASSWORD" in source and len(source["CLICKHOUSE_PASSWORD"]) < 24):
+                raise ValueError(f"{name}: telemetry sink passwords must contain at least 24 characters")
+            if not re.fullmatch(r"kafka\.greenguard\.svc\.cluster\.local:29092", source["KAFKA_BROKERS"]):
+                raise ValueError(f"{name}: telemetry sink broker must use the private in-cluster endpoint")
+            if name == "greenguard-telemetry-clickhouse-config" and source["CLICKHOUSE_URL"] != "http://greenguard-clickhouse.greenguard.svc.cluster.local:8123":
+                raise ValueError(f"{name}: ClickHouse URL must use the private in-cluster service")
+            if source["KAFKA_TLS_CA_FILE"] != "/etc/greenguard/kafka/ca.crt" or (name in {"greenguard-telemetry-archive-config", "greenguard-telemetry-replay-config"} and not source["TELEMETRY_ARCHIVE_BUCKET"]):
+                raise ValueError(f"{name}: TLS CA path or disposable archive bucket is invalid")
         elif name in {"greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth"}:
             keys = {"KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_SASL_JAAS_CONFIG"}
             if name == "greenguard-kafka-connect-auth":
@@ -276,6 +353,8 @@ def expected_secrets(args):
                 if ":" in source["SCHEMA_REGISTRY_USERNAME"] or source["SCHEMA_REGISTRY_BASIC_USER_INFO"] != f'{source["SCHEMA_REGISTRY_USERNAME"]}:{source["SCHEMA_REGISTRY_PASSWORD"]}':
                     raise ValueError(f"{name}: Registry Basic user info must match the username and password")
         elif name in {"read-api-config", "search-indexer-config"}:
+            if name == "read-api-config" and len(source.get("READ_HISTORY_CURSOR_SECRET", "").encode()) < 32:
+                raise ValueError(f"{name}: READ_HISTORY_CURSOR_SECRET must contain at least 32 bytes")
             if source.get("ELASTICSEARCH_URL") != "https://greenguard-opensearch.greenguard.svc.cluster.local:9200":
                 raise ValueError(f"{name}: OpenSearch URL must use the verified in-cluster HTTPS endpoint")
             if "OPENSEARCH_USERNAME" in source or "OPENSEARCH_PASSWORD" in source:
@@ -294,6 +373,11 @@ def expected_secrets(args):
             "version": version,
             "master_version": master.get("VersionId", "") if name == "greenguard-rds-bootstrap" else "",
         }
+    if "entitlement-heartbeat-config" in expected:
+        billing_values = expected.get("billing-service-config", {}).get("data", {})
+        heartbeat_values = expected["entitlement-heartbeat-config"]["data"]
+        if any(heartbeat_values[key] != billing_values.get(key) for key in heartbeat_values):
+            raise ValueError("entitlement-heartbeat-config: scoped Kafka settings must match billing-service-config")
     if "audit-export-worker-config" in application_secrets:
         if "tenant-control-plane-config" not in expected:
             raise ValueError(
@@ -331,6 +415,9 @@ def expected_secrets(args):
         source = expected[name]["data"]
         if f'user_{source["KAFKA_SASL_USERNAME"]}="{source["KAFKA_SASL_PASSWORD"]}"' not in broker_jaas:
             raise ValueError(f"{name}: Kafka broker JAAS does not contain its scoped client credential")
+    replay = expected.get("greenguard-telemetry-replay-config", {}).get("data", {})
+    if replay and f'user_{replay["KAFKA_SASL_USERNAME"]}="{replay["KAFKA_SASL_PASSWORD"]}"' not in broker_jaas:
+        raise ValueError("greenguard-telemetry-replay-config: Kafka broker JAAS does not contain its write-only replay credential")
     return expected
 
 

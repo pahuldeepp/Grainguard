@@ -8,7 +8,7 @@ test("ENT-06 GraphQL preserves Read API entitlement denial", async () => {
   const result = await server.executeOperation(
     {
       query:
-        '{ readingHistory(deviceId:"d1",from:"2026-09-01T00:00:00Z",to:"2026-09-20T00:00:00Z",limit:10) { readingId } }',
+        '{ readingHistory(deviceId:"d1",from:"2026-09-01T00:00:00Z",to:"2026-09-20T00:00:00Z",limit:10) { items { readingId } nextCursor sources { postgres cassandra } } }',
     },
     {
       contextValue: {

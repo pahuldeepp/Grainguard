@@ -71,14 +71,18 @@ Inputs:
 
 The runner first checks STS account, exact EKS ARN and ACTIVE status, endpoint
 and CA equality with the selected kubeconfig, secure TLS configuration, then
-`/readyz`. It reads Deployments, StatefulSets, Rollouts and Pods in `greenguard`
-with bounded subprocess/API deadlines. Every release in `contract.json` must
-have exactly one supported workload with an observed current generation,
-all desired replicas updated/ready (and available for Deployments), the exact
-immutable runtime image, and Ready running Pods. StatefulSets also require
-matching update/current revisions. Sidecar images are not confused with the
-contract runtime image. Output contains public scope/result information;
-CLI diagnostics and raw kubeconfig/workload payloads are not logged.
+`/readyz`. It reads cell-scoped Argo Applications from `argocd`, plus
+Deployments, StatefulSets, Rollouts, Pods, CronJobs, and Jobs in `greenguard`,
+with bounded subprocess/API deadlines. Every Argo Application for the cell
+must report `Synced` and `Healthy` at the selected immutable GitOps revision;
+every release Application must exist exactly once. Every release in
+`contract.json` must have exactly one supported workload with an observed
+current generation, all desired replicas updated/ready (and available for
+Deployments), the exact immutable runtime image, and Ready running Pods.
+StatefulSets also require matching update/current revisions. Sidecar images
+are not confused with the contract runtime image. Output contains public
+scope/result information; CLI diagnostics and raw kubeconfig/workload payloads
+are not logged.
 
 All ordinary BFF/service charts use Deployments. Dashboard supports an
 optional Argo Rollout. **Rollout mode fails this gate**: Ready Pods alone do
@@ -94,23 +98,82 @@ other data workloads, public API journeys, tenant isolation,
 telemetry/projection/alert flows, or iPhone behavior. Those remain separate
 acceptance phases.
 
-The Terraform acceptance wait also requires exactly one completed Job labeled
-`greenguard.io/migration-gate=true`, with the immutable kubectl/psql images
-passed through Terraform. That Job waits for all 38 central and shard owner
-migration Jobs, then checks owner databases and roles, runtime grants, forced
-RLS, and shard placement admission. Nested Argo Application sync waves are not
-treated as proof that their child resources have converged. The default wait
-is 2,400 seconds (configurable from 60 to 3,600) to cover the 900-second owner
-Jobs and 1,800-second SQL gate.
+The Terraform acceptance wait requires every Job declared in
+`contract.json` under `acceptanceJobs` to match its unique, mutually exclusive
+label selector, use the exact immutable image digests from the release input,
+and complete successfully. The PostgreSQL owner-migration/RLS Job remains
+mandatory under the exact `greenguard.io/migration-gate=true` selector and
+the immutable kubectl/psql images passed through Terraform. That Job waits for
+all 38 central and shard owner migration Jobs, then checks owner databases and
+roles, runtime grants, forced RLS, and shard placement admission. Additional
+data-plane or user-journey Jobs must be declared with digest-pinned images and
+real executable checks before they are counted; the current contract contains
+only the PostgreSQL gate. Nested Argo Application sync waves are not treated
+as proof that their child resources have converged. The default wait is 2,400
+seconds (configurable from 60 to 3,600) to cover the 900-second owner Jobs and
+1,800-second SQL gate.
+
+## Public edge apply gate
+
+When `enable_application_tree` is enabled, Terraform runs
+`terraform_data.public_edge_acceptance` after workload and migration
+acceptance. `run-public-edge.py` retries only transient health/readiness states
+for at most 600 seconds. It confirms the selected target group belongs to the
+exact non-production AWS account and region, checks the cell ownership tags,
+requires every registered ingress target to be healthy, and verifies that the
+two supplied CloudFront distribution IDs are deployed, tagged for this cell,
+use the AWS-owned distribution hostnames with no aliases, and point through
+the expected private ALB/VPC origin route. It then requests the dashboard root
+and the BFF `/healthz` and `/readyz` endpoints over HTTPS. It does not follow
+redirects, log response bodies, use credentials, or claim authenticated
+tenant/user workflow coverage.
+
+Terraform supplies identity, TargetGroup ARN, CloudFront domains, and
+distribution IDs from its own resources; the local-exec adapter passes these
+public values via environment variables and stores no credentials in state.
+For a manual rerun, get the public outputs with
+`terraform output -json disposable_cell_identity`,
+`terraform output -json edge_target_group_binding`, and
+`terraform output -json edge_urls`. Supply the dashboard and API CloudFront
+distribution IDs from the same cell; the checker independently verifies
+their AWS status, tags, aliases, domains and origin configuration.
+
+```sh
+python3 infra/gitops/disposable/check-public-edge.py \
+  --cell-file cell-identity.json \
+  --target-group-arn "$TARGET_GROUP_ARN" \
+  --dashboard-url "$DASHBOARD_URL" \
+  --api-url "$API_URL" \
+  --dashboard-distribution-id "$DASHBOARD_DISTRIBUTION_ID" \
+  --api-distribution-id "$API_DISTRIBUTION_ID"
+```
+
+Offline fixtures for both the checker and bounded retry adapter use stubbed
+AWS/HTTPS calls only. They do not establish live AWS health or user sign-in.
 
 ## Remaining automatic acceptance work
 
-The deployment must run separately scoped non-PostgreSQL data checks, authenticated
+The deployment must run separately scoped data-plane probes, authenticated
 web/API and tenant-isolation journeys, and telemetry-to-projection/alert/ACK
-checks. Existing `check-live-acceptance.py` validates a hashed evidence
-inventory including physical-iPhone and teardown outcomes; it does not execute
-or attest those journeys. Physical-iPhone acceptance needs the real device and
-reviewed observations. All live AWS, registry, private endpoint, workload,
+checks. The evidence inventory requires distinct PostgreSQL shard/write/replica
+freshness, PgBouncer transaction-pool, Kafka produce/consume and Connect
+connector-status, Schema Registry compatibility, RabbitMQ publish/consume, Redis
+tenant-cache, Cassandra tenant-partition, OpenSearch index/search, MQTT
+TLS/authenticated publish/subscribe, object-storage audit-export roundtrip, and
+OAuth discovery/JWKS probes. It also requires the web/iPhone login, tenant
+isolation, alert creation/live update/ACK, telemetry projection, recovery, and
+teardown journeys. Workload readiness and the PostgreSQL migration Job do not
+satisfy these checks. The authoritative service probe IDs are listed in
+`contract.json` under `phases[].probes` and must also appear in the evidence
+manifest.
+
+`check-live-acceptance.py` only validates that required inventory entries and
+hashed evidence artifacts are present and structurally valid; it does not run
+or independently attest any probe or journey. Even a structurally complete
+inventory exits with status 2 and prints `BLOCKED` until an authorized reviewer
+inspects the artifacts and records acceptance separately. It must not be used
+as an acceptance PASS gate. Physical-iPhone acceptance needs the real device
+and reviewed observations. All live AWS, registry, private endpoint, workload,
 OAuth, telemetry and physical-iPhone proof remains pending.
 
 Offline command: `python3 -m unittest discover -s infra/gitops/disposable -p

@@ -27,10 +27,12 @@ ACCEPT = ",".join((
 def inventory(inputs, contract):
     required_fields = {
         "gitops_revision", "deployment_image_digests", "migration_image_digests",
-        "migration_gate_image_digest", "migration_sql_image_digest",
+        "migration_gate_image_digest", "migration_sql_image_digest", "ml_synthetic_scorer_image_digest",
+        "observability_image_digests", "data_plane_image_digests", "opensearch_image_digest",
+        "cassandra_image_digest", "mqtt_image_digest", "clickhouse_image_digest", "ai_runtime_image_digests",
     }
     if not isinstance(inputs, dict) or set(inputs) != required_fields:
-        raise ValueError("release inputs must contain runtime, all owner migration, and both migration tool digests")
+        raise ValueError("release inputs must include every runtime, migration, platform, data-plane and AI image map")
     revision = inputs["gitops_revision"]
     if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("gitops_revision must be an exact commit SHA")
@@ -44,12 +46,15 @@ def inventory(inputs, contract):
             r"[a-f0-9]{64}", reference.removeprefix(prefix)
         ):
             raise ValueError(f"{service}: expected an exact signed-CI GHCR digest reference")
+    synthetic = inputs["ml_synthetic_scorer_image_digest"]
+    verify_reference("ml-scoring-synthetic", synthetic)
     owner_inventory = json.loads((BASE / "owner-migration-inventory.json").read_text())
     expected_owners = {owner["name"] for owner in owner_inventory}
     migrations = inputs["migration_image_digests"]
     if not isinstance(migrations, dict) or set(migrations) != expected_owners:
         raise ValueError("owner migration image inventory does not match the migration contract")
     image_references = dict(images)
+    image_references["ml-scoring-synthetic"] = synthetic
     for owner, reference in migrations.items():
         verify_reference(f"migration-{owner}", reference)
         image_references[f"migration-{owner}"] = reference
@@ -58,6 +63,33 @@ def inventory(inputs, contract):
         reference = inputs[field]
         verify_reference(repository, reference)
         image_references[repository] = reference
+    observability_names = {"otel-collector", "prometheus", "grafana", "tempo", "loki"}
+    observability = inputs["observability_image_digests"]
+    if not isinstance(observability, dict) or set(observability) != observability_names:
+        raise ValueError("observability image inventory must contain exactly the five Terraform keys")
+    data_plane_names = {"pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"}
+    data_plane = inputs["data_plane_image_digests"]
+    if not isinstance(data_plane, dict) or set(data_plane) != data_plane_names:
+        raise ValueError("data-plane image inventory must contain exactly the four Terraform keys")
+    platform = {**observability, **data_plane}
+    for field, name in (("opensearch_image_digest", "opensearch"), ("cassandra_image_digest", "cassandra"),
+                        ("mqtt_image_digest", "mqtt"), ("clickhouse_image_digest", "clickhouse")):
+        platform[name] = inputs[field]
+    ai_images = inputs["ai_runtime_image_digests"]
+    ai_names = {"knowledge", "indexer", "parser", "advisor", "gateway", "usage", "mcp", "clamav"}
+    if not isinstance(ai_images, dict) or set(ai_images) != ai_names:
+        raise ValueError("AI runtime image inventory must contain exactly the eight Terraform keys")
+    ai_repositories = {
+        "knowledge": "knowledge-service", "indexer": "knowledge-indexer", "parser": "knowledge-parser",
+        "advisor": "grain-advisor", "gateway": "model-gateway", "usage": "model-gateway-usage",
+        "mcp": "mcp-gateway", "clamav": "clamav"
+    }
+    for key, repository in ai_repositories.items():
+        verify_reference(repository, ai_images[key])
+        image_references[repository] = ai_images[key]
+    for name, reference in platform.items():
+        verify_reference(name, reference)
+        image_references[name] = reference
     return image_references
 
 

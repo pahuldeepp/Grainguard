@@ -382,11 +382,13 @@ export function cacheBackends(
     q.from.toISOString(),
     q.to.toISOString(),
     q.limit,
+    q.after ? [q.after.observedAt.toISOString(), q.after.readingId] : null,
   ];
   return {
     cache,
     devices: backends.devices,
     deviceCurrent: backends.deviceCurrent,
+    deviceRisk: backends.deviceRisk,
     sites: (tenant, ids) =>
       cache.get(
         tenant,

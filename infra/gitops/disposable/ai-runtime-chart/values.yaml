@@ -1,0 +1,43 @@
+enabled: false
+cell: ""
+environment: ""
+revision: ""
+secretSyncEpoch: ""
+scopeIdentity: ""
+rdsHost: ""
+rdsCIDRs: []
+externalHTTPSCIDRs: []
+kubernetesAPICIDRs: []
+parserRuntimeClassName: greenguard-parser-runsc
+knowledgeAPIRoleArn: ""
+knowledgeIndexerRoleArn: ""
+podIdentityAssociationsReady: false
+images:
+  knowledge: ""
+  indexer: ""
+  parser: ""
+  advisor: ""
+  gateway: ""
+  usage: ""
+  mcp: ""
+  clamav: ""
+  redis: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+providers:
+  authIssuer: ""
+  authAudience: ""
+  authTokenMode: "audience"
+  authClientIds: []
+  authJwksUrl: ""
+  delegatedIssuer: ""
+  delegatedJwksUrl: ""
+  pineconeIndexHost: ""
+  voyageUrl: ""
+  anthropicUrl: ""
+  embeddingModel: ""
+  rerankerModel: ""
+  answerModel: ""
+  s3Bucket: ""
+  s3Region: ""
+  s3KmsKeyArn: ""
+  kafkaBootstrapServers: ""
+  clamavHost: ""

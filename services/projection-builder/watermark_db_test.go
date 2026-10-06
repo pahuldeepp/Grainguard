@@ -345,52 +345,49 @@ func TestDatabaseProjectionWatermarkVersionPromotionAndOutbox(t *testing.T) {
 	}
 }
 
-func TestDatabaseProjectionCustomerImportPreservesInfrastructure(t *testing.T) {
+func TestDatabaseProjectionBootstrapUsesExplicitTenantOwnership(t *testing.T) {
 	db := scratchHistoryDBWithoutFixturePlacement(t, true)
 	ctx := context.Background()
 	tenant, incarnation := randomUUID(), randomUUID()
-	call := func(snapshot string, shardIncarnation string, expected int) (int, error) {
+	call := func(query string, args ...any) error {
 		tx, err := db.admin.Begin(ctx)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		defer tx.Rollback(ctx)
 		if _, err := tx.Exec(ctx, `SET LOCAL ROLE tenant_ownership_bootstrap`); err != nil {
-			return 0, err
+			return err
 		}
-		var imported int
-		if err := tx.QueryRow(ctx, `SELECT greenguard_internal.seed_tenant_ownership($1::jsonb,'s2',$2,$3)`, snapshot, shardIncarnation, expected).Scan(&imported); err != nil {
-			return 0, err
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			return err
 		}
-		return imported, tx.Commit(ctx)
+		return tx.Commit(ctx)
 	}
 	if _, err := db.admin.Exec(ctx, `SELECT greenguard_internal.seed_projection_infrastructure_ownership('s2',$1,9007199254740993)`, incarnation); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := fmt.Sprintf(`[{"tenantId":%q,"shardId":"s2","shardIncarnation":%q,"placementEpoch":"9007199254740993","state":"active"}]`, tenant, incarnation)
-	if imported, err := call(snapshot, incarnation, 1); err != nil || imported != 1 {
-		t.Fatal("customer count includes reserved namespace", imported, err)
+	if err := call(`SELECT greenguard_internal.prepare_tenant_ownership($1,'s2',$2,9007199254740993)`, tenant, incarnation); err != nil {
+		t.Fatal("explicit tenant preparation failed", err)
 	}
-	if n := scalar(t, db.admin, `SELECT sequence FROM projection_watermarks WHERE tenant_id=$1`, tenant); n != 0 {
-		t.Fatal("customer bootstrap failed to initialize sequence zero", n)
+	if n := scalar(t, db.admin, `SELECT count(*) FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 AND state='prepared'`, tenant); n != 1 {
+		t.Fatal("tenant was not prepared exactly once", n)
 	}
-	if imported, err := call(`[]`, incarnation, 0); err != nil || imported != 0 {
-		t.Fatal("empty customer import failed", imported, err)
+	if err := call(`SELECT greenguard_internal.activate_tenant_ownership($1,'s2',$2,9007199254740993)`, tenant, incarnation); err != nil {
+		t.Fatal("explicit tenant activation failed", err)
+	}
+	if err := call(`SELECT greenguard_internal.activate_tenant_ownership($1,'s2',$2,9007199254740993)`, tenant, incarnation); err != nil {
+		t.Fatal("activation retry was not idempotent", err)
+	}
+	if n := scalar(t, db.admin, `SELECT count(*) FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 AND state='active'`, tenant); n != 1 {
+		t.Fatal("tenant did not become active", n)
 	}
 	if n := scalar(t, db.admin, `SELECT count(*) FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 AND state='active'`, infrastructureTenant); n != 1 {
-		t.Fatal("customer import fenced infrastructure")
+		t.Fatal("tenant bootstrap changed infrastructure ownership", n)
 	}
-	if n := scalar(t, db.admin, `SELECT count(*) FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1 AND state='fenced'`, tenant); n != 1 {
-		t.Fatal("removed customer was not fenced")
+	if err := call(`SELECT greenguard_internal.prepare_tenant_ownership($1,'s3',$2,9007199254740993)`, tenant, randomUUID()); err == nil {
+		t.Fatal("bootstrap silently moved an already placed tenant")
 	}
-	reserved := fmt.Sprintf(`[{"tenantId":%q}]`, infrastructureTenant)
-	if _, err := call(reserved, incarnation, 0); err == nil {
-		t.Fatal("customer import accepted caller-supplied reserved namespace")
-	}
-	if _, err := call(`[{"tenantId":"00000000000040008000000000000001"}]`, incarnation, 0); err == nil {
-		t.Fatal("customer import accepted noncanonical reserved UUID")
-	}
-	if _, err := call(`[]`, randomUUID(), 0); !postgresCode(err, "42501") {
-		t.Fatal("customer import changed durable infrastructure identity", err)
+	if err := call(`SELECT greenguard_internal.seed_tenant_ownership('[]'::jsonb,'s2',$1,0)`, incarnation); !postgresCode(err, "42501") {
+		t.Fatal("retired snapshot importer remains callable by the bootstrap role", err)
 	}
 }

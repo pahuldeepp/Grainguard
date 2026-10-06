@@ -30,6 +30,17 @@ class SyncTests(unittest.TestCase):
             "annotations": desired["metadata"]["annotations"]},
             "data": {"TOKEN": base64.b64encode(b"dummy-sensitive-value").decode()}}
 
+    def test_cassandra_secret_mounts_binary_keystore_not_base64_text(self):
+        raw = b"\x30\x82\xff\x00binary-keystore-fixture"
+        record = {"data": {"server.p12": base64.b64encode(raw).decode(), "keystore-password": "dummy-password", "ca.crt": "certificate-pem"},
+                  "source": "greenguard/disposable/greenguard-cassandra-tls", "version": "source-v1", "master_version": ""}
+        desired = sync.desired_secret("greenguard-cassandra-tls", "greenguard", record, None)
+        self.assertNotIn("stringData", desired)
+        self.assertEqual(raw, base64.b64decode(desired["data"]["server.p12"]))
+        self.assertEqual(b"dummy-password", base64.b64decode(desired["data"]["keystore-password"]))
+        existing = {**desired, "metadata": {**desired["metadata"], "resourceVersion": "8"}}
+        self.assertTrue(sync.same_secret(existing, desired))
+
     def test_new_secret_uses_string_data_and_owner(self):
         self.assertEqual(self.desired["metadata"]["labels"]["app.kubernetes.io/managed-by"], sync.OWNER)
         self.assertEqual(self.desired["stringData"], self.record["data"])

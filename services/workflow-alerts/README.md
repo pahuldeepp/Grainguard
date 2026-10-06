@@ -130,3 +130,30 @@ Set `SHARD_REGISTRY_FILE` to the private version 1 `workflow-alerts` / `greengua
 HTTP operations, risk-event consumption and explicit tenant escalation all resolve the tenant owner and admit its exact incarnation and epoch inside the existing Prisma transaction, before business SQL. Inbox/effect/position/episode/transition/outbox atomicity and receipt/event IDs stay unchanged. No request or event route field selects a database endpoint; inactive, unknown or locally stale placement fails closed. HTTP placement failures return a retryable 503 problem. Risk handlers do not commit an offset on placement failure.
 
 Readiness checks all owner primaries concurrently with a one-second caller timeout. Consumer shutdown still precedes database closure; closing all shard pools has a five-second caller bound.
+
+`KAFKA_TOPIC_PREFIX` optionally namespaces the three risk subscriptions and the
+quarantine topic together (for example `provisioning-demo.`). The default is empty.
+Use a matching isolated source stream and group; invalid ASCII/topic-length prefixes
+fail startup. Event source coordinates and commits retain the actual transport topic.
+
+## Assistant ownership and delegated authorization
+
+Optional `ALERTS_OWNERSHIP_SERVICE_TOKEN`, `CONTROL_PLANE_MEMBERSHIP_URL`, and
+`CONTROL_PLANE_MEMBERSHIP_SERVICE_TOKEN` enable the internal, read-only
+`GET /v1/internal/alert-authorization` adapter. They must be configured together.
+It verifies the service credential, current operator/admin membership, tenant
+ownership, open alert state and exact ETag; stale or foreign alerts fail closed.
+
+`DELEGATED_ISSUER` plus exactly one of `DELEGATED_JWKS_FILE` (public JWKs only)
+or `DELEGATED_JWKS_URL` enables short-lived Advisor/MCP delegation. Current
+membership is checked on every call. Read tokens can list/read Alerts; acknowledge
+tokens can only call `POST /v1/alerts/{id}/acknowledge`. Rules/history mutations
+are outside this delegated allowlist. Acknowledgement keeps the existing
+`If-Match` version check, idempotency key and tenant RLS transaction. Normal
+OIDC authentication and existing history/actor identity behavior remain in place.
+
+### Alerts by assessment source device
+
+`GET /v1/alerts?deviceId=<lowercase UUID>&limit=20` uses the existing fresh human/delegated `alerts:read` authorization and keyset pagination (maximum 200). The owner joins its validated `risk.assessed` inbox receipt to each episode's `current_assessment_id`, with explicit tenant predicates and forced RLS. Filtered responses identify the association as `current_assessment_source_device`. This means the device produced the episode's current assessment; it does not certify the device's current bin binding or Risk freshness. Wrong-type receipts, mismatched event tenants and nonmatching assessments cannot establish this association. The additive expression-index migration supports the lookup; no episode schema or write behavior changes.
+
+Disposable acceptance: build the service, then run `node services/workflow-alerts/dist/api/device-alerts.acceptance.js`. It requires the pinned PostgreSQL image already available locally and tests all current migrations, runtime RLS, signed synthetic humans, tenant isolation, invalid risk input and receipt association. It removes its owned container and changes no live alerts.

@@ -15,9 +15,11 @@ CENTRAL_ONLY = {
     "CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD",
     "CONTROL_MIGRATOR_PASSWORD",
     "CONTROL_AUDIT_WORKER_PASSWORD",
+    "CONTROL_BOOTSTRAP_WORKER_PASSWORD",
     "BILLING_DB_PASSWORD",
     "BILLING_MIGRATOR_PASSWORD",
     "BILLING_AUDIT_READER_PASSWORD",
+    "DEX_DB_PASSWORD",
 }
 
 
@@ -31,9 +33,10 @@ class ShardBootstrapSecretScopeTest(unittest.TestCase):
         operational_keys = sql_keys - CENTRAL_ONLY
         self.assertTrue(operational_keys)
         self.assertIn("PROJECTION_HISTORY_MAINTAINER_PASSWORD", operational_keys)
+        central_only_start = sql.index("\\else\n", sql.index("\\if :{?GG_OPERATIONAL_ONLY}"))
         for key in CENTRAL_ONLY:
             key_line = next(line for line in sql.splitlines() if line.startswith("\\getenv ") and line.endswith(key))
-            self.assertGreater(sql.index(key_line), sql.index("\\else\n-- Stage 09a tenant-control-plane"))
+            self.assertGreater(sql.index(key_line), central_only_start)
 
         block = re.search(
             r"runtime_central_only_bootstrap_role_keys\s*=\s*toset\(\[(.*?)\]\)",

@@ -1,4 +1,6 @@
 import pg from "pg";
+import { AuthError } from "@greenguard/tenant-auth";
+import { readDelegation } from "./delegation.js";
 import { readContext, assertReadActive } from "./consistency.js";
 import { parseWatermark } from "@greenguard/membership-client";
 import {
@@ -31,6 +33,8 @@ import {
 } from "./shards.js";
 import { watermarkCacheBackends } from "./watermark-cache.js";
 import { postgresCachePolicy } from "./cache-policy.js";
+import { readHistoryHotWindowMs } from "./history-window.js";
+import { requireHistoryCursorSecret } from "./history-cursor.js";
 
 for (const key of ["CASSANDRA_HOSTS", "ELASTICSEARCH_URL"]) {
   if (!process.env[key]) throw new Error(`${key} is required`);
@@ -49,6 +53,9 @@ if (
 const shardConfig = process.env.READ_SHARD_REGISTRY_FILE
   ? readFileSync(process.env.READ_SHARD_REGISTRY_FILE, "utf8")
   : process.env.READ_SHARD_DATABASE_URLS;
+const historyCursorSecret = requireHistoryCursorSecret(
+  process.env.READ_HISTORY_CURSOR_SECRET,
+);
 if (process.env.SHARD_ROUTING_REQUIRED === "true" && !shardConfig)
   throw new Error(
     "read shard registry is required when SHARD_ROUTING_REQUIRED=true",
@@ -143,7 +150,19 @@ const machine =
         lookupToken: process.env.CONTROL_LOOKUP_TOKEN,
       })
     : undefined;
-const verify = machineAwareVerifier(verifier.verify, machine, "read:telemetry");
+const delegated = readDelegation(process.env);
+const humanVerify = delegated
+  ? async (header: string | undefined) => {
+      try {
+        return await delegated.verify(header);
+      } catch (error) {
+        if (error instanceof AuthError && error.status === 401)
+          return verifier.verify(header);
+        throw error;
+      }
+    }
+  : verifier.verify;
+const verify = machineAwareVerifier(humanVerify, machine, "read:telemetry");
 const readSnapshots = contextualReplicaProvider(shards ?? replicas!);
 const postgresBackends = postgresReads(readSnapshots);
 const guardedPostgres =
@@ -223,7 +242,9 @@ let stopping = false;
 const app = createApp({
   verify,
   backends: effectiveBackends,
+  hotWindowMs: readHistoryHotWindowMs(),
   readAuthority,
+  historyCursorSecret,
   entitlements: postgresHistoryEntitlements(
     shards ? (tenantId) => shards.primary(tenantId) : pool!,
     (tenantId) =>

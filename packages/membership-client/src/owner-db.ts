@@ -232,7 +232,18 @@ export function createOwnerDatabase<T extends object>(
       throw new OwnerDatabaseError("owner_tenant_required");
     },
     get(_target, key) {
-      if (key === "then") return undefined;
+      // DI containers inspect constructors and optional lifecycle hooks before
+      // injecting a value. These describe this logical handle, never a pool.
+      if (
+        key === "then" ||
+        key === "constructor" ||
+        key === "onModuleInit" ||
+        key === "onApplicationBootstrap" ||
+        key === "onModuleDestroy" ||
+        key === "beforeApplicationShutdown" ||
+        key === "onApplicationShutdown"
+      )
+        return undefined;
       if (key === "$disconnect" || key === "end")
         return () => closeOwnerDatabase(handle);
       throw new OwnerDatabaseError("owner_tenant_required");

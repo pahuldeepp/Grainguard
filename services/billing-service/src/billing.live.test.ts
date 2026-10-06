@@ -42,6 +42,7 @@ class FakeStripe implements StripePort {
   failCheckoutOnce = false;
   failMeter = false;
   checkoutCalls = 0;
+  portalCalls = 0;
   reportTimes = new Map<string, Date>();
   canceled: string[] = [];
 
@@ -78,6 +79,7 @@ class FakeStripe implements StripePort {
     _returnUrl: string,
     idempotencyKey: string,
   ) {
+    this.portalCalls++;
     return {
       id: `bps_${hex(idempotencyKey)}`,
       url: `https://billing.stripe.test/${hex(idempotencyKey)}`,
@@ -133,7 +135,7 @@ class FakeStripe implements StripePort {
 
 async function admin<T>(sql: string, params: unknown[] = []): Promise<T[]> {
   const url = new URL(process.env.POSTGRES_ADMIN_URL!);
-  url.pathname = "/greenguard_billing";
+  url.pathname = new URL(process.env.BILLING_DATABASE_URL!).pathname;
   const client = new pg.Client({ connectionString: url.toString() });
   await client.connect();
   try {
@@ -1135,18 +1137,26 @@ test(
       "admin",
     );
     const worker = new BillingWorker(db!, f.commands, f.webhooks, f.usage);
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    for (let index = 0; index < 100; index++) {
+    // The durable queue includes commands from earlier cases and uses real
+    // database availability/backoff times. Poll a bounded deadline rather than
+    // assuming that 100 immediate claims include this tenant's command.
+    const deadline = Date.now() + 10_000;
+    for (let index = 0; index < 1_000 && Date.now() < deadline; index++) {
       await worker.processCommand();
       if (
         (await f.commands.get(f.tenantId, receipt.commandId))?.status ===
         "completed"
       )
         break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.equal(
       (await f.commands.get(f.tenantId, receipt.commandId))?.status,
       "completed",
+    );
+    assert.ok(
+      f.stripe.portalCalls > 0,
+      "the restarted worker invoked this fixture's Stripe adapter",
     );
   },
 );

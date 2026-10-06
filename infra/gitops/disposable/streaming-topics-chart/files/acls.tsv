@@ -10,7 +10,7 @@ cdc-transformer|topic|literal|greenguard.raw.inventory.outbox,greenguard.raw.con
 cdc-transformer|topic|literal|greenguard.inventory.device.v1,greenguard.inventory.tenant.v1,greenguard.inventory.facility.v1,greenguard.inventory.lot.v1,greenguard.inventory.sensor-layout.v1,greenguard.billing.lifecycle.v1,greenguard.platform.config.v1,greenguard.telemetry.recorded.v1,greenguard.telemetry.recorded.v2,greenguard.risk.assessment.v1,greenguard.risk.assessment.v2,greenguard.risk.policy.v1,greenguard.risk.assessment_invalidated.v1,greenguard.alerts.lifecycle.v1,greenguard.projection.notification.v1,greenguard.quarantine.v1|Write,Describe
 cdc-transformer|group|literal|greenguard-cdc-transformer-v1|Read
 cdc-transformer|cluster|literal|kafka-cluster|IdempotentWrite
-projection-builder|topic|literal|greenguard.inventory.device.v1,greenguard.inventory.facility.v1,greenguard.inventory.sensor-layout.v1,greenguard.telemetry.recorded.v1,greenguard.telemetry.recorded.v2,greenguard.risk.assessment.v1,greenguard.risk.assessment.v2,greenguard.risk.policy.v1|Read,Describe
+projection-builder|topic|literal|greenguard.inventory.device.v1,greenguard.inventory.facility.v1,greenguard.inventory.sensor-layout.v1,greenguard.telemetry.recorded.v1,greenguard.telemetry.recorded.v2,greenguard.risk.assessment.v1,greenguard.risk.assessment.v2,greenguard.risk.policy.v1,greenguard.risk.assessment_invalidated.v1|Read,Describe
 projection-builder|topic|literal|greenguard.quarantine.v1|Write,Describe
 projection-builder|group|prefixed|greenguard.projection-builder.|Read
 projection-builder|cluster|literal|kafka-cluster|IdempotentWrite
@@ -42,6 +42,10 @@ cassandra-writer|topic|literal|greenguard.telemetry.recorded.v1,greenguard.telem
 cassandra-writer|topic|literal|greenguard.quarantine.v1|Write,Describe
 cassandra-writer|group|literal|cassandra-writer|Read
 cassandra-writer|cluster|literal|kafka-cluster|IdempotentWrite
+telemetry-sinks|topic|literal|greenguard.telemetry.recorded.v1,greenguard.telemetry.recorded.v2|Read,Describe
+telemetry-sinks|group|prefixed|greenguard-telemetry-|Read
+telemetry-replay|topic|literal|greenguard.telemetry.recorded.v1,greenguard.telemetry.recorded.v2|Write,Describe
+telemetry-replay|cluster|literal|kafka-cluster|IdempotentWrite
 search-indexer|topic|literal|greenguard.inventory.device.v1,greenguard.inventory.facility.v1|Read,Describe
 search-indexer|group|prefixed|greenguard.search-indexer.|Read
 read-api|topic|literal|greenguard.billing.lifecycle.v1|Read,Describe
@@ -58,6 +62,12 @@ telemetry-ingest|topic|literal|greenguard.inventory.device.v1,greenguard.invento
 telemetry-ingest|topic|literal|greenguard.saga.results.v1,greenguard.quarantine.v1,greenguard.billing.entitlements.dlq.v1|Write,Describe
 telemetry-ingest|group|literal|telemetry-binding-consumer,telemetry-saga-binding-v1,telemetry-entitlements-v1|Read
 telemetry-ingest|cluster|literal|kafka-cluster|IdempotentWrite
+knowledge-service|topic|literal|greenguard.knowledge.document.index.requested.v1|Read,Write,Describe
+knowledge-service|topic|literal|greenguard.knowledge.assistant.suggestion.used.v1|Read,Write,Describe
+knowledge-service|topic|literal|greenguard.knowledge.assistant.suggestion.used.v1.quarantine|Write,Describe
+knowledge-service|group|literal|greenguard-knowledge-indexer-v1,greenguard-knowledge-suggestion-analytics-v1|Read
+model-gateway-usage|topic|literal|greenguard.ai-usage-settled.v1|Read,Write,Describe
+model-gateway-usage|group|literal|greenguard-model-gateway-usage-v1|Read
 jobs-worker|topic|literal|greenguard.alerts.lifecycle.v1|Read,Describe
 jobs-worker|group|literal|jobs-worker|Read
 tenant-control-plane|topic|literal|greenguard.billing.lifecycle.v1|Read,Describe

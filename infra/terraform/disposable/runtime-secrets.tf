@@ -1,3 +1,23 @@
+variable "telemetry_sink_credentials" {
+  description = "Disposable Kafka SASL and ClickHouse writer credentials, supplied only during Terraform apply and written to the disposable Secrets Manager container."
+  type        = map(string)
+  sensitive   = true
+  ephemeral   = true
+  default     = {}
+  validation {
+    condition = length(var.telemetry_sink_credentials) == 0 || (
+      toset(keys(var.telemetry_sink_credentials)) == toset(["KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "TELEMETRY_REPLAY_KAFKA_SASL_USERNAME", "TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"]) &&
+      can(regex("^[A-Za-z0-9._-]{1,64}$", try(var.telemetry_sink_credentials["KAFKA_SASL_USERNAME"], ""))) &&
+      length(try(var.telemetry_sink_credentials["KAFKA_SASL_PASSWORD"], "")) >= 24 &&
+      can(regex("^[A-Za-z0-9._-]{1,64}$", try(var.telemetry_sink_credentials["CLICKHOUSE_USER"], ""))) &&
+      length(try(var.telemetry_sink_credentials["CLICKHOUSE_PASSWORD"], "")) >= 24 &&
+      try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_USERNAME"], "") == "telemetry-replay" &&
+      length(try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"], "")) >= 24
+    )
+    error_message = "Telemetry sink credentials must contain exactly scoped Kafka/ClickHouse usernames and passwords (passwords at least 24 characters)."
+  }
+}
+
 variable "runtime_secret_values" {
   description = "Ephemeral runtime Secret payloads. Values are written only through Secrets Manager write-only arguments and are not stored in Terraform plans/state."
   type        = map(map(string))
@@ -33,7 +53,16 @@ variable "audit_export_signing_material" {
 }
 
 locals {
-  runtime_bootstrap_role_keys = toset(flatten(regexall("(?m)^\\\\getenv\\s+\\S+\\s+(\\S+)\\s*$", file("${path.module}/../../gitops/disposable/rds-bootstrap-chart/files/init-databases.sql"))))
+  managed_dex_owner_uuid_hash = sha1("${var.cluster_name}:dex-first-owner")
+  managed_dex_owner_uuid = join("-", [
+    substr(local.managed_dex_owner_uuid_hash, 0, 8),
+    substr(local.managed_dex_owner_uuid_hash, 8, 4),
+    "5${substr(local.managed_dex_owner_uuid_hash, 13, 3)}",
+    "${format("%x", 8 + parseint(substr(local.managed_dex_owner_uuid_hash, 16, 1), 16) % 4)}${substr(local.managed_dex_owner_uuid_hash, 17, 3)}",
+    substr(local.managed_dex_owner_uuid_hash, 20, 12),
+  ])
+  runtime_bootstrap_role_keys_from_sql = toset(flatten(regexall("(?m)^\\\\getenv\\s+\\S+\\s+(\\S+)\\s*$", file("${path.module}/../../gitops/disposable/rds-bootstrap-chart/files/init-databases.sql"))))
+  runtime_bootstrap_role_keys          = var.identity_mode == "managed-dex" ? local.runtime_bootstrap_role_keys_from_sql : setsubtract(local.runtime_bootstrap_role_keys_from_sql, toset(["DEX_DB_PASSWORD"]))
   # These credentials belong only to the central control and billing databases.
   # Operational shard bootstrap Secrets must never copy them to every shard.
   runtime_central_only_bootstrap_role_keys = toset([
@@ -41,9 +70,11 @@ locals {
     "CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD",
     "CONTROL_MIGRATOR_PASSWORD",
     "CONTROL_AUDIT_WORKER_PASSWORD",
+    "CONTROL_BOOTSTRAP_WORKER_PASSWORD",
     "BILLING_DB_PASSWORD",
     "BILLING_MIGRATOR_PASSWORD",
     "BILLING_AUDIT_READER_PASSWORD",
+    "DEX_DB_PASSWORD",
   ])
   runtime_shard_bootstrap_role_keys = setsubtract(local.runtime_bootstrap_role_keys, local.runtime_central_only_bootstrap_role_keys)
   runtime_secret_exact_keys = {
@@ -76,7 +107,7 @@ locals {
   # they can drift and make otherwise healthy sharded workloads fail closed.
   control_lookup_secret_consumers = toset([
     "bff-config", "gateway-config", "device-service-config", "read-api-config",
-    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config",
+    "workflow-alerts-config", "notification-service-config", "telemetry-ingest-config", "billing-service-config",
     "projection-builder-config", "risk-engine-config", "jobs-worker-config",
     "hardware-service-config", "saga-api-config", "saga-worker-config",
     "tenant-control-plane-config",
@@ -85,6 +116,12 @@ locals {
     "notification-contacts-projector-config" = {
       for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] :
       key => try(var.runtime_secret_values["notification-service-config"][key], "")
+    }
+    # The heartbeat only needs its scoped Kafka producer settings. Keep Stripe,
+    # billing database and webhook credentials in the billing service Secret.
+    "entitlement-heartbeat-config" = {
+      for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"] :
+      key => try(var.runtime_secret_values["billing-service-config"][key], "")
     }
   } : {}
   generated_projection_maintenance_values = var.enable_application_tree ? {
@@ -107,7 +144,45 @@ locals {
       AUDIT_EXPORT_S3_REGION       = var.aws_region
     }
   } : {}
-  generated_all_runtime_values = merge(local.generated_runtime_values, local.generated_projection_maintenance_values, local.generated_audit_export_values)
+  generated_tenant_bootstrap_worker_values = var.enable_application_tree ? {
+    "tenant-bootstrap-worker-config" = {
+      CONTROL_BOOTSTRAP_DATABASE_URL = "postgresql://tenant_bootstrap_worker:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_BOOTSTRAP_WORKER_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+    }
+  } : {}
+  generated_telemetry_sink_values = var.enable_application_tree ? {
+    "greenguard-telemetry-archive-config" = {
+      KAFKA_BROKERS            = "kafka.greenguard.svc.cluster.local:29092"
+      KAFKA_SECURITY_PROTOCOL  = "SASL_SSL"
+      KAFKA_SASL_MECHANISM     = "PLAIN"
+      KAFKA_TLS_CA_FILE        = "/etc/greenguard/kafka/ca.crt"
+      TELEMETRY_ARCHIVE_BUCKET = aws_s3_bucket.telemetry_archive[0].id
+      AWS_REGION               = var.aws_region
+      KAFKA_SASL_USERNAME      = try(var.telemetry_sink_credentials["KAFKA_SASL_USERNAME"], "")
+      KAFKA_SASL_PASSWORD      = try(var.telemetry_sink_credentials["KAFKA_SASL_PASSWORD"], "")
+    }
+    "greenguard-telemetry-clickhouse-config" = {
+      KAFKA_BROKERS           = "kafka.greenguard.svc.cluster.local:29092"
+      KAFKA_SECURITY_PROTOCOL = "SASL_SSL"
+      KAFKA_SASL_MECHANISM    = "PLAIN"
+      KAFKA_TLS_CA_FILE       = "/etc/greenguard/kafka/ca.crt"
+      CLICKHOUSE_URL          = "http://greenguard-clickhouse.greenguard.svc.cluster.local:8123"
+      KAFKA_SASL_USERNAME     = try(var.telemetry_sink_credentials["KAFKA_SASL_USERNAME"], "")
+      KAFKA_SASL_PASSWORD     = try(var.telemetry_sink_credentials["KAFKA_SASL_PASSWORD"], "")
+      CLICKHOUSE_USER         = try(var.telemetry_sink_credentials["CLICKHOUSE_USER"], "")
+      CLICKHOUSE_PASSWORD     = try(var.telemetry_sink_credentials["CLICKHOUSE_PASSWORD"], "")
+    }
+    "greenguard-telemetry-replay-config" = {
+      KAFKA_BROKERS            = "kafka.greenguard.svc.cluster.local:29092"
+      KAFKA_SECURITY_PROTOCOL  = "SASL_SSL"
+      KAFKA_SASL_MECHANISM     = "PLAIN"
+      KAFKA_TLS_CA_FILE        = "/etc/greenguard/kafka/ca.crt"
+      TELEMETRY_ARCHIVE_BUCKET = aws_s3_bucket.telemetry_archive[0].id
+      AWS_REGION               = var.aws_region
+      KAFKA_SASL_USERNAME      = try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_USERNAME"], "")
+      KAFKA_SASL_PASSWORD      = try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"], "")
+    }
+  } : {}
+  generated_all_runtime_values = merge(local.generated_runtime_values, local.generated_projection_maintenance_values, local.generated_audit_export_values, local.generated_tenant_bootstrap_worker_values, local.generated_telemetry_sink_values)
   # Secret names are public, state-stable resource keys. Never derive instance
   # addresses or triggers from ephemeral payload values.
   runtime_secret_input_names = var.secret_names
@@ -120,6 +195,22 @@ locals {
       name == "tenant-control-plane-config" ? { CONTROL_ENTITLEMENT_PROJECTOR_URL = "postgresql://control_entitlement_projector:${replace(urlencode(try(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD"], "")), "+", "%20")}@${aws_db_instance.postgres.address}:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem" } : {},
       name == "notification-contacts-projector-config" ? { NOTIFICATION_STATE_TABLE = aws_dynamodb_table.notification_state[0].name, AWS_REGION = var.aws_region } : {},
       name == "eventbridge-bridge-config" ? { AWS_REGION = var.aws_region, AWS_ACCOUNT_ID = var.target_account_id } : {},
+      name == "billing-service-config" ? {
+        BILLING_RETURN_ORIGINS = "https://${aws_cloudfront_distribution.web.domain_name}"
+      } : {},
+      name == "greenguard-dex-config" && var.identity_mode == "managed-dex" ? {
+        DEX_ISSUER              = local.managed_dex_issuer
+        DEX_DATABASE_HOST       = aws_db_instance.postgres.address
+        DEX_DATABASE_PASSWORD   = try(var.runtime_secret_values["greenguard-rds-bootstrap"]["DEX_DB_PASSWORD"], "")
+        DEX_DASHBOARD_ORIGIN    = "https://${aws_cloudfront_distribution.web.domain_name}"
+        DEX_DASHBOARD_CLIENT_ID = local.managed_dex_public.web_client_id
+        DEX_MOBILE_CLIENT_ID    = local.managed_dex_public.mobile_client_id
+        DEX_FIRST_ADMIN_USER_ID = local.managed_dex_owner_uuid
+      } : {},
+      name == "bff-config" && var.ml_synthetic_enabled ? {
+        ML_OPERATIONS_URL   = "http://ml-scoring-synthetic.ml-synthetic.svc.cluster.local:8080"
+        ML_OPERATIONS_TOKEN = base64decode(var.ml_synthetic_secret_payloads["ml-scoring-runtime"]["operations-token"])
+      } : {},
       name == "tenant-control-plane-config" && var.enable_application_tree ? {
         AUDIT_EXPORT_S3_BUCKET      = aws_s3_bucket.audit_exports.id
         AUDIT_EXPORT_S3_REGION      = var.aws_region
@@ -140,14 +231,18 @@ locals {
     cluster          = var.cluster_name
     rds_instance     = aws_db_instance.postgres.identifier
     namespace        = "greenguard"
-    versions         = merge(local.runtime_secret_version_ids, local.shard_registry_secret_versions, local.shard_bootstrap_secret_versions, local.shard_data_secret_versions, local.projector_registry_secret_versions)
-    sources          = merge({ for name, secret in aws_secretsmanager_secret.runtime : name => secret.name if contains(local.runtime_secret_input_names, name) }, local.shard_registry_secret_sources, local.shard_bootstrap_secret_sources, local.shard_data_secret_sources, local.projector_registry_secret_sources)
+    versions         = merge(local.runtime_secret_version_ids, local.shard_registry_secret_versions, local.shard_bootstrap_secret_versions, local.tenant_bootstrap_secret_versions, local.shard_data_secret_versions, local.projector_registry_secret_versions)
+    sources          = merge({ for name, secret in aws_secretsmanager_secret.runtime : name => secret.name if contains(local.runtime_secret_input_names, name) }, local.shard_registry_secret_sources, local.shard_bootstrap_secret_sources, local.tenant_bootstrap_secret_sources, local.shard_data_secret_sources, local.projector_registry_secret_sources)
     shard_bootstraps = local.shard_bootstrap_scope
     master_version   = try(one([for version in data.aws_secretsmanager_secret_versions.runtime_master[0].versions : version.version_id if contains(version.version_stages, "AWSCURRENT")]), "")
   }
 }
 
 resource "aws_secretsmanager_secret_version" "runtime" {
+  depends_on = [
+    terraform_data.destroy_inventory_sentinel,
+    terraform_data.ml_synthetic_secret_guard,
+  ]
   for_each  = var.secret_names
   secret_id = aws_secretsmanager_secret.runtime[each.key].id
   # A name/payload mismatch must reach the explanatory precondition below,
@@ -174,6 +269,45 @@ resource "aws_secretsmanager_secret_version" "runtime" {
       error_message = "Runtime bootstrap, CA and TLS secret keys must exactly match the approved role/material profile."
     }
     precondition {
+      condition = each.key != "greenguard-dex-config" || (
+        var.identity_mode == "managed-dex" &&
+        can(regex("^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$", try(var.runtime_secret_values[each.key]["DEX_FIRST_ADMIN_EMAIL"], ""))) &&
+        can(regex("^\\$2[aby]\\$[0-3][0-9]\\$[./A-Za-z0-9]{53}$", try(var.runtime_secret_values[each.key]["DEX_FIRST_ADMIN_PASSWORD_HASH"], "")))
+      )
+      error_message = "greenguard-dex-config requires an operator-selected first-admin email and a valid bcrypt hash; do not use local demo users or plaintext passwords."
+    }
+    precondition {
+      condition = each.key != "billing-service-config" || (
+        can(regex("^(sk|rk)_test_[A-Za-z0-9]+$", try(var.runtime_secret_values[each.key]["STRIPE_API_KEY"], ""))) &&
+        length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) >= 1 &&
+        length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) <= 2 &&
+        alltrue([for secret in split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], "")) : can(regex("^whsec_[A-Za-z0-9]+$", trimspace(secret)))]) &&
+        can(regex("^[A-Za-z0-9+/]{43}=$", try(var.runtime_secret_values[each.key]["BILLING_INBOX_ENCRYPTION_KEY"], "")))
+      )
+      error_message = "billing-service-config requires a Stripe test API key, one or two webhook signing secrets, and a base64 32-byte inbox key; Terraform binds return origins to this cell's dashboard HTTPS endpoint."
+    }
+    precondition {
+      condition = each.key != "entitlement-heartbeat-config" || (
+        var.enable_application_tree &&
+        try(var.runtime_secret_values["billing-service-config"]["KAFKA_SASL_USERNAME"], "") == "billing-service" &&
+        length(trimspace(try(var.runtime_secret_values["billing-service-config"]["KAFKA_BROKERS"], ""))) > 0 &&
+        length(try(var.runtime_secret_values["billing-service-config"]["KAFKA_SASL_PASSWORD"], "")) > 0 &&
+        !can(regex("[\"\\\\\\r\\n]", try(var.runtime_secret_values["billing-service-config"]["KAFKA_SASL_PASSWORD"], "")))
+      )
+      error_message = "entitlement-heartbeat-config is generated from the billing Kafka principal and requires only its broker, username, and password settings."
+    }
+    precondition {
+      condition = !contains(["greenguard-telemetry-archive-config", "greenguard-telemetry-clickhouse-config", "greenguard-telemetry-replay-config"], each.key) || (
+        var.enable_application_tree &&
+        toset(keys(var.telemetry_sink_credentials)) == toset(["KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "TELEMETRY_REPLAY_KAFKA_SASL_USERNAME", "TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"]) &&
+        length(try(var.telemetry_sink_credentials["KAFKA_SASL_PASSWORD"], "")) >= 24 &&
+        length(try(var.telemetry_sink_credentials["CLICKHOUSE_PASSWORD"], "")) >= 24 &&
+        try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_USERNAME"], "") == "telemetry-replay" &&
+        length(try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"], "")) >= 24
+      )
+      error_message = "The disposable telemetry sinks require complete Kafka and ClickHouse credentials."
+    }
+    precondition {
       condition     = each.key != "notification-contacts-projector-config" || alltrue([for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] : try(length(trimspace(var.runtime_secret_values["notification-service-config"][key])) > 0, false)])
       error_message = "The contacts projector needs broker and Registry credentials copied from notification-service-config."
     }
@@ -192,7 +326,9 @@ resource "terraform_data" "runtime_secret_sync" {
   count            = var.enable_application_tree ? 1 : 0
   input            = local.runtime_secret_sync_scope
   triggers_replace = local.runtime_secret_sync_scope
-  depends_on       = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing, terraform_data.runtime_secret_cleanup]
+  depends_on = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.tenant_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing, terraform_data.runtime_secret_cleanup,
+    terraform_data.destroy_inventory_sentinel,
+  ]
   lifecycle {
     precondition {
       condition     = toset(keys(var.runtime_secret_values)) == setsubtract(var.secret_names, setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))) && length(setintersection(toset(keys(var.runtime_secret_values)), setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values))))) == 0
@@ -222,7 +358,9 @@ resource "terraform_data" "runtime_secret_cleanup" {
   count            = var.enable_application_tree ? 1 : 0
   input            = { scope = local.runtime_secret_sync_scope, runner = abspath("${path.module}/../../gitops/disposable/runtime-secret-lifecycle.py") }
   triggers_replace = local.runtime_secret_sync_scope
-  depends_on       = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing]
+  depends_on = [helm_release.greenguard_namespace, aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, aws_db_instance.postgres, aws_secretsmanager_secret_version.runtime, aws_secretsmanager_secret_version.shard_routing, aws_secretsmanager_secret_version.shard_bootstrap, aws_secretsmanager_secret_version.tenant_bootstrap, aws_secretsmanager_secret_version.shard_data, aws_secretsmanager_secret_version.projector_routing,
+    terraform_data.destroy_inventory_sentinel,
+  ]
   provisioner "local-exec" {
     when        = destroy
     command     = "python3 ${self.input.runner} destroy"

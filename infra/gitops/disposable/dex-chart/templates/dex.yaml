@@ -1,0 +1,56 @@
+{{- if not (regexMatch "^ghcr\\.io/dexidp/dex:v2\\.[0-9]+\\.[0-9]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "Dex image must be versioned and pinned to an immutable OCI digest" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9-]{2,99}$" .Values.cell) }}{{ fail "Dex requires the exact disposable cell identity" }}{{ end }}
+{{- if not (regexMatch "^https://[a-z0-9.-]+\\.cloudfront\\.net/dex$" .Values.issuer) }}{{ fail "Dex issuer must be the selected API CloudFront HTTPS hostname under /dex" }}{{ end }}
+{{- if not (regexMatch "^https://[a-z0-9.-]+\\.cloudfront\\.net$" .Values.webOrigin) }}{{ fail "Dex web origin must be the selected dashboard CloudFront HTTPS hostname" }}{{ end }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" .Values.databaseHost) }}{{ fail "Dex storage requires the disposable central RDS host" }}{{ end }}
+{{- if not (and (kindIs "slice" .Values.databaseCIDRs) (gt (len .Values.databaseCIDRs) 0) (le (len .Values.databaseCIDRs) 6)) }}{{ fail "Dex storage requires bounded private RDS CIDRs" }}{{ end }}
+{{- range list .Values.secret .Values.caSecret }}{{ if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .) }}{{ fail "Dex Secret names must be Kubernetes DNS labels" }}{{ end }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-dex-config
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, greenguard.io/cell: {{ .Values.cell | quote }}}
+data:
+  config.yaml: |
+    issuer: ${DEX_ISSUER}
+    storage:
+      type: postgres
+      config:
+        host: ${DEX_DATABASE_HOST}
+        port: 5432
+        database: greenguard_dex
+        user: dex_app
+        password: ${DEX_DATABASE_PASSWORD}
+        ssl:
+          mode: verify-full
+          caFile: /etc/greenguard/rds/ca.pem
+    web:
+      http: 0.0.0.0:5556
+      allowedOrigins: ["${DEX_DASHBOARD_ORIGIN}"]
+    oauth2:
+      responseTypes: ["code"]
+      skipApprovalScreen: true
+      passwordConnector: local
+      pkce:
+        enforce: true
+        codeChallengeMethodsSupported: ["S256"]
+    enablePasswordDB: true
+    staticClients:
+      - id: ${DEX_DASHBOARD_CLIENT_ID}
+        name: GreenGuard dashboard
+        public: true
+        redirectURIs:
+          - ${DEX_DASHBOARD_ORIGIN}/auth/callback
+          - ${DEX_DASHBOARD_ORIGIN}/auth/silent-callback
+        trustedPeers:
+          - ${DEX_MOBILE_CLIENT_ID}
+      - id: ${DEX_MOBILE_CLIENT_ID}
+        name: GreenGuard iOS application
+        public: true
+        redirectURIs: ["greenguard://auth/callback"]
+    staticPasswords:
+      - email: ${DEX_FIRST_ADMIN_EMAIL}
+        hash: '${DEX_FIRST_ADMIN_PASSWORD_HASH}'
+        username: ${DEX_FIRST_ADMIN_EMAIL}
+        name: GreenGuard Owner
+        userID: ${DEX_FIRST_ADMIN_USER_ID}

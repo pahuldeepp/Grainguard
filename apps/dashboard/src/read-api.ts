@@ -32,6 +32,13 @@ export interface ReadingView {
   inventoryEnrichment: string | null;
 }
 
+export interface ReadingHistoryPage {
+  items: ReadingView[];
+  nextCursor: string | null;
+  /** Indicates which physical stores were queried for this page. */
+  sources: { postgres: boolean; cassandra: boolean };
+}
+
 export interface RollupView {
   consistencyToken?: string | null;
   bucketStart: string;
@@ -109,7 +116,7 @@ export interface BinTrendView {
 export const readOperations = {
   readingById: `query ReadingById($id: ID!, $minimumConsistency: String) { reading(id: $id, minimumConsistency: $minimumConsistency) { consistencyToken readingId deviceId eventId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
   deviceCurrent: `query DeviceCurrent($id: ID!, $minimumConsistency: String) { device(id: $id, minimumConsistency: $minimumConsistency) { consistencyToken deviceId siteId binId name status projectedAt } latestReading(deviceId: $id, minimumConsistency: $minimumConsistency) { consistencyToken readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
-  deviceHistory: `query DeviceHistory($id: ID!, $from: String!, $to: String!, $limit: Int!, $minimumConsistency: String) { readingHistory(deviceId: $id, from: $from, to: $to, limit: $limit, minimumConsistency: $minimumConsistency) { consistencyToken readingId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
+  deviceHistory: `query DeviceHistory($id: ID!, $from: String!, $to: String!, $limit: Int!, $after: String, $minimumConsistency: String) { readingHistory(deviceId: $id, from: $from, to: $to, limit: $limit, after: $after, minimumConsistency: $minimumConsistency) { items { consistencyToken readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } nextCursor sources { postgres cassandra } } }`,
   deviceSearch: `query DeviceSearch($query: String!, $limit: Int!, $minimumConsistency: String) { searchDevices(query: $query, limit: $limit, minimumConsistency: $minimumConsistency) { consistencyToken deviceId siteId binId name status projectedAt } }`,
   readingRollups: `query ReadingRollups($deviceId: ID!, $from: String!, $to: String!, $limit: Int!, $bucket: String!, $minimumConsistency: String) { readingRollups(deviceId: $deviceId, from: $from, to: $to, limit: $limit, bucket: $bucket, minimumConsistency: $minimumConsistency) { consistencyToken bucketStart sampleCount avgTemperatureC avgRelativeHumidityPercent } }`,
   binReadingsLatest: `query BinReadingsLatest($binId: ID!, $minimumConsistency: String) { binReadingsLatest(binId: $binId, minimumConsistency: $minimumConsistency) { consistencyToken bin { binId name siteName } devices { deviceId status } devicesTruncated readings { metric value observedAt ageSeconds } layout { sensorId position depthM label } sensorReadings { sensorId metric value observedAt position depthM label } policies { policyId policyVersion grainType calibrated status measurementThresholds riskThresholds } freshness } }`,
@@ -195,6 +202,7 @@ export class ReadApi {
     variables: Record<string, string | number>,
     minimumConsistency?: string,
     supportsConsistency = true,
+    signal?: AbortSignal,
   ): Promise<T> {
     const generation = this.generation;
     const deadline = Date.now() + 8000;
@@ -218,6 +226,7 @@ export class ReadApi {
         },
         deadline,
         () => generation === this.generation,
+        signal,
       );
     };
     let data: T;
@@ -291,23 +300,30 @@ export class ReadApi {
     from: string,
     to: string,
     limit: number,
+    after?: string,
     minimumConsistency?: string,
   ) {
-    const data = await this.execute<{ readingHistory: ReadingView[] }>(
+    const data = await this.execute<{ readingHistory: ReadingHistoryPage }>(
       readOperations.deviceHistory,
-      { id, from, to, limit },
+      { id, from, to, limit, ...(after ? { after } : {}) },
       minimumConsistency,
       false,
     );
     return data.readingHistory;
   }
 
-  async search(query: string, limit = 25, minimumConsistency?: string) {
+  async search(
+    query: string,
+    limit = 25,
+    minimumConsistency?: string,
+    signal?: AbortSignal,
+  ) {
     const data = await this.execute<{ searchDevices: DeviceView[] }>(
       readOperations.deviceSearch,
       { query, limit },
       minimumConsistency,
       false,
+      signal,
     );
     return data.searchDevices;
   }
@@ -323,6 +339,9 @@ export class ReadApi {
       readOperations.readingRollups,
       { deviceId, from, to, limit: 100, bucket },
       minimumConsistency,
+      // Historical averages may include Cassandra, which cannot certify a
+      // PostgreSQL watermark. Explicit caller minima remain unchanged.
+      false,
     );
     return data.readingRollups;
   }

@@ -7,42 +7,44 @@ import (
 )
 
 const (
-	reasonEnvelope     = "bad_envelope"
-	reasonSchema       = "schema_invalid"
-	reasonUnknown      = "unknown_event_type"
-	reasonBigint       = "bad_bigint"
-	fieldPayload       = "payload"
-	fieldTenant        = "tenant_id"
-	fieldType          = "event_type"
-	fieldSchema        = "schema_version"
-	fieldVersion       = "aggregate_version"
-	fieldAggregate     = "aggregate_id"
-	fieldTrace         = "traceparent"
-	fieldBinding       = "binding_version"
-	fieldOccurred      = "occurred_at"
-	fieldEvent         = "event_id"
-	fieldCorrelation   = "correlation_id"
-	fieldCausation     = "causation_id"
-	fieldAggregateType = "aggregate_type"
-	fieldDevice        = "device_id"
-	typeTelemetry      = "telemetry.recorded"
-	typeSiteChanged    = "site.changed"
-	typeBinChanged     = "bin.changed"
-	typeCableLayout    = "cable.layout_changed"
-	typeRiskAssessed   = "risk.assessed"
-	typeRiskPolicy     = "risk.policy_changed"
-	typeRegistered     = "device.registered"
-	typeBinding        = "device.binding_changed"
-	typeStatus         = "device.status_changed"
-	topicTelemetry     = "greenguard.telemetry.recorded.v1"
-	topicTelemetryV2   = "greenguard.telemetry.recorded.v2"
-	topicInventory     = "greenguard.inventory.device.v1"
-	topicFacility      = "greenguard.inventory.facility.v1"
-	topicSensorLayout  = "greenguard.inventory.sensor-layout.v1"
-	topicRiskV1        = "greenguard.risk.assessment.v1"
-	topicRiskV2        = "greenguard.risk.assessment.v2"
-	topicRiskPolicy    = "greenguard.risk.policy.v1"
-	topicQuarantine    = "greenguard.quarantine.v1"
+	reasonEnvelope       = "bad_envelope"
+	reasonSchema         = "schema_invalid"
+	reasonUnknown        = "unknown_event_type"
+	reasonBigint         = "bad_bigint"
+	fieldPayload         = "payload"
+	fieldTenant          = "tenant_id"
+	fieldType            = "event_type"
+	fieldSchema          = "schema_version"
+	fieldVersion         = "aggregate_version"
+	fieldAggregate       = "aggregate_id"
+	fieldTrace           = "traceparent"
+	fieldBinding         = "binding_version"
+	fieldOccurred        = "occurred_at"
+	fieldEvent           = "event_id"
+	fieldCorrelation     = "correlation_id"
+	fieldCausation       = "causation_id"
+	fieldAggregateType   = "aggregate_type"
+	fieldDevice          = "device_id"
+	typeTelemetry        = "telemetry.recorded"
+	typeSiteChanged      = "site.changed"
+	typeBinChanged       = "bin.changed"
+	typeCableLayout      = "cable.layout_changed"
+	typeRiskAssessed     = "risk.assessed"
+	typeRiskInvalidated  = "risk.assessment_invalidated"
+	typeRiskPolicy       = "risk.policy_changed"
+	typeRegistered       = "device.registered"
+	typeBinding          = "device.binding_changed"
+	typeStatus           = "device.status_changed"
+	topicTelemetry       = "greenguard.telemetry.recorded.v1"
+	topicTelemetryV2     = "greenguard.telemetry.recorded.v2"
+	topicInventory       = "greenguard.inventory.device.v1"
+	topicFacility        = "greenguard.inventory.facility.v1"
+	topicSensorLayout    = "greenguard.inventory.sensor-layout.v1"
+	topicRiskV1          = "greenguard.risk.assessment.v1"
+	topicRiskV2          = "greenguard.risk.assessment.v2"
+	topicRiskInvalidated = "greenguard.risk.assessment_invalidated.v1"
+	topicRiskPolicy      = "greenguard.risk.policy.v1"
+	topicQuarantine      = "greenguard.quarantine.v1"
 )
 
 type failure struct{ Reason, Detail string }
@@ -64,22 +66,23 @@ func bigint(value any) (string, *failure) {
 }
 
 var eventTopics = map[string]string{
-	typeTelemetry + "@1":    topicTelemetry,
-	typeTelemetry + "@2":    topicTelemetryV2,
-	typeRegistered + "@1":   topicInventory,
-	typeBinding + "@1":      topicInventory,
-	typeStatus + "@1":       topicInventory,
-	typeSiteChanged + "@1":  topicFacility,
-	typeBinChanged + "@1":   topicFacility,
-	typeCableLayout + "@1":  topicSensorLayout,
-	typeRiskAssessed + "@1": topicRiskV1,
-	typeRiskAssessed + "@2": topicRiskV2,
-	typeRiskPolicy + "@1":   topicRiskPolicy,
+	typeTelemetry + "@1":       topicTelemetry,
+	typeTelemetry + "@2":       topicTelemetryV2,
+	typeRegistered + "@1":      topicInventory,
+	typeBinding + "@1":         topicInventory,
+	typeStatus + "@1":          topicInventory,
+	typeSiteChanged + "@1":     topicFacility,
+	typeBinChanged + "@1":      topicFacility,
+	typeCableLayout + "@1":     topicSensorLayout,
+	typeRiskAssessed + "@1":    topicRiskV1,
+	typeRiskAssessed + "@2":    topicRiskV2,
+	typeRiskPolicy + "@1":      topicRiskPolicy,
+	typeRiskInvalidated + "@1": topicRiskInvalidated,
 }
 
 var projectionTopics = []string{
 	topicInventory, topicTelemetry, topicTelemetryV2, topicFacility,
-	topicSensorLayout, topicRiskV1, topicRiskV2, topicRiskPolicy,
+	topicSensorLayout, topicRiskV1, topicRiskV2, topicRiskPolicy, topicRiskInvalidated,
 }
 
 func route(event map[string]any) string {
@@ -148,6 +151,15 @@ func semantic(event map[string]any) *failure {
 		}
 		if payload["policy_id"] != event[fieldAggregate] || policyVersion != version {
 			return fail(reasonSchema, "policy identity and version must match aggregate")
+		}
+	case typeRiskInvalidated:
+		for _, key := range []string{"assessment_version", "replacement_occupancy_version"} {
+			if _, bad := bigint(payload[key]); bad != nil {
+				return bad
+			}
+		}
+		if payload[fieldDevice] != event[fieldAggregate] {
+			return fail(reasonSchema, "invalidation device must match aggregate")
 		}
 	case typeRiskAssessed:
 		if payload[fieldDevice] != event[fieldAggregate] {

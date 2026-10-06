@@ -1,0 +1,97 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ai-parser-gate, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: ai-parser-gate-{{ trunc 12 (sha256sum .Values.cell) }}, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+rules:
+  - {apiGroups: [node.k8s.io], resources: [runtimeclasses], resourceNames: [greenguard-parser-runsc], verbs: [get]}
+  - {apiGroups: [""], resources: [nodes], verbs: [list]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: ai-parser-gate-{{ trunc 12 (sha256sum .Values.cell) }}, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ai-parser-gate-{{ trunc 12 (sha256sum .Values.cell) }}}
+subjects: [{kind: ServiceAccount, name: ai-parser-gate, namespace: greenguard}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ai-parser-gate, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: knowledge-parser-launcher}
+subjects: [{kind: ServiceAccount, name: ai-parser-gate, namespace: greenguard}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ai-parser-gate, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+data:
+  gate.py: |
+    import json,os,subprocess,uuid
+    def run(*args):
+        p=subprocess.run(['kubectl','--request-timeout=20s',*args],capture_output=True,text=True)
+        if p.returncode: raise RuntimeError('parser runtime gate Kubernetes operation failed')
+        return p.stdout
+    runtime=json.loads(run('get','runtimeclass','greenguard-parser-runsc','-o','json'))
+    if runtime.get('handler')!='runsc': raise RuntimeError('parser RuntimeClass handler mismatch')
+    scheduling=runtime.get('scheduling',{}).get('nodeSelector',{})
+    if scheduling.get('greenguard.io/workload-class')!='parser': raise RuntimeError('parser RuntimeClass must target dedicated nodes')
+    nodes=json.loads(run('get','nodes','-l','greenguard.io/workload-class=parser','-o','json'))['items']
+    if not any(any(c.get('type')=='Ready' and c.get('status')=='True' for c in n.get('status',{}).get('conditions',[])) for n in nodes): raise RuntimeError('no Ready parser nodes')
+    from knowledge_extensions.parser_kubernetes import KubernetesPdfParser
+    name='gg-parser-gate-'+uuid.uuid4().hex
+    spec=KubernetesPdfParser(image=os.environ['PARSER_IMAGE']).pod(name)
+    spec['metadata']['labels']['greenguard.io/cell']=os.environ['CELL']
+    # Execute real container syscalls under runsc; this is not a ready flag.
+    spec['spec']['containers'][0]['command']=['python','-c',"import pathlib,os; p=pathlib.Path('/tmp/gate'); p.write_bytes(b'runsc'); assert p.read_bytes()==b'runsc'; assert os.getuid()==10001"]
+    created=False
+    try:
+        result=subprocess.run(['kubectl','-n','greenguard-parser','create','-f','-'],input=json.dumps(spec),text=True,capture_output=True)
+        if result.returncode: raise RuntimeError('parser gate launch failed')
+        created=True
+        run('-n','greenguard-parser','wait','--for=jsonpath={.status.phase}=Succeeded','pod/'+name,'--timeout=180s')
+        pod=json.loads(run('-n','greenguard-parser','get','pod',name,'-o','json'))
+        statuses=pod.get('status',{}).get('containerStatuses',[])
+        if len(statuses)!=1 or statuses[0].get('state',{}).get('terminated',{}).get('exitCode')!=0 or 'sha256:' not in statuses[0].get('imageID',''): raise RuntimeError('parser actual container proof missing')
+        print('PASS exact runsc RuntimeClass, Ready dedicated nodes and immutable parser execution')
+    finally:
+        if created: run('-n','greenguard-parser','delete','pod',name,'--wait=true','--timeout=60s')
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-parser-gate-{{ trunc 8 (sha256sum (printf "%s:%s" .Values.revision .Values.images.parser)) }}
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}, greenguard.io/ai-gate: parser-runtime}
+  annotations: {argocd.argoproj.io/sync-wave: "5"}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ai-parser-gate, app.kubernetes.io/part-of: ai-runtime}
+      annotations: {sidecar.istio.io/inject: "false"}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ai-parser-gate
+      nodeSelector: {kubernetes.io/arch: amd64}
+      securityContext:
+{{ include "ai.security" . | indent 8 }}
+      containers:
+        - name: gate
+          image: {{ .Values.images.indexer | quote }}
+          command: [python, /gate/gate.py]
+          env:
+            - {name: PYTHONPATH, value: /app}
+            - {name: PARSER_IMAGE, value: {{ .Values.images.parser | quote }}}
+            - {name: CELL, value: {{ .Values.cell | quote }}}
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /gate, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+      volumes:
+        - {name: script, configMap: {name: ai-parser-gate, defaultMode: 0444}}
+        - {name: scratch, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+{{- end }}

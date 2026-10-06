@@ -5,9 +5,9 @@ import {
   runtimeDb,
   adminQuery,
   asRuntime,
+  createActiveTenantFixture,
   uniqueSubject,
 } from "../testing/fixtures.js";
-import { createOrganization } from "./store.js";
 import {
   acquireReadLease,
   admitReadLease,
@@ -24,10 +24,10 @@ const db = runtimeDb();
 after(() => db.$disconnect());
 async function fixture() {
   await adminQuery("UPDATE shard_registry SET state='active'");
-  const created = await createOrganization(
+  const created = await createActiveTenantFixture(
     db,
     { issuer: "https://read-lease.test", subject: uniqueSubject("reader") },
-    { name: "read lease farm" },
+    "read lease farm",
     {
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),

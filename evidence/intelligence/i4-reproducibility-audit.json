@@ -1,0 +1,55 @@
+{
+  "created_at_utc": "2026-10-01T03:18:42.803141+00:00",
+  "current_report_sha256": "4e15c28ef0d29cb7ac0456bb752e416398355f95699a0ec599a2ea43be973e65",
+  "final_source_replay": {
+    "model_artifact": "i4-transformer-final-source-replay.state.pt",
+    "model_artifact_sha256": "f132c9554c644dedad3092a7fb1c6897e2d9f63317549d3afbafe0a8ba09ef7d",
+    "path": "i4-transformer-final-source-replay.json",
+    "report_sha256": "761bfaaa4ef40998184d044e092c05ca5e618355633dde65d7450e8f5ea1b987",
+    "sequence_models_sha256": "b4318d8108e3c1b929f1a02d7769c36be9b4fe58143fbc9a0d36fd11cfec7285",
+    "state_tensor_sha256": "787dddb66f1e6912ef45bd0b74cffd2cf11709e6d431333f5da515fc357dc267"
+  },
+  "frozen_split_sha256": "584f4a602a2dd53aa7d2f30ee9c49eb9113f0dad5c9e070fcea3fe15448dbd57",
+  "limits": [
+    "Same-platform synthetic replay only; no cross-platform guarantee.",
+    "Synthetic hotspot-transition classification, not spoilage outcomes or full multi-horizon quantile forecasting.",
+    "Classical engineered summaries and neural raw sequences differ; no matched representation or equal hyperparameter search claim.",
+    "No model selection, promotion, real tenant data, or production decisions.",
+    "Formal I3/I4 sample, site, weather-year, and real-data gates remain unmet."
+  ],
+  "production_eligible": false,
+  "same_source_replay_checks": {
+    "drift_reference": true,
+    "environment": true,
+    "examples": true,
+    "frozen_record_sha256": true,
+    "inputs": true,
+    "label_counts": true,
+    "label_fingerprints": true,
+    "models": true,
+    "normalization": true,
+    "seeds": true,
+    "sensor_feature_order": true,
+    "serialized_artifact_bytes_equal": false,
+    "source_sha256": true,
+    "split_definition": true,
+    "split_fingerprints": true,
+    "split_unit": true,
+    "target": true,
+    "target_semantics": true,
+    "training": true,
+    "transformer_tensor_fingerprint": true
+  },
+  "schema_version": "synthetic-i4-reproducibility-audit-v1",
+  "source_sha256": {
+    "classical_baseline_adapter": "99f2474ad3771ae729f3b66e44b2aff98be43c18e2c4f23be7c67c5fad01f5ad",
+    "comparison_contract": "e76098f7823eaf835e547e4ed63b86038633983ac7b8e2ee5de3e1664711da13",
+    "corpus_builder": "d9c6e8f114d349d199a30dbde6353ce369cc8fa7a7359cbd2bb558a55e9d0fa9",
+    "i2_lightgbm_trainer": "f171e06149453fae47d9e5aa0a8d37a06e6dfe98f2f1fd25fe519688e54d0c76",
+    "i2_logistic_trainer": "1df2eba15240e19aae2e54ed81c854bc7160a59b3d35a96225a2afca438869d1",
+    "runner": "34b9e7aab9fba59f2bab73d447e8053ac26f827e58cd217d7c119782f0006aa0",
+    "sequence_models": "b4318d8108e3c1b929f1a02d7769c36be9b4fe58143fbc9a0d36fd11cfec7285",
+    "simulator": "f1a7a31b9e2c1f1c7132cb8847e4a82de21a0b03a7f5f6ab7021980bea7f84ea"
+  },
+  "synthetic_only": true
+}

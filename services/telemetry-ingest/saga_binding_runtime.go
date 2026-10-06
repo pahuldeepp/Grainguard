@@ -218,7 +218,7 @@ func handleSagaBindingCommand(ctx context.Context, db TxStarter, client transpor
 		return nil
 	}
 	if !errors.Is(err, ErrSagaBindingCommandConflict) && !errors.Is(err, ErrInvalidEvent) {
-		return err
+		return fmt.Errorf("binding await tenant %s: %w", command.TenantID, err)
 	}
 	return quarantineSagaBindingCommand(ctx, client, message, reasonConflict)
 }

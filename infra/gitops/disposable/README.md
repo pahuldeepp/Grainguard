@@ -145,7 +145,7 @@ provide a JSON object mapping each of the image names in `contract.json` to
 its full digest reference. For example:
 
 ```json
-{"bff":"123456789012.dkr.ecr.us-east-1.amazonaws.com/greenguard/bff@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+{"bff":"123456789012.dkr.ecr.us-east-1.amazonaws.com/greenguard/dev/cell-0123456789abcdef/bff@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 ```
 
 The main-branch CI `greenguard-release-inputs-<commit>` artifact contains

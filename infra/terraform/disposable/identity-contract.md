@@ -1,6 +1,8 @@
 # Disposable identity contract
 
-`identity_mode` defaults to `existing-oidc`. Supply the public `existing_oidc`
+`identity_mode` defaults to `existing-oidc`. `managed-dex` hosts the checked-in
+Dex implementation behind this disposable cell's CloudFront API hostname and
+preserves OIDC/PKCE. Supply the public `existing_oidc`
 object with issuer, JWKS URL, authorization and token endpoints, web/mobile
 client IDs, audience, scopes, and token mode. No users, passwords, client
 secrets, or membership records are created for this mode. Register the exported

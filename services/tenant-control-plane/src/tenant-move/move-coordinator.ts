@@ -97,8 +97,23 @@ export function preflightTenantMoveAdapters(
       incomplete[owner] = ["adapter is not owner-local"];
       continue;
     }
+    // Do not trust a duck-typed `.has()` declaration here: an incomplete
+    // adapter could return `true` for every boundary and accidentally pass
+    // the admission gate. Read native Set contents directly so an overridden
+    // method cannot claim capabilities the set does not contain.
+    let hasNativeSet: boolean;
+    try {
+      Set.prototype.has.call(adapter.boundaries, TENANT_MOVE_BOUNDARIES[0]);
+      hasNativeSet = true;
+    } catch {
+      hasNativeSet = false;
+    }
+    if (!hasNativeSet) {
+      incomplete[owner] = ["adapter boundary declaration is invalid"];
+      continue;
+    }
     const absent = TENANT_MOVE_BOUNDARIES.filter(
-      (boundary) => !adapter.boundaries.has(boundary),
+      (boundary) => !Set.prototype.has.call(adapter.boundaries, boundary),
     );
     if (absent.length) incomplete[owner] = absent;
   }

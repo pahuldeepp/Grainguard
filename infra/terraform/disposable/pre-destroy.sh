@@ -13,6 +13,16 @@ if [ "$environment_lower" = "prod" ] || [ "$environment_lower" = "production" ];
   echo "pre-destroy: refusing to tear down a production environment from the disposable root" >&2
   exit 1
 fi
+sentinel_enabled="${GG_DESTROY_INVENTORY_SENTINEL_ENABLED:-false}"
+if [ "$sentinel_enabled" != true ] && [ "$sentinel_enabled" != false ]; then
+  echo "pre-destroy: inventory-sentinel state flag must be true or false" >&2
+  exit 1
+fi
+expected_verified_scope="${GG_ACCOUNT}:${GG_REGION}:${GG_ENVIRONMENT}:${GG_CLUSTER}"
+if [ "$sentinel_enabled" != true ] && [ "${GG_VERIFIED_DESTROY_SCOPE:-}" != "$expected_verified_scope" ]; then
+  echo "pre-destroy: this state has no final-inventory sentinel; use destroy-verified.sh for scoped cleanup" >&2
+  exit 1
+fi
 for tool in aws kubectl python3; do
   command -v "$tool" >/dev/null || { echo "pre-destroy: $tool is required" >&2; exit 1; }
 done
@@ -23,9 +33,16 @@ if [ "$actual_account" != "$GG_ACCOUNT" ]; then
   exit 1
 fi
 
-log() { echo "pre-destroy: $*"; }
 pv_inventory="${GG_PV_INVENTORY_FILE:-$(dirname "$0")/.last-destroy-pvs}"
+manifest_file="${GG_DESTROY_MANIFEST_FILE:-${pv_inventory}.scope.json}"
 umask 077
+
+# Capture all values needed by the final inventory before any state-owned
+# resources disappear. A failed final check remains retryable after Terraform
+# has removed the rest of the graph.
+python3 "$(dirname "$0")/destroy-scope-manifest.py" save-env "$manifest_file"
+
+log() { echo "pre-destroy: $*"; }
 
 # The EKS endpoint is private by default. Verify Kubernetes connectivity and
 # admin authorization before deleting the out-of-state CDK stack or any other
@@ -109,7 +126,7 @@ import json, sys
 for app in json.load(sys.stdin).get("items", []):
     spec = app.get("spec", {})
     targets = [spec.get("destination", {})] + spec.get("destinations", [])
-    if any(t.get("namespace") == "greenguard" for t in targets):
+    if any(t.get("namespace") in {"greenguard", "ml-synthetic"} for t in targets):
         name = app.get("metadata", {}).get("name", "<unknown>")
         raise SystemExit(f"pre-destroy: Argo Application {name} still targets greenguard; reconcile/delete its owner first")
 '

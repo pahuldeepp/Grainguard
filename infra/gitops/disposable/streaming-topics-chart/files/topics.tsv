@@ -30,6 +30,10 @@ greenguard.saga.results.v1|6|delete|-
 greenguard.saga.results.dlq.v1|6|delete|-
 greenguard.saga.commands.dlq.v1|6|delete|-
 greenguard.quarantine.v1|1|delete|-
+greenguard.knowledge.document.index.requested.v1|6|delete|259200000
+greenguard.knowledge.assistant.suggestion.used.v1|6|delete|604800000
+greenguard.knowledge.assistant.suggestion.used.v1.quarantine|1|delete|1209600000
+greenguard.ai-usage-settled.v1|6|delete|604800000
 greenguard.connect.configs|1|compact|-
 greenguard.connect.offsets|1|compact|-
 greenguard.connect.status|1|compact|-

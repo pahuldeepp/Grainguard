@@ -27,13 +27,15 @@ data "aws_iam_policy_document" "alb_controller_pod_identity" {
 }
 
 resource "aws_iam_role" "alb_controller" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   name               = "${local.edge_name}-alb-controller"
   assume_role_policy = data.aws_iam_policy_document.alb_controller_pod_identity.json
 }
 
 resource "aws_iam_role_policy" "alb_controller" {
-  name = "${local.edge_name}-target-bindings"
-  role = aws_iam_role.alb_controller.id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  name       = "${local.edge_name}-target-bindings"
+  role       = aws_iam_role.alb_controller.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -76,7 +78,9 @@ resource "aws_eks_pod_identity_association" "alb_controller" {
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
   role_arn        = aws_iam_role.alb_controller.arn
-  depends_on      = [aws_eks_addon.pod_identity_agent]
+  depends_on = [aws_eks_addon.pod_identity_agent,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 output "alb_controller_pod_identity_role_arn" {

@@ -1,0 +1,9 @@
+image: ""
+cell: ""
+issuer: ""
+webOrigin: ""
+databaseHost: ""
+databaseCIDRs: []
+secret: greenguard-dex-config
+caSecret: greenguard-rds-ca
+replicas: 2

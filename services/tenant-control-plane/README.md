@@ -2,24 +2,50 @@
 
 ## Greenfield tenant ownership bootstrap status
 
-The control plane can persist an initial shard placement, but tenant creation is
-not yet a complete four-shard bootstrap workflow. No deployed event consumer or
-request path currently provisions `greenguard_internal.tenant_ownership` in all
-nine owner databases before making the placement available. The existing
+The control plane can persist an initial shard placement. A private polling
+worker is wired to provision `greenguard_internal.tenant_ownership` in all nine
+owner databases before making a new placement available; no live AWS run has
+proven that flow yet. The existing
 `seed_tenant_ownership` database function is a full-shard snapshot importer; it
 can fence local rows missing from its input and must not be used as a
 single-tenant seed operation.
 
-`src/tenant-bootstrap/preflight.ts` defines an offline contract for the missing
-provisioner. It requires exactly one adapter per sharded owner, direct readiness
-proof from all owners on the selected shard, and matching read-back proofs for
-all nine owners before routing activation. The module is validation-only: it
-does not contact databases, write ownership rows, or activate tenants. Its
-plain-object assertions are forgeable and its migration hashes are not compared
-against an expected per-owner manifest; they are useful only for testing input
-shape and must never authorize activation. Until authenticated probes, an
-expected migration manifest, and a durable worker implement and deploy the full
-protocol, tenant bootstrap across shards remains blocked and must fail closed.
+New organization requests now persist with `organizations.state='provisioning'`
+and return HTTP 202. They do not create an effective admin membership or emit
+`tenant.created` before owner bootstrap; OIDC first-admin enrollment and static
+membership import also leave new tenants pending. Existing active tenants are
+unchanged. Requests remain non-routable and can be retried idempotently while
+provisioning. A durable, per-tenant job now records the creator's pending
+first-admin intent, placement snapshot, trace/correlation context, attempts,
+claim lease, and prepared/active receipt ledgers. Existing provisioning rows are
+backfilled. The PostgreSQL claim/retry functions provide lease fencing and
+bounded backoff. The worker uses a separate central `tenant_bootstrap_worker`
+login, a NOLOGIN worker role, and a separate Secret; the HTTP API cannot claim
+jobs or write proof columns. Owner connections use per-shard bootstrap logins,
+TLS hostname verification, a mounted RDS CA, and exact owner database allowlists.
+
+`src/tenant-bootstrap/preflight.ts` defines the owner and proof contract. It
+requires exactly one adapter per sharded owner, direct readiness proof from all
+owners on the selected shard, and exact read-back proofs for all nine owners
+before routing activation. Ownership contract capability is tracked separately
+from the actual service migration-ledger fingerprint. Structural receipt checks
+alone are forgeable and must not authorize activation.
+
+`src/tenant-bootstrap/run.ts` contains the ordered retryable protocol: verify
+the selected shard's nine service migration ledgers and ownership contract,
+prepare/read back every owner, activate/read back every owner, then finalize
+membership, tenant state, and outbox events in one control-plane transaction.
+Production adapters call only per-tenant SQL functions and the authenticated
+owner receipt readback; they never call the legacy snapshot seeder. The build
+generates a migration manifest from the nine source migration directories.
+Prisma and Risk ledgers verify stored checksums; Go migrate ledgers prove the
+current head and clean state; Notifications proves the exact version list.
+The latter two runners do not store per-migration checksums, so their database
+ledgers cannot detect a historical migration file edited without a version
+change. This is a limitation of those existing ledger formats, not a fabricated
+content attestation. The adapter protocol has unit and offline SQL-contract
+coverage; live end-to-end execution against nine isolated migrated databases
+has not yet been run.
 
 Stage 09a implementation: first-party organizations, identities, invitations and
 versioned memberships. See [ADR-0017](../../docs/adr/0017-tenant-control-plane.md).
@@ -162,3 +188,15 @@ Key plaintext is returned once. `GET` lists only metadata, including last use;
 revocation and rotation write one transactional outbox event each. Internal
 verification routes require `CONTROL_LOOKUP_TOKEN` and return the normalized
 service context. See [ADR-0018](../../docs/adr/0018-machine-authentication.md).
+
+## Verified identity membership lookup
+
+Membership lookup first discovers candidates under the verified identity scope,
+then checks each membership and active organization under its tenant scope in
+one repeatable-read snapshot. Organization forced RLS stays tenant-only.
+Provisioning and suspended organizations cannot authenticate a membership;
+multiple eligible active memberships remain ambiguous, and revoked membership
+versions remain available for revocation handling. Discovery reads at most 101
+rows: more than 100 candidate memberships returns HTTP 503
+`membership_lookup_unavailable` before any tenant is chosen. Supporting larger
+identity membership sets requires an explicit tenant-selection flow.

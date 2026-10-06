@@ -1,0 +1,18 @@
+{{- if not .Values.cell }}{{ fail "parser runtime requires exact cell" }}{{ end }}
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: greenguard-parser-runsc
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+    app.kubernetes.io/managed-by: Helm
+handler: runsc
+scheduling:
+  nodeSelector:
+    greenguard.io/workload-class: parser
+    kubernetes.io/arch: amd64
+  tolerations:
+    - key: greenguard.io/workload-class
+      operator: Equal
+      value: parser
+      effect: NoSchedule

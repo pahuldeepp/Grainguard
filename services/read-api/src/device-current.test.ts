@@ -144,6 +144,7 @@ test("authenticated current operation acquires one lease and certifies one bound
     },
   } as unknown as ReadBackends;
   const server = createApp({
+    historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
     verify: async (auth) => {
       if (auth !== "A" && auth !== "B") throw new Error("unauthorized");
       return principal(auth === "A" ? A : B);
@@ -212,6 +213,7 @@ test("authenticated current operation acquires one lease and certifies one bound
 
 test("current aggregate refuses oversized response payloads", async () => {
   const server = createApp({
+    historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
     verify: async () => principal(A),
     backends: {
       deviceCurrent: async () => ({

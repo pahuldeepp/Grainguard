@@ -3,6 +3,8 @@ networkPolicy:
   egressPods:
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
   ingressSources:
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: billing-service, app.kubernetes.io/instance: billing-service } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: jobs-worker, app.kubernetes.io/instance: jobs-worker } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: audit-export-worker, app.kubernetes.io/instance: audit-export-worker } }
     - { namespace: greenguard, selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway } }

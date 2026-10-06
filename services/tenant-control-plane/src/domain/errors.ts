@@ -50,3 +50,9 @@ export class AmbiguousMembershipError extends Error {
     super("identity has active memberships in more than one tenant");
   }
 }
+
+export class MembershipLookupLimitError extends Error {
+  constructor() {
+    super("identity membership lookup exceeds its bounded candidate limit");
+  }
+}

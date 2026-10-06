@@ -18,6 +18,7 @@ test("defaults and required database URL", () => {
     host: "127.0.0.1",
     port: 3004,
     auth: undefined,
+    ownership: undefined,
     actorHmacKey: undefined,
     historyCursorKey: undefined,
     otlpEndpoint: undefined,
@@ -101,5 +102,33 @@ test("private shard registry config requires no legacy database URL", () => {
   assert.equal(
     readConfig({ SHARD_REGISTRY_FILE: "/private/owners.json" }).databaseUrl,
     "",
+  );
+});
+
+test("ownership configuration is complete and excludes unsafe origins", () => {
+  const values = {
+    ALERTS_OWNERSHIP_SERVICE_TOKEN:
+      "owner-secret-at-least-thirty-two-characters",
+    CONTROL_PLANE_MEMBERSHIP_URL: "http://127.0.0.1:3010",
+    CONTROL_PLANE_MEMBERSHIP_SERVICE_TOKEN:
+      "member-secret-at-least-thirty-two-characters",
+  };
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ALERTS_OWNERSHIP_SERVICE_TOKEN: values.ALERTS_OWNERSHIP_SERVICE_TOKEN,
+      }),
+    /set together/,
+  );
+  assert.ok(readConfig({ ...base, ...values }).ownership);
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...values,
+        CONTROL_PLANE_MEMBERSHIP_URL: "http://untrusted.test",
+      }),
+    /unsafe/,
   );
 });

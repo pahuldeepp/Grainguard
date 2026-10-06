@@ -132,6 +132,9 @@ func (s *CQLSession) Close() { s.session.Close() }
 // Transient reports driver and server failures worth retrying: unavailable,
 // timeouts, overload, bootstrapping and connection loss.
 func Transient(err error) bool {
+	if err == nil {
+		return false
+	}
 	// Network wrappers can also carry permanent TLS verification errors. Check
 	// those before the broad net.Error classification below so bad trust roots,
 	// names or certificates fail visibly instead of retrying forever.
@@ -159,6 +162,28 @@ func Transient(err error) bool {
 	}
 	if errors.Is(err, gocql.ErrNoConnections) || errors.Is(err, gocql.ErrTimeoutNoResponse) || errors.Is(err, gocql.ErrConnectionClosed) {
 		return true
+	}
+	// CreateSession in the pinned gocql driver formats protocol-negotiation
+	// failures with %v (it drops the underlying net.OpError), so errors.As
+	// cannot see a refused/timeout dial while Cassandra is starting or
+	// recovering. Match only known network-failure phrases; do not treat every
+	// protocol-negotiation error as transient because a real protocol
+	// incompatibility must still fail visibly.
+	message := strings.ToLower(err.Error())
+	for _, networkFailure := range []string{
+		"connection refused",
+		"i/o timeout",
+		"operation timed out",
+		"no route to host",
+		"network is unreachable",
+		"connection reset by peer",
+		"broken pipe",
+		"unexpected eof",
+		"unable to discover protocol version: eof",
+	} {
+		if strings.Contains(message, networkFailure) {
+			return true
+		}
 	}
 	var request gocql.RequestError
 	if errors.As(err, &request) {

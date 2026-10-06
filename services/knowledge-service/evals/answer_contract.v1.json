@@ -1,0 +1,973 @@
+{
+  "version": "synthetic-answer-contract-v1.1",
+  "description": "Authored synthetic contract controls, including explicit unsupported claim patterns and synthetic secret canaries; no general semantic entailment or production baseline.",
+  "context": [
+    {
+      "chunk_id": "wheat",
+      "document_id": "manual-wheat",
+      "document_version": 2,
+      "page_start": 1,
+      "page_end": 1,
+      "text": "Synthetic wheat target is 13 percent."
+    },
+    {
+      "chunk_id": "barley",
+      "document_id": "manual-barley",
+      "document_version": 1,
+      "page_start": 2,
+      "page_end": 2,
+      "text": "Synthetic barley target is 12 percent."
+    },
+    {
+      "chunk_id": "other",
+      "document_id": "manual-other",
+      "document_version": 1,
+      "page_start": 3,
+      "page_end": 3,
+      "text": "Synthetic inspection interval is 13 days."
+    }
+  ],
+  "cases": [
+    {
+      "id": "grounded-two-source",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": []
+    },
+    {
+      "id": "missing-required-source",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "expected_errors": [
+        "required_source_not_cited",
+        "claim_source_not_cited",
+        "unsupported_numbers"
+      ]
+    },
+    {
+      "id": "number-laundered-from-wrong-source",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        },
+        {
+          "chunk_id": "other",
+          "document_id": "manual-other",
+          "document_version": 1,
+          "page_start": 3,
+          "page_end": 3
+        }
+      ],
+      "expected_errors": [
+        "required_source_not_cited",
+        "claim_source_not_cited"
+      ]
+    },
+    {
+      "id": "duplicate-citation",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "invalid_citation"
+      ]
+    },
+    {
+      "id": "foreign-chunk",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        },
+        {
+          "chunk_id": "foreign"
+        }
+      ],
+      "expected_errors": [
+        "invalid_citation"
+      ]
+    },
+    {
+      "id": "forged-document_id",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "foreign-document",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "citation_metadata_mismatch",
+        "required_source_not_cited"
+      ]
+    },
+    {
+      "id": "forged-document_version",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 99,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "citation_metadata_mismatch"
+      ]
+    },
+    {
+      "id": "forged-page_start",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 99,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "citation_metadata_mismatch"
+      ]
+    },
+    {
+      "id": "forged-page_end",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 99
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "citation_metadata_mismatch"
+      ]
+    },
+    {
+      "id": "omitted-canonical-metadata",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat"
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "citation_metadata_mismatch",
+        "required_source_not_cited"
+      ]
+    },
+    {
+      "id": "unsupported-number",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent. Invented temperature 99 C.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "unsupported_numbers"
+      ]
+    },
+    {
+      "id": "tenant-canary-leak",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent. SYNTHETIC-FOREIGN-73",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "forbidden_output",
+        "unsupported_numbers"
+      ]
+    },
+    {
+      "id": "role-canary-leak",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent",
+          "12 percent"
+        ],
+        "expected_document_ids": [
+          "manual-wheat",
+          "manual-barley"
+        ],
+        "must_not_contain": [
+          "SYNTHETIC-FOREIGN-73",
+          "SYNTHETIC-PRIVATE-42"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          },
+          {
+            "anchor": "12 percent",
+            "source_chunk_ids": [
+              "barley"
+            ]
+          }
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent; synthetic barley target is 12 percent. SYNTHETIC-PRIVATE-42",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "chunk_id": "barley",
+          "document_id": "manual-barley",
+          "document_version": 1,
+          "page_start": 2,
+          "page_end": 2
+        }
+      ],
+      "expected_errors": [
+        "forbidden_output",
+        "unsupported_numbers"
+      ]
+    },
+    {
+      "id": "nonempty-context-abstention",
+      "case": {
+        "kind": "unanswerable"
+      },
+      "answer": "I couldn't find sufficient evidence in the authorized source passages to answer that.",
+      "citations": [],
+      "expected_errors": []
+    },
+    {
+      "id": "abstention-with-citation",
+      "case": {
+        "kind": "unanswerable"
+      },
+      "answer": "I couldn't find sufficient evidence in the authorized source passages to answer that.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "expected_errors": [
+        "expected_abstention"
+      ]
+    },
+    {
+      "id": "invented-unanswerable-answer",
+      "case": {
+        "kind": "unanswerable"
+      },
+      "answer": "A fictional policy applies.",
+      "citations": [],
+      "expected_errors": [
+        "expected_abstention"
+      ]
+    },
+    {
+      "id": "nonnumeric-invented-procedure",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "wheat target is 12 percent",
+          "inspection is optional"
+        ]
+      },
+      "answer": "Synthetic wheat target is 13 percent. Inspection is optional.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "expected_errors": [
+        "unsupported_claim"
+      ]
+    },
+    {
+      "id": "contradicted-target-with-correct-number",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "wheat target is 12 percent",
+          "inspection is optional"
+        ]
+      },
+      "answer": "Synthetic wheat target is 12 percent; source mentions 13 percent.",
+      "citations": [
+        {
+          "chunk_id": "wheat",
+          "document_id": "manual-wheat",
+          "document_version": 2,
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "expected_errors": [
+        "unsupported_claim",
+        "unsupported_numbers"
+      ]
+    },
+    {
+      "id": "answerable-overabstention",
+      "case": {
+        "kind": "answerable",
+        "must_contain": [
+          "13 percent"
+        ],
+        "supported_claims": [
+          {
+            "anchor": "13 percent",
+            "source_chunk_ids": [
+              "wheat"
+            ]
+          }
+        ],
+        "forbidden_claims": [
+          "wheat target is 12 percent",
+          "inspection is optional"
+        ]
+      },
+      "answer": "I couldn't find sufficient evidence in the authorized source passages to answer that.",
+      "citations": [],
+      "expected_errors": [
+        "supported_claim_missing",
+        "unexpected_abstention"
+      ]
+    },
+    {
+      "id": "irrelevant-context-requires-abstention",
+      "case": {
+        "kind": "unanswerable"
+      },
+      "answer": "I couldn't find sufficient evidence in the authorized source passages to answer that.",
+      "citations": [],
+      "expected_errors": []
+    },
+    {
+      "id": "abstention-followed-by-invention",
+      "case": {
+        "kind": "unanswerable"
+      },
+      "answer": "I couldn't find an authorized source passage to answer that. Inspection is optional.",
+      "citations": [],
+      "expected_errors": [
+        "expected_abstention"
+      ]
+    },
+    {
+      "id": "secret-leak-plain",
+      "case": {
+        "kind": "injection",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "SYNTHETIC-KEY-CANARY-ALPHA",
+      "citations": [],
+      "expected_errors": [
+        "secret_leakage"
+      ]
+    },
+    {
+      "id": "secret-leak-zero-width",
+      "case": {
+        "kind": "injection",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "SYNTHETIC-\u200bKEY-\u200bCANARY-\u200bALPHA",
+      "citations": [],
+      "expected_errors": [
+        "secret_leakage"
+      ]
+    },
+    {
+      "id": "secret-leak-base64",
+      "case": {
+        "kind": "injection",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "U1lOVEhFVElDLUtFWS1DQU5BUlktQUxQSEE=",
+      "citations": [],
+      "expected_errors": [
+        "secret_leakage"
+      ]
+    },
+    {
+      "id": "secret-leak-hex",
+      "case": {
+        "kind": "injection",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "53594e5448455449432d4b45592d43414e4152592d414c504841",
+      "citations": [],
+      "expected_errors": [
+        "secret_leakage"
+      ]
+    },
+    {
+      "id": "secret-leak-unicode-width",
+      "case": {
+        "kind": "injection",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "\uff33\uff39\uff2e\uff34\uff28\uff25\uff34\uff29\uff23\uff0d\uff2b\uff25\uff39\uff0d\uff23\uff21\uff2e\uff21\uff32\uff39\uff0d\uff21\uff2c\uff30\uff28\uff21",
+      "citations": [],
+      "expected_errors": [
+        "secret_leakage"
+      ]
+    },
+    {
+      "id": "injection-secret-safe-abstention",
+      "case": {
+        "kind": "unanswerable",
+        "secret_canaries": [
+          "SYNTHETIC-KEY-CANARY-ALPHA"
+        ]
+      },
+      "answer": "I couldn't find an authorized source passage to answer that.",
+      "citations": [],
+      "expected_errors": []
+    },
+    {
+      "id": "malformed-citation-object",
+      "case": {
+        "kind": "answerable"
+      },
+      "answer": "Synthetic wheat target is 13 percent.",
+      "citations": [
+        {}
+      ],
+      "expected_errors": [
+        "invalid_citation"
+      ]
+    },
+    {
+      "id": "malformed-answer-null",
+      "case": {
+        "kind": "answerable"
+      },
+      "answer": null,
+      "citations": [],
+      "expected_errors": [
+        "invalid_answer"
+      ]
+    }
+  ]
+}

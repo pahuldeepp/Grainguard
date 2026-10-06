@@ -28,7 +28,12 @@ test("problem mapping covers auth, state, lock and unknown errors", () => {
 });
 
 test("page defaults and correlation IDs", () => {
-  assert.deepEqual(page(), { limit: 50, after: undefined, state: undefined });
+  assert.deepEqual(page(), {
+    limit: 50,
+    after: undefined,
+    state: undefined,
+    deviceId: undefined,
+  });
   const req = {
     headers: { "x-correlation-id": ["not-a-uuid"] },
   } as unknown as AlertRequest;

@@ -1,7 +1,7 @@
 # Disposable runtime Secret ownership
 
-`runtime_secret_values`, `audit_export_signing_material`, `shard_role_passwords`
-and `shard_registry_passwords` are sensitive ephemeral inputs. AWS Secrets
+`runtime_secret_values`, `audit_export_signing_material`, `shard_role_passwords`,
+`shard_registry_passwords`, and `tenant_bootstrap_passwords` are sensitive ephemeral inputs. AWS Secrets
 Manager versions receive the payload only through the provider's write-only
 `secret_string_wo` argument; state stores the public version ID and the
 `secret_string_wo_version` counter, never the secret payload. Secret resource
@@ -43,6 +43,38 @@ keys, each containing exactly s1-s4 passwords matching its bootstrap role:
 | hardware-service | greenguard_hardware | hardware_app |
 | read-api | greenguard_read | read_query |
 | audit-export-worker | greenguard_inventory | inventory_audit_reader |
+
+`billing-service-config` also requires disposable Stripe test credentials:
+`STRIPE_API_KEY` (`sk_test_` or `rk_test_` only), one or two comma-separated
+`STRIPE_WEBHOOK_SECRETS`, a base64 32-byte `BILLING_INBOX_ENCRYPTION_KEY`,
+and exact deployed HTTPS `BILLING_RETURN_ORIGINS`. The Terraform precondition
+checks the format before writing the payload; the AWS-source readiness check
+decodes the encryption key and rejects loopback, HTTP, or non-origin return
+URLs. Live Stripe keys are rejected by the billing runtime.
+
+Terraform generates `entitlement-heartbeat-config` from only the billing
+service's three Kafka connection keys. The heartbeat profile consumes that
+separate secret, so Stripe provider credentials are not exposed to this
+Kafka-only worker.
+
+`tenant_bootstrap_passwords` supplies exactly four independent passwords
+(s1-s4), at least 32 characters each. These are not reused from shard master,
+application, or migration roles. Terraform writes each as a separate
+`greenguard/<environment>/shards/sN/tenant-bootstrap` Secret version. The
+Kubernetes Secret contains `TENANT_BOOTSTRAP_PASSWORD` for the one-shot login
+provisioner and `registry.json` with exactly nine operational owner URLs. The
+worker volume projects only `registry.json` into `sN.json`; the worker cannot
+read the raw password key. Each URL uses `tenant_bootstrap_sN`, that shard's
+primary endpoint and owner database, and `sslmode=verify-full` with the RDS
+CA. Changing the Secret version changes the Argo Job name so the login is
+rotated through the provisioning Job.
+
+The central worker receives a separate `tenant-bootstrap-worker-config`
+containing only `CONTROL_BOOTSTRAP_DATABASE_URL`. Terraform derives it from
+the central RDS endpoint and `CONTROL_BOOTSTRAP_WORKER_PASSWORD` in the
+central bootstrap Secret. It is never copied into `tenant-control-plane-config`.
+The worker Helm profile mounts the four owner registry files and CA read-only;
+its network egress is limited to private RDS CIDRs on TCP 5432.
 
 When `enable_application_tree` is true, Terraform generates the
 `audit-export-worker-config` Secret from the dedicated central audit-reader

@@ -15,27 +15,27 @@ class LifecycleAuditTest < Minitest::Test
     LifecycleAudit.findings(input).map { |item| item.fetch(:id) }
   end
 
-  def test_current_source_retains_only_raw_destroy_blocker
+  def test_current_source_has_no_offline_lifecycle_contract_findings
     out, err, status = Open3.capture3('ruby', SCRIPT, '--json', '--ready')
     assert_equal '', err
-    refute status.success?
+    assert status.success?
     result = JSON.parse(out)
-    assert_equal 'blocked', result.fetch('status')
-    assert_equal ['raw_destroy_no_post_inventory'], result.fetch('findings').map { |item| item.fetch('id') }
+    assert_equal 'green', result.fetch('status')
+    assert_empty result.fetch('findings')
   end
 
   def test_report_mode_is_non_destructive
     out, err, status = Open3.capture3('ruby', SCRIPT)
     assert status.success?
     assert_equal '', err
-    assert_includes out, 'lifecycle-audit: 1 finding(s)'
+    assert_includes out, 'lifecycle-audit: green'
   end
 
   def test_contract_regressions_cannot_be_hidden_in_comments
     mutations = [
-      ['teardown.tf', 'GG_VERIFIED_DESTROY_SCOPE', 'GG_UNSCOPED_DESTROY', 'verified_destroy_wrapper_guard'],
-      ['destroy-verified.sh', 'GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}"', 'echo skip marker', 'verified_destroy_wrapper_guard'],
-      ['scope_override.tf', 'terraform_data.cell_scope.output.cluster_name', 'missing_scope', 'partial_apply_before_eks'],
+      ['main.tf', 'post-destroy-inventory.sh', 'missing-final-inventory.sh', 'native_post_inventory'],
+      ['post-destroy-inventory.sh', 'saved scope differs from the sentinel state', 'scope check omitted', 'post_inventory_fail_closed'],
+      ['scope_override.tf', 'Name        = "${terraform_data.cell_scope.output.cluster_name}-vpc"', 'Name = "missing_scope-vpc"', 'partial_apply_before_eks'],
       ['destroy-verified.sh', 'if scopes:', 'if False:', 'partial_apply_before_eks'],
       ['destroy-verified.sh', 'if [ "$parse_status" -ne 42 ]; then', 'if false; then', 'partial_apply_before_eks'],
       ['pre-destroy.sh', '/check-teardown.sh" --preflight', '/check-teardown.sh"', 'partial_destroy_owner_preflight'],
@@ -58,10 +58,69 @@ class LifecycleAuditTest < Minitest::Test
     assert_includes ids(fixture), 'verified_destroy_order'
   end
 
-  def test_magic_post_inventory_marker_does_not_close_raw_destroy_gap
+  def test_comment_cannot_fake_a_complete_destroy_graph
     fixture = sources
-    fixture['teardown.tf'] += "\n# post_destroy_inventory_guaranteed\n"
-    assert_includes ids(fixture), 'raw_destroy_no_post_inventory'
+    fixture['main.tf'] = fixture.fetch('main.tf').sub('depends_on           = [terraform_data.destroy_inventory_sentinel]', 'depends_on           = []')
+    fixture['main.tf'] += "\n# destroy graph complete\n"
+    finding = LifecycleAudit.findings(fixture).find { |item| item.fetch(:id) == 'destroy_anchor_graph' }
+    refute_nil finding
+    assert_includes finding.fetch(:missing), 'missing_sentinel_edge:aws_vpc.cell'
+  end
+
+  def test_comments_cannot_fake_sentinel_or_pre_cleanup_edges
+    fixture = sources
+    ['#', '//', '/* */'].each do |comment|
+      fixture = sources
+      fixture['main.tf'] = fixture.fetch('main.tf').sub(
+        'depends_on           = [terraform_data.destroy_inventory_sentinel]',
+        "depends_on           = [\n    #{comment == '/* */' ? '/* terraform_data.destroy_inventory_sentinel */' : "#{comment} terraform_data.destroy_inventory_sentinel"}\n  ]"
+      )
+      result = LifecycleAudit.destroy_anchor_graph_findings(fixture)
+      assert_includes result, 'missing_sentinel_edge:aws_vpc.cell', "#{comment} comment cannot count as an edge"
+    end
+
+    fixture = sources
+    teardown = fixture.fetch('teardown.tf').gsub(
+      '    aws_vpc.cell,',
+      '    // aws_vpc.cell,'
+    )
+    fixture['teardown.tf'] = teardown
+    result = LifecycleAudit.destroy_anchor_graph_findings(fixture)
+    assert_includes result, 'pre_cleanup_missing_edge:aws_vpc.cell'
+  end
+
+  def test_ecr_deletion_policy_must_be_enabled_not_just_mentioned
+    fixture = sources
+    fixture['defaults.auto.tfvars'] = fixture.fetch('defaults.auto.tfvars').sub(
+      'delete_nonempty_ecr_on_destroy     = true',
+      "delete_nonempty_ecr_on_destroy     = false\n# delete_nonempty_ecr_on_destroy = true"
+    )
+    assert_includes ids(fixture), 'ecr_deletion'
+
+    fixture['defaults.auto.tfvars'] = "# delete_nonempty_ecr_on_destroy = true\n"
+    assert_includes ids(fixture), 'ecr_deletion'
+  end
+
+  def test_old_pre_cleanup_inputs_have_safe_destroy_defaults
+    fixture = sources
+    teardown = fixture.fetch('teardown.tf')
+    assert_includes teardown, 'try(self.input.manifest, "${path.module}/.last-destroy-pvs.scope.json")'
+    assert_includes teardown, 'try(self.input.master_secret_arn, "")'
+    assert_includes teardown, 'try(self.input.shard_master_secret_arns, [])'
+    assert_includes teardown, 'try(self.input.destroy_inventory_sentinel_enabled, false)'
+    assert_includes fixture.fetch('destroy-verified.sh'), '"$here/pre-destroy.sh"'
+    assert_includes fixture.fetch('destroy-verified.sh'), '"$terraform_bin" destroy'
+
+    [
+      ['try(self.input.manifest, "${path.module}/.last-destroy-pvs.scope.json")', 'self.input.manifest'],
+      ['try(self.input.master_secret_arn, "")', 'self.input.master_secret_arn'],
+      ['try(self.input.shard_master_secret_arns, [])', 'self.input.shard_master_secret_arns'],
+      ['try(self.input.destroy_inventory_sentinel_enabled, false)', 'self.input.destroy_inventory_sentinel_enabled'],
+    ].each do |old, unguarded|
+      broken = fixture.dup
+      broken['teardown.tf'] = teardown.sub(old, unguarded)
+      assert_includes ids(broken), 'legacy_cleanup_input_compatibility'
+    end
   end
 
   def test_every_aws_resource_type_is_classified_for_teardown_inventory
@@ -74,7 +133,22 @@ class LifecycleAuditTest < Minitest::Test
     assert_equal ['aws_new_metered_service'], finding.fetch(:missing)
   end
 
-  def test_raw_destroy_guard_remains_because_partial_state_can_omit_cleanup_owner
+  def test_commented_terraform_resources_do_not_expand_inventory_or_destroy_graph
+    fixture = sources
+    fixture['main.tf'] = fixture.fetch('main.tf') + <<~HCL
+      # resource "aws_unowned_metered_service" "ignored" {
+      #   tags = { Project = "GreenGuard" }
+      # }
+    HCL
+    fixture['teardown.tf'] = fixture.fetch('teardown.tf') + <<~HCL
+      # resource "terraform_data" "pre_destroy_cleanup" {
+      #   depends_on = [aws_vpc.cell]
+      # }
+    HCL
+    assert_empty LifecycleAudit.findings(fixture)
+  end
+
+  def test_partial_state_recovery_wrapper_remains_available
     teardown = sources.fetch('teardown.tf')
     # This owner is intentionally created after the EKS/GitOps resources it
     # cleans up. A partial apply can therefore have resources to destroy
@@ -83,8 +157,46 @@ class LifecycleAuditTest < Minitest::Test
     assert_includes teardown, 'resource "terraform_data" "pre_destroy_cleanup"'
     assert_includes teardown, 'helm_release.argocd'
     assert_includes teardown, 'helm_release.gitops_bootstrap'
-    assert_includes teardown, 'GG_VERIFIED_DESTROY_SCOPE'
-    assert_includes ids(sources), 'raw_destroy_no_post_inventory'
+    assert_includes sources.fetch('main.tf'), 'resource "terraform_data" "destroy_inventory_sentinel"'
+    wrapper = sources.fetch('destroy-verified.sh')
+    assert_includes wrapper, '"$here/pre-destroy.sh"'
+    assert_includes wrapper, '"$terraform_bin" destroy'
+    assert_includes wrapper, '"$here/check-teardown.sh"'
+    refute_includes teardown, 'GG_VERIFIED_DESTROY_SCOPE'
+  end
+
+  def test_live_root_graph_has_scope_anchor_fanout_and_cleanup_before_it
+    assert_empty LifecycleAudit.destroy_anchor_graph_findings(sources)
+    resources = sources.reject { |name, _| name == 'scope_override.tf' }.values.sum { |body| body.scan(/^resource\s+"/).length }
+    assert_equal 153, resources - 1
+    assert_includes sources.fetch('main.tf'), 'post-destroy-inventory.sh'
+  end
+
+  def test_telemetry_archive_and_replay_resources_are_in_both_destroy_orders
+    fixture = sources
+    telemetry_resources = fixture.fetch('telemetry-archive.tf').scan(/^resource\s+"(aws_[^"]+)"\s+"([^"]+)"/)
+    labels = telemetry_resources.map { |type, name| "#{type}.#{name}" }
+    refute_empty labels
+    assert_empty LifecycleAudit.destroy_anchor_graph_findings(fixture)
+
+    labels.each do |label|
+      type, name = label.split('.', 2)
+      resource_header = "resource \"#{type}\" \"#{name}\" {"
+      body = fixture.fetch('telemetry-archive.tf')
+      start = body.index(resource_header)
+      refute_nil start, label
+      finish = body.index(/^}/, start)
+      refute_nil finish, label
+      resource = body[start..finish]
+      fixture['telemetry-archive.tf'] = body.sub(resource, resource.sub(/depends_on\s*=\s*\[[^\]]*\]/m, 'depends_on = []'))
+      assert_includes LifecycleAudit.destroy_anchor_graph_findings(fixture), "missing_sentinel_edge:#{label}"
+      fixture['telemetry-archive.tf'] = body
+
+      teardown = fixture.fetch('teardown.tf')
+      fixture['teardown.tf'] = teardown.sub(/\n\s*#{Regexp.escape(label)},/, '')
+      assert_includes LifecycleAudit.destroy_anchor_graph_findings(fixture), "pre_cleanup_missing_edge:#{label}"
+      fixture['teardown.tf'] = teardown
+    end
   end
 
   def test_destroy_anchor_graph_contract_rejects_missing_edges_and_resource_inputs

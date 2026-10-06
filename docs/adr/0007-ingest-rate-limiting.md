@@ -6,6 +6,8 @@ Status: accepted, 2026-09-24 (Stage 03b design; the Redis-backed shared layer is
 
 **Order on the ingest path.** Authenticate, then rate limit, then parse and validate the body, then the ingest transaction. The limiter needs the verified device and tenant to pick a bucket, and it must run before body parsing and any database work. A cheap pre-authentication limit per connection or IP belongs to the edge (WAF and gateway), because verifying a token is itself work.
 
+**Pre-authentication boundary.** A public ingress must apply a finite per-source-IP/connection request limit to the ingest route before forwarding requests. The application also keeps a bounded socket-peer token bucket as a local fallback (30-request burst, 10 requests/second, up to 4,096 peer entries per replica) and caps concurrent credential verification across JWT/JWKS, API-key, and client-credentials paths at 16 per replica. By default the bucket keys from `RemoteAddr`; `INGEST_TRUSTED_PROXY_CIDRS` opts into proxy resolution and accepts at most 64 CIDR prefixes. Universal prefixes (`0.0.0.0/0`, `::/0`) are rejected. Only a socket peer within this allowlist can cause `X-Forwarded-For` to be considered. The chain is parsed strictly and walked right-to-left to the first untrusted hop; malformed/missing headers fall back to the socket peer. Configure only ingress proxy networks, and make the ingress overwrite the incoming forwarded header with the verified source or append its verified source as the rightmost hop. These local controls do not replace the public edge limit, which must be configured at every internet-facing deployment. Reject saturation with `429` and `Retry-After`. Health and metrics endpoints do not consume ingest tokens.
+
 **Response.** A limited request gets `429` with `Retry-After` and reason `rate_limited`. It is counted (`ingest_rejections_total{reason="rate_limited"}`) but never written to the rejection samples, so throttling cannot cause writes. Nothing is lost: the device retries with the same `source_message_id`, and idempotency makes the retry safe.
 
 **Where the state lives.**
@@ -16,3 +18,5 @@ Status: accepted, 2026-09-24 (Stage 03b design; the Redis-backed shared layer is
 - If Redis is unavailable, the local buckets keep consumption bounded (X11 requires this) and the condition is alerted.
 
 **Tests required.** Steady rate passes; a burst up to capacity passes and the next request is limited; refill over time; per-device isolation (one noisy device does not throttle another); the tenant limit throttles a tenant across its devices; `Retry-After` is correct; concurrent requests obey the limit atomically; a limited request writes no rows.
+
+Pre-authentication regression coverage also blocks the control-plane verifier and proves concurrent API-key and M2M calls stay within the configured in-process cap, excess requests receive `429`, forwarded-header spoofing cannot rotate peer buckets, and the peer bucket map remains bounded.

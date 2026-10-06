@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,3 +268,42 @@ func TestBindingKafkaRetryExhaustionPreservesBrokerOffset(t *testing.T) {
 }
 
 func (f *fakeBindingKafka) CommittedOffsets() map[string]map[int32]kgo.EpochOffset { return nil }
+
+type prefixedBindingClient struct {
+	fakeBindingKafka
+	record          *kgo.Record
+	committedRecord *kgo.Record
+}
+
+func (f *prefixedBindingClient) PollRecords(context.Context, int) kgo.Fetches {
+	return kgo.Fetches{{Topics: []kgo.FetchTopic{{Topic: f.record.Topic, Partitions: []kgo.FetchPartition{{Records: []*kgo.Record{f.record}}}}}}}
+}
+func (f *prefixedBindingClient) CommitRecords(_ context.Context, records ...*kgo.Record) error {
+	f.committedRecord = records[0]
+	return nil
+}
+func TestBindingPrefixPreservesTransportIdentity(t *testing.T) {
+	prefix := "provisioning-demo."
+	record := &kgo.Record{Topic: prefix + bindingTopic, Partition: 2, Offset: 17, Value: []byte("null")}
+	fake := &prefixedBindingClient{record: record}
+	adapter := &BindingKafka{client: fake, topicPrefix: prefix}
+	message, err := adapter.Next(context.Background())
+	if err != nil || message.Topic != bindingTopic || message.TransportTopic != record.Topic {
+		t.Fatalf("message=%+v err=%v", message, err)
+	}
+	if err = message.Commit(context.Background()); err != nil || fake.committedRecord != record {
+		t.Fatal("commit must retain original transport topic and offset")
+	}
+	quarantine := bindingQuarantine(message, reasonSchema)
+	if !bytes.Contains(quarantine.Value, []byte(record.Topic)) {
+		t.Fatal("quarantine lost original source topic")
+	}
+}
+func TestBindingPrefixRejectsInvalidNamespace(t *testing.T) {
+	for _, prefix := range []string{"../", "a b", "a/b", "a\t", "a\n", "é", strings.Repeat("a", 249)} {
+		t.Setenv("BINDING_KAFKA_TOPIC_PREFIX", prefix)
+		if _, err := newBindingKafka(nil, "test"); err == nil {
+			t.Fatalf("accepted %q", prefix)
+		}
+	}
+}

@@ -142,7 +142,7 @@ func (p *Processor) write(ctx context.Context, m Message, r history.Reading, e m
 	if err := p.retry(ctx, func(ctx context.Context) error { return p.Store.Write(ctx, r) }, p.Transient); err != nil {
 		return err
 	}
-	mark := history.Watermark{TenantID: r.TenantID, DeviceID: r.DeviceID, Topic: m.Topic, Partition: m.Partition, Offset: m.Offset, ObservedAt: r.ObservedAt}
+	mark := history.Watermark{TenantID: r.TenantID, DeviceID: r.DeviceID, Topic: transportTopic(m), Partition: m.Partition, Offset: m.Offset, ObservedAt: r.ObservedAt}
 	if err := p.retry(ctx, func(ctx context.Context) error { return p.Store.Confirm(ctx, mark) }, p.Transient); err != nil {
 		return err
 	}
@@ -185,6 +185,7 @@ func (p *Processor) retry(ctx context.Context, fn func(context.Context) error, c
 // Larger records stop the consumer for operator recovery from the retained
 // source; silently truncating and committing would permanently lose bytes.
 func quarantine(m Message, reason string) (Record, error) {
+	topic := transportTopic(m)
 	if len(m.Value) > maxQuarantineRawBytes {
 		return Record{}, fmt.Errorf("%w: %d > %d bytes at %s/%d@%d", errQuarantinePayloadTooLarge, len(m.Value), maxQuarantineRawBytes, m.Topic, m.Partition, m.Offset)
 	}
@@ -196,7 +197,7 @@ func quarantine(m Message, reason string) (Record, error) {
 		Offset    int64  `json:"source_offset"`
 		Raw       []byte `json:"raw_base64"`
 		Truncated bool   `json:"truncated"`
-	}{reason, consumerGroup, m.Topic, m.Partition, m.Offset, m.Value, false})
+	}{reason, consumerGroup, topic, m.Partition, m.Offset, m.Value, false})
 	if err != nil {
 		return Record{}, err
 	}
@@ -205,5 +206,12 @@ func quarantine(m Message, reason string) (Record, error) {
 	if json.Unmarshal(m.Value, &e) == nil && history.ValidID(str(e, fieldTenant)) {
 		tenant = str(e, fieldTenant)
 	}
-	return Record{Topic: topicQuarantine, Key: []byte(fmt.Sprintf("%s:%d:%d", m.Topic, m.Partition, m.Offset)), Value: body, Headers: map[string]string{fieldTenant: tenant, "consumer": consumerGroup}}, nil
+	return Record{Topic: topicQuarantine, Key: []byte(fmt.Sprintf("%s:%d:%d", topic, m.Partition, m.Offset)), Value: body, Headers: map[string]string{fieldTenant: tenant, "consumer": consumerGroup}}, nil
+}
+
+func transportTopic(m Message) string {
+	if m.TransportTopic != "" {
+		return m.TransportTopic
+	}
+	return m.Topic
 }

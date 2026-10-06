@@ -59,6 +59,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    {{- /* Keep namespaceSelector and podSelector in the same peer: both must match. */}}
     {{- range .Values.networkPolicy.egressServices }}
     - to:
         - namespaceSelector:

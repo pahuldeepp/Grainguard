@@ -35,11 +35,13 @@ data "aws_iam_policy_document" "ebs_csi_pod_identity" {
 }
 
 resource "aws_iam_role" "ebs_csi" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   name               = "${substr(var.cluster_name, 0, 45)}-${substr(sha256(var.cluster_name), 0, 8)}-ebs"
   assume_role_policy = data.aws_iam_policy_document.ebs_csi_pod_identity.json
 }
 
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   role       = aws_iam_role.ebs_csi.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2"
 }
@@ -51,11 +53,24 @@ resource "aws_eks_addon" "ebs_csi" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
   preserve                    = false
+  configuration_values = jsonencode({
+    controller = {
+      extraVolumeTags = {
+        Project     = "GreenGuard"
+        Environment = var.environment
+        Cell        = var.cluster_name
+        Lifecycle   = "Disposable"
+        ManagedBy   = "Terraform"
+      }
+    }
+  })
 
   pod_identity_association {
     service_account = "ebs-csi-controller-sa"
     role_arn        = aws_iam_role.ebs_csi.arn
   }
 
-  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy_attachment.ebs_csi]
+  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy_attachment.ebs_csi,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }

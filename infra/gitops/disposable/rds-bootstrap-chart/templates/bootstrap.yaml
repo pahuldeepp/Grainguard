@@ -3,11 +3,20 @@
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.caSecret) }}{{ fail "caSecret must be a Kubernetes Secret name" }}{{ end }}
 {{- if not (and (le (len .Values.name) 46) (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.name)) }}{{ fail "name must be a Kubernetes name" }}{{ end }}
 {{- if not (kindIs "bool" .Values.operationalOnly) }}{{ fail "operationalOnly must be boolean" }}{{ end }}
+{{- if not (kindIs "bool" .Values.managedDex) }}{{ fail "managedDex must be boolean" }}{{ end }}
 {{- if and .Values.operationalOnly (not .Values.rdsHost) }}{{ fail "operationalOnly requires an explicit RDS endpoint" }}{{ end }}
+{{- if .Values.operationalOnly }}
+{{- if gt (len .Values.name) 40 }}{{ fail "operational bootstrap name is too long for the versioned tenant login Job" }}{{ end }}
+{{- $shardID := regexFind "s[1-4]" .Values.name }}
+{{- if not $shardID }}{{ fail "operational bootstrap name must identify one shard" }}{{ end }}
+{{- if ne .Values.tenantBootstrapSecret (printf "greenguard-%s-tenant-bootstrap" $shardID) }}{{ fail "operational shard bootstrap requires its own dedicated tenant-bootstrap Secret" }}{{ end }}
+{{- if not (regexMatch "^[A-Za-z0-9-]{1,64}$" .Values.tenantBootstrapVersion) }}{{ fail "tenant-bootstrap Secret version is required to reconcile credential rotation" }}{{ end }}
+{{- if ne .Values.tenantBootstrapRole (printf "tenant_bootstrap_%s" $shardID) }}{{ fail "tenant-bootstrap login must be the exact shard-specific constrained role" }}{{ end }}
+{{- else if or .Values.tenantBootstrapSecret .Values.tenantBootstrapVersion .Values.tenantBootstrapRole }}{{ fail "central bootstrap must not receive operational tenant-bootstrap credentials" }}{{ end }}
 {{- if and .Values.rdsHost (not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" .Values.rdsHost)) }}{{ fail "rdsHost must be a validated RDS endpoint" }}{{ end }}
 {{- $sql := .Files.Get "files/init-databases.sql" }}
 {{- if not $sql }}{{ fail "RDS bootstrap SQL is missing" }}{{ end }}
-{{- $revision := sha256sum (printf "%s\n%s\n%t\n%s\n%s\n%s" .Values.image $sql .Values.operationalOnly .Values.credentialSecret .Values.caSecret .Values.rdsHost) | trunc 16 }}
+{{- $revision := sha256sum (printf "%s\n%s\n%t\n%t\n%s\n%s\n%s" .Values.image $sql .Values.operationalOnly .Values.managedDex .Values.credentialSecret .Values.caSecret .Values.rdsHost) | trunc 16 }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -43,7 +52,7 @@ spec:
           image: {{ .Values.image | quote }}
           imagePullPolicy: IfNotPresent
           command: ["psql"]
-          args: ["-X", "-v", "ON_ERROR_STOP=1", "-v", "GG_RDS=1", {{ if .Values.operationalOnly }}"-v", "GG_OPERATIONAL_ONLY=1", {{ end }}"-f", "/bootstrap/init-databases.sql"]
+          args: ["-X", "-v", "ON_ERROR_STOP=1", "-v", "GG_RDS=1", {{ if .Values.operationalOnly }}"-v", "GG_OPERATIONAL_ONLY=1", {{ end }}{{ if .Values.managedDex }}"-v", "GG_MANAGED_DEX=1", {{ end }}"-f", "/bootstrap/init-databases.sql"]
           envFrom:
             - secretRef:
                 name: {{ .Values.credentialSecret | quote }}

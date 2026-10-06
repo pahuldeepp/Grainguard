@@ -39,22 +39,34 @@ abort 'Service name drifted' unless service.dig('metadata', 'name') == expected
 abort 'Istio ingress pod selector missing' unless policy.dig('spec', 'ingress').any? { |i| i.fetch('from', []).any? { |from| from.dig('namespaceSelector', 'matchLabels', 'kubernetes.io/metadata.name') == 'istio-system' && from.dig('podSelector', 'matchLabels', 'app') == 'istio-ingressgateway' } }
 RUBY
 done
-ruby <<'RUBY'
+helm template edge infra/gitops/disposable/edge-routing-chart --set-string cell=gg-disposable-test --set-string accountId=123456789012 --set-string region=us-east-1 --set-string targetGroupARN=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/gg-test/0123456789abcdef > "$rendered"
+ruby - "$rendered" <<'RUBY'
 require 'yaml'
-objects = YAML.load_stream(File.read('infra/gitops/disposable/mesh-edge-routing.yaml')).compact
-abort 'missing Istio routes' unless objects.map { |o| o['kind'] }.sort == %w[DestinationRule DestinationRule Gateway VirtualService]
+objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+abort 'missing deployable edge resources' unless objects.map { |o| o['kind'] }.sort == %w[DestinationRule DestinationRule DestinationRule Gateway TargetGroupBinding VirtualService]
+binding = objects.find { |o| o['kind'] == 'TargetGroupBinding' }
+abort 'wrong target binding' unless binding.dig('spec', 'serviceRef') == {'name'=>'istio-ingressgateway', 'port'=>80} && binding.dig('spec', 'targetType') == 'ip'
+abort 'unexpected security group management' if binding.dig('spec', 'networking')
+abort 'cell ownership missing' unless objects.all? { |o| o.dig('metadata', 'labels', 'greenguard.io/cell') == 'gg-disposable-test' }
 gateway = objects.find { |o| o['kind'] == 'Gateway' }
 virtual = objects.find { |o| o['kind'] == 'VirtualService' }
-abort 'wrong ingress selector' unless gateway.dig('metadata', 'namespace') == 'istio-system' && gateway.dig('spec', 'selector', 'app') == 'istio-ingressgateway'
-abort 'wrong gateway binding' unless virtual.dig('metadata', 'namespace') == 'greenguard' && virtual.dig('spec', 'gateways') == ['istio-system/greenguard-edge']
+abort 'wrong ingress selector' unless gateway.dig('spec', 'selector', 'app') == 'istio-ingressgateway'
+abort 'wrong gateway binding' unless virtual.dig('spec', 'gateways') == ['istio-system/greenguard-edge']
 routes = virtual.dig('spec', 'http')
-%w[bff dashboard].each_with_index do |name, index|
-  route = routes.fetch(index)
-  abort "#{name} header route drifted" unless route['name'] == name && route.dig('match', 0, 'headers', 'x-greenguard-origin', 'exact') == name
-  expected = "#{name}-greenguard-#{name}.greenguard.svc.cluster.local"
-  abort "#{name} destination drifted" unless route.dig('route', 0, 'destination', 'host') == expected && route.dig('route', 0, 'destination', 'port', 'number') == 80
+webhook = routes.fetch(0)
+abort 'webhook routing drifted' unless webhook['name'] == 'stripe-webhook' && webhook.dig('match',0,'uri','exact') == '/webhooks/stripe' && webhook.dig('match',0,'headers','x-greenguard-origin','exact') == 'bff' && webhook.dig('route',0,'destination','host') == 'billing-service.greenguard.svc.cluster.local' && webhook.dig('route',0,'destination','port','number') == 3021
+%w[bff dashboard].each_with_index do |name,index|
+  route = routes.fetch(index+1)
+  abort "#{name} header route drifted" unless route['name'] == name && route.dig('match',0,'headers','x-greenguard-origin','exact') == name
+  abort "#{name} destination drifted" unless route.dig('route',0,'destination','host') == "#{name}-greenguard-#{name}.greenguard.svc.cluster.local" && route.dig('route',0,'destination','port','number') == 80
 end
-abort 'unknown origin must fail closed' unless routes.fetch(2).dig('directResponse', 'status') == 404
-abort 'destinations must use mTLS' unless objects.select { |o| o['kind'] == 'DestinationRule' }.all? { |o| o.dig('spec', 'trafficPolicy', 'tls', 'mode') == 'ISTIO_MUTUAL' }
+abort 'unknown origin must fail closed' unless routes.fetch(3).dig('directResponse','status') == 404
+abort 'destinations must use mTLS' unless objects.select { |o| o['kind'] == 'DestinationRule' }.all? { |o| o.dig('spec','trafficPolicy','tls','mode') == 'ISTIO_MUTUAL' }
 RUBY
-echo 'TargetGroupBinding and Istio edge routing contract passed.'
+for arn in arn:aws:elasticloadbalancing:us-east-1:999999999999:targetgroup/gg-test/0123456789abcdef arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/gg-test/0123456789abcdef; do
+  if helm template edge infra/gitops/disposable/edge-routing-chart --set-string cell=gg-disposable-test --set-string accountId=123456789012 --set-string region=us-east-1 --set-string "targetGroupARN=$arn" > /dev/null 2>&1; then
+    echo 'cross-account or cross-region target group accepted' >&2
+    exit 1
+  fi
+done
+echo 'TargetGroupBinding and deployed Istio edge routing contract passed.'

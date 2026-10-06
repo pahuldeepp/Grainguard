@@ -60,6 +60,7 @@ async function api(
   readAuthority?: ReadLeaseAuthority,
 ) {
   const server = createApp({
+    historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
     verify: async (auth) => principal(auth === "B" ? B : A),
     backends,
     readAuthority,
@@ -77,6 +78,14 @@ async function api(
   }
 }
 const base = {
+  deviceRisk: async () => ({
+    status: "no_assessments",
+    assessments: [],
+    truncated: false,
+    validity: "unverified",
+    actionable: false,
+    caveat: "fixture",
+  }),
   deviceCurrent: async () => ({ device: null, latestReading: null }),
   device: async () => null,
   devices: async () => [],
@@ -415,6 +424,7 @@ test("expired response budget refuses final admission and releases its lease", a
 test("unsupported cold-store minimum rejects before primary entitlement lookup", async () => {
   let lookups = 0;
   const server = createApp({
+    historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
     verify: async () => principal(A),
     backends: base,
     entitlements: {

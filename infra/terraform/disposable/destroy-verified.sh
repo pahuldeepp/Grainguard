@@ -274,6 +274,7 @@ printf '%s' "$manifest_json" | python3 -c 'import json,sys; print("\n".join(json
 # destroy provisioner alone can strand controller-owned LBs and EBS volumes.
 # The hook verifies AWS account and Kubernetes access before any deletion.
 GG_CLUSTER="$cluster" GG_REGION="$region" GG_ENVIRONMENT="$environment" GG_ACCOUNT="$account" \
+  GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}" \
   GG_MASTER_SECRET_ARN="$master_secret_arn" \
   GG_PV_INVENTORY_FILE="$pv_inventory_file" \
   "$here/pre-destroy.sh"

@@ -26,6 +26,11 @@ EDGES = [
   %w[bff workflow-alerts 3004],
   %w[bff saga-api 8092],
   %w[bff tenant-control-plane 3010],
+  %w[bff billing-service 3021],
+  %w[bff jobs-worker 8095],
+  %w[bff notification-service 8096],
+  %w[billing-service tenant-control-plane 3010],
+  %w[jobs-worker tenant-control-plane 3010],
   %w[gateway tenant-control-plane 3010],
   %w[read-api tenant-control-plane 3010],
   %w[device-service tenant-control-plane 3010],
@@ -54,7 +59,9 @@ DATA_EDGES = {
   'tenant-control-plane' => %w[kafka],
   'jobs-worker' => %w[rabbit kafka],
   'cassandra-writer' => %w[kafka],
-  'search-indexer' => %w[kafka]
+  'search-indexer' => %w[kafka],
+  'telemetry-s3-archive' => %w[kafka],
+  'telemetry-clickhouse-sink' => %w[kafka]
 }.freeze
 DATA_PEERS = { 'kafka' => ['kafka', 29092], 'redis' => ['redis-cluster', 6379],
                'rabbit' => ['rabbitmq', 5672], 'mqtt' => ['greenguard-mqtt', 8883],
@@ -154,9 +161,9 @@ end
 heartbeat = rendered.fetch('entitlement-heartbeat').fetch(:workload)
 heartbeat_container = heartbeat.dig('spec', 'template', 'spec', 'containers')&.first
 heartbeat_env_from = Array(heartbeat_container && heartbeat_container['envFrom'])
-abort 'entitlement heartbeat must use the dedicated billing-service-config Secret' unless
+abort 'entitlement heartbeat must use the dedicated entitlement-heartbeat-config Secret' unless
   heartbeat.dig('spec', 'template', 'spec', 'serviceAccountName') == 'entitlement-heartbeat' &&
-    heartbeat_env_from.any? { |source| source.dig('secretRef', 'name') == 'billing-service-config' } &&
+    heartbeat_env_from.any? { |source| source.dig('secretRef', 'name') == 'entitlement-heartbeat-config' } &&
     Array(heartbeat_container && heartbeat_container['args']).include?('packages/entitlements/dist/heartbeat.js')
 contacts = rendered.fetch('notification-contacts-projector').fetch(:workload)
 contacts_container = contacts.dig('spec', 'template', 'spec', 'containers')&.first
@@ -217,6 +224,11 @@ _, rejected_error, rejected_status = Open3.capture3(
 abort 'service chart accepted world-wide egress' if rejected_status.success? ||
   !rejected_error.include?('networkPolicy.egressCIDRs must not permit all destinations')
 terraform = gitops_terraform
+archive_profile = YAML.safe_load_file(File.join(ROOT, 'infra/helm/greenguard-service/values/telemetry-s3-archive.yaml'))
+abort 'telemetry archive must get bounded HTTPS egress from the regional S3 prefix list' unless
+  terraform.include?('release.name == "telemetry-s3-archive"') &&
+    terraform.include?('data.aws_prefix_list.s3[0].cidr_blocks') &&
+    archive_profile.dig('networkPolicy', 'egressCIDRs') == []
 abort 'contacts projector must use the regional DynamoDB managed prefix list for bounded TLS egress' unless
   terraform.include?('data.aws_prefix_list.dynamodb[0].cidr_blocks') &&
     terraform.include?('release.name == "notification-contacts-projector"')

@@ -194,6 +194,19 @@ test("tenant requests select private pools independently with no default or clie
   assert.equal(second.database.shard, "s4");
   assert.equal(ownerDatabases(db).length, 4);
   assert.throws(() => db.shard, /owner_tenant_required/);
+  const metadata = db as unknown as Record<string, unknown>;
+  for (const key of [
+    "then",
+    "constructor",
+    "onModuleInit",
+    "onApplicationBootstrap",
+    "onModuleDestroy",
+    "beforeApplicationShutdown",
+    "onApplicationShutdown",
+  ])
+    assert.equal(metadata[key], undefined);
+  for (const key of ["query", "$transaction", "$queryRaw", "connect"])
+    assert.throws(() => metadata[key], /owner_tenant_required/);
   assert.equal(
     (await resolveOwnerDatabase(first.database, b)).database.shard,
     "s4",

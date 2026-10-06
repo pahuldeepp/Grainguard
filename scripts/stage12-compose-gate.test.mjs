@@ -79,9 +79,14 @@ test("recursive make loads the explicitly selected scratch Makefile", () => {
       "",
     ].join("\n");
     writeFileSync(absoluteMakefile, fixture, { mode: 0o600 });
+    // MAKEFILE_LIST is exported by the parent product Makefile. With -e it
+    // would override the scratch make's own list, hiding what it actually loads.
+    const fixtureEnv = { ...process.env };
+    delete fixtureEnv.MAKEFILE_LIST;
     const result = spawnSync("make", ["-f", relativeMakefile, "recurse"], {
       cwd: root,
       encoding: "utf8",
+      env: fixtureEnv,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(result.stdout.includes(`loaded= ${relativeMakefile}`));

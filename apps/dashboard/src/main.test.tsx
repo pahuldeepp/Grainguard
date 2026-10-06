@@ -7,6 +7,15 @@ import { expect, test, vi } from "vitest";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 test("entry point mounts the app into #root", async () => {
+  // Keep this rendering test independent of a developer's local OIDC config.
+  for (const key of [
+    "VITE_OIDC_AUTHORITY",
+    "VITE_OIDC_CLIENT_ID",
+    "VITE_OIDC_AUDIENCE",
+    "VITE_OIDC_TOKEN_MODE",
+    "VITE_OIDC_RESOURCE",
+  ])
+    vi.stubEnv(key, "");
   vi.stubGlobal(
     "fetch",
     vi.fn(() => Promise.reject(new Error("offline"))),

@@ -75,7 +75,7 @@ func createVersionSchema(ctx context.Context, tx pgx.Tx, schema string) error {
 }
 
 func applyVersionFiles(ctx context.Context, tx pgx.Tx, schema string) error {
-	for _, file := range []string{"000001_projection.up.sql", "000002_history_retention.up.sql", "000003_replay_manifest.up.sql", "000005_global_replay.up.sql", "000016_domain_product.up.sql", "000023_history_maintenance_runtime.up.sql"} {
+	for _, file := range []string{"000001_projection.up.sql", "000002_history_retention.up.sql", "000003_replay_manifest.up.sql", "000005_global_replay.up.sql", "000016_domain_product.up.sql", "000023_history_maintenance_runtime.up.sql", "000026_read_history_prune_guard.up.sql", "000027_history_maintenance_rls.up.sql", "000028_risk_invalidation_ledger.up.sql", "000031_history_repair_source.up.sql", "000032_history_prune_content_hash.up.sql"} {
 		body, readErr := files.ReadFile(file)
 		if readErr != nil {
 			return readErr

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: greenguard-edge-routing
+version: 0.1.0
+type: application

@@ -79,10 +79,21 @@ function asText(value: unknown): string {
 }
 
 export function operationCharge(body: Record<string, unknown>): {
-  group: "read" | "provisioning" | "alertMutation";
+  group: "read" | "assistant" | "provisioning" | "alertMutation";
   cost: number;
 } {
   const query = body.query;
+  if (query === "knowledgeQuery") return { group: "assistant", cost: 5 };
+  if (query === "knowledgeUpload") return { group: "read", cost: 10 };
+  if (query === "assistantSuggestionList") return { group: "read", cost: 1 };
+  if (
+    query === "assistantConversationList" ||
+    query === "assistantConversationRead"
+  )
+    return { group: "read", cost: 2 };
+  if (query === "assistantSuggestionUsage") return { group: "read", cost: 5 };
+  if (query === "assistantConversationWrite")
+    return { group: "assistant", cost: 5 };
   if (typeof query !== "string") throw new Error("unresolved_operation");
   const name = hashes[operationHash(query)];
   if (!name) throw new Error("unregistered_operation_cost");
@@ -129,17 +140,27 @@ export function redisRateLimiter(store: RateStore): RateLimiter {
       const budgets =
         group === "read"
           ? [1000, 1000 / 60, 100, 10]
-          : group === "provisioning"
-            ? [20, 20 / 60, 5, 5 / 60]
-            : [60, 1, 20, 1 / 3];
+          : group === "assistant"
+            ? [1000, 1000 / 60, 150, 10]
+            : group === "provisioning"
+              ? [20, 20 / 60, 5, 5 / 60]
+              : [60, 1, 20, 1 / 3];
       if (principal.keyId) {
         const key = createHash("sha256").update(principal.keyId).digest("hex");
         keys.push(`rate:{${tenant}}:${group}:key:${key}`);
         // Per-key capacity stays below tenant capacity. An exhausted key does
         // not spend a tenant or another key's tokens because the Lua check is atomic.
         budgets.push(
-          group === "read" ? 40 : group === "provisioning" ? 5 : 10,
-          group === "read" ? 4 : group === "provisioning" ? 5 / 60 : 1 / 6,
+          group === "read" || group === "assistant"
+            ? 40
+            : group === "provisioning"
+              ? 5
+              : 10,
+          group === "read" || group === "assistant"
+            ? 4
+            : group === "provisioning"
+              ? 5 / 60
+              : 1 / 6,
         );
       }
       const reply = await store.eval(TOKEN_BUCKET, {

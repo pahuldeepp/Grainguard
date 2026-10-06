@@ -16,7 +16,7 @@ func buildShardedApp(getenv func(string) string, window time.Duration, brokers s
 	if err != nil {
 		return nil, err
 	}
-	schema, group, err := writerTarget(getenv("PROJECTION_WRITE_SCHEMA"), "greenguard_read", "projection_app")
+	schema, group, err := configuredWriterTarget(getenv, "greenguard_read", "projection_app")
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -50,13 +50,13 @@ func buildShardedApp(getenv func(string) string, window time.Duration, brokers s
 		db.Close()
 		return nil, err
 	}
-	kafka, err := newKafka(strings.Split(brokers, ","), group)
+	kafka, err := newKafkaWithPrefix(strings.Split(brokers, ","), group, getenv("KAFKA_TOPIC_PREFIX"))
 	if err != nil {
 		db.Close()
 		shutdownTracing(provider)
 		return nil, err
 	}
-	store := &Store{DB: db, Schema: schema, HistoryWindow: window, ShardLeases: leases}
+	store := &Store{DB: db, TopicPrefix: getenv("KAFKA_TOPIC_PREFIX"), Schema: schema, HistoryWindow: window, ShardLeases: leases}
 	p := &Processor{Tracer: provider.Tracer(consumerName), Source: kafka, Sink: kafka, Schemas: schemas, Apply: store.Apply, Heartbeat: store.Heartbeat, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 20 * time.Second}
 	a := &app{shards: db, processor: p, historyOutOfWindow: store.HistoryOutOfWindow.Load, feedAge: store.FeedAge,
 		ping: func(ctx context.Context) error {
@@ -101,7 +101,7 @@ func (s *Store) forEachInfrastructure(ctx context.Context, fn func(*Store) error
 		return fn(s)
 	}
 	return db.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
-		local := &Store{DB: db.InfrastructureDB(shard), Schema: s.Schema, HistoryWindow: s.HistoryWindow, Lease: s.ShardLeases[shard]}
+		local := &Store{DB: db.InfrastructureDB(shard), Schema: s.Schema, TopicPrefix: s.TopicPrefix, HistoryWindow: s.HistoryWindow, Lease: s.ShardLeases[shard]}
 		return fn(local)
 	})
 }

@@ -18,6 +18,7 @@ const streamTelemetry = "telemetry"
 
 type Store struct {
 	DB                 TxStarter
+	TopicPrefix        string
 	Schema             string // empty uses the live public schema
 	HistoryWindow      time.Duration
 	Lease              *writerLease
@@ -98,7 +99,7 @@ func (s *Store) applyInTx(ctx context.Context, tx pgx.Tx, m Message, e map[strin
 }
 func insertInbox(ctx context.Context, tx pgx.Tx, m Message, e map[string]any) error {
 	tag, err := tx.Exec(ctx, `INSERT INTO consumer_inbox(consumer_name,tenant_id,event_id,source_topic,source_partition,source_offset,event)
- VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(consumer_name,tenant_id,event_id) DO NOTHING`, consumerName, e[fieldTenant], e[fieldEvent], m.Topic, m.Partition, m.Offset, string(m.Value))
+ VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(consumer_name,tenant_id,event_id) DO NOTHING`, consumerName, e[fieldTenant], e[fieldEvent], m.sourceTopic(), m.Partition, m.Offset, string(m.Value))
 	if err != nil {
 		return err
 	}
@@ -123,6 +124,8 @@ func applyEffect(ctx context.Context, tx pgx.Tx, e map[string]any, window time.D
 		return applyCableLayout(ctx, tx, e)
 	case typeRiskPolicy:
 		return applyRiskPolicy(ctx, tx, e)
+	case typeRiskInvalidated:
+		return applyRiskInvalidation(ctx, tx, e)
 	case typeRiskAssessed:
 		return applyRiskAssessment(ctx, tx, e)
 	}
@@ -421,6 +424,15 @@ func closePolicyInterval(ctx context.Context, tx pgx.Tx, tenant, policyID, versi
 
 func applyRiskAssessment(ctx context.Context, tx pgx.Tx, e map[string]any) error {
 	p := e[fieldPayload].(map[string]any)
+	var mismatch bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM risk_assessment_invalidations i WHERE i.tenant_id=$1 AND i.assessment_id=$2
+ AND (i.device_id IS DISTINCT FROM $3::uuid OR i.assessment_version IS DISTINCT FROM $4::bigint OR i.payload->>'reading_id' IS DISTINCT FROM $5 OR i.payload->>'source_event_id' IS DISTINCT FROM $6 OR i.payload->>'bin_id' IS DISTINCT FROM $7 OR i.payload->>'previous_lot_id' IS DISTINCT FROM $8))`, e[fieldTenant], p["assessment_id"], p["device_id"], e[fieldVersion], p["reading_id"], p["source_event_id"], p["bin_id"], p["lot_id"]).Scan(&mismatch); err != nil {
+		return err
+	}
+	if mismatch {
+		return fail(reasonSchema, "assessment identity conflicts with stored invalidation")
+	}
+
 	reasons, err := json.Marshal(p["reasons"])
 	if err != nil {
 		return err
@@ -465,7 +477,7 @@ func number(v any) any {
 func saveCheckpoint(ctx context.Context, tx pgx.Tx, m Message, e map[string]any) error {
 	_, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset,last_event_occurred_at)
  VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,last_event_occurred_at=EXCLUDED.last_event_occurred_at,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, e[fieldTenant], consumerName, m.Topic, m.Partition, m.Offset, e[fieldOccurred])
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, e[fieldTenant], consumerName, m.sourceTopic(), m.Partition, m.Offset, e[fieldOccurred])
 	return err
 }
 
@@ -484,11 +496,32 @@ func saveVersionFrontier(ctx context.Context, tx pgx.Tx, m Message, eventTenant 
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset) VALUES($1,$2,$3,$4,$5)
  ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.Topic, m.Partition, m.Offset); err != nil {
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.sourceTopic(), m.Partition, m.Offset); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", eventTenant); err != nil {
 		return err
 	}
 	return admitProjectionTenant(ctx, tx, eventTenant)
+}
+
+// Withdrawals remain immutable regardless of assessment arrival order. The
+// surrounding tenant watermark lock serializes this check with assessment writes.
+func applyRiskInvalidation(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	body, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	var mismatch bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM risk_assessments a WHERE a.tenant_id=$1 AND a.assessment_id=$2
+ AND (a.device_id IS DISTINCT FROM $3::uuid OR a.assessment_version IS DISTINCT FROM $4::bigint OR a.reading_id IS DISTINCT FROM $5::uuid OR a.source_event_id IS DISTINCT FROM $6::uuid OR a.bin_id IS DISTINCT FROM $7::uuid OR a.lot_id IS DISTINCT FROM $8::uuid))`, e[fieldTenant], p["assessment_id"], p["device_id"], p["assessment_version"], p["reading_id"], p["source_event_id"], p["bin_id"], p["previous_lot_id"]).Scan(&mismatch)
+	if err != nil {
+		return err
+	}
+	if mismatch {
+		return fail(reasonSchema, "invalidation target identity conflicts with stored assessment")
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO risk_assessment_invalidations(tenant_id,event_id,assessment_id,assessment_version,device_id,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`, e[fieldTenant], e[fieldEvent], p["assessment_id"], p["assessment_version"], p["device_id"], string(body), e[fieldOccurred])
+	return err
 }

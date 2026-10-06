@@ -200,6 +200,7 @@ def validate_profiles(expected):
         "CONTROL_DATABASE_URL": ("control_app", "greenguard_control", "CONTROL_DB_PASSWORD"),
         "CONTROL_ENTITLEMENT_PROJECTOR_URL": ("control_entitlement_projector", "greenguard_control", "CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD"),
         "BILLING_DATABASE_URL": ("billing_app", "greenguard_billing", "BILLING_DB_PASSWORD"),
+        "CONTROL_BOOTSTRAP_DATABASE_URL": ("tenant_bootstrap_worker", "greenguard_control", "CONTROL_BOOTSTRAP_WORKER_PASSWORD"),
     }
     for name, record in expected.items():
         for key, value in record["data"].items():
@@ -335,6 +336,26 @@ def validate_supplemental_profiles(scope, expected):
                     parsed = urlparse(raw)
                     if parsed.scheme != "postgresql" or parsed.hostname != host or parsed.port != 5432 or unquote(parsed.username or "") != role or unquote(parsed.password or "") != bootstrap[password_key] or parsed.path != "/" + profile["database"] or parse_qs(parsed.query) != {"sslmode": ["verify-full"], "sslrootcert": ["/etc/greenguard/rds/ca.pem"]}:
                         raise RuntimeError(f"{name}: shard role/endpoint/TLS profile mismatch")
+        elif re.fullmatch(r"greenguard-s[1-4]-tenant-bootstrap", name):
+            shard_id = name.split("-")[1]
+            physical = scope["shard_bootstraps"][f"greenguard-{shard_id}-rds-bootstrap"]
+            data = record["data"]
+            if set(data) != {"registry.json", "TENANT_BOOTSTRAP_PASSWORD"} or len(data["TENANT_BOOTSTRAP_PASSWORD"]) < 32:
+                raise RuntimeError(f"{name}: dedicated tenant bootstrap key contract is invalid")
+            payload = json.loads(data["registry.json"])
+            tenant_owners = {owner: profile for owner, profile in owners.items() if not profile["central"]}
+            if set(payload) != {"version", "shardId", "shardIncarnation", "caCertPath", "owners"} or payload["version"] != 1 or payload["shardId"] != shard_id or payload["shardIncarnation"] != physical["incarnation"] or payload["caCertPath"] != "/var/run/greenguard/tenant-bootstrap/ca/ca.crt" or set(payload["owners"]) != set(tenant_owners):
+                raise RuntimeError(f"{name}: tenant bootstrap registry identity/owner contract mismatch")
+            bootstrap = expected[f"greenguard-{shard_id}-rds-bootstrap"]["data"]
+            if data["TENANT_BOOTSTRAP_PASSWORD"] in bootstrap.values():
+                raise RuntimeError(f"{name}: tenant bootstrap password must be independent of RDS and application passwords")
+            for owner, profile in tenant_owners.items():
+                entry = payload["owners"][owner]
+                if set(entry) != {"url"}:
+                    raise RuntimeError(f"{name}: {owner} connection contract mismatch")
+                parsed = urlparse(entry["url"])
+                if parsed.scheme != "postgresql" or parsed.hostname != physical["host"] or parsed.port != 5432 or unquote(parsed.username or "") != f"tenant_bootstrap_{shard_id}" or unquote(parsed.password or "") != data["TENANT_BOOTSTRAP_PASSWORD"] or parsed.path != "/" + profile["database"] or parse_qs(parsed.query) != {"sslmode": ["verify-full"], "sslrootcert": ["/var/run/greenguard/tenant-bootstrap/ca/ca.crt"]}:
+                    raise RuntimeError(f"{name}: {owner} endpoint/login/TLS profile mismatch")
 
 
 def apply(scope):

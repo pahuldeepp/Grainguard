@@ -24,7 +24,7 @@ type ReadSession = AccessSource & {
 export const mobileReadOperations = {
   readingById: `query ReadingById($id: ID!, $minimumConsistency: String) { reading(id: $id, minimumConsistency: $minimumConsistency) { consistencyToken readingId deviceId eventId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
   deviceCurrent: `query DeviceCurrent($id: ID!, $minimumConsistency: String) { device(id: $id, minimumConsistency: $minimumConsistency) { consistencyToken deviceId siteId binId name status projectedAt } latestReading(deviceId: $id, minimumConsistency: $minimumConsistency) { consistencyToken readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
-  deviceHistory: `query DeviceHistory($id: ID!, $from: String!, $to: String!, $limit: Int!, $minimumConsistency: String) { readingHistory(deviceId: $id, from: $from, to: $to, limit: $limit, minimumConsistency: $minimumConsistency) { consistencyToken readingId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`,
+  deviceHistory: `query DeviceHistory($id: ID!, $from: String!, $to: String!, $limit: Int!, $after: String, $minimumConsistency: String) { readingHistory(deviceId: $id, from: $from, to: $to, limit: $limit, after: $after, minimumConsistency: $minimumConsistency) { items { consistencyToken readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } nextCursor sources { postgres cassandra } } }`,
   deviceSearch: `query DeviceSearch($query: String!, $limit: Int!, $minimumConsistency: String) { searchDevices(query: $query, limit: $limit, minimumConsistency: $minimumConsistency) { consistencyToken deviceId siteId binId name status projectedAt } }`,
   readingRollups: `query ReadingRollups($deviceId: ID!, $from: String!, $to: String!, $limit: Int!, $bucket: String!, $minimumConsistency: String) { readingRollups(deviceId: $deviceId, from: $from, to: $to, limit: $limit, bucket: $bucket, minimumConsistency: $minimumConsistency) { consistencyToken bucketStart sampleCount avgTemperatureC avgRelativeHumidityPercent } }`,
   binReadingsLatest: `query BinReadingsLatest($binId: ID!, $minimumConsistency: String) { binReadingsLatest(binId: $binId, minimumConsistency: $minimumConsistency) { consistencyToken bin { binId name siteName } devices { deviceId status } devicesTruncated readings { metric value observedAt ageSeconds } layout { sensorId position depthM label } sensorReadings { sensorId metric value observedAt position depthM label } policies { policyId policyVersion grainType calibrated status measurementThresholds riskThresholds } freshness } }`,
@@ -310,10 +310,28 @@ export class MobileReadClient {
     limit: number,
     minimumConsistency?: string,
   ) {
+    return (await this.historyPage(id, from, to, limit, minimumConsistency))
+      .items;
+  }
+
+  async historyPage(
+    id: string,
+    from: string,
+    to: string,
+    limit: number,
+    minimumConsistency?: string,
+    after?: string,
+  ) {
     return (
-      await this.execute<{ readingHistory: MobileReadingView[] }>(
+      await this.execute<{
+        readingHistory: {
+          items: MobileReadingView[];
+          nextCursor: string | null;
+          sources: { postgres: boolean; cassandra: boolean };
+        };
+      }>(
         mobileReadOperations.deviceHistory,
-        { id, from, to, limit },
+        { id, from, to, limit, ...(after ? { after } : {}) },
         minimumConsistency,
         false,
       )

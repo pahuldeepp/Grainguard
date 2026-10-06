@@ -170,6 +170,7 @@ export interface Page {
   limit: number;
   after?: string;
   state?: EpisodeState;
+  deviceId?: string;
 }
 
 // Keyset pagination on episode_id; the tenant filter is explicit on top of RLS.
@@ -180,9 +181,18 @@ export async function listEpisodes(
 ): Promise<Episode[]> {
   const after = page.after ?? "00000000-0000-0000-0000-000000000000";
   const rows = await tx.$queryRaw<EpisodeRow[]>`
-    SELECT * FROM alert_episodes
-     WHERE tenant_id = ${tenantId}::uuid AND episode_id > ${after}::uuid
+    SELECT e.* FROM alert_episodes e
+     WHERE e.tenant_id = ${tenantId}::uuid AND episode_id > ${after}::uuid
        AND (${page.state ?? null}::text IS NULL OR state = ${page.state ?? null}::text)
+     AND (${page.deviceId ?? null}::text IS NULL OR EXISTS (
+         SELECT 1 FROM consumer_inbox i
+          WHERE i.tenant_id = ${tenantId}::uuid AND i.tenant_id = e.tenant_id
+            AND i.consumer_name = 'workflow-alerts.risk-assessed'
+            AND i.event->>'event_type' = 'risk.assessed'
+            AND i.event->>'tenant_id' = ${tenantId}::text
+            AND i.event->'payload'->>'assessment_id' = e.current_assessment_id::text
+            AND i.event->'payload'->>'device_id' = ${page.deviceId ?? null}::text
+       ))
      ORDER BY episode_id LIMIT ${page.limit}`;
   return rows.map(toEpisode);
 }

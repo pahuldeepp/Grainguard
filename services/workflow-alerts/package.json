@@ -26,7 +26,8 @@
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "@greenguard/kafka-security": "0.1.0"
+    "@greenguard/kafka-security": "0.1.0",
+    "jose": "6.2.12"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

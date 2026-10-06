@@ -10,6 +10,51 @@ def source(name)
   @sources ? @sources.fetch(name) : File.read(File.join(ROOT, name))
 end
 
+def strip_hcl_comments(text)
+  output = +''
+  index = 0
+  quoted = false
+  escaped = false
+  block_comment = false
+  while index < text.length
+    pair = text[index, 2]
+    char = text[index]
+    if block_comment
+      if pair == '*/'
+        block_comment = false
+        index += 2
+      else
+        output << "\n" if char == "\n"
+        index += 1
+      end
+    elsif quoted
+      output << char
+      if escaped
+        escaped = false
+      elsif char == '\\'
+        escaped = true
+      elsif char == '"'
+        quoted = false
+      end
+      index += 1
+    elsif char == '"'
+      quoted = true
+      output << char
+      index += 1
+    elsif char == '#' || pair == '//'
+      index += (char == '#' ? 1 : 2)
+      index += 1 while index < text.length && text[index] != "\n"
+    elsif pair == '/*'
+      block_comment = true
+      index += 2
+    else
+      output << char
+      index += 1
+    end
+  end
+  output
+end
+
 def require_contract(findings, id, file, *markers)
   body = source(file)
   missing = markers.reject { |marker| body.include?(marker) }
@@ -38,9 +83,13 @@ DIRECT_INVENTORY_MARKERS = {
   'aws_cognito_user_pool_domain' => 'cognito-idp describe-user-pool-domain',
   'aws_db_instance' => 'rds describe-db-instances',
   'aws_dynamodb_table' => 'dynamodb describe-table',
+  'aws_eip' => 'ec2 describe-addresses',
   'aws_eks_cluster' => 'eks list-clusters',
+  'aws_internet_gateway' => 'ec2 describe-internet-gateways',
   'aws_lb' => 'elbv2 describe-load-balancers',
+  'aws_nat_gateway' => 'ec2 describe-nat-gateways',
   'aws_s3_bucket' => 's3api list-buckets',
+  'aws_vpc' => 'ec2 describe-vpcs',
   'aws_wafv2_web_acl' => 'wafv2 list-web-acls'
 }.freeze
 
@@ -51,18 +100,19 @@ SUPPORTING_RESOURCE_TYPES = %w[
   aws_lb_listener aws_launch_template aws_route aws_route_table_association
   aws_s3_bucket_ownership_controls aws_s3_bucket_policy
   aws_s3_bucket_public_access_block aws_s3_bucket_server_side_encryption_configuration
+  aws_s3_bucket_versioning
   aws_secretsmanager_secret_version aws_vpc_security_group_egress_rule
   aws_vpc_security_group_ingress_rule
 ].freeze
 
 def aws_resource_inventory_gaps(sources = nil)
   terraform_files = if sources
-    sources.keys.select { |name| name.end_with?('.tf') }
+    sources.keys.select { |name| name.end_with?('.tf') && name != 'scope_override.tf' }
   else
-    Dir.glob(File.join(ROOT, '*.tf')).map { |path| File.basename(path) }
+    Dir.glob(File.join(ROOT, '*.tf')).map { |path| File.basename(path) }.reject { |name| name == 'scope_override.tf' }
   end
   declared = terraform_files.flat_map do |file|
-    source(file).scan(/\bresource\s+"(aws_[^"]+)"\s+"[^"]+"/).flatten
+    strip_hcl_comments(source(file)).scan(/\bresource\s+"(aws_[^"]+)"\s+"[^"]+"/).flatten
   end.uniq
   classified = TAG_INVENTORY_TYPES + SUPPORTING_RESOURCE_TYPES
   gaps = declared - classified
@@ -81,6 +131,53 @@ def aws_resource_inventory_gaps(sources = nil)
   gaps.uniq.sort
 end
 
+# Source-level destroy graph contract. Terraform reverses dependency edges on
+# destroy, so every managed object must depend on the scope-only sentinel, and
+# pre_destroy_cleanup must depend on every other object. The latter makes the
+# cleanup hook run first; the sentinel's destroy hook then runs last.
+def destroy_anchor_graph_findings(sources = nil)
+  previous_sources = @sources
+  @sources = sources if sources
+  terraform_files = if sources
+    sources.keys.select { |name| name.end_with?('.tf') && name != 'scope_override.tf' }
+  else
+    Dir.glob(File.join(ROOT, '*.tf')).map { |path| File.basename(path) }.reject { |name| name == 'scope_override.tf' }
+  end
+  blocks = terraform_files.flat_map do |file|
+    body = strip_hcl_comments(source(file))
+    body.to_enum(:scan, /^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{/).map do
+      match = Regexp.last_match
+      start = match.end(0)
+      finish = body.index(/^\}/, start)
+      finish && ["#{match[1]}.#{match[2]}", body[start...finish]]
+    end.compact
+  end
+  anchor = blocks.select { |label, _| label == 'terraform_data.destroy_inventory_sentinel' }
+  return ['missing_or_duplicate_anchor'] unless anchor.length == 1
+
+  issues = []
+  anchor_body = anchor.first.last
+  input = anchor_body[/\binput\s*=\s*\{(.*?)^\s*\}/m, 1].to_s
+  issues << 'anchor_input_has_resource_reference' if input.match?(/\b(?:aws_[a-z0-9_]+|terraform_data|helm_release)\.[A-Za-z0-9_-]+/)
+  issues << 'anchor_has_create_before_destroy' if anchor_body.match?(/create_before_destroy\s*=\s*true/)
+  blocks.each do |label, body|
+    next if label == 'terraform_data.destroy_inventory_sentinel'
+    depends = strip_hcl_comments(body[/\bdepends_on\s*=\s*\[(.*?)\]/m, 1].to_s)
+    issues << "missing_sentinel_edge:#{label}" unless depends.match?(/\bterraform_data\.destroy_inventory_sentinel\b/)
+    issues << "create_before_destroy:#{label}" if body.match?(/create_before_destroy\s*=\s*true/)
+  end
+  cleanup = blocks.select { |label, _| label == 'terraform_data.pre_destroy_cleanup' }
+  return issues + ['missing_or_duplicate_pre_cleanup'] unless cleanup.length == 1
+  depends = strip_hcl_comments(cleanup.first.last[/\bdepends_on\s*=\s*\[(.*?)\]/m, 1].to_s)
+  blocks.each do |label, _|
+    next if %w[terraform_data.destroy_inventory_sentinel terraform_data.pre_destroy_cleanup].include?(label)
+    issues << "pre_cleanup_missing_edge:#{label}" unless depends.match?(/\b#{Regexp.escape(label)}\b/)
+  end
+  issues
+ensure
+  @sources = previous_sources
+end
+
 def findings(sources = nil)
   @sources = sources
   findings = []
@@ -89,10 +186,14 @@ def findings(sources = nil)
                 missing: inventory_gaps } unless inventory_gaps.empty?
   require_contract(findings, 'account_guard', 'versions.tf', 'allowed_account_ids = [var.target_account_id]', 'backend "local"')
   require_contract(findings, 'production_guard', 'pre-destroy.sh', 'production', 'actual_account="$(aws sts get-caller-identity')
+  require_contract(findings, 'legacy_destroy_guard', 'pre-destroy.sh',
+                   'this state has no final-inventory sentinel', 'expected_verified_scope')
   require_contract(findings, 'network_ownership', 'main.tf', 'resource "aws_vpc" "cell"', 'resource "aws_nat_gateway" "az"', 'resource "aws_eip" "nat"')
   require_contract(findings, 'rds_deletion', 'data-storage.tf', 'skip_final_snapshot         = true', 'delete_automated_backups    = true', 'deletion_protection         = false')
   require_contract(findings, 'secret_deletion', 'secrets.tf', 'recovery_window_in_days = 0')
-  require_contract(findings, 'ecr_deletion', 'defaults.auto.tfvars', 'delete_nonempty_ecr_on_destroy = true')
+  unless strip_hcl_comments(source('defaults.auto.tfvars')).match?(/^\s*delete_nonempty_ecr_on_destroy\s*=\s*true\s*$/)
+    findings << { id: 'ecr_deletion', file: 'defaults.auto.tfvars', missing: ['delete_nonempty_ecr_on_destroy = true'] }
+  end
   require_contract(findings, 'kms_deletion', 'main.tf', 'deletion_window_in_days = var.kms_deletion_window_days')
   require_contract(findings, 'cognito_deletion', 'identity.tf', 'deletion_protection      = "INACTIVE"')
   require_contract(findings, 'edge_ownership', 'edge.tf', 'resource "aws_lb" "edge"', 'resource "aws_cloudfront_distribution" "web"', 'resource "aws_cloudfront_distribution" "api"', 'resource "aws_wafv2_web_acl" "edge"')
@@ -115,12 +216,18 @@ def findings(sources = nil)
     positions.none?(&:nil?) && positions.each_cons(2).all? { |a, b| a < b }
   end
   contracts = {
-    'verified_destroy_wrapper_guard' => ['teardown.tf',
-      teardown.include?('GG_VERIFIED_DESTROY_SCOPE') &&
-      teardown.include?('terraform destroy must be run through destroy-verified.sh') &&
-      wrapper.include?('GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}"')],
+    'native_post_inventory' => ['main.tf',
+      code.call('main.tf').include?('resource "terraform_data" "destroy_inventory_sentinel"') &&
+      code.call('main.tf').include?('post-destroy-inventory.sh')],
+    'partial_apply_recovery' => ['destroy-verified.sh',
+      ordered.call(wrapper, '"$here/pre-destroy.sh"', '"$terraform_bin" destroy', '"$here/check-teardown.sh"')],
+    'post_inventory_fail_closed' => ['post-destroy-inventory.sh',
+      code.call('post-destroy-inventory.sh').include?('destroy-scope-manifest.py" read') &&
+      code.call('post-destroy-inventory.sh').include?('check-teardown.sh') &&
+      code.call('post-destroy-inventory.sh').include?('saved scope differs from the sentinel state') &&
+      ordered.call(code.call('post-destroy-inventory.sh'), 'check-teardown.sh', 'destroy-scope-manifest.py" remove')],
     'partial_apply_before_eks' => ['destroy-verified.sh',
-      code.call('scope_override.tf').include?('terraform_data.cell_scope.output.cluster_name') &&
+      code.call('scope_override.tf').include?('Name        = "${terraform_data.cell_scope.output.cluster_name}-vpc"') &&
       wrapper.include?('"$terraform_bin" show -json') &&
       wrapper.include?('if r.get("address") == "terraform_data.cell_scope"') &&
       wrapper.include?('if scopes:') && wrapper.include?('if [ "$parse_status" -ne 42 ]; then')],
@@ -132,16 +239,24 @@ def findings(sources = nil)
     'verified_destroy_order' => ['destroy-verified.sh',
       wrapper.include?('set -euo pipefail') &&
       ordered.call(wrapper, 'production', '"$here/pre-destroy.sh"',
-        '"$terraform_bin" destroy', '"$here/check-teardown.sh"')]
+        '"$terraform_bin" destroy', '"$here/check-teardown.sh"')],
+    'legacy_cleanup_input_compatibility' => ['teardown.tf',
+      teardown.include?('try(self.input.manifest,') &&
+      teardown.include?('try(self.input.master_secret_arn, "")') &&
+      teardown.include?('try(self.input.shard_master_secret_arns, [])') &&
+      teardown.include?('destroy_inventory_sentinel_enabled = var.enable_disposable_destroy_sentinel') &&
+      teardown.include?('try(self.input.destroy_inventory_sentinel_enabled, false)')],
+    'legacy_sentinel_destroy_guard' => ['pre-destroy.sh',
+      pre.include?('GG_DESTROY_INVENTORY_SENTINEL_ENABLED') &&
+      pre.include?('GG_VERIFIED_DESTROY_SCOPE') &&
+      wrapper.include?('GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}"') &&
+      wrapper.include?('GG_VERIFIED_DESTROY_SCOPE="${account}:${region}:${environment}:${cluster}" "$terraform_bin" destroy')]
   }
   contracts.each do |id, (file, satisfied)|
     findings << { id: id, file: file, remediation: 'Restore the executable scope, guard, preflight and fail-closed teardown ordering; run teardown_test.sh.' } unless satisfied
   end
-  # Terraform destroy provisioners run before their resource is deleted and
-  # cannot guarantee a post-destroy inventory. The wrapper is the only path
-  # that can check after Terraform has removed the full state.
-  findings << { id: 'raw_destroy_no_post_inventory', file: 'teardown.tf',
-                remediation: 'Use destroy-verified.sh. Ordinary raw terraform destroy now fails its scope guard, but Terraform has no supported post-destroy provisioner; the wrapper must inventory after state deletion. The marker is an operational guard, not a security boundary.' }
+  graph_issues = destroy_anchor_graph_findings(sources)
+  findings << { id: 'destroy_anchor_graph', file: 'teardown.tf', missing: graph_issues } unless graph_issues.empty?
   findings
 ensure
   @sources = nil

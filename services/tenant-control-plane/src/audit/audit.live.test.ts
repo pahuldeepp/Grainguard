@@ -9,14 +9,10 @@ import {
   writeSignedAuditExport,
   type AuditManifest,
 } from "@greenguard/audit";
-import {
-  createOrganization,
-  inviteMember,
-  acceptInvitation,
-  type Actor,
-} from "../domain/store.js";
+import { inviteMember, acceptInvitation, type Actor } from "../domain/store.js";
 import {
   adminQuery,
+  createActiveTenantFixture,
   asRuntime,
   runtimeDb,
   uniqueSubject,
@@ -58,7 +54,7 @@ const actor = (name: string): Actor => {
 };
 async function org(name: string) {
   const admin = actor(name);
-  const created = await createOrganization(db, admin, { name }, cmd());
+  const created = await createActiveTenantFixture(db, admin, name, cmd());
   const tenantId = created.body.tenantId as string;
   await seedPlan(tenantId, { "exports.per_day": 50 }, { audit_export: true });
   return { admin, tenantId };
@@ -228,27 +224,27 @@ test("A01 A03 owner reads include inventory and billing under RLS; CSV verifies"
     billingId = randomUUID(),
     foreignId = randomUUID();
   await insert(
-    "greenguard_inventory",
+    new URL(env("INVENTORY_DATABASE_URL")).pathname.slice(1),
     a.tenantId,
     `INSERT INTO audit_events
     (audit_id,tenant_id,actor_type,actor_id,action,resource_type,resource_id,command_id,outcome,occurred_at)
-    VALUES($1,$2,'human','owner-a','device.created','device',$3,$4,'succeeded',now())`,
+    VALUES($1,$2,'human','owner-a','device.created','device',$3,$4,'succeeded',now()-interval '1 second')`,
     [inventoryId, a.tenantId, randomUUID(), randomUUID()],
   );
   await insert(
-    "greenguard_inventory",
+    new URL(env("INVENTORY_DATABASE_URL")).pathname.slice(1),
     b.tenantId,
     `INSERT INTO audit_events
     (audit_id,tenant_id,actor_type,actor_id,action,resource_type,resource_id,command_id,outcome,occurred_at)
-    VALUES($1,$2,'human','owner-b','device.created','device',$3,$4,'succeeded',now())`,
+    VALUES($1,$2,'human','owner-b','device.created','device',$3,$4,'succeeded',now()-interval '1 second')`,
     [foreignId, b.tenantId, randomUUID(), randomUUID()],
   );
   await insert(
-    "greenguard_billing",
+    new URL(env("BILLING_DATABASE_URL")).pathname.slice(1),
     a.tenantId,
     `INSERT INTO billing_audit_events
-    (tenant_id,audit_id,actor_id,action,object_id,detail)
-    VALUES($1,$2,'system','billing.subscription.changed','sub-1','{"secret":"must-not-export"}'::jsonb)`,
+    (tenant_id,audit_id,actor_id,action,object_id,detail,occurred_at)
+    VALUES($1,$2,'system','billing.subscription.changed','sub-1','{"secret":"must-not-export"}'::jsonb,now()-interval '1 second')`,
     [a.tenantId, billingId],
   );
   const sources = new AuditSources(

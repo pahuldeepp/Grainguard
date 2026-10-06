@@ -1,0 +1,44 @@
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ai-worker-readiness, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+data:
+  ready.py: |
+    import json,os,socket,sys,urllib.request
+    import psycopg
+    from confluent_kafka.admin import AdminClient
+    def main():
+        profile=sys.argv[1]
+        if profile.startswith('model-gateway-usage-'):
+            path='/private/consume.json' if profile.endswith('consume') else '/private/relay.json'
+            cfg=json.load(open(path))
+            dsn=cfg['database_url']; kafka=cfg['kafka']; topic='greenguard.ai-usage-settled.v1'
+        else:
+            dsn=os.environ['KNOWLEDGE_DATABASE_URL']; kafka=None; topic=None
+            if profile in ('knowledge-indexer','knowledge-relay','knowledge-analytics'):
+                kafka={'bootstrap.servers':os.environ['KNOWLEDGE_KAFKA_BOOTSTRAP_SERVERS'],
+                       'security.protocol':'SASL_SSL','sasl.mechanisms':os.environ['KNOWLEDGE_KAFKA_SASL_MECHANISM'],
+                       'sasl.username':os.environ['KNOWLEDGE_KAFKA_SASL_USERNAME'],
+                       'sasl.password':os.environ['KNOWLEDGE_KAFKA_SASL_PASSWORD'],
+                       'ssl.ca.location':os.environ['KNOWLEDGE_KAFKA_CA_FILE']}
+                topic='greenguard.knowledge.assistant.suggestion.used.v1' if profile=='knowledge-analytics' else 'greenguard.knowledge.document.index.requested.v1'
+        with psycopg.connect(dsn,connect_timeout=2) as db:
+            role=db.execute('SELECT current_user,rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user').fetchone()
+            expected='model_gateway_usage_app' if profile.startswith('model-gateway-usage-') else 'knowledge_worker'
+            if role != (expected,False): raise RuntimeError('unsafe or mismatched worker role')
+        if kafka is not None:
+            kafka=dict(kafka); kafka['socket.timeout.ms']=2000
+            meta=AdminClient(kafka).list_topics(timeout=2)
+            if topic not in meta.topics or meta.topics[topic].error is not None: raise RuntimeError('required authenticated topic unavailable')
+        if profile=='knowledge-indexer':
+            with socket.create_connection((os.environ['KNOWLEDGE_CLAMAV_HOST'],3310),timeout=2) as sock:
+                sock.sendall(b'zPING\0')
+                if sock.recv(32).rstrip(b'\0\n') != b'PONG': raise RuntimeError('malware scanner unavailable')
+        if profile in ('knowledge-indexer','knowledge-summary'):
+            with urllib.request.urlopen('http://model-gateway.greenguard.svc.cluster.local:8080/readyz',timeout=2) as response:
+                if response.status != 200: raise RuntimeError('gateway unavailable')
+    try:
+        main()
+    except Exception:
+        raise SystemExit('AI_WORKER_DEPENDENCY_NOT_READY')
+{{- end }}

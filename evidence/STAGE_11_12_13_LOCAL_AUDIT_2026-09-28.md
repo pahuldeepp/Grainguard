@@ -191,13 +191,173 @@ Stages 11–13 are complete or that the disposable AWS environment is ready for
   and exact run-scoped ownership checks. It performs no workload, fault, or
   cleanup action and explicitly reports `certification: false`; Stage 13 stays
   planned until live load, soak, and failure exercises are measured.
-- Stage 11 review confirmed the gateway has no application-level RED metrics.
-  A public-listener `/metrics` prototype was rejected and reverted because it
-  would expose unauthenticated telemetry. A separate internal listener and
-  scrape-only policy are still needed. SLO approval, representative load, and
-  production paging remain unproven.
-- The destroy review confirms the verified wrapper runs a post-destroy
-  inventory, but scans the configured account/region plus named global
-  resources only. It cannot prove account-wide, all-region absence of billable
-  GreenGuard resources. Raw `terraform destroy` does not perform that final
-  inventory.
+- At this checkpoint, Stage 11's gateway RED metrics and raw Terraform's final
+  destroy inventory were still open. **Superseded by the follow-up below:** a
+  separate internal gateway metrics listener and scrape-only policy were added,
+  and a Terraform destroy sentinel now runs scoped post-destroy inventory on a
+  full-state destroy. The earlier statements are retained as historical status,
+  not current status.
+
+## Follow-up verification — current integration changes
+
+- Gateway now serves RED metrics on a separate application-metrics listener;
+  the public gateway listener continues to return 404 for `/metrics`. Gateway
+  tests passed 12/12, including monotonic histogram buckets, `+Inf` count, and
+  aborted-request accounting.
+  The observability contract checker passed and verifies rendered scrape policy
+  selectors against Prometheus pod labels. These are offline checks; no live
+  Prometheus scrape or representative load was run. Approved SLOs, cardinality
+  limits, end-to-end risk-to-alert traces, and paging remain unproven.
+- A Terraform destroy sentinel captures scoped resource/secret inventory before
+  teardown and runs the final inventory after the complete managed graph is
+  destroyed. Offline Terraform validation and lifecycle/teardown tests passed.
+  This guarantee applies to a full Terraform state containing the sentinel;
+  partial-state recovery still uses the verified wrapper. Inventory checks the
+  configured disposable scope and region plus named global resources, not every
+  account region, and cannot establish account-wide absence of every billable
+  GreenGuard resource.
+- The latest combined disposable acceptance/deployed-workload/runner regression
+  suite passed 47 tests. The acceptance checker deliberately returns
+  `BLOCKED` until live evidence is independently approved. The deployment
+  contract currently contains 30 releases and 20 image identities and reports
+  7 blocking gaps. This is static contract validation, not proof of a healthy
+  deployed environment.
+- `git diff --check` and Python byte-compilation of the two modified disposable
+  acceptance checkers passed. `bash scripts/helm-validate.sh` also passed all
+  rendered chart, autoscaling, scheduling, network-peer, and reject-fixture
+  checks on this rerun after correcting stale worker-probe assertions and
+  removing the search-indexer's conflicting ephemeral `/tmp` volume mount.
+- Tenant move capability checks now reject all nine sharded data owners until
+  each supplies a complete all-owner move adapter; local Inventory, Risk, and
+  Telemetry primitives no longer make an owner appear globally migratable.
+  Malformed adapter boundary declarations also fail closed. The focused
+  tenant-move tests passed 7/7 and CodeRabbit reported zero findings for those
+  files. This is safer admission behavior, not a completed tenant move; Docker
+  and the owner-specific broker, CDC, saga, MQTT, Cassandra, and replica-freshness
+  acceptance requirements remain unavailable or unimplemented.
+- OAuth/OIDC configuration review found the existing provider-neutral flow
+  internally consistent: Terraform exports the web and `greenguard://` mobile
+  callbacks, dashboard runtime config, and BFF issuer/JWKS/audience; mobile PKCE
+  and tenant membership resolution remain in place. Mobile configuration tests
+  passed 4/4, identity contract tests 7 runs/127 assertions, and dashboard auth
+  tests 8/8. Provider callback registration, real-user membership enrollment,
+  live discovery/JWKS/token claims, browser login, and physical-iPhone journeys
+  still require operator and deployed-environment proof.
+- The full tenant-control-plane `npm test` command could not pass offline because
+  it includes live database fixtures requiring `CONTROL_DATABASE_URL` and
+  `CONTROL_DIRECT_URL`; no database was configured or modified. Its build
+  completed, and the isolated tenant-move tests passed separately.
+- Gateway metrics now count premature connection closes once with an `aborted`
+  status label; completed responses retain their HTTP status. The metrics server
+  binds to loopback by default, and only the explicitly configured Gateway
+  chart profile opts into pod-wide binding for Prometheus scraping. Gateway
+  tests passed 12/12, and Helm/observability checks passed. These are still
+  offline tests, not a live scrape or load measurement.
+- Disposable ECR names now include the environment and a hash of the cell name;
+  runtime/migration promotion continues to use Terraform's URL outputs with
+  stable image keys. The shared legacy `greenguard/<service>` repositories are
+  intentionally excluded from cell cleanup to avoid deleting another cell's
+  images. Promotion tests and the image-inventory check passed. Existing state
+  containing the legacy shared repository addresses requires review before
+  applying because Terraform could otherwise propose replacement/deletion.
+  Teardown now tags and directly inventories the exact cell VPC, internet
+  gateway, NAT gateways and EIPs, and includes Secrets Manager secrets pending
+  deletion. Lifecycle audit tests passed 13/13 (101 assertions), teardown tests
+  passed 61/61, manifest tests 8/8, and both disposable/platform Terraform roots
+  passed formatting and validation using the repository-pinned binary. The final
+  lifecycle suite is now 14/14 (121 assertions); it covers pre-cleanup state
+  missing newer manifest/secret fields and fails if commented-out ECR settings
+  look enabled. Secrets Manager inventory includes items scheduled for deletion.
+  These checks do not establish live AWS deletion or account-wide/all-region
+  absence.
+- The migration-image publish job's malformed Sigstore installer pin was
+  corrected to the verified v4.1.2 commit, and `scripts/check-image-inventory.sh`
+  now asserts the exact pin. Image inventory, `actionlint`, and a malformed-pin
+  negative check passed. The disposable GitOps acceptance release includes the
+  complete migration-image digest map. This fixes CI/deployment wiring only; it
+  does not publish images or prove cloud pulls.
+- No fresh full Compose `make verify`/smoke run was possible after these changes:
+  Docker CLI is installed but its daemon socket is absent. The earlier isolated
+  Compose evidence above remains the last full local-stack run; no shared DB
+  was touched during this follow-up.
+- Legacy Terraform state without the destroy sentinel is blocked from raw
+  `terraform destroy` before AWS calls unless the exact verified-wrapper scope
+  marker is present. The teardown suite covers both the rejection and wrapper
+  path; this is an offline guard test, not a live AWS destroy rehearsal.
+
+## Follow-up verification — 2026-09-29
+
+- Four-shard Read API readiness now requires all four shard providers to be
+  healthy. The regression test covers all healthy, one unavailable, and three
+  unavailable shard providers. Read API build and shard tests passed (6/6),
+  and the Terraform shard-runtime contract tests passed (3/3). The
+  `read-entitlement-projector` registry identity was aligned with its runtime
+  identity (`read-api`). CodeRabbit reviewed the Read API changes with no
+  findings. These checks do not prove live RDS health or EKS pod readiness.
+- Tenant bootstrap orchestration now waits for every in-flight owner operation
+  to settle before returning a preparation or activation failure, preventing an
+  immediate retry from overlapping the prior owner calls. Tenant-control-plane
+  build and offline bootstrap/preflight tests passed (7/7); CodeRabbit reported
+  no findings for the scoped bootstrap code. This remains a protocol harness:
+  no durable bootstrap worker, authenticated owner probes, owner-specific
+  adapters, or production activation caller is deployed. New organizations
+  remain `provisioning` and unroutable.
+- Fixed five stale test-fixture calls to the current `createActiveTenantFixture`
+  signature. This cleared the tenant-control-plane TypeScript build failure;
+  the database-backed full tenant-control-plane suite was not run because it
+  requires configured control database URLs.
+- Re-ran Terraform formatting and validation (Terraform 1.16.4):
+  `fmt -check -recursive` and `validate` passed for disposable, platform, and
+  bootstrap-state roots. The destroy lifecycle audit reported green with no
+  static findings; 63 mocked teardown cases and 16 disposable Terraform
+  Python gate tests passed. These results do not prove AWS permissions or a
+  live destroy/inventory run.
+- The ordinary Terraform readiness gate remains intentionally closed. The
+  deployment contract declares 30 releases and 22 runtime image identities,
+  four scheduled shard-maintenance tasks, and one PostgreSQL migration/RLS
+  acceptance Job; it does not execute all declared data-service probes or
+  web/API/alert/iPhone journeys. There is still no production all-owner tenant
+  bootstrap or move controller/receipt path. Do not mark Stage 12 complete or
+  apply to AWS on this evidence.
+- The full shared Compose gate was left untouched because the existing local
+  Docker daemon has active GreenGuard, Stage 11, and three-broker Kafka stacks
+  used by background acceptance work. Prior isolated Compose evidence remains
+  the last full local-stack run; no shared database or AWS resource was changed
+  in this follow-up.
+
+## Additional offline verification — 2026-09-29
+
+- The Terraform-to-Argo-to-Helm shard-secret path was checked through the
+  projector application contract. The test parses Terraform's release mapping,
+  checks runtime registry env names and secret mounts, verifies Argo's merged
+  `valuesObject`, fail-closed routing, RDS CA Secret/key path, and read-only
+  registry access. Secret mode is `0440` to match UID/GID 101 and `fsGroup`
+  101. The focused Ruby test and `scripts/helm-validate.sh` passed; 28 scoped
+  shard/runtime-secret tests passed. This is a rendered contract simulation,
+  not a live pod read test. Terraform is not available in the current shell;
+  the preceding Terraform 1.16.4 fmt/validate result is recorded above.
+- Tenant-move and Read API freshness unit suites passed 31/31 and 39/39.
+  They exercise fake pools/pure logic. There is no production all-owner
+  migration caller or set of adapters for the nine owners; cutover remains
+  fail-closed without trusted owner receipts. These tests do not prove a live
+  cross-shard move, actual lease drain, old-writer rejection, or replica lag
+  behavior against PostgreSQL/Redis.
+- The deployment/live-acceptance test group passed 47/47, Compose isolation
+  wrapper tests passed 3/3, and Ruby contract readiness passed 3 runs/11
+  assertions. The contract checker still blocks certification without signed
+  live evidence, and the declared data probes/web/API/alert/iPhone journeys
+  are not all executed by the migration Job.
+- The full tenant-control-plane `npm test` attempt fails because it starts
+  database-backed suites without `CONTROL_DATABASE_URL` and
+  `CONTROL_DIRECT_URL`. The TypeScript build and isolated bootstrap protocol
+  tests passed, but no production owner bootstrap adapters/caller exist and
+  new first-admin enrollments remain `provisioning`.
+- A full Stage 12 Compose verify/smoke was not rerun: `docker ps` confirmed
+  active GreenGuard, observability, Stage 11, and three-broker Kafka stacks
+  belonging to existing background work. The isolated wrapper tests pass, but
+  the latest full-stack execution evidence remains the earlier isolated run.
+- Rechecked the current disposable Terraform root with the official
+  `hashicorp/terraform:1.16` image, mounting the repository root so its linked
+  platform definitions and `infra/gitops` contract files resolve correctly.
+  Recursive Terraform formatting check and disposable `terraform validate`
+  passed. This remains static validation only; no plan/apply/AWS calls ran.

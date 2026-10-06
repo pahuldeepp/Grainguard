@@ -5,6 +5,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 COPY package*.json ./
 COPY packages packages
 COPY services/tenant-control-plane services/tenant-control-plane
+COPY services/telemetry-ingest/migrations services/telemetry-ingest/migrations
+COPY services/projection-builder/migrations services/projection-builder/migrations
+COPY services/jobs-worker/migrations services/jobs-worker/migrations
+COPY services/saga-orchestrator/migrations services/saga-orchestrator/migrations
+COPY services/hardware-service/migrations services/hardware-service/migrations
+COPY services/device-service/prisma/migrations services/device-service/prisma/migrations
+COPY services/workflow-alerts/prisma/migrations services/workflow-alerts/prisma/migrations
+COPY services/risk-engine/migrations services/risk-engine/migrations
+COPY services/notification-service/migrations services/notification-service/migrations
+COPY scripts/generate-tenant-bootstrap-ledger-manifest.mjs scripts/generate-tenant-bootstrap-ledger-manifest.mjs
 RUN npm ci && npm run build --workspace @greenguard/entitlements \
     && npm run build --workspace @greenguard/tenant-control-plane
 

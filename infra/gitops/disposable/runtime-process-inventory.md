@@ -26,6 +26,13 @@ Those integrated loops do not require extra releases. Go migrator commands,
 projection version provisioning, MQTT fixture programs and operator DLQ/redrive
 commands are explicit bounded operations, not additional continuous services.
 
+Projection Builder's operator replay (`scripts/projection-replay.mjs`) is also
+not a deployed release or part of the Stage 12 live acceptance contract. It
+rejects `SHARD_REGISTRY_FILE` before opening PostgreSQL/Kafka because the
+shadow-target, tenant-scoped checkpoint/manifest, and move-fencing protocol is
+not implemented for sharded tenants. Do not count sharded replay/rebuild as an
+available recovery operation; it has no fixed-primary fallback.
+
 Projection `cmd/maintain` is a bounded read-side history partition maintenance pass using
 PROJECTION_MIGRATION_URL. The deployment contract defines one scheduled maintenance
 CronJob per shard, each with that shard's projection-history-maintenance Secret,

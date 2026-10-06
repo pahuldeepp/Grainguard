@@ -29,7 +29,9 @@ resource "terraform_data" "eks_api_reachability" {
     aws_eks_cluster.cell.name,
     var.target_account_id,
   ]
-  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin]
+  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 
   provisioner "local-exec" {
     command = "python3 \"${path.module}/check-eks-api-reachability.py\""
@@ -63,6 +65,8 @@ resource "helm_release" "aws_load_balancer_controller" {
     aws_eks_access_policy_association.cluster_admin,
     aws_eks_pod_identity_association.alb_controller,
     terraform_data.eks_api_reachability,
+
+    terraform_data.destroy_inventory_sentinel,
   ]
 }
 
@@ -75,18 +79,22 @@ resource "helm_release" "istio_base" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
+  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "helm_release" "istiod" {
-  name       = "istiod"
-  namespace  = "istio-system"
-  chart      = "${path.module}/../../helm/controller-charts/istiod-1.30.5.tgz"
-  version    = "1.30.5"
-  atomic     = true
-  wait       = true
-  timeout    = 900
-  depends_on = [helm_release.istio_base]
+  name      = "istiod"
+  namespace = "istio-system"
+  chart     = "${path.module}/../../helm/controller-charts/istiod-1.30.5.tgz"
+  version   = "1.30.5"
+  atomic    = true
+  wait      = true
+  timeout   = 900
+  depends_on = [helm_release.istio_base,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "helm_release" "istio_ingressgateway" {
@@ -108,7 +116,9 @@ resource "helm_release" "istio_ingressgateway" {
     replicaCount = 2
     autoscaling  = { enabled = false }
   })]
-  depends_on = [helm_release.istiod, helm_release.aws_load_balancer_controller]
+  depends_on = [helm_release.istiod, helm_release.aws_load_balancer_controller,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "helm_release" "keda" {
@@ -120,7 +130,9 @@ resource "helm_release" "keda" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
+  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "helm_release" "argo_rollouts" {
@@ -132,7 +144,9 @@ resource "helm_release" "argo_rollouts" {
   atomic           = true
   wait             = true
   timeout          = 900
-  depends_on       = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability]
+  depends_on = [aws_eks_node_group.general, aws_eks_access_policy_association.cluster_admin, terraform_data.eks_api_reachability,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "helm_release" "argocd" {
@@ -172,7 +186,9 @@ resource "helm_release" "argocd" {
       LUA
     } }
   })]
-  depends_on = [helm_release.istio_ingressgateway, helm_release.keda, helm_release.argo_rollouts]
+  depends_on = [helm_release.istio_ingressgateway, helm_release.keda, helm_release.argo_rollouts,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 # Create and own the target namespace before Argo, secret materialization,
@@ -187,5 +203,7 @@ resource "helm_release" "greenguard_namespace" {
   timeout          = 300
   create_namespace = false
   values           = [yamlencode({ cell = var.cluster_name })]
-  depends_on       = [helm_release.argocd]
+  depends_on = [helm_release.argocd,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }

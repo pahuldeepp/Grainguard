@@ -34,6 +34,8 @@ class PreflightTests(unittest.TestCase):
             {"name": "notification-contacts-projector", "secret": "notification-contacts-projector-config", "kafkaPrincipal": "notification-service"},
             {"name": "tenant-control-plane", "secret": "tenant-control-plane-config"},
             {"name": "audit-export-worker", "secret": "audit-export-worker-config", "kafka": False},
+            {"name": "billing-service", "secret": "billing-service-config"},
+            {"name": "entitlement-heartbeat", "secret": "entitlement-heartbeat-config", "kafkaPrincipal": "billing-service"},
         ], "scheduledTasks": [
             {"name": "projection-history-s1", "secret": "greenguard-s1-projection-history-maintenance-config"}
         ]}))
@@ -42,7 +44,7 @@ class PreflightTests(unittest.TestCase):
         lookup_token = "c" * 32
         self.values = {
             "bff-config": {"BFF_TOKEN": "dummy-token", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "bff", "KAFKA_SASL_PASSWORD": "dummy"},
-            "read-api-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
+            "read-api-config": {"READ_HISTORY_CURSOR_SECRET": "h" * 32, "ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
             "search-indexer-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "search-indexer", "KAFKA_SASL_PASSWORD": "dummy"},
             "cassandra-writer-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "cassandra-writer", "KAFKA_SASL_PASSWORD": "dummy"},
             "notification-service-config": {"CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
@@ -54,6 +56,19 @@ class PreflightTests(unittest.TestCase):
                 "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
                 "AUDIT_EXPORT_LINK_SECRET": "l" * 32,
                 "BILLING_DATABASE_URL": "postgresql://billing_app:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+            },
+            "billing-service-config": {
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
+                "BILLING_DATABASE_URL": "postgresql://billing_app:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "KAFKA_BROKERS": "kafka.greenguard.svc.cluster.local:29092",
+                "KAFKA_SASL_USERNAME": "billing-service", "KAFKA_SASL_PASSWORD": "dummy-kafka-password",
+                "STRIPE_API_KEY": "sk_test_fixture", "STRIPE_WEBHOOK_SECRETS": "whsec_fixture",
+                "BILLING_INBOX_ENCRYPTION_KEY": base64.b64encode(b"x" * 32).decode(),
+                "BILLING_RETURN_ORIGINS": "https://greenguard.example.com",
+            },
+            "entitlement-heartbeat-config": {
+                "KAFKA_BROKERS": "kafka.greenguard.svc.cluster.local:29092",
+                "KAFKA_SASL_USERNAME": "billing-service", "KAFKA_SASL_PASSWORD": "dummy-kafka-password",
             },
             "audit-export-worker-config": {
                 "CONTROL_AUDIT_DATABASE_URL": "postgresql://control_audit_worker:secret@db.example.rds.amazonaws.com:5432/greenguard_control?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
@@ -78,7 +93,7 @@ class PreflightTests(unittest.TestCase):
             "greenguard-opensearch-tls": {"ca.crt": "dummy-ca", "node.crt": "dummy-node-cert", "node.key": "dummy-node-key", "admin.crt": "dummy-admin-cert", "admin.key": "dummy-admin-key"},
             "greenguard-opensearch-ca": {"ca.crt": "-----BEGIN CERTIFICATE-----\ndummy\n-----END CERTIFICATE-----"},
             "greenguard-cassandra-auth": {"admin-password": "dummy-admin", "reader-password": "dummy-reader", "writer-password": "dummy-writer"},
-            "greenguard-cassandra-tls": {"server.p12": "dummy-p12", "keystore-password": "dummy-keystore", "ca.crt": "dummy-ca"},
+            "greenguard-cassandra-tls": {"server.p12": base64.b64encode(b"dummy-p12").decode(), "keystore-password": "dummy-keystore", "ca.crt": "dummy-ca"},
             "greenguard-kafka-auth": {
                 **{key: base64.b64encode(b"dummy-p12").decode() for key in preflight.KAFKA_BINARY_KEYS},
                 "broker-jaas": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"broker\" password=\"dummy\" user_broker=\"dummy\";",
@@ -97,10 +112,11 @@ class PreflightTests(unittest.TestCase):
                 "PROJECTION_HISTORY_SCHEMA": "public", "PROJECTION_HISTORY_HOT_WINDOW": "24h", "PROJECTION_HISTORY_AHEAD_DAYS": "3",
             },
         }
-        clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "tenant-control-plane", "connect", "admin")
+        clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "tenant-control-plane", "billing-service", "connect", "admin")
         self.values["greenguard-kafka-auth"]["broker-jaas"] += " " + " ".join(
             f'user_{name}="dummy"' for name in clients
         )
+        self.values["greenguard-kafka-auth"]["broker-jaas"] += ' user_billing-service="dummy-kafka-password"'
         self.missing = set()
         self.kubernetes_overrides = {}
         self.account = "123456789012"
@@ -162,7 +178,52 @@ class PreflightTests(unittest.TestCase):
     def test_complete_secrets_pass(self):
         status, output = self.run_preflight()
         self.assertEqual(status, 0)
-        self.assertIn("PASS 25 Secrets", output)
+        self.assertIn("PASS 27 Secrets", output)
+
+    def test_billing_requires_a_stripe_test_api_key(self):
+        self.values["billing-service-config"]["STRIPE_API_KEY"] = "sk_live_fixture"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("Stripe test-mode API key is required", output)
+        self.assertNotIn("sk_live_fixture", output)
+
+    def test_billing_requires_one_or_two_webhook_secrets(self):
+        self.values["billing-service-config"]["STRIPE_WEBHOOK_SECRETS"] = "whsec_one,whsec_two,whsec_three"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("one or two Stripe webhook signing secrets are required", output)
+
+    def test_billing_requires_a_base64_32_byte_inbox_key(self):
+        self.values["billing-service-config"]["BILLING_INBOX_ENCRYPTION_KEY"] = base64.b64encode(b"short").decode()
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("base64 32-byte inbox encryption key is required", output)
+
+    def test_billing_return_origins_must_be_deployed_https_origins(self):
+        for origin in ("http://greenguard.example.com", "https://localhost", "https://greenguard.example.com/path"):
+            with self.subTest(origin=origin):
+                self.values["billing-service-config"]["BILLING_RETURN_ORIGINS"] = origin
+                status, output = self.run_preflight()
+                self.assertEqual(status, 1)
+                self.assertIn("return origins must be deployed HTTPS origins", output)
+
+    def test_billing_webhook_rotation_accepts_two_signing_secrets(self):
+        self.values["billing-service-config"]["STRIPE_WEBHOOK_SECRETS"] = "whsec_current, whsec_next"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 0)
+
+    def test_heartbeat_secret_contains_only_and_matches_its_scoped_kafka_keys(self):
+        self.assertEqual(
+            set(self.values["entitlement-heartbeat-config"]),
+            {"KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"},
+        )
+        self.assertFalse(set(self.values["entitlement-heartbeat-config"]) & {
+            "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRETS", "BILLING_INBOX_ENCRYPTION_KEY", "BILLING_DATABASE_URL",
+        })
+        self.values["entitlement-heartbeat-config"]["KAFKA_SASL_PASSWORD"] = "wrong-scoped-secret"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("scoped Kafka settings must match billing-service-config", output)
 
     def test_audit_worker_secret_is_validated_without_broad_kafka_credentials(self):
         status, output = self.run_preflight()
@@ -264,6 +325,20 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("broker JAAS does not contain", output)
 
+    def test_cassandra_pkcs12_binary_is_decoded_once(self):
+        raw = b"\x30\x82\x00\xffPKCS12-fixture"
+        source = {"server.p12": base64.b64encode(raw).decode(), "keystore-password": "private-password", "ca.crt": "certificate-pem"}
+        decoded = preflight.secret_bytes("greenguard-cassandra-tls", source)
+        self.assertEqual(raw, decoded["server.p12"])
+        self.assertEqual(b"private-password", decoded["keystore-password"])
+        self.assertEqual(b"certificate-pem", decoded["ca.crt"])
+
+    def test_cassandra_pkcs12_rejects_invalid_base64(self):
+        self.values["greenguard-cassandra-tls"]["server.p12"] = "not-base64!"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("base64 PKCS12", output)
+
     def test_cassandra_tls_keys_must_be_exact(self):
         del self.values["greenguard-cassandra-tls"]["server.p12"]
         status, output = self.run_preflight()
@@ -275,6 +350,16 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("secured chart profile", output)
+
+    def test_read_cursor_secret_is_required_and_bounded(self):
+        for value in (None, "short"):
+            if value is None:
+                self.values["read-api-config"].pop("READ_HISTORY_CURSOR_SECRET", None)
+            else:
+                self.values["read-api-config"]["READ_HISTORY_CURSOR_SECRET"] = value
+            status, output = self.run_preflight()
+            self.assertEqual(status, 1)
+            self.assertIn("READ_HISTORY_CURSOR_SECRET must contain at least 32 bytes", output)
 
     def test_search_url_must_be_internal_https(self):
         self.values["read-api-config"]["ELASTICSEARCH_URL"] = "http://greenguard-opensearch:9200"

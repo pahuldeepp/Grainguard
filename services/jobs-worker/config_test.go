@@ -48,3 +48,19 @@ func TestControlPlaneMembershipRequiresSecureEndpointAndCredential(t *testing.T)
 		t.Fatal("short control-plane credential accepted")
 	}
 }
+
+func TestAPIOnlyDoesNotRequireDeliveryTransport(t *testing.T) {
+	base := map[string]string{"JOBS_DATABASE_URL": "postgres://jobs", "JOBS_API_ONLY": "true"}
+	cfg, err := loadConfig(func(k string) string { return base[k] })
+	if err != nil || !cfg.APIOnly {
+		t.Fatalf("API-only configuration rejected: %v", err)
+	}
+	base["JOBS_API_ONLY"] = "false"
+	if _, err = loadConfig(func(k string) string { return base[k] }); err == nil {
+		t.Fatal("delivery runtime accepted missing RabbitMQ transport")
+	}
+	base["JOBS_API_ONLY"] = "invalid"
+	if _, err = loadConfig(func(k string) string { return base[k] }); err == nil {
+		t.Fatal("invalid API-only setting accepted")
+	}
+}

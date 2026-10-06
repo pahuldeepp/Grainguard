@@ -35,6 +35,7 @@ from ml_scoring.processor import (BinDeviceLimitExceeded, INPUT_TOPIC, ProcessRe
                                   ShadowScoringProcessor)
 from ml_scoring.contracts import (ContractError, TelemetryEvent,
                                   parse_canonical_uuid, parse_telemetry_recorded)
+from ml_scoring.analytics import clickhouse_summary
 from ml_scoring.deployment import RollingPSIMonitor
 from ml_scoring.local_guard import (validate_cluster_synthetic_postgres_dsn,
                                    validate_local_postgres_dsn)
@@ -639,6 +640,7 @@ def run() -> None:
                 "performance": {"status": "unavailable", "brierScore": None,
                                 "sampleCount": 0, "evaluatedAt": None},
                 "retraining": {"status": "idle", "runId": None, "completedAt": None},
+                "analytics": clickhouse_summary(requested_tenant),
             }
         health = _health_server(repository, int(os.environ.get("PORT", "8080")),
                                 os.environ.get("ML_HEALTH_BIND", "127.0.0.1"),

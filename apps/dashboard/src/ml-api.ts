@@ -16,8 +16,12 @@ export interface MlOperationsSnapshot {
     status: string;
   };
   models: Array<{
-    name: string; version: string; mode: string; dataOrigin: string;
-    productionEligible: boolean; status: string; createdAt: string;
+    name: string;
+    version: string;
+    mode: string;
+    dataOrigin: string;
+    productionEligible: boolean;
+    status: string;
   }>;
   drift: Array<{
     feature: string;
@@ -25,15 +29,27 @@ export interface MlOperationsSnapshot {
     sampleCount: number;
     status: string;
   }>;
-  performance: { status: string; brierScore: number | null; sampleCount: number; evaluatedAt: string | null };
+  performance: {
+    status: string;
+    brierScore: number | null;
+    sampleCount: number;
+    evaluatedAt: string | null;
+  };
   retraining: {
     status: string;
     runId: string | null;
     completedAt: string | null;
   };
+  analytics: {
+    status: "ready" | "unavailable";
+    rows: number;
+    bins: number;
+    averageTemperatureC: number | null;
+    averageHumidityPercent: number | null;
+  };
 }
 
-const operation = `query MlOperations { mlOperations { capturedAt scorerReady predictionsTotal inferenceP95Ms canaryPercentage model { name version mode dataOrigin productionEligible status } models { name version mode dataOrigin productionEligible status createdAt } drift { feature psi sampleCount status } performance { status brierScore sampleCount evaluatedAt } retraining { status runId completedAt } } }`;
+const operation = `query MlOperations { mlOperations { capturedAt scorerReady predictionsTotal inferenceP95Ms canaryPercentage model { name version mode dataOrigin productionEligible status } models { name version mode dataOrigin productionEligible status } drift { feature psi sampleCount status } performance { status brierScore sampleCount evaluatedAt } retraining { status runId completedAt } analytics { status rows bins averageTemperatureC averageHumidityPercent } } }`;
 
 export class MlApi {
   constructor(private readonly getAccessToken: AccessTokenProvider) {}
@@ -58,12 +74,26 @@ export class MlApi {
       rollback: `mutation RollbackMlModel($version: String) { rollbackMlModel(version: $version) { action accepted message runId } }`,
       retrain: `mutation StartMlRetraining { startMlRetraining { action accepted message runId } }`,
     } as const;
-    const data = await executeOperation<{ promoteMlModel?: { message: string }; rollbackMlModel?: { message: string }; startMlRetraining?: { message: string } }>(
+    const data = await executeOperation<{
+      promoteMlModel?: { message: string };
+      rollbackMlModel?: { message: string };
+      startMlRetraining?: { message: string };
+    }>(
       this.getAccessToken,
       operations[action],
-      action === "promote" ? { version: version ?? "" } : action === "rollback" ? { version: version ?? "" } : {},
-      { signIn: "Sign in to manage ML operations.", request: "ML operation failed", empty: "ML operation unavailable." },
+      action === "promote"
+        ? { version: version ?? "" }
+        : action === "rollback"
+          ? { version: version ?? "" }
+          : {},
+      {
+        signIn: "Sign in to manage ML operations.",
+        request: "ML operation failed",
+        empty: "ML operation unavailable.",
+      },
     );
-    return data[`${action === "retrain" ? "startMlRetraining" : `${action}MlModel`}` as keyof typeof data];
+    return data[
+      `${action === "retrain" ? "startMlRetraining" : `${action}MlModel`}` as keyof typeof data
+    ];
   }
 }

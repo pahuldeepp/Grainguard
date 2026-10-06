@@ -2,10 +2,12 @@
 
 import hashlib
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
 
 
 SOURCE = Path(__file__).with_name("check-live-acceptance.py")
@@ -65,6 +67,67 @@ class LiveAcceptanceTests(unittest.TestCase):
         self.manifest["checks"] = [item for item in self.manifest["checks"]
                                    if item["id"] != "iphone-physical-login"]
         self.assertIn("missing live check: iphone-physical-login", checker.verify(self.manifest))
+
+    def test_missing_service_probe_fails(self):
+        self.manifest["checks"] = [item for item in self.manifest["checks"]
+                                   if item["id"] != "kafka-produce-consume"]
+        self.assertIn("missing live check: kafka-produce-consume", checker.verify(self.manifest))
+
+    def test_each_dependency_probe_group_is_required(self):
+        dependency_probes = (
+            "pgbouncer-transaction-pool",
+            "kafka-connect-connector-status",
+            "schema-registry-subject-compatibility",
+            "rabbitmq-publish-consume",
+            "mqtt-tls-auth-publish-subscribe",
+            "clickhouse-roundtrip",
+            "tenant-membership-readback",
+            "object-storage-audit-export-roundtrip",
+        )
+        for probe in dependency_probes:
+            with self.subTest(probe=probe):
+                checks = [item for item in self.manifest["checks"] if item["id"] != probe]
+                self.assertIn(f"missing live check: {probe}", checker.verify({**self.manifest, "checks": checks}))
+
+    def test_clickhouse_and_tenant_membership_require_live_receipts(self):
+        for probe in ("clickhouse-roundtrip", "tenant-membership-readback"):
+            with self.subTest(probe=probe):
+                manifest = json.loads(json.dumps(self.manifest))
+                item = next(check for check in manifest["checks"] if check["id"] == probe)
+                item["status"] = "BLOCKED"
+                failures = checker.verify(manifest)
+                self.assertIn(f"{probe}: live status is not PASS", failures)
+
+    def test_contract_acceptance_ids_match_the_live_checker_exactly(self):
+        contract = json.loads((SOURCE.parent / "contract.json").read_text())
+        acceptance = next(phase for phase in contract["phases"] if phase["id"] == "acceptance")
+        contract_ids = acceptance["probes"] + acceptance["journeys"]
+        self.assertEqual(len(contract_ids), len(set(contract_ids)), "acceptance IDs must be unique")
+        self.assertEqual(set(contract_ids), set(checker.REQUIRED))
+
+    def test_web_and_iphone_login_acceptance_preserves_selected_oidc_provider(self):
+        runbook = (SOURCE.parent.parents[2] / "docs/runbooks/disposable-live-acceptance.md").read_text()
+        web_login = next(line for line in runbook.splitlines() if "`web-login`" in line)
+        iphone_section = runbook.split("## Physical iPhone", 1)[1]
+        iphone_login = next(line for line in iphone_section.splitlines() if "`iphone-physical-login`" in line)
+
+        self.assertIn("selected OIDC provider", web_login)
+        self.assertIn("Authorization Code + PKCE", web_login)
+        self.assertIn("only when `identity_mode = \"cognito\"` is explicitly selected", web_login)
+        self.assertNotIn("Cognito hosted page", web_login)
+        self.assertIn("selected deployed OIDC issuer", iphone_section)
+        self.assertIn("Authorization Code + PKCE", iphone_login)
+
+    def test_valid_inventory_is_blocked_pending_human_acceptance_review(self):
+        manifest_path = self.root / "manifest.json"
+        manifest_path.write_text(json.dumps(self.manifest))
+        with patch.object(sys, "argv", [str(SOURCE), str(manifest_path)]):
+            self.assertEqual(checker.main(), 2)
+
+    def test_missing_user_journey_stays_required(self):
+        self.manifest["checks"] = [item for item in self.manifest["checks"]
+                                   if item["id"] != "web-login"]
+        self.assertIn("missing live check: web-login", checker.verify(self.manifest))
 
     def test_hash_mismatch_fails(self):
         self.manifest["checks"][0]["artifacts"][0]["sha256"] = "0" * 64

@@ -4,22 +4,24 @@ Run `ruby infra/terraform/disposable/lifecycle-audit.rb --ready` from the reposi
 
 The owned foundation includes VPC, NAT/EIP, EKS and nodes, RDS, disposable Secrets Manager containers, ECR, Cognito, private ALB, CloudFront and WAF. CDK and Kubernetes-owned resources need separate cleanup before the network disappears. KMS deletion is scheduled with a seven-day AWS waiting period; the inventory must distinguish `PendingDeletion` from an active key.
 
-The verified wrapper now records a cell scope before VPC creation and can
-recover a pre-EKS partial apply from state. It preflights inventory reads and
-simulates its AWS delete permissions before cleanup. It also saves a
-mode-0600 identity/managed-secret manifest before cleanup so an empty-state
-retry can rerun final inventory; keep it and the PV inventory until inventory
-passes.
+The verified wrapper records a cell scope before VPC creation and can recover
+a pre-EKS partial apply from state. It preflights inventory reads and simulates
+its AWS delete permissions before cleanup. It saves a mode-0600
+identity/managed-secret manifest before cleanup so an empty-state retry can
+rerun final inventory; keep it and the PV inventory until inventory passes.
+For a complete apply, the root also wires every managed resource to a
+scope-only `terraform_data.destroy_inventory_sentinel`. Terraform reverses
+these edges during destroy: pre-destroy cleanup runs first and the sentinel's
+final AWS inventory runs after all managed resources.
 
 Remaining limitations:
 
 1. Terraform provider deletion permissions cannot be completely proven without attempting each delete. The wrapper checks inventory reads and simulates the out-of-state AWS deletes; an actual denial remains a resumable failure with local state intact.
-2. Native `terraform destroy` has no guaranteed post-destroy hook. The
-   `pre_destroy_cleanup` destroy provisioner requires an exact-scope marker
-   supplied by `./destroy-verified.sh`, which inventories after Terraform
-   exits. This is an operator guard, not a security boundary; a deliberate
-   caller can set the marker manually. Raw `terraform destroy` cannot provide
-   final inventory proof.
+2. A partial apply may not have recorded `pre_destroy_cleanup`. Use
+   `./destroy-verified.sh` for partial-state recovery because it performs
+   cleanup while EKS and its PV inventory are still available. Raw Terraform
+   destroy is proven only for a complete apply with the cleanup owner present;
+   a raw destroy of partial state is not established safe.
 
 Even after these source checks pass, live AWS destroy and final inventory are required. This checker does not claim that all billable resource classes can be found or that AWS eventual consistency has settled.
 
@@ -37,11 +39,13 @@ AWS/Kubernetes/Terraform fixtures cover pre-EKS partial state, wrong account,
 unreachable EKS, denied reads/deletes, preserved PV inventory, failed destroy,
 and leftover resources after destroy. These commands make no AWS calls.
 
-The expected current result is **one finding**: `raw_destroy_no_post_inventory`.
-The scope marker makes accidental bare destroys stop, but does not add a
-post-destroy provisioner or close the inventory limitation. Source checks and
-stubbed fixtures establish the supported wrapper's contract, not a successful
-live AWS teardown. IAM simulation does not establish provider delete authority
-under every SCP or resource policy.
+The current offline source audit checks every resource edge to the sentinel,
+every resource edge in the pre-cleanup dependency set, scope-only sentinel
+inputs, and the absence of `create_before_destroy` ordering suppression.
+Stubbed fixtures exercise missing/invalid manifests, dirty inventory failure,
+and retry after cleanup. These checks prove configuration contracts, not live
+AWS behavior. IAM simulation does not establish provider delete authority
+under every SCP or resource policy; live AWS destroy and final inventory are
+still required.
 
 Recorded local evidence: [offline contract tests](../../../evidence/tenant-sharding/teardown-audit/offline-contract-tests.log) and [source findings](../../../evidence/tenant-sharding/teardown-audit/source-audit.json).

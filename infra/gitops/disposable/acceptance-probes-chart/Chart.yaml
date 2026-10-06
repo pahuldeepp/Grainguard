@@ -1,0 +1,6 @@
+apiVersion: v2
+name: greenguard-acceptance-probes
+description: Disposable in-cluster ClickHouse and tenant-membership acceptance probes
+type: application
+version: 0.1.0
+appVersion: "1"

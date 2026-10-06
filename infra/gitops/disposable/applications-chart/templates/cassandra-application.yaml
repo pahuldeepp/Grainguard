@@ -2,7 +2,7 @@
 {{- if and (hasKey $cassandra "enabled") (not (kindIs "bool" $cassandra.enabled)) }}{{ fail "cassandraPlane.enabled must be boolean" }}{{ end }}
 {{- if $cassandra.enabled }}
 {{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "Cassandra plane requires an exact Git revision" }}{{ end }}
-{{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "Cassandra plane requires an HTTPS Git repository" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "Cassandra plane requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "Cassandra plane requires a cell" }}{{ end }}
 {{- range (list "image" "migratorImage") }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $cassandra . | default "")) }}{{ fail (printf "Cassandra plane %s must be an immutable OCI digest" .) }}{{ end }}

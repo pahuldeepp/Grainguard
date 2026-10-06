@@ -1,0 +1,50 @@
+# Stage 07 saga alert rules (Prometheus rule-file format). Metrics come from the
+# saga worker (SAGA_METRICS_ADDR) and saga API (/metrics). No rule uses tenant or
+# saga-id labels: the metrics do not carry them. Stage 11 wires these into the
+# alerting pipeline. Not yet checked with `promtool check rules` (not installed here).
+groups:
+  - name: greenguard-saga
+    rules:
+      - alert: SagaStuck
+        expr: max(saga_deadline_overdue) > 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "Sagas past their deadline are not being compensated"
+          runbook: docs/runbooks/saga-stuck.md
+      - alert: SagaRepairRequiredBacklog
+        expr: max(saga_repair_required) > 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Sagas are quarantined as repair_required and need an operator decision"
+          runbook: docs/runbooks/saga-repair-required.md
+      - alert: SagaLeaseChurn
+        expr: sum(increase(saga_lease_lost_total[10m])) > 3
+        labels: { severity: ticket }
+        annotations:
+          summary: "Saga workers keep losing shard leases"
+          runbook: docs/runbooks/saga-lease-churn.md
+      - alert: SagaCompensationBacklog
+        expr: max(saga_compensation_backlog) > 20
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: "Compensating sagas are accumulating"
+          runbook: docs/runbooks/saga-compensation-backlog.md
+      - alert: SagaMQTTAckTimeout
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(saga_step_latency_seconds_bucket{step="asset.configure"}[15m]))) > 300
+          or max(saga_state_count{state="configuring"}) > 0 and max(saga_deadline_overdue) > 0
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "Device configuration acknowledgements over MQTT are slow or missing"
+          runbook: docs/runbooks/saga-mqtt-ack-timeout.md
+      - alert: SagaParticipantDown
+        expr: max(saga_commands_oldest_pending_seconds) > 120 or up{job=~"saga-worker|hardware-service|inventory-saga|telemetry-ingest"} == 0
+        for: 3m
+        labels: { severity: page }
+        annotations:
+          summary: "A saga worker or participant is not making progress"
+          runbook: docs/runbooks/saga-participant-down.md

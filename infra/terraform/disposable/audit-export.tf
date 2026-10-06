@@ -12,6 +12,7 @@ data "aws_prefix_list" "s3" {
 }
 
 resource "aws_vpc_endpoint" "s3" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   count             = var.enable_application_tree ? 1 : 0
   vpc_id            = aws_vpc.cell.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
@@ -25,19 +26,6 @@ resource "aws_vpc_endpoint" "s3" {
     Lifecycle   = "Disposable"
     Cell        = var.cluster_name
     ManagedBy   = "Terraform"
-  }
-}
-
-data "aws_iam_policy_document" "audit_export_s3_endpoint" {
-  count = var.enable_application_tree ? 1 : 0
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
-    resources = [local.audit_export_object_arn]
-    principals {
-      type        = "AWS"
-      identifiers = ["*"]
-    }
   }
 }
 
@@ -69,6 +57,7 @@ data "aws_iam_policy_document" "audit_export_pod_identity" {
 }
 
 resource "aws_iam_role" "audit_export" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   for_each           = var.enable_application_tree ? local.audit_export_pod_roles : toset([])
   name               = "${substr(var.cluster_name, 0, 40)}-${each.key}"
   assume_role_policy = data.aws_iam_policy_document.audit_export_pod_identity[each.key].json
@@ -89,9 +78,10 @@ resource "aws_iam_role" "audit_export" {
 }
 
 resource "aws_iam_role_policy" "audit_export" {
-  for_each = var.enable_application_tree ? local.audit_export_pod_roles : toset([])
-  name     = "${substr(var.cluster_name, 0, 36)}-${each.key}-audit-exports"
-  role     = aws_iam_role.audit_export[each.key].id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = var.enable_application_tree ? local.audit_export_pod_roles : toset([])
+  name       = "${substr(var.cluster_name, 0, 36)}-${each.key}-audit-exports"
+  role       = aws_iam_role.audit_export[each.key].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -109,5 +99,7 @@ resource "aws_eks_pod_identity_association" "audit_export" {
   service_account = each.key
   role_arn        = aws_iam_role.audit_export[each.key].arn
 
-  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy.audit_export]
+  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy.audit_export,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }

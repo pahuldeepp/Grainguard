@@ -309,7 +309,7 @@ spec:
             matchExpressions:
               - key: app
                 operator: In
-                values: [greenguard-cassandra-bootstrap, greenguard-cassandra-schema, greenguard-cassandra-grants, greenguard-cassandra-activator]
+                values: [greenguard-cassandra-bootstrap, greenguard-cassandra-schema, greenguard-cassandra-grants, greenguard-cassandra-activator, greenguard-history-verifier]
       ports:
         - { protocol: TCP, port: 9042 }
   egress:
@@ -332,7 +332,7 @@ spec:
     matchExpressions:
       - key: app
         operator: In
-        values: [greenguard-cassandra-bootstrap, greenguard-cassandra-schema, greenguard-cassandra-grants, greenguard-cassandra-activator]
+        values: [greenguard-cassandra-bootstrap, greenguard-cassandra-schema, greenguard-cassandra-grants, greenguard-cassandra-activator, greenguard-history-verifier]
   policyTypes: [Ingress, Egress]
   ingress: []
   egress:

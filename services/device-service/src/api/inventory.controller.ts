@@ -16,7 +16,11 @@ import {
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
 import type { Db } from "../db/client.js";
 import { isUuid } from "../db/tenant.js";
-import { DeviceNotFoundError, InvalidInputError } from "../inventory/errors.js";
+import {
+  DeviceNotFoundError,
+  DeviceLookupAmbiguousError,
+  InvalidInputError,
+} from "../inventory/errors.js";
 import {
   changeDeviceBinding,
   createBin,
@@ -24,6 +28,7 @@ import {
   grainLotAt,
   getDevice,
   listDevices,
+  lookupDeviceBySerial,
   placeGrainLot,
   registerDevice,
   registerPendingDevice,
@@ -187,6 +192,29 @@ export class InventoryController {
           ? (items.at(-1) as { deviceId: string }).deviceId
           : null,
     };
+  }
+
+  @Get("devices/lookup")
+  async lookup(
+    @Req() req: ApiRequest,
+    @Query() query: Record<string, unknown>,
+    @Res({ passthrough: true }) res: ApiResponse,
+  ) {
+    const principal = authorized(req, ...READ);
+    if (
+      Object.keys(query).join(",") !== "serial" ||
+      typeof query.serial !== "string"
+    )
+      throw new InvalidInputError("serial is required");
+    const matches = await lookupDeviceBySerial(
+      this.db,
+      principal.tenantId,
+      query.serial,
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    if (!matches.length) throw new DeviceNotFoundError();
+    if (matches.length !== 1) throw new DeviceLookupAmbiguousError();
+    return matches[0];
   }
 
   @Get("devices/:id")

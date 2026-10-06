@@ -43,13 +43,14 @@ func (s SharedOps) Ping(ctx context.Context) error { return s.Client.Ping(ctx) }
 
 // Message preserves the record and high-watermark needed by read-model consumers.
 type Message struct {
-	EndOffset  int64
-	Topic      string
-	Partition  int32
-	Offset     int64
-	Key, Value []byte
-	Headers    []kgo.RecordHeader
-	Commit     func(context.Context) error
+	EndOffset      int64
+	Topic          string
+	TransportTopic string
+	Partition      int32
+	Offset         int64
+	Key, Value     []byte
+	Headers        []kgo.RecordHeader
+	Commit         func(context.Context) error
 }
 
 func NextMessage(ctx context.Context, client Client, offsetLost error) (Message, error) {

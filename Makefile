@@ -1,4 +1,4 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
@@ -37,6 +37,7 @@ build:
 dev: db-migrate build
 	npm run dev
 verify: check-plan db-migrate
+	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
 	npm run format:check
 	npm run lint
@@ -200,7 +201,7 @@ projection-replay:
 # Opt-in Cassandra history (Stage 05c); never part of dev/verify/smoke.
 CASSANDRA_COMPOSE = $(COMPOSE) -f infra/cassandra/compose.yaml
 CASSANDRA_HOSTS ?= 127.0.0.1:59042
-.PHONY: cassandra-up cassandra-down cassandra-test
+.PHONY: cassandra-up cassandra-down cassandra-test cassandra-rf3-test
 cassandra-up:
 	$(CASSANDRA_COMPOSE) up -d --wait cassandra
 	cd services/cassandra-writer && go run ./cmd/migrate
@@ -208,6 +209,15 @@ cassandra-down:
 	$(CASSANDRA_COMPOSE) stop cassandra
 cassandra-test:
 	cd services/cassandra-writer && CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 go test -count=1 -race -run 'Live' -v ./...
+
+# Isolated, disposable RF3 cluster acceptance. Uses ports 59043-59045 and
+# separate persistent volumes; the script stops (but does not delete) the lab.
+cassandra-rf3-test:
+	bash scripts/cassandra-rf3-acceptance.sh
+
+.PHONY: telemetry-source-retention-guard
+telemetry-source-retention-guard:
+	bash scripts/check-write-side-retention-guard.sh
 
 # Destructive, opt-in local fault gate: stops/starts ONLY the Cassandra container
 # (startup-while-down and a CASSANDRA_OUTAGE_SECONDS outage, default 130).
@@ -455,3 +465,25 @@ design-check:
 observability-test-ml-rules:
 	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/ml-scoring.yaml
 	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/ml-scoring.test.yaml
+
+# Optional local-only ClickHouse analytics plus canonical synthetic scorer fixtures.
+ml-clickhouse-up:
+	docker compose -f labs/clickhouse/compose.yaml up -d --wait clickhouse
+	docker compose -f labs/clickhouse/compose.yaml --profile init run --rm schema-init
+ml-clickhouse-down:
+	docker compose -f labs/clickhouse/compose.yaml down
+ml-local-synthetic-seed:
+	ML_SYNTHETIC_TENANT_ID=0a0a0a0a-0000-4000-8000-00000000000a PYTHONPATH=services/ml-scoring .local/ml-scoring-venv/bin/python services/ml-scoring/seed_local_synthetic.py --allow-local-synthetic
+.PHONY: telemetry-pipeline-e2e
+telemetry-pipeline-e2e:
+	@set -eu; compose='docker compose -f labs/telemetry-pipeline/compose.yaml'; \
+	cleanup() { $$compose down --volumes --remove-orphans >/dev/null 2>&1 || true; }; \
+	trap cleanup EXIT INT TERM; \
+	$$compose up -d --build --wait kafka clickhouse minio minio-init telemetry-archive telemetry-clickhouse-sink; \
+	$$compose run --rm publisher; \
+	$$compose run --rm acceptance; \
+	$$compose run --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --prefix telemetry/greenguard.telemetry.recorded.v1/ --topic greenguard.telemetry.recorded.v1 --confirm; \
+	replay_check=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --prefix telemetry/greenguard.telemetry.recorded.v1/ --topic greenguard.telemetry.recorded.v1); \
+	printf '%s\n' "$$replay_check"; \
+	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["mode"].startswith("dry-run"), result' "$$replay_check"; \
+	$$compose run --rm -e EXPECTED_ARCHIVE_OBJECTS=2 acceptance

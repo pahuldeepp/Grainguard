@@ -1,12 +1,17 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link, NavLink, Route, Routes } from "react-router";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router";
 import { checkHealth } from "./health";
 import { ProvisioningApi, type AccessTokenProvider } from "./provisioning";
 import { ReadApi } from "./read-api";
 import { AlertsApi } from "./alerts-api";
 import { MlApi } from "./ml-api";
 import { BillingApi } from "./billing-api";
+import {
+  RagOperationsApi,
+  type RagOperationsSection,
+} from "./rag-operations-api";
+import { AssistantApi } from "./assistant-api";
 import { type DashboardState, uiActions } from "./dashboard-state";
 import { AlertSummary } from "./AlertSummary";
 import { useOnline } from "./online";
@@ -37,7 +42,15 @@ const BinReadings = lazy(() =>
 const MlOperationsView = lazy(() =>
   import("./MlOperationsView").then((m) => ({ default: m.MlOperationsView })),
 );
-const BillingView = lazy(() => import("./BillingView").then((m) => ({ default: m.BillingView })));
+const BillingView = lazy(() =>
+  import("./BillingView").then((m) => ({ default: m.BillingView })),
+);
+const RagOperationsView = lazy(() =>
+  import("./RagOperationsView").then((m) => ({ default: m.RagOperationsView })),
+);
+const AssistantView = lazy(() =>
+  import("./AssistantView").then((m) => ({ default: m.AssistantView })),
+);
 const services = [
   {
     name: "Device service",
@@ -71,6 +84,8 @@ const navItems = [
   { to: "/alerts", label: "Alerts", icon: "alerts" },
   { to: "/ml", label: "ML operations", icon: "overview" },
   { to: "/billing", label: "Billing", icon: "overview" },
+  { to: "/assistant", label: "Assistant", icon: "assistant" },
+  { to: "/rag/overview", label: "RAG admin", icon: "rag" },
 ] as const;
 
 function Overview({
@@ -150,7 +165,18 @@ export function App({
     () => (getAccessToken ? new MlApi(getAccessToken) : null),
     [getAccessToken],
   );
-  const billingApi = useMemo(() => (getAccessToken ? new BillingApi(getAccessToken) : null), [getAccessToken]);
+  const billingApi = useMemo(
+    () => (getAccessToken ? new BillingApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const ragOperationsApi = useMemo(
+    () => (getAccessToken ? new RagOperationsApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const assistantApi = useMemo(
+    () => (getAccessToken ? new AssistantApi(getAccessToken) : null),
+    [getAccessToken],
+  );
   const [health, setHealth] = useState<(boolean | null)[]>([null, null]);
   useEffect(() => {
     const controller = new AbortController();
@@ -270,6 +296,7 @@ export function App({
               path="/alerts"
               element={
                 <AlertsView
+                  key={sessionId}
                   api={alertsApi}
                   provisioningApi={provisioning}
                   sessionId={sessionId}
@@ -312,7 +339,47 @@ export function App({
               path="/ml/retraining"
               element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
             />
-            <Route path="/billing" element={<BillingView api={billingApi} sessionId={sessionId} />} />
+            <Route
+              path="/billing"
+              element={<BillingView api={billingApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/assistant"
+              element={
+                <AssistantView
+                  key={sessionId}
+                  api={assistantApi}
+                  sessionId={sessionId}
+                  getAccessToken={getAccessToken}
+                />
+              }
+            />
+            <Route
+              path="/rag"
+              element={<Navigate to="/rag/overview" replace />}
+            />
+            {(
+              [
+                "overview",
+                "retrieval",
+                "documents",
+                "evaluations",
+                "cache",
+                "traces",
+              ] as RagOperationsSection[]
+            ).map((section) => (
+              <Route
+                key={section}
+                path={`/rag/${section}`}
+                element={
+                  <RagOperationsView
+                    api={ragOperationsApi}
+                    sessionId={sessionId}
+                    section={section}
+                  />
+                }
+              />
+            ))}
           </Routes>
         </Suspense>
       </main>

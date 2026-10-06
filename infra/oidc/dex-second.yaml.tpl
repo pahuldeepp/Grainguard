@@ -19,7 +19,9 @@ staticClients:
     public: true
     redirectURIs:
       - http://127.0.0.1:5173/auth/callback
+      - http://127.0.0.1:5173/auth/silent-callback
       - http://localhost:5173/auth/callback
+      - http://localhost:5173/auth/silent-callback
 staticPasswords:
   - email: alice@greenguard.test
     hash: '{{ getenv "OIDC_DEV_PASSWORD" | crypto.Bcrypt }}'

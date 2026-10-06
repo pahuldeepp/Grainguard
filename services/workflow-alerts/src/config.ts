@@ -1,7 +1,9 @@
+import { validateOwnership, type OwnershipConfig } from "./api/ownership.js";
 import { secret } from "./api/identity.js";
 import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
 
 export interface AlertsConfig {
+  ownership?: OwnershipConfig;
   databaseUrl: string;
   host: string;
   port: number;
@@ -87,6 +89,7 @@ export function readConfig(env: NodeJS.ProcessEnv): AlertsConfig {
     host: env.HOST || "127.0.0.1",
     port,
     auth,
+    ownership: ownershipFrom(env),
     actorHmacKey: env.ALERTS_ACTOR_HMAC_KEY,
     historyCursorKey: env.ALERTS_HISTORY_CURSOR_KEY,
     otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT || undefined,
@@ -96,4 +99,20 @@ export function readConfig(env: NodeJS.ProcessEnv): AlertsConfig {
       .filter(Boolean),
     kafkaGroup: env.ALERTS_KAFKA_GROUP || "workflow-alerts",
   };
+}
+
+function ownershipFrom(env: NodeJS.ProcessEnv): OwnershipConfig | undefined {
+  const names = [
+    "ALERTS_OWNERSHIP_SERVICE_TOKEN",
+    "CONTROL_PLANE_MEMBERSHIP_URL",
+    "CONTROL_PLANE_MEMBERSHIP_SERVICE_TOKEN",
+  ];
+  if (!names.some((name) => env[name] !== undefined)) return undefined;
+  if (!names.every((name) => env[name]))
+    throw new Error("Alerts ownership configuration must be set together");
+  return validateOwnership({
+    serviceToken: required(env, names[0]),
+    membershipUrl: required(env, names[1]),
+    membershipToken: required(env, names[2]),
+  });
 }

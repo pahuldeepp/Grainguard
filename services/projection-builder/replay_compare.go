@@ -32,6 +32,7 @@ type referenceState struct {
 	Policies      map[string]referencePolicy     `json:"policies"`
 	Assessments   map[string]referenceAssessment `json:"assessments"`
 	Sensors       map[string]referenceSensor     `json:"sensors"`
+	Invalidations map[string]string              `json:"invalidations"`
 	domainEvents  []referenceEvent
 }
 type referenceReading struct {
@@ -144,7 +145,7 @@ func referenceFoldAt(envelopes [][]byte, historyCutoff time.Time) (referenceStat
 }
 
 func newReferenceState() referenceState {
-	return referenceState{Devices: map[string]referenceDevice{}, Latest: map[string]referenceLatest{}, Streams: map[string]referenceStream{}, Readings: map[string]referenceReading{}, Notifications: map[string]string{}, Sites: map[string]referenceSite{}, Bins: map[string]referenceBin{}, CableLayouts: map[string]referenceCable{}, Policies: map[string]referencePolicy{}, Assessments: map[string]referenceAssessment{}, Sensors: map[string]referenceSensor{}}
+	return referenceState{Devices: map[string]referenceDevice{}, Latest: map[string]referenceLatest{}, Streams: map[string]referenceStream{}, Readings: map[string]referenceReading{}, Notifications: map[string]string{}, Sites: map[string]referenceSite{}, Bins: map[string]referenceBin{}, CableLayouts: map[string]referenceCable{}, Policies: map[string]referencePolicy{}, Assessments: map[string]referenceAssessment{}, Sensors: map[string]referenceSensor{}, Invalidations: map[string]string{}}
 }
 
 // collectReferenceEnvelope validates one envelope and groups it by stream key.
@@ -516,6 +517,16 @@ func foldReferenceDomains(state *referenceState, events []referenceEvent) error 
 				approvedAt = formatReferenceTime(parsed)
 			}
 			state.Policies[fmt.Sprintf("%s/%d", p["policy_id"], v)] = referencePolicy{PolicyID: fmt.Sprint(p["policy_id"]), Grain: fmt.Sprint(p["grain_type"]), Bin: referenceNullable(p["bin_id"]), EffectiveFrom: formatReferenceTime(effectiveFrom), EffectiveTo: effectiveTo, Status: fmt.Sprint(p["status"]), Event: e.Event, Version: v, Calibrated: p["calibrated"].(bool), Thresholds: thresholds, RiskThresholds: risk, Provenance: provenance, Evidence: referenceNullable(p["calibration_evidence"]), ApprovedBy: referenceNullable(p["approved_by"]), ApprovedAt: approvedAt, SupersedesID: supersedesID, SupersedesVersion: supersedesVersion}
+		case typeRiskInvalidated:
+			value, err := canonicalJSON(p)
+			if err != nil {
+				return err
+			}
+			occurred, err := parseReferenceTime(e.Occurred)
+			if err != nil {
+				return err
+			}
+			state.Invalidations[e.Event] = value + "/" + formatReferenceTime(occurred)
 		case typeRiskAssessed:
 			policyID := referenceNullable(p["policy_id"])
 			policyCalibrated, _ := p["policy_calibrated"].(bool)
@@ -711,6 +722,7 @@ func readReferenceStateAt(ctx context.Context, tx pgx.Tx, tenant string, history
 		func() error { return readReferenceLayouts(ctx, tx, tenant, got) },
 		func() error { return readReferencePolicies(ctx, tx, tenant, got) },
 		func() error { return readReferenceAssessments(ctx, tx, tenant, got) },
+		func() error { return readReferenceInvalidations(ctx, tx, tenant, got) },
 		func() error { return readReferenceSensors(ctx, tx, tenant, historyCutoff, got) },
 		func() error { return readReferenceNotifications(ctx, tx, tenant, got) },
 	}
@@ -968,6 +980,27 @@ func readReferenceNotifications(ctx context.Context, tx pgx.Tx, tenant string, g
 			return errors.New("unexpected projection notification semantics")
 		}
 		got.Notifications[event] = device
+		return nil
+	}, tenant)
+}
+
+func readReferenceInvalidations(ctx context.Context, tx pgx.Tx, tenant string, got referenceState) error {
+	return queryEachRow(ctx, tx, `SELECT event_id,payload,occurred_at FROM risk_assessment_invalidations WHERE tenant_id=$1`, func(rows pgx.Rows) error {
+		var id string
+		var body []byte
+		var occurred time.Time
+		if err := rows.Scan(&id, &body, &occurred); err != nil {
+			return err
+		}
+		var payload any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return err
+		}
+		value, err := canonicalJSON(payload)
+		if err != nil {
+			return err
+		}
+		got.Invalidations[id] = value + "/" + formatReferenceTime(occurred)
 		return nil
 	}, tenant)
 }

@@ -6,6 +6,12 @@ require 'tempfile'
 
 root = __dir__
 contract = JSON.parse(File.read(File.join(root, 'contract.json')))
+terraform_gitops = File.read(File.expand_path('../../terraform/disposable/gitops.tf', root))
+registry_block = terraform_gitops[/shard_registry_by_release\s*=\s*\{([\s\S]*?)\n\s*\}/, 1]
+abort 'Terraform shard registry release map is missing' unless registry_block
+terraform_registry_map = registry_block.scan(/"([a-z0-9-]+)"\s*=\s*\{\s*service\s*=\s*"([a-z0-9-]+)"\s*,\s*secret\s*=\s*"([a-z0-9-]+)"\s*,\s*env\s*=\s*"([A-Z_]+)"\s*\}/).to_h do |release, service, secret, env|
+  [release, { 'service' => service, 'secret' => secret, 'env' => env }]
+end
 digest = "example.test/greenguard/runtime@sha256:#{'a' * 64}"
 workers = {
   'device-saga-worker' => ['device-service', ['node', 'services/device-service/dist/saga/main.js'], 'device-service'],
@@ -38,11 +44,16 @@ workers.each do |name, (image, command, registry)|
     extra['container'] = {'env' => [{'name' => 'TELEMETRY_ENTITLEMENT_PROJECTOR_HEALTH_ADDR', 'value' => '127.0.0.1:8090'}]}
   end
   if registry
+    mapping = terraform_registry_map.fetch(name) { abort "#{name}: Terraform shard registry mapping is missing" }
+    abort "#{name}: Terraform shard registry target drift" unless mapping['secret'] == registry && mapping['env'] == 'SHARD_REGISTRY_FILE'
     extra['container'] = (extra['container'] || {}).merge({
-      'env' => (extra.dig('container', 'env') || []) + [{'name' => 'SHARD_REGISTRY_FILE', 'value' => '/run/greenguard-shards/registry.json'}],
+      'env' => (extra.dig('container', 'env') || []) + [
+        {'name' => 'SHARD_ROUTING_REQUIRED', 'value' => 'true'},
+        {'name' => mapping.fetch('env'), 'value' => '/run/greenguard-shards/registry.json'}
+      ],
       'volumeMounts' => [{'name' => 'shard-registry', 'mountPath' => '/run/greenguard-shards', 'readOnly' => true}]
     })
-    extra['volumes'] = [{'name' => 'shard-registry', 'secret' => {'secretName' => "greenguard-shard-routing-#{registry}", 'defaultMode' => 256, 'items' => [{'key' => 'registry.json', 'path' => 'registry.json'}]}}]
+    extra['volumes'] = [{'name' => 'shard-registry', 'secret' => {'secretName' => "greenguard-shard-routing-#{registry}", 'defaultMode' => 288, 'items' => [{'key' => 'registry.json', 'path' => 'registry.json'}]}}]
   end
   Tempfile.create(['worker-', '.yaml']) do |file|
     file.write(extra.to_yaml); file.flush
@@ -87,10 +98,19 @@ workers.each do |name, (image, command, registry)|
       abort "#{name}: worker HTTP probes should remain disabled without a proven health signal" if container.key?('readinessProbe') || container.key?('livenessProbe') || container.key?('startupProbe')
     end
     abort "#{name}: missing verified RDS CA mount" unless container['volumeMounts'].any? { |mount| mount['name'] == 'rds-ca' && mount['readOnly'] == true }
+    abort "#{name}: pod securityContext must allow the runtime UID to read group-readable projected Secrets" unless
+      spec.dig('securityContext', 'runAsUser') == 101 && spec.dig('securityContext', 'fsGroup') == 101
     if registry
       secret = spec.fetch('volumes').find { |volume| volume['name'] == 'shard-registry' }.fetch('secret')
-      abort "#{name}: registry role/permission drift" unless secret['secretName'] == "greenguard-shard-routing-#{registry}" && secret['defaultMode'] == 256
+      abort "#{name}: registry role/permission drift" unless secret['secretName'] == "greenguard-shard-routing-#{mapping.fetch('secret')}" && secret['defaultMode'] == 288
+      abort "#{name}: registry routing must fail closed" unless
+        container.fetch('env').any? { |env| env['name'] == 'SHARD_ROUTING_REQUIRED' && env['value'] == 'true' } &&
+        container.fetch('env').any? { |env| env['name'] == mapping.fetch('env') && env['value'] == '/run/greenguard-shards/registry.json' }
     end
+    rds_ca = spec.fetch('volumes').find { |volume| volume['name'] == 'rds-ca' }
+    abort "#{name}: missing RDS CA Secret/key mapping" unless
+      rds_ca&.dig('secret', 'secretName') == 'greenguard-rds-ca' &&
+      rds_ca.dig('secret', 'items') == [{'key' => 'ca.pem', 'path' => 'ca.pem'}]
   end
   releases << release.merge('imageDigest' => digest, 'extraValues' => extra.reject { |key, _| key == 'image' })
 end
@@ -102,6 +122,17 @@ Tempfile.create(['worker-root-', '.yaml']) do |file|
   abort 'worker Argo release inventory incomplete' unless apps.length == workers.length
   apps.each do |app|
     abort 'worker lifecycle/order drift' unless app.dig('metadata', 'annotations', 'argocd.argoproj.io/sync-wave') == '30' && app.dig('metadata', 'finalizers') == ['resources-finalizer.argocd.argoproj.io']
+    release_name = app.dig('spec', 'source', 'helm', 'releaseName')
+    release = releases.find { |candidate| candidate.fetch('name') == release_name }
+    rendered_values = app.dig('spec', 'source', 'helm', 'valuesObject')
+    abort "#{release_name}: Argo Application lost chart valuesObject" unless rendered_values
+    expected_values = release.fetch('extraValues')
+    abort "#{release_name}: Argo Application did not preserve runtime container env/mounts" unless
+      rendered_values['container'] == expected_values['container']
+    if expected_values['volumes']
+      abort "#{release_name}: Argo Application did not preserve Secret volumes" unless
+        rendered_values['volumes'] == expected_values['volumes']
+    end
   end
 end
 puts 'PASS worker workloads render with pinned images, scoped config/CA mounts, assignment-based entitlement readiness and owned Argo Applications'

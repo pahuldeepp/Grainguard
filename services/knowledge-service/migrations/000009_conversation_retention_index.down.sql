@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS assistant_conversations_retention_idx;

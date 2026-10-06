@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import {
+  identityKey,
   createMembershipCache,
   createMembershipVerifier,
   httpMembershipFetcher,
@@ -10,7 +11,7 @@ import {
 import { validateEvent } from "@greenguard/contracts";
 import { AuthError } from "@greenguard/tenant-auth";
 import { LOOKUP_TOKEN, startApi } from "../testing/api.js";
-import { outboxEvents } from "../testing/fixtures.js";
+import { outboxEvents, activateTenantFixture } from "../testing/fixtures.js";
 
 let api: Awaited<ReturnType<typeof startApi>>;
 before(async () => {
@@ -30,7 +31,27 @@ async function organization(
     body: { name: `${label} farm` },
     headers: key(),
   });
-  assert.equal(res.status, 201, JSON.stringify(res.json));
+  assert.equal(res.status, 202, JSON.stringify(res.json));
+  assert.equal(res.json.state, "provisioning");
+  assert.equal(
+    (
+      await api.call("GET", `/v1/organizations/${res.json.tenantId}/members`, {
+        token: admin.token,
+      })
+    ).status,
+    404,
+    "provisioning tenant remains unavailable before trusted activation",
+  );
+  await activateTenantFixture(
+    api.db,
+    { issuer: api.issuer.issuer, subject: admin.subject },
+    res.json.tenantId as string,
+    {
+      idempotencyKey: randomUUID(),
+      correlationId: randomUUID(),
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    },
+  );
   return { admin, tenantId: res.json.tenantId as string };
 }
 
@@ -289,5 +310,36 @@ test("M05/M06: revoke -> outbox event -> cache entry gone -> next request 403, m
   await assert.rejects(verifier.verify(bearer2), forbidden);
   console.log(
     `revocation-to-403-ms(outbox read + apply + verify)=${elapsed.toFixed(1)}`,
+  );
+});
+
+test("delegated membership lookup is credential protected and tenant scoped", async () => {
+  const a = await organization("delegated-lookup");
+  const userId = identityKey(api.issuer.issuer, a.admin.subject);
+  const path = `/v1/internal/delegated-memberships?tenantId=${a.tenantId}&identityId=${userId}`;
+  assert.equal((await api.call("GET", path)).status, 401);
+  const found = await api.call("GET", path, { token: LOOKUP_TOKEN });
+  assert.equal(found.status, 200);
+  assert.equal(found.json.identityId, userId);
+  assert.deepEqual(found.json.roles, ["admin"]);
+  assert.equal(
+    (
+      await api.call(
+        "GET",
+        `/v1/internal/delegated-memberships?tenantId=${randomUUID()}&identityId=${userId}`,
+        { token: LOOKUP_TOKEN },
+      )
+    ).status,
+    404,
+  );
+  assert.equal(
+    (
+      await api.call(
+        "GET",
+        "/v1/internal/delegated-memberships?tenantId=forged&identityId=forged",
+        { token: LOOKUP_TOKEN },
+      )
+    ).status,
+    400,
   );
 });

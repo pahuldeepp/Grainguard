@@ -18,6 +18,9 @@ afterEach(() => vi.unstubAllEnvs());
 test("requires complete OIDC configuration and uses code flow", () => {
   vi.stubEnv("VITE_OIDC_AUTHORITY", "https://idp.example.test");
   vi.stubEnv("VITE_OIDC_CLIENT_ID", "dashboard");
+  // The workspace .env contains a real local IdP config; this test exercises
+  // the incomplete-config branch and must not inherit that value.
+  vi.stubEnv("VITE_OIDC_AUDIENCE", "");
   expect(oidcConfiguration()).toBeNull();
   vi.stubEnv("VITE_OIDC_AUDIENCE", "greenguard-api");
   expect(oidcConfiguration()).toMatchObject({

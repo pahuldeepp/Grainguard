@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	common "greenguard.local/go-common"
+	"log"
 	"math"
 	"net"
 	"net/http"
@@ -62,7 +63,11 @@ func buildApp(getenv func(string) string) (*app, error) {
 	// The session is opened lazily and re-created after outages, so a worker
 	// that starts while Cassandra is down waits instead of exiting.
 	session := &history.Reconnecting{Open: func() (history.Conn, error) { return openCassandra(cfg) }}
-	kafka, err := newKafka(strings.Split(brokers, ","), consumerGroup)
+	group := strings.TrimSpace(getenv("KAFKA_GROUP_ID"))
+	if group == "" {
+		group = consumerGroup
+	}
+	kafka, err := newKafkaWithPrefix(strings.Split(brokers, ","), group, getenv("KAFKA_TOPIC_PREFIX"))
 	if err != nil {
 		shutdownTracing(provider)
 		return nil, err
@@ -149,4 +154,20 @@ func shutdownTracing(provider *sdktrace.TracerProvider) {
 	_ = provider.Shutdown(ctx)
 }
 
-func main() { common.RunMain(runService, exit) }
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "backfill-read-history" {
+		if len(os.Args) != 3 || os.Args[2] != "--confirm" {
+			fmt.Fprintln(os.Stderr, "usage: cassandra-writer backfill-read-history --confirm")
+			exit(2)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err := backfillReadHistory(ctx, os.Getenv); err != nil {
+			log.Printf("Cassandra history backfill failed; PostgreSQL history remains authoritative: %v", err)
+			exit(1)
+		}
+		return
+	}
+	common.RunMain(runService, exit)
+}

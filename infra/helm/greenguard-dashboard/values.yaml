@@ -90,7 +90,7 @@ observability:
     enabled: false
     namespace: monitoring
     selector:
-      app.kubernetes.io/name: prometheus
+      app: prometheus
     # Istio merged mode is 15020; Envoy-only mode is 15090.
     mergeMetrics: true
     scrapePort: 15020

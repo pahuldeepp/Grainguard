@@ -10,6 +10,7 @@ import {
 } from "../inventory/entitlements.js";
 import {
   DeviceNotFoundError,
+  DeviceLookupAmbiguousError,
   DuplicateBinError,
   DuplicateSerialError,
   IdempotencyConflictError,
@@ -57,6 +58,8 @@ export function classify(error: unknown): Problem {
       headers: AUTH_HEADERS[error.status],
     };
   }
+  if (error instanceof DeviceLookupAmbiguousError)
+    return { status: 409, code: "device_lookup_ambiguous", title: "Conflict" };
   if (error instanceof AuthError) {
     return {
       status: error.status,

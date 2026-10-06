@@ -56,7 +56,8 @@ func newHandler(app App) http.Handler {
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 		defer cancel()
-		if err := app.Ping(ctx); err != nil || (app.Consumer != nil && !app.Consumer.Ready.Load()) {
+		if err := app.Ping(ctx); err != nil || (app.Consumer != nil && !app.Consumer.Ready.Load()) ||
+			(app.Feed != nil && !app.Feed.Ready(ctx)) {
 			writeStatus(w, http.StatusServiceUnavailable, "not_ready")
 			return
 		}

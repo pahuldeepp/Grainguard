@@ -276,3 +276,25 @@ test("the idempotency key and tracked saga survive a remount for the same identi
   expect(client.start.mock.calls[1][2]).toBe(client.start.mock.calls[0][2]);
   expect(window.location.search).toContain("saga=saga-1");
 });
+
+test("valid fixture link fills IDs without starting provisioning", async () => {
+  const original = window.location.href;
+  window.history.replaceState(
+    {},
+    "",
+    `?deviceId=${snapshot.saga.deviceId}&assetId=${snapshot.saga.assetId}`,
+  );
+  try {
+    const client = api(snapshot);
+    await render(client);
+    expect(container.querySelector<HTMLInputElement>("#device-id")?.value).toBe(
+      snapshot.saga.deviceId,
+    );
+    expect(container.querySelector<HTMLInputElement>("#asset-id")?.value).toBe(
+      snapshot.saga.assetId,
+    );
+    expect(client.start).not.toHaveBeenCalled();
+  } finally {
+    window.history.replaceState({}, "", original);
+  }
+});

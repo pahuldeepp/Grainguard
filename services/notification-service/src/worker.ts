@@ -149,12 +149,19 @@ export async function handleTask(
   } catch (error) {
     if (!(error instanceof InvalidTaskError)) throw error;
     deps.metrics.inc("tasks_rejected");
+    console.warn("notification task rejected", {
+      reason: error.message.slice(0, 120),
+    });
     return "reject";
   }
   // Severity ownership is unconditional, including stale/forged RabbitMQ tasks.
   // Reject before flag lookup, ledger claims or provider calls; critical is AWS-only.
   if (task.severity !== "warning") {
     deps.metrics.inc("tasks_rejected");
+    console.warn("notification task rejected", {
+      reason: "severity_not_owned_by_rabbit_worker",
+      severity: task.severity,
+    });
     return "reject";
   }
   if (deps.optionalSendEnabled) {

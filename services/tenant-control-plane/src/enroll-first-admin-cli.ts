@@ -1,4 +1,5 @@
 import { createDb } from "./db/client.js";
+import { lookupMembership } from "./domain/store.js";
 import {
   enrollFirstAdmin,
   validateFirstAdminEnrollment,
@@ -24,8 +25,9 @@ export async function main(
   });
   if (env.ENROLL_CONFIRM !== `${input.tenantId}:${issuer}`)
     throw new Error("ENROLL_CONFIRM must equal TENANT_ID:ISSUER");
-  if (!env.CONTROL_DIRECT_URL)
-    throw new Error("CONTROL_DIRECT_URL is required");
+  const databaseUrl = validateFirstAdminDatabaseUrl(
+    required(env, "CONTROL_DATABASE_URL"),
+  );
 
   const principal = await verifyFirstAdminAccessToken(
     accessToken,
@@ -50,13 +52,131 @@ export async function main(
   if (env.ENROLL_CONFIRM !== `${enrollment.tenantId}:${enrollment.issuer}`)
     throw new Error("ENROLL_CONFIRM must equal TENANT_ID:ISSUER");
 
-  const db = createDb(env.CONTROL_DIRECT_URL, 2);
+  const db = createDb(databaseUrl, 2);
   try {
     const status = await enrollFirstAdmin(db, enrollment);
-    return `OIDC first-admin enrollment: ${status}`;
+    await waitForFirstAdminMembership(
+      async () => lookupMembership(db, enrollment.issuer, enrollment.subject),
+      enrollment,
+      {
+        timeoutMs: parseBoundedWait(
+          env.ENROLL_WAIT_TIMEOUT_MS,
+          900_000,
+          10_000,
+          3_600_000,
+        ),
+        pollIntervalMs: parseBoundedWait(
+          env.ENROLL_WAIT_POLL_MS,
+          2_000,
+          250,
+          10_000,
+        ),
+      },
+    );
+    return `OIDC first-admin enrollment: ACTIVE admin membership read-back verified (${status})`;
   } finally {
     await db.$disconnect();
   }
+}
+
+export function validateFirstAdminDatabaseUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("CONTROL_DATABASE_URL must be a valid PostgreSQL URL");
+  }
+  const keys = [...url.searchParams.keys()].sort();
+  if (
+    !["postgres:", "postgresql:"].includes(url.protocol) ||
+    decodeURIComponent(url.username) !== "control_app" ||
+    !decodeURIComponent(url.password) ||
+    !url.hostname ||
+    url.port !== "5432" ||
+    url.pathname !== "/greenguard_control" ||
+    url.searchParams.get("sslmode") !== "verify-full" ||
+    url.searchParams.get("sslrootcert") !== "/etc/greenguard/rds/ca.pem" ||
+    keys.join("\0") !== ["sslmode", "sslrootcert"].join("\0")
+  )
+    throw new Error(
+      "CONTROL_DATABASE_URL must use the control_app role, control database and mounted verified RDS CA",
+    );
+  return raw;
+}
+
+export interface FirstAdminMembershipReadback {
+  tenantId: string;
+  roles: string[];
+  state: string;
+}
+
+export interface FirstAdminWaitOptions {
+  timeoutMs: number;
+  pollIntervalMs: number;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
+export async function waitForFirstAdminMembership(
+  lookup: () => Promise<FirstAdminMembershipReadback | null>,
+  enrollment: { tenantId: string },
+  options: FirstAdminWaitOptions,
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(options.timeoutMs) ||
+    options.timeoutMs < 1_000 ||
+    options.timeoutMs > 3_600_000 ||
+    !Number.isSafeInteger(options.pollIntervalMs) ||
+    options.pollIntervalMs < 250 ||
+    options.pollIntervalMs > 10_000
+  )
+    throw new Error("first-admin wait bounds are invalid");
+  const now = options.now ?? Date.now;
+  const pause =
+    options.sleep ??
+    ((milliseconds) =>
+      new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const deadline = now() + options.timeoutMs;
+  while (true) {
+    const membership = await lookup();
+    if (membership?.state === "active") {
+      if (
+        membership.tenantId !== enrollment.tenantId ||
+        !membership.roles.includes("admin")
+      )
+        throw new Error(
+          "first-admin active membership read-back did not match requested tenant/admin",
+        );
+      return;
+    }
+    if (membership && membership.tenantId !== enrollment.tenantId)
+      throw new Error(
+        "verified identity is already attached to another tenant",
+      );
+    const remaining = deadline - now();
+    if (remaining <= 0)
+      throw new Error(
+        "timed out waiting for active first-admin membership read-back",
+      );
+    await pause(Math.min(options.pollIntervalMs, remaining));
+  }
+}
+
+function parseBoundedWait(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!/^\d+$/.test(value))
+    throw new Error("first-admin wait settings must be integer milliseconds");
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max)
+    throw new Error(
+      `first-admin wait setting must be between ${min} and ${max}ms`,
+    );
+  return parsed;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {

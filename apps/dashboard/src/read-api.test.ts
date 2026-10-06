@@ -133,7 +133,7 @@ test("observed minima survive refresh, avoid cross-store claims and clear with s
         data: {
           latestReading: { readingId: "r", consistencyToken: token() },
           searchDevices: [],
-          readingHistory: [],
+          readingHistory: { items: [], nextCursor: null, sources: [] },
         },
       });
     }),
@@ -155,6 +155,40 @@ test("observed minima survive refresh, avoid cross-store claims and clear with s
   api.clearConsistency();
   await api.current("d");
   expect(bodies[5].variables.minimumConsistency).toBeUndefined();
+});
+
+test("history sends opaque cursors and returns page source metadata", async () => {
+  const fetchMock = vi.fn(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    return Response.json({
+      data: {
+        readingHistory: {
+          items: [],
+          nextCursor: body.variables.after ? null : "opaque-cursor",
+          sources: body.variables.after
+            ? { postgres: false, cassandra: true }
+            : { postgres: true, cassandra: true },
+        },
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const api = new ReadApi(async () => "token");
+  const first = await api.history("d1", "from", "to", 2);
+  expect(first).toEqual({
+    items: [],
+    nextCursor: "opaque-cursor",
+    sources: { postgres: true, cassandra: true },
+  });
+  await api.history("d1", "from", "to", 2, first.nextCursor!);
+  expect(
+    fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(String(init?.body)).variables,
+    ),
+  ).toEqual([
+    { id: "d1", from: "from", to: "to", limit: 2 },
+    { id: "d1", from: "from", to: "to", limit: 2, after: "opaque-cursor" },
+  ]);
 });
 
 test("out of order responses never lower the observed minimum and epoch changes surface controlled error", async () => {
@@ -611,4 +645,84 @@ test("a cleared session cannot start a recovery request after the old request re
   await api.current("d");
   await expect(api.current("d")).rejects.toThrow("session_changed");
   expect(calls).toBe(2);
+});
+
+test("search cancellation reaches the GraphQL request without changing authorization", async () => {
+  const controller = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+  const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    requestSignal = init?.signal as AbortSignal;
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token",
+    );
+    return new Promise<Response>((_resolve, reject) => {
+      requestSignal!.addEventListener(
+        "abort",
+        () => reject(requestSignal!.reason),
+        { once: true },
+      );
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const api = new ReadApi(async () => "access-token");
+  const request = api.search("s", 25, undefined, controller.signal);
+  const rejection = expect(request).rejects.toMatchObject({
+    name: "AbortError",
+  });
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  controller.abort();
+  await rejection;
+  expect(requestSignal?.aborted).toBe(true);
+});
+
+test("historical rollups omit automatic hot-store minima but preserve explicit requirements", async () => {
+  const bodies: { variables: Record<string, unknown> }[] = [];
+  const responses = [
+    Response.json({
+      data: {
+        latestReading: { readingId: "r", consistencyToken: token("90") },
+      },
+    }),
+    Response.json({ data: { readingRollups: [] } }),
+    Response.json({
+      errors: [
+        {
+          message: "unsupported",
+          extensions: {
+            code: "consistency_store_unsupported",
+            httpStatus: 409,
+          },
+        },
+      ],
+    }),
+    Response.json({
+      data: {
+        latestReading: { readingId: "r", consistencyToken: token("90") },
+      },
+    }),
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return responses.shift()!;
+    }),
+  );
+  const api = new ReadApi(async () => "token");
+  await api.current("d");
+  await api.rollups("d", "2026-09-20T00:00:00Z", "2026-09-24T00:00:00Z", "day");
+  expect(bodies[1].variables.minimumConsistency).toBeUndefined();
+  await expect(
+    api.rollups(
+      "d",
+      "2026-09-20T00:00:00Z",
+      "2026-09-24T00:00:00Z",
+      "day",
+      token("90"),
+    ),
+  ).rejects.toThrow("consistency_store_unsupported");
+  expect(bodies).toHaveLength(3);
+  expect(bodies[2].variables.minimumConsistency).toBe(token("90"));
+  await api.current("d");
+  expect(bodies[3].variables.minimumConsistency).toBe(token("90"));
 });

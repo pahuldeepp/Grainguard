@@ -1,5 +1,7 @@
 nameOverride: notification-service
 networkPolicy:
+  ingressSources:
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
   egressPods:
     - { namespace: greenguard, selector: { app: rabbitmq }, port: 5672 }
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }

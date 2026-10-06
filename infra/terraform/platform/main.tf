@@ -1,24 +1,69 @@
 locals {
   az_index                            = { for index, zone in var.availability_zones : zone => index }
   az_names                            = sort(var.availability_zones)
+  cell_tags                           = { Project = "GreenGuard", Environment = var.environment, Cell = var.cluster_name }
+  ecr_repository_prefix               = "greenguard/${var.environment}/cell-${substr(sha256(var.cluster_name), 0, 16)}"
   eventbridge_bridge_identity_enabled = var.eventbridge_event_bus_arn != "" && var.bridge_quarantine_queue_arn != ""
 }
 
+# The disposable Terraform root enables this scope-only anchor. Platform-only
+# deployments leave its count at zero. All managed resources in this shared
+# configuration depend on the address so disposable destroy can run the final
+# inventory after the dependency graph has gone away.
+resource "terraform_data" "destroy_inventory_sentinel" {
+  count = var.enable_disposable_destroy_sentinel ? 1 : 0
+
+  input = {
+    region       = var.aws_region
+    environment  = var.environment
+    cluster_name = var.cluster_name
+    account_id   = var.target_account_id
+    script       = "${path.root}/post-destroy-inventory.sh"
+    manifest     = "${path.root}/.last-destroy-pvs.scope.json"
+    pv_inventory = "${path.root}/.last-destroy-pvs"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !contains(["prod", "production"], lower(var.environment))
+      error_message = "The disposable root cannot manage a production environment."
+    }
+  }
+
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["bash", "-c"]
+    command     = "\"$GG_SCRIPT\" \"$GG_REGION\" \"$GG_ENVIRONMENT\" \"$GG_CLUSTER\" \"$GG_ACCOUNT\" \"$GG_MANIFEST\" \"$GG_PV_INVENTORY_FILE\""
+    environment = {
+      GG_SCRIPT            = self.input.script
+      GG_REGION            = self.input.region
+      GG_ENVIRONMENT       = self.input.environment
+      GG_CLUSTER           = self.input.cluster_name
+      GG_ACCOUNT           = self.input.account_id
+      GG_MANIFEST          = self.input.manifest
+      GG_PV_INVENTORY_FILE = self.input.pv_inventory
+    }
+  }
+}
+
 resource "aws_vpc" "cell" {
+  depends_on           = [terraform_data.destroy_inventory_sentinel]
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = { Name = "${var.cluster_name}-vpc" }
+  tags = merge(local.cell_tags, { Name = "${var.cluster_name}-vpc" })
 }
 
 resource "aws_internet_gateway" "cell" {
-  vpc_id = aws_vpc.cell.id
-  tags   = { Name = "${var.cluster_name}-igw" }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  vpc_id     = aws_vpc.cell.id
+  tags       = merge(local.cell_tags, { Name = "${var.cluster_name}-igw" })
 }
 
 resource "aws_subnet" "public" {
-  for_each = local.az_index
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = local.az_index
 
   vpc_id                  = aws_vpc.cell.id
   availability_zone       = each.key
@@ -27,12 +72,16 @@ resource "aws_subnet" "public" {
 
   tags = {
     Name                     = "${var.cluster_name}-public-${each.key}"
+    Project                  = local.cell_tags.Project
+    Environment              = local.cell_tags.Environment
+    Cell                     = local.cell_tags.Cell
     "kubernetes.io/role/elb" = "1"
   }
 }
 
 resource "aws_subnet" "private" {
-  for_each = local.az_index
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = local.az_index
 
   vpc_id            = aws_vpc.cell.id
   availability_zone = each.key
@@ -40,33 +89,40 @@ resource "aws_subnet" "private" {
 
   tags = {
     Name                                        = "${var.cluster_name}-private-${each.key}"
+    Project                                     = local.cell_tags.Project
+    Environment                                 = local.cell_tags.Environment
+    Cell                                        = local.cell_tags.Cell
     "kubernetes.io/role/internal-elb"           = "1"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 }
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.cell.id
-  tags   = { Name = "${var.cluster_name}-public" }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  vpc_id     = aws_vpc.cell.id
+  tags       = merge(local.cell_tags, { Name = "${var.cluster_name}-public" })
 }
 
 resource "aws_route" "public_internet" {
+  depends_on             = [terraform_data.destroy_inventory_sentinel]
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.cell.id
 }
 
 resource "aws_route_table_association" "public" {
-  for_each = aws_subnet.public
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = aws_subnet.public
 
   subnet_id      = each.value.id
   route_table_id = aws_route_table.public.id
 }
 
 resource "aws_eip" "nat" {
-  for_each = aws_subnet.public
-  domain   = "vpc"
-  tags     = { Name = "${var.cluster_name}-nat-${each.key}" }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = aws_subnet.public
+  domain     = "vpc"
+  tags       = merge(local.cell_tags, { Name = "${var.cluster_name}-nat-${each.key}" })
 }
 
 resource "aws_nat_gateway" "az" {
@@ -75,18 +131,22 @@ resource "aws_nat_gateway" "az" {
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = each.value.id
 
-  depends_on = [aws_internet_gateway.cell]
-  tags       = { Name = "${var.cluster_name}-nat-${each.key}" }
+  depends_on = [aws_internet_gateway.cell,
+    terraform_data.destroy_inventory_sentinel,
+  ]
+  tags = merge(local.cell_tags, { Name = "${var.cluster_name}-nat-${each.key}" })
 }
 
 resource "aws_route_table" "private" {
-  for_each = local.az_index
-  vpc_id   = aws_vpc.cell.id
-  tags     = { Name = "${var.cluster_name}-private-${each.key}" }
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = local.az_index
+  vpc_id     = aws_vpc.cell.id
+  tags       = merge(local.cell_tags, { Name = "${var.cluster_name}-private-${each.key}" })
 }
 
 resource "aws_route" "private_nat" {
-  for_each = local.az_index
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = local.az_index
 
   route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
@@ -94,18 +154,21 @@ resource "aws_route" "private_nat" {
 }
 
 resource "aws_route_table_association" "private" {
-  for_each = aws_subnet.private
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = aws_subnet.private
 
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private[each.key].id
 }
 
 resource "aws_cloudwatch_log_group" "eks" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   name              = "/aws/eks/${var.cluster_name}/cluster"
   retention_in_days = 90
 }
 
 resource "aws_cloudwatch_log_group" "vpc_flow" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   name              = "/aws/vpc/${var.cluster_name}/flow"
   retention_in_days = 90
 }
@@ -121,13 +184,15 @@ data "aws_iam_policy_document" "vpc_flow_assume_role" {
 }
 
 resource "aws_iam_role" "vpc_flow" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   name               = "${var.cluster_name}-vpc-flow-logs"
   assume_role_policy = data.aws_iam_policy_document.vpc_flow_assume_role.json
 }
 
 resource "aws_iam_role_policy" "vpc_flow" {
-  name = "${var.cluster_name}-vpc-flow-logs"
-  role = aws_iam_role.vpc_flow.id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  name       = "${var.cluster_name}-vpc-flow-logs"
+  role       = aws_iam_role.vpc_flow.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -140,6 +205,7 @@ resource "aws_iam_role_policy" "vpc_flow" {
 }
 
 resource "aws_flow_log" "cell" {
+  depends_on           = [terraform_data.destroy_inventory_sentinel]
   vpc_id               = aws_vpc.cell.id
   traffic_type         = "ALL"
   log_destination_type = "cloud-watch-logs"
@@ -158,11 +224,13 @@ data "aws_iam_policy_document" "eks_cluster_assume_role" {
 }
 
 resource "aws_iam_role" "eks_cluster" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   name               = "${var.cluster_name}-cluster"
   assume_role_policy = data.aws_iam_policy_document.eks_cluster_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   role       = aws_iam_role.eks_cluster.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
@@ -178,11 +246,13 @@ data "aws_iam_policy_document" "eks_node_assume_role" {
 }
 
 resource "aws_iam_role" "eks_nodes" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   name               = "${var.cluster_name}-nodes"
   assume_role_policy = data.aws_iam_policy_document.eks_node_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "eks_nodes" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   for_each = toset([
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
@@ -194,6 +264,7 @@ resource "aws_iam_role_policy_attachment" "eks_nodes" {
 }
 
 resource "aws_kms_key" "eks_secrets" {
+  depends_on              = [terraform_data.destroy_inventory_sentinel]
   description             = "EKS Kubernetes Secret envelope encryption for ${var.cluster_name}"
   deletion_window_in_days = var.kms_deletion_window_days
   enable_key_rotation     = true
@@ -236,16 +307,20 @@ resource "aws_eks_cluster" "cell" {
     aws_iam_role_policy_attachment.eks_cluster,
     aws_iam_role_policy.eks_secrets_encryption,
     aws_cloudwatch_log_group.eks,
+
+    terraform_data.destroy_inventory_sentinel,
   ]
 }
 
 resource "aws_eks_access_entry" "cluster_admin" {
+  depends_on    = [terraform_data.destroy_inventory_sentinel]
   cluster_name  = aws_eks_cluster.cell.name
   principal_arn = var.cluster_admin_role_arn
   type          = "STANDARD"
 }
 
 resource "aws_eks_access_policy_association" "cluster_admin" {
+  depends_on    = [terraform_data.destroy_inventory_sentinel]
   cluster_name  = aws_eks_cluster.cell.name
   principal_arn = aws_eks_access_entry.cluster_admin.principal_arn
   policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -265,7 +340,9 @@ resource "aws_eks_addon" "core" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
-  depends_on = [aws_iam_role_policy_attachment.eks_nodes]
+  depends_on = [aws_iam_role_policy_attachment.eks_nodes,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "aws_eks_addon" "pod_identity_agent" {
@@ -274,10 +351,13 @@ resource "aws_eks_addon" "pod_identity_agent" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
-  depends_on = [aws_iam_role_policy_attachment.eks_nodes]
+  depends_on = [aws_iam_role_policy_attachment.eks_nodes,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "aws_launch_template" "general" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "${var.cluster_name}-general-"
 
   block_device_mappings {
@@ -327,10 +407,13 @@ resource "aws_eks_node_group" "general" {
     "greenguard.io/workload-class" = "general"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.eks_nodes]
+  depends_on = [aws_iam_role_policy_attachment.eks_nodes,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "aws_launch_template" "compute" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "${var.cluster_name}-compute-"
 
   block_device_mappings {
@@ -386,13 +469,16 @@ resource "aws_eks_node_group" "compute" {
     effect = "NO_SCHEDULE"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.eks_nodes]
+  depends_on = [aws_iam_role_policy_attachment.eks_nodes,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "aws_ecr_repository" "runtime" {
-  for_each = var.image_repositories
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = var.image_repositories
 
-  name                 = "greenguard/${each.value}"
+  name                 = "${local.ecr_repository_prefix}/${each.value}"
   image_tag_mutability = "IMMUTABLE"
   force_delete         = var.delete_nonempty_ecr_on_destroy
 

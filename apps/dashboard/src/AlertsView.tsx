@@ -549,14 +549,16 @@ function AlertDetail({
             {history.data.source.status !== "ok" &&
               history.data.source.status !== "empty" && (
                 <Banner kind="warning">
-                  History source:{" "}
-                  {history.data.source.reasonCode || history.data.source.status}
-                  .
+                  {history.data.source.reasonCode === "incomplete_lifecycle"
+                    ? "Some alert lifecycle transitions are missing from the stored history. The transitions still available are shown below."
+                    : `History is ${history.data.source.status}${history.data.source.reasonCode ? ` (${history.data.source.reasonCode})` : ""}.`}
                 </Banner>
               )}
             {!history.data.complete && (
               <p className="meta">
-                The owner reports incomplete retained transition history.
+                This alert’s current state is available, but its stored
+                transition history has gaps. Missing events are not
+                reconstructed from current state.
               </p>
             )}
             {history.data.items.length ? (
@@ -584,7 +586,7 @@ function AlertDetail({
                 title={
                   history.data.complete
                     ? "No transitions were recorded."
-                    : "No retained transitions are available."
+                    : "No lifecycle transitions are available for this alert."
                 }
               />
             )}

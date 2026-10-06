@@ -4,6 +4,15 @@
 {{- if and .Values.observability.prometheus.enabled (not .Values.mesh.enabled) -}}
 {{- fail "Prometheus Envoy metrics scraping requires mesh.enabled=true" -}}
 {{- end }}
+{{- if and .Values.appMetrics.enabled (not .Values.observability.prometheus.enabled) -}}
+{{- fail "application metrics scraping requires an enabled Prometheus source policy" -}}
+{{- end }}
+{{- if and .Values.appMetrics.enabled (not .Values.mesh.strictMtls) -}}
+{{- fail "application metrics listener requires strict mesh mTLS" -}}
+{{- end }}
+{{- if and .Values.appMetrics.enabled (not .Values.appMetrics.allowedPrincipals) -}}
+{{- fail "application metrics listener requires an explicit scrape principal allowlist" -}}
+{{- end }}
 {{- if and .Values.observability.prometheus.enabled .Values.observability.prometheus.mergeMetrics (ne (int .Values.observability.prometheus.scrapePort) 15020) -}}
 {{- fail "merged Istio metrics require scrapePort=15020" -}}
 {{- end }}
@@ -47,6 +56,11 @@ spec:
         prometheus.io/path: /stats/prometheus
         prometheus.io/port: {{ .Values.observability.prometheus.scrapePort | quote }}
         prometheus.istio.io/merge-metrics: {{ .Values.observability.prometheus.mergeMetrics | quote }}
+        {{- if .Values.appMetrics.enabled }}
+        greenguard.io/app-metrics-scrape: "true"
+        greenguard.io/app-metrics-port: {{ .Values.appMetrics.port | quote }}
+        greenguard.io/app-metrics-path: /metrics
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "greenguard-service.fullname" . }}
@@ -87,6 +101,11 @@ spec:
             - name: http
               containerPort: {{ .Values.service.containerPort }}
               protocol: TCP
+            {{- if .Values.appMetrics.enabled }}
+            - name: app-metrics
+              containerPort: {{ .Values.appMetrics.port }}
+              protocol: TCP
+            {{- end }}
           {{- end }}
           {{- with .Values.container.env }}
           env:
@@ -161,8 +180,10 @@ spec:
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
           {{- end }}
           volumeMounts:
+            {{- if .Values.tmpVolume.enabled }}
             - name: tmp
               mountPath: /tmp
+            {{- end }}
             {{- if .Values.kafka.caSecretName }}
             - name: kafka-ca
               mountPath: /etc/greenguard/kafka
@@ -177,8 +198,10 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
+        {{- if .Values.tmpVolume.enabled }}
         - name: tmp
           emptyDir: {}
+        {{- end }}
         {{- if .Values.kafka.caSecretName }}
         - name: kafka-ca
           secret:

@@ -5,6 +5,7 @@ import { validateEvent } from "@greenguard/contracts";
 import { identityKey } from "@greenguard/membership-client";
 import {
   adminQuery,
+  createActiveTenantFixture,
   outboxEvents as outbox,
   ISSUER,
   runtimeDb,
@@ -51,7 +52,7 @@ const cmd = (key = randomUUID()) => ({
 
 async function orgWithAdmin(name = "Farm") {
   const admin = actor("admin");
-  const created = await createOrganization(db, admin, { name }, cmd());
+  const created = await createActiveTenantFixture(db, admin, name, cmd());
   return { admin, tenantId: created.body.tenantId as string };
 }
 
@@ -81,7 +82,7 @@ async function member(
   };
 }
 
-test("creating an organization makes the caller admin and writes audit and outbox in one transaction (M09)", async () => {
+test("creating an organization persists provisioning without exposing tenant membership before owner bootstrap", async () => {
   const admin = actor("founder");
   const command = cmd();
   const first = await createOrganization(
@@ -90,7 +91,8 @@ test("creating an organization makes the caller admin and writes audit and outbo
     { name: "North farm" },
     command,
   );
-  assert.equal(first.status, 201);
+  assert.equal(first.status, 202);
+  assert.equal(first.body.state, "provisioning");
   const tenantId = first.body.tenantId as string;
   const replay = await createOrganization(
     db,
@@ -104,21 +106,14 @@ test("creating an organization makes the caller admin and writes audit and outbo
     IdempotencyConflictError,
   );
   const events = await outbox(tenantId);
-  assert.deepEqual(
-    events.map((e) => e.event_type),
-    ["tenant.created", "membership.changed"],
-  );
+  assert.deepEqual(events, []);
   for (const event of events)
     assert.deepEqual(validateEvent(event), { ok: true, event });
-  assert.equal((await tenantRows("membership_events", tenantId)).length, 2);
-  assert.equal((await tenantRows("memberships", tenantId)).length, 1);
-  const [grant] = events.filter((e) => e.event_type === "membership.changed");
-  assert.equal(
-    grant?.payload.identity_id,
-    identityKey(admin.issuer, admin.subject),
-  );
-  assert.equal(grant?.payload.action, "granted");
-  assert.equal(JSON.stringify(grant).includes(admin.subject), false);
+  assert.equal((await tenantRows("membership_events", tenantId)).length, 1);
+  assert.equal((await tenantRows("memberships", tenantId)).length, 0);
+  assert.equal(await lookupMembership(db, admin.issuer, admin.subject), null);
+  const [organization] = await tenantRows("organizations", tenantId);
+  assert.equal(organization.state, "provisioning");
 });
 
 test("M02: replaying an invitation token gives one membership; another identity cannot reuse it", async () => {

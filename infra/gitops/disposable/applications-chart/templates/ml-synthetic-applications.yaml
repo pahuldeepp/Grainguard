@@ -1,0 +1,96 @@
+{{- $ml := .Values.mlSynthetic | default dict }}
+{{- if $ml.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "Synthetic ML requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "Synthetic ML requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
+{{- $image := $ml.imageDigest | default "" }}
+{{- if not (regexMatch "^[0-9]{12}:[a-z]{2}(-[a-z]+)+-[0-9]+:[a-z][a-z0-9-]{1,15}:[A-Za-z0-9][A-Za-z0-9_-]{0,99}:[A-Za-z0-9][A-Za-z0-9_-]{0,99}$" ($ml.scopeIdentity | default "")) }}{{ fail "Synthetic ML exact Terraform scope identity is required" }}{{ end }}
+{{- $scope := splitList ":" $ml.scopeIdentity }}
+{{- $account := index $scope 0 }}
+{{- $region := index $scope 1 }}
+{{- $environment := index $scope 2 }}
+{{- if has (lower $environment) (list "prod" "production") }}{{ fail "Synthetic ML cannot target a production environment" }}{{ end }}
+{{- $cluster := index $scope 4 }}
+{{- $ecr := printf "%s.dkr.ecr.%s.amazonaws.com/greenguard/%s/cell-%s/ml-scoring-synthetic@sha256:[a-f0-9]{64}" $account $region $environment (trunc 16 (sha256sum $cluster)) }}
+{{- if not (or (regexMatch "^ghcr\\.io/pahuldeepp/grainguard/ml-scoring-synthetic@sha256:[a-f0-9]{64}$" $image) (regexMatch (printf "^%s$" $ecr) $image)) }}{{ fail "Synthetic ML scorer must use the approved immutable GHCR digest or this exact cell's ECR digest" }}{{ end }}
+{{- if not ($ml.secretSyncEpoch | default "") }}{{ fail "Synthetic ML Secrets Manager synchronization must complete before Argo deploys" }}{{ end }}
+{{- $parts := splitList "@sha256:" $image }}
+{{- $repository := index $parts 0 }}
+{{- $digest := index $parts 1 }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-ml-synthetic-data
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: services/ml-scoring/deploy/data-chart
+    helm:
+      valuesObject:
+        enabled: true
+        cell: {{ $.Values.cell | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ml-synthetic
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels:
+        greenguard.io/cell: {{ $.Values.cell | quote }}
+        greenguard.io/isolation: synthetic-only
+        istio-injection: disabled
+      annotations:
+        greenguard.io/terraform-scope: {{ $ml.scopeIdentity | quote }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-ml-synthetic-scorer
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: services/ml-scoring/deploy/chart
+    helm:
+      valuesObject:
+        enabled: true
+        cell: {{ $.Values.cell | quote }}
+        nameOverride: ml-scoring-synthetic
+        environment: cluster-synthetic
+        image:
+          repository: {{ $repository | quote }}
+          digest: {{ $digest | quote }}
+        syntheticFixtureSeed:
+          enabled: true
+          count: 384
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ml-synthetic
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels:
+        greenguard.io/cell: {{ $.Values.cell | quote }}
+        greenguard.io/isolation: synthetic-only
+        istio-injection: disabled
+      annotations:
+        greenguard.io/terraform-scope: {{ $ml.scopeIdentity | quote }}
+{{- end }}

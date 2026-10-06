@@ -48,7 +48,7 @@ def desired_secret(name, namespace, record, existing):
             raise RuntimeError(f"{name}: source annotation differs from expected AWS secret")
         metadata["resourceVersion"] = existing["metadata"]["resourceVersion"]
     desired = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque", "metadata": metadata}
-    if name == "greenguard-kafka-auth":
+    if name in {"greenguard-kafka-auth", "greenguard-cassandra-tls"}:
         desired["data"] = {key: base64.b64encode(value).decode("ascii")
                            for key, value in preflight.secret_bytes(name, record["data"]).items()}
     else:

@@ -45,11 +45,14 @@ const telemetryMigrator = secret("TELEMETRY_MIGRATOR_PASSWORD");
 const projection = secret("PROJECTION_DB_PASSWORD");
 const readEntitlementProjector = secret("READ_ENTITLEMENT_PROJECTOR_PASSWORD");
 const readQuery = secret("READ_QUERY_DB_PASSWORD");
+secret("READ_HISTORY_CURSOR_SECRET");
 const projectionMigrator = secret("PROJECTION_MIGRATOR_PASSWORD");
 secret("PROJECTION_HISTORY_MAINTAINER_PASSWORD");
 const risk = secret("RISK_DB_PASSWORD");
 const riskMigrator = secret("RISK_MIGRATOR_PASSWORD");
 const ports = connectionPorts(env);
+env.set("POSTGRES_HOST_PORT", String(ports.direct));
+env.set("PGBOUNCER_HOST_PORT", String(ports.pooled));
 const direct = `127.0.0.1:${ports.direct}`;
 const pooled = `127.0.0.1:${ports.pooled}`;
 env.set(
@@ -160,6 +163,11 @@ const controlAuditWorker = secret("CONTROL_AUDIT_WORKER_PASSWORD");
 env.set(
   "CONTROL_AUDIT_DATABASE_URL",
   `postgresql://control_audit_worker:${controlAuditWorker}@${direct}/greenguard_control`,
+);
+const controlBootstrapWorker = secret("CONTROL_BOOTSTRAP_WORKER_PASSWORD");
+env.set(
+  "CONTROL_BOOTSTRAP_DATABASE_URL",
+  `postgresql://tenant_bootstrap_worker:${controlBootstrapWorker}@${direct}/greenguard_control`,
 );
 const billingAuditReader = secret("BILLING_AUDIT_READER_PASSWORD");
 env.set(

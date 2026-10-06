@@ -1,0 +1,57 @@
+{
+  "admission": {
+    "tenant": {
+      "capacity": 40,
+      "refill_per_second": 2,
+      "concurrent": 8
+    },
+    "query": {
+      "capacity": 30,
+      "refill_per_second": 1.5,
+      "concurrent": 6
+    },
+    "indexing": {
+      "capacity": 20,
+      "refill_per_second": 0.5,
+      "concurrent": 2
+    },
+    "user": {
+      "capacity": 20,
+      "refill_per_second": 0.3,
+      "concurrent": 2
+    },
+    "lease_seconds": 45,
+    "provider": {
+      "voyage": {
+        "capacity": 200,
+        "refill_per_second": 3,
+        "concurrent": 20
+      },
+      "anthropic": {
+        "capacity": 60,
+        "refill_per_second": 1,
+        "concurrent": 10
+      }
+    }
+  },
+  "prices": {
+    "voyage-4-large": {
+      "input_micros_per_million": 120000,
+      "output_micros_per_million": 0
+    },
+    "rerank-2.5": {
+      "input_micros_per_million": 50000,
+      "output_micros_per_million": 0
+    },
+    "claude-haiku-4-5-20251001": {
+      "input_micros_per_million": 1000000,
+      "output_micros_per_million": 5000000
+    }
+  },
+  "attempts": 2,
+  "attempt_timeout_seconds": 8,
+  "total_timeout_seconds": 18,
+  "breaker_threshold": 5,
+  "breaker_cooldown_seconds": 30,
+  "fallbacks": {}
+}

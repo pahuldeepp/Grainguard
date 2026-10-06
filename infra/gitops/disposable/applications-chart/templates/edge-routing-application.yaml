@@ -1,0 +1,32 @@
+{{- if .Values.edgeRouting.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-edge-routing
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/edge-routing-chart
+    helm:
+      releaseName: greenguard-edge-routing
+      valuesObject:
+        cell: {{ .Values.cell | quote }}
+        accountId: {{ .Values.edgeRouting.accountId | quote }}
+        region: {{ .Values.edgeRouting.region | quote }}
+        targetGroupARN: {{ .Values.edgeRouting.targetGroupARN | quote }}
+        dexEnabled: {{ .Values.managedDex.enabled }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+{{- end }}

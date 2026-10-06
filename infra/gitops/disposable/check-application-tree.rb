@@ -33,9 +33,28 @@ shard_routed_releases = %w[
 digest = "123456789012.dkr.ecr.us-east-1.amazonaws.com/greenguard/example@sha256:#{'a' * 64}"
 values = {
   'cell' => 'greenguard-example',
-  'repositoryUrl' => 'https://github.com/pahuldeepp/Grainguard.git',
+  'repositoryUrl' => 'ssh://git@github.com/pahuldeepp/Grainguard.git',
   'revision' => 'b' * 40,
+  'edgeRouting' => { 'enabled' => true, 'accountId' => '123456789012', 'region' => 'us-east-1', 'targetGroupARN' => 'arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/ggmesh-example/0123456789abcdef' },
+  'managedDex' => {
+    'enabled' => true,
+    'image' => "ghcr.io/dexidp/dex:v2.41.1@sha256:#{'f' * 64}",
+    'issuer' => 'https://api.example.cloudfront.net/dex',
+    'webOrigin' => 'https://app.example.cloudfront.net',
+    'databaseHost' => 'central.example.rds.amazonaws.com',
+    'databaseCIDRs' => %w[10.60.128.0/20 10.60.144.0/20],
+    'secret' => 'greenguard-dex-config',
+    'caSecret' => 'greenguard-rds-ca'
+  },
+  'acceptanceProbes' => {
+    'enabled' => true,
+    'membershipEnabled' => false,
+    'clickhouseImage' => digest,
+    'tenantControlPlaneImage' => digest,
+    'membershipAudience' => 'greenguard-dashboard'
+  },
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, digest] },
+  'clickhousePlane' => {'enabled' => true, 'image' => digest, 'storageClassName' => 'gp3', 'storageSize' => '20Gi', 'authSecret' => 'greenguard-telemetry-clickhouse-config', 'replayS3CIDRs' => %w[52.216.0.0/15 3.5.0.0/20]},
   'ownerMigrations' => {
     'revision' => 'b' * 40,
     'images' => %w[control billing telemetry projection jobs saga hardware inventory alerts risk notifications].to_h { |name| [name, digest] },
@@ -96,12 +115,24 @@ values = {
 Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   file.write(values.to_yaml)
   file.flush
+  # Exercise the actual Terraform bootstrap -> root Application -> child chart
+  # path, so a value discarded by the bootstrap chart cannot pass this gate.
+  bootstrap, bootstrap_error, bootstrap_status = Open3.capture3('helm', 'template', 'bootstrap', File.join(root, 'bootstrap-chart'), '--namespace', 'argocd', '-f', file.path)
+  abort "bootstrap chart failed: #{bootstrap_error}" unless bootstrap_status.success?
+  root_application = YAML.safe_load_stream(bootstrap).compact.find { |object| object['kind'] == 'Application' }
+  propagated = root_application.dig('spec', 'source', 'helm', 'valuesObject')
+  abort 'ClickHouse configuration discarded by bootstrap' unless propagated['clickhousePlane'] == values['clickhousePlane']
+  abort 'edge routing configuration discarded by bootstrap' unless propagated['edgeRouting'] == values['edgeRouting']
+  file.rewind
+  file.truncate(0)
+  file.write(propagated.to_yaml)
+  file.flush
   chart = File.join(root, 'applications-chart')
   rendered, error, status = Open3.capture3('helm', 'template', 'applications', chart, '--namespace', 'argocd', '-f', file.path)
   abort "application chart failed: #{error}" unless status.success?
   apps = YAML.safe_load_stream(rendered).compact
   actual = apps.map { |app| app.fetch('metadata').fetch('name').delete_prefix('greenguard-') }
-  expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate']
+  expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate', 'clickhouse', 'edge-routing', 'managed-dex', 'live-acceptance-probes']
   abort "application inventory drift: #{actual.sort} != #{expected.sort}" unless actual.sort == expected.sort
   apps.each do |app|
     spec = app.fetch('spec')
@@ -127,6 +158,28 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
       abort 'owner migration Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/owner-migrations-chart'
       abort 'owner migration Application sync wave drift' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '24'
       abort 'owner migration contract was not propagated' unless source.dig('helm', 'valuesObject') == values.fetch('ownerMigrations')
+    elsif app.fetch('metadata').fetch('name') == 'greenguard-edge-routing'
+      abort 'edge routing Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/edge-routing-chart'
+      abort 'edge must follow application readiness' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '40'
+      edge_expected = values.fetch('edgeRouting').reject { |key, _| key == 'enabled' }.merge('cell' => values.fetch('cell'), 'dexEnabled' => true)
+      abort 'edge AWS ownership scope was discarded' unless source.dig('helm', 'valuesObject') == edge_expected
+    elsif app.fetch('metadata').fetch('name') == 'greenguard-managed-dex'
+      abort 'managed Dex Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/dex-chart'
+      abort 'managed Dex must sync before the readiness probes' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '21'
+      dex_values = source.dig('helm', 'valuesObject')
+      abort 'managed Dex issuer or storage scope was discarded' unless dex_values['issuer'] == values.dig('managedDex', 'issuer') && dex_values['databaseHost'] == values.dig('managedDex', 'databaseHost')
+    elsif app.fetch('metadata').fetch('name') == 'greenguard-live-acceptance-probes'
+      abort 'acceptance probe Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/acceptance-probes-chart'
+      abort 'acceptance probes must run after stateful services' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '29'
+      probe_values = source.dig('helm', 'valuesObject')
+      abort 'membership probe must remain gated until interactive login' unless probe_values['membershipEnabled'] == false
+      abort 'acceptance probe image or audience was discarded' unless probe_values['clickhouseImage'] == values.dig('acceptanceProbes', 'clickhouseImage') && probe_values['membershipAudience'] == values.dig('acceptanceProbes', 'membershipAudience')
+    elsif app.fetch('metadata').fetch('name') == 'greenguard-clickhouse'
+      abort 'ClickHouse Application source drift' unless source.fetch('path') == 'infra/gitops/disposable/clickhouse-chart'
+      abort 'ClickHouse must precede its Kafka consumer' unless app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == '28'
+      clickhouse_values = source.dig('helm', 'valuesObject')
+      abort 'ClickHouse values must preserve immutable image, persistent storage, and scoped credentials' unless
+        clickhouse_values == values.fetch('clickhousePlane').reject { |key, _| key == 'enabled' }
     else
       object = source.fetch('helm').fetch('valuesObject')
       abort 'mutable image' unless object.fetch('image') == digest

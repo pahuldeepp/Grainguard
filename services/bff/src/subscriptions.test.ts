@@ -13,8 +13,13 @@ const principal: Principal = {
   subject: "user",
   tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   roles: ["viewer"],
-  expiresAt: new Date(Date.now() + 60_000),
+  expiresAt: new Date(0),
 };
+
+const freshPrincipal = (): Principal => ({
+  ...principal,
+  expiresAt: new Date(Date.now() + 60_000),
+});
 
 type WsMessage = {
   type: string;
@@ -90,13 +95,14 @@ test("subscription verifies bearer, scopes reads and catches up after reconnect"
     },
     onStatus: feed.onStatus.bind(feed),
   } as unknown as LiveFeed;
+  const connectionPrincipal = freshPrincipal();
   const server = createServer();
   const stop = attachSubscriptions(server, {
     verify: async (auth) => {
       if (auth !== "Bearer tenant-a" && auth !== "Bearer tenant-b")
         throw new Error("unauthorized");
       return {
-        ...principal,
+        ...connectionPrincipal,
         tenantId:
           auth === "Bearer tenant-a"
             ? principal.tenantId
@@ -272,12 +278,10 @@ test("subscription verifies bearer, scopes reads and catches up after reconnect"
 
 test("silent peers lose their connection slots and subscription polling stops", async () => {
   let polls = 0;
+  const connectionPrincipal = freshPrincipal();
   const server = createServer();
   const stop = attachSubscriptions(server, {
-    verify: async () => ({
-      ...principal,
-      expiresAt: new Date(Date.now() + 60_000),
-    }),
+    verify: async () => connectionPrincipal,
     read: {
       device: async () => ({ deviceId }) as never,
       latest: async () => {
@@ -370,9 +374,10 @@ test("live notification demands its projection watermark and discards late old p
   };
   const feed = new LiveFeed(redis);
   await feed.start();
+  const connectionPrincipal = freshPrincipal();
   const server = createServer();
   const stop = attachSubscriptions(server, {
-    verify: async () => principal,
+    verify: async () => connectionPrincipal,
     feed,
     read: {
       async device() {
@@ -507,6 +512,7 @@ test("live notification demands its projection watermark and discards late old p
 async function recoverySubscription(
   actual: string | undefined,
   failure?: "outage" | "fresh" | "empty",
+  verifiedPrincipal = freshPrincipal(),
 ) {
   const { ReadUpstreamError } = await import("./read-client.js");
   const initialToken = JSON.stringify({
@@ -531,9 +537,10 @@ async function recoverySubscription(
   };
   const feed = new LiveFeed(redis);
   await feed.start();
+  const connectionPrincipal = verifiedPrincipal;
   const server = createServer();
   const stop = attachSubscriptions(server, {
-    verify: async () => principal,
+    verify: async () => connectionPrincipal,
     feed,
     read: {
       device: async () => ({ deviceId }),
@@ -578,29 +585,39 @@ async function recoverySubscription(
     "graphql-transport-ws",
     { headers: { Authorization: "Bearer one" } },
   );
-  await new Promise<void>((resolve, reject) => {
-    ws.once("open", resolve);
-    ws.once("error", reject);
-  });
-  let message = next(ws);
-  ws.send(JSON.stringify({ type: "connection_init" }));
-  await message;
-  message = next(ws);
-  ws.send(
-    JSON.stringify({
-      type: "subscribe",
-      id: "recovery",
-      payload: {
-        extensions: {
-          persistedQuery: {
-            sha256Hash: operationHash(operations.deviceChanged),
+  const close = async () => {
+    ws.terminate();
+    await stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    let message = next(ws);
+    ws.send(JSON.stringify({ type: "connection_init" }));
+    await message;
+    message = next(ws);
+    ws.send(
+      JSON.stringify({
+        type: "subscribe",
+        id: "recovery",
+        payload: {
+          extensions: {
+            persistedQuery: {
+              sha256Hash: operationHash(operations.deviceChanged),
+            },
           },
+          variables: { deviceId },
         },
-        variables: { deviceId },
-      },
-    }),
-  );
-  await message;
+      }),
+    );
+    await message;
+  } catch (error) {
+    await close();
+    throw error;
+  }
   return {
     calls,
     initialToken,
@@ -651,11 +668,7 @@ async function recoverySubscription(
       );
       return pending;
     },
-    close: async () => {
-      ws.close();
-      await stop();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
+    close,
   };
 }
 
@@ -833,3 +846,11 @@ test("a newer hint during an old snapshot discards that snapshot and reruns at t
     await h.close();
   }
 });
+
+test(
+  "expired recovery identity rejects the upgrade and closes failed setup",
+  { timeout: 3000 },
+  async () => {
+    await assert.rejects(recoverySubscription(undefined, undefined, principal));
+  },
+);

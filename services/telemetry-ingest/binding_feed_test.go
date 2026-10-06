@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,48 @@ func feedFixture() (*BindingFeed, BindingMessage) {
 }
 func feedStep(count int, oldest, newest *time.Time) step {
 	return step{scan: func(d []any) { *(d[0].(*int)) = count; *(d[1].(**time.Time)) = oldest; *(d[2].(**time.Time)) = newest }}
+}
+
+type feedStreamTx struct {
+	*scriptTx
+	queryArgs, writeArgs []any
+}
+
+func (tx *feedStreamTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	tx.queryArgs = args
+	return tx.scriptTx.QueryRow(ctx, query, args...)
+}
+func (tx *feedStreamTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	tx.writeArgs = args
+	return tx.scriptTx.Exec(ctx, query, args...)
+}
+
+type feedStreamDB struct{ tx *feedStreamTx }
+
+func (db feedStreamDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) { return db.tx, nil }
+
+func TestBindingFeedStreamIdentitySeparatesOffsetsAndFreshness(t *testing.T) {
+	f, message := feedFixture()
+	f.TransportTopic = "provisioning-demo." + bindingTopic
+	message.TransportTopic = f.TransportTopic
+	tx := &feedStreamTx{scriptTx: &scriptTx{steps: []step{{rows: 1}, feedStep(6, &ingNow, &ingNow)}}}
+	f.DB = feedStreamDB{tx}
+	if err := f.Heartbeat(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Check(context.Background(), tx); err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.writeArgs) != 7 || tx.writeArgs[6] != f.TransportTopic {
+		t.Fatalf("heartbeat stream=%v", tx.writeArgs)
+	}
+	if len(tx.queryArgs) != 2 || tx.queryArgs[1] != f.TransportTopic {
+		t.Fatalf("freshness stream=%v", tx.queryArgs)
+	}
+	f.TransportTopic = ""
+	if f.streamTopic(BindingMessage{}) != bindingTopic {
+		t.Fatal("default stream changed")
+	}
 }
 
 func TestBindingFeedFreshStaleDisabledMissingAndClockSkew(t *testing.T) {
@@ -49,6 +93,29 @@ func TestBindingFeedFreshStaleDisabledMissingAndClockSkew(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestBindingFeedReadinessUsesAdmissionFreshness(t *testing.T) {
+	f, _ := feedFixture()
+	fresh := feedStep(6, &ingNow, &ingNow)
+	f.DB = scriptDB{steps: []step{fresh}}
+	if !f.Ready(context.Background()) {
+		t.Fatal("fresh binding feed should admit readiness")
+	}
+	old := ingNow.Add(-6 * time.Minute)
+	f.DB = scriptDB{steps: []step{feedStep(6, &old, &old)}}
+	if f.Ready(context.Background()) {
+		t.Fatal("stale binding feed must fail readiness")
+	}
+	f.DB = scriptDB{steps: []step{{err: errBoom}}}
+	if f.Ready(context.Background()) {
+		t.Fatal("feed database failure must fail readiness")
+	}
+	f.MaxStale = 0
+	f.DB = failingDB{}
+	if !f.Ready(context.Background()) {
+		t.Fatal("disabled freshness gate should preserve readiness")
 	}
 }
 func ptrTime(value time.Time) *time.Time { return &value }

@@ -6,10 +6,11 @@ import { inScope } from "../db/session.js";
 import {
   adminQuery,
   asRuntime,
+  createActiveTenantFixture,
   runtimeDb,
   uniqueSubject,
 } from "../testing/fixtures.js";
-import { createOrganization, insertOrganization, type Actor } from "./store.js";
+import { insertOrganization, type Actor } from "./store.js";
 import {
   beginPlacementMove,
   compareAndSetPlacement,
@@ -38,10 +39,10 @@ async function organization() {
     issuer: "https://placement.test",
     subject: uniqueSubject("placement"),
   };
-  const created = await createOrganization(
+  const created = await createActiveTenantFixture(
     db,
     actor,
-    { name: "placement farm" },
+    "placement farm",
     command(),
   );
   const tenantId = created.body.tenantId as string;
@@ -183,6 +184,10 @@ test("trusted onboarding override persists provenance without a public routing h
     insertOrganization(tx, tenantId, "dedicated", randomUUID(), command(), {
       shardId: "s3",
     }),
+  );
+  await adminQuery(
+    "UPDATE organizations SET state='active' WHERE tenant_id=$1",
+    [tenantId],
   );
   assert.equal((await resolveTenant(db, tenantId)).shardId, "s3");
   const [row] = await adminQuery<{ method: string }>(

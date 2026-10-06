@@ -8,6 +8,9 @@ digest = "example.test/greenguard/data@sha256:#{'a' * 64}"
 shards = %w[s1 s2 s3 s4].to_h { |id| [id, {
   'rdsHost' => "db-#{id}.example.us-east-1.rds.amazonaws.com",
   'bootstrapSecret' => "greenguard-#{id}-rds-bootstrap",
+  'tenantBootstrapSecret' => "greenguard-#{id}-tenant-bootstrap",
+  'tenantBootstrapVersion' => 'v1',
+  'tenantBootstrapRole' => "tenant_bootstrap_#{id}",
   'pgbouncerAuthSecret' => "greenguard-#{id}-pgbouncer-auth",
   'cdcSecret' => "greenguard-#{id}-cdc-credentials",
   'projectionMaintenanceSecret' => "greenguard-#{id}-projection-history-maintenance-config"
@@ -15,6 +18,7 @@ shards = %w[s1 s2 s3 s4].to_h { |id| [id, {
 values = {
   'cell' => 'greenguard-shard-test', 'repositoryUrl' => 'https://example.test/greenguard.git', 'revision' => 'b' * 40,
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name,digest] },
+  'cassandraPlane' => {'enabled' => true, 'image' => digest, 'migratorImage' => digest, 'authSecret' => 'greenguard-cassandra-auth', 'tlsSecret' => 'greenguard-cassandra-tls', 'apiServerCIDR' => '10.100.0.1/32', 'storageClassName' => 'gp3', 'storageSize' => '20Gi'},
   'dataPlane' => {
     'enabled' => true, 'rdsHost' => 'db-central.example.us-east-1.rds.amazonaws.com',
     'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name,digest] },
@@ -43,16 +47,16 @@ apps = render(root,'applications-chart',values)
   end
   raise 'projection maintenance Application ordering/source drift' unless maintenance.dig('metadata','annotations','argocd.argoproj.io/sync-wave') == '26' && maintenance.dig('spec','source','path') == 'infra/gitops/disposable/projection-maintenance-chart'
   maintenance_values = maintenance.dig('spec','source','helm','valuesObject')
-  raise 'projection maintenance shard credential or endpoint drift' unless maintenance_values['credentialSecret'] == shards[id]['projectionMaintenanceSecret'] && maintenance_values['rdsHost'] == shards[id]['rdsHost'] && maintenance_values['image'] == digest
+  raise 'projection maintenance shard credential or endpoint drift' unless maintenance_values['credentialSecret'] == shards[id]['projectionMaintenanceSecret'] && maintenance_values['rdsHost'] == shards[id]['rdsHost'] && maintenance_values['image'] == digest && maintenance_values['verifierImage'] == digest
   maintenance_objects = render(root,'projection-maintenance-chart',maintenance_values)
   initial = maintenance_objects.find { |object| object['kind'] == 'Job' }
   cron = maintenance_objects.find { |object| object['kind'] == 'CronJob' }
-  policy = maintenance_objects.find { |object| object['kind'] == 'NetworkPolicy' }
-  raise 'projection maintenance initial job hook absent' unless initial && initial.dig('metadata','annotations','argocd.argoproj.io/hook') == 'Sync' && initial.dig('spec','template','spec','containers',0,'command') == ['/projection-maintain']
+  policy = maintenance_objects.find { |object| object.dig('metadata','name') == "projection-history-#{id}-verifier-egress" }
+  raise 'projection maintenance initial job hook absent' unless initial && initial.dig('metadata','annotations','argocd.argoproj.io/hook') == 'Sync' && initial.dig('spec','template','spec','containers',0,'command') == ['/projection-maintain'] && initial.dig('spec','template','spec','initContainers',0,'command') == ['/usr/local/bin/verify-read-history']
   raise 'projection maintenance schedule/concurrency contract drift' unless cron && cron.dig('spec','schedule') == '*/10 * * * *' && cron.dig('spec','concurrencyPolicy') == 'Forbid'
   container = cron.dig('spec','jobTemplate','spec','template','spec','containers',0)
   raise 'projection maintenance mounted migration credentials or lost dedicated Secret' unless container.dig('env',0,'valueFrom','secretKeyRef') == {'name' => shards[id]['projectionMaintenanceSecret'], 'key' => 'PROJECTION_MAINTENANCE_URL'}
-  raise 'projection maintenance egress policy missing' unless policy && policy.dig('spec','policyTypes') == ['Ingress','Egress'] && policy.dig('spec','ingress') == []
+  raise 'projection maintenance egress policy missing' unless policy && policy.dig('spec','policyTypes') == ['Egress'] && policy.dig('spec','egress').any? { |rule| rule.dig('ports',0,'port') == 5432 }
   bootstrap_objects = render(root,'rds-bootstrap-chart',bootstrap.dig('spec','source','helm','valuesObject'))
   job = bootstrap_objects.find { |item| item['kind'] == 'Job' }
   raise 'operational bootstrap selected central databases' unless job.dig('spec','template','spec','containers',0,'args').include?('GG_OPERATIONAL_ONLY=1')
@@ -113,3 +117,16 @@ rescue RuntimeError => error
   raise error if error.message.include?('accepted no explicit host')
 end
 puts 'Operational bootstrap without an explicit host rejected.'
+
+[false, nil].each do |enabled|
+  invalid = Marshal.load(Marshal.dump(values))
+  invalid['cassandraPlane'] = enabled.nil? ? {} : invalid['cassandraPlane'].merge('enabled' => enabled)
+  begin
+    render(root, 'applications-chart', invalid)
+  rescue RuntimeError => error
+    raise error unless error.message.include?('shard projection maintenance requires enabled Cassandra')
+    next
+  end
+  raise 'shard maintenance accepted missing or disabled Cassandra coverage owner'
+end
+puts 'Missing or disabled Cassandra coverage owner rejected for shard maintenance.'

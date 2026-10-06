@@ -10,6 +10,7 @@ import { AuthError } from "@greenguard/tenant-auth";
 import { ResourceLockedError } from "../db/session.js";
 import {
   AmbiguousMembershipError,
+  MembershipLookupLimitError,
   DomainConflictError,
   IdempotencyConflictError,
   InvalidInputError,
@@ -45,6 +46,7 @@ const STATUS = new Map<ErrorClass, [number, string]>([
   [IdempotencyConflictError, [409, "idempotency_conflict"]],
   [LastAdminError, [409, "last_admin"]],
   [AmbiguousMembershipError, [409, "ambiguous_membership"]],
+  [MembershipLookupLimitError, [503, "membership_lookup_unavailable"]],
   [ResourceLockedError, [409, "resource_locked"]],
   [InvitationEmailMismatchError, [403, "invitation_email_mismatch"]],
   [InvitationUnusableError, [410, "invitation_unusable"]],

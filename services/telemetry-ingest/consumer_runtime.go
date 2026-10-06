@@ -38,11 +38,15 @@ func startBindingConsumer(parent context.Context, db TxStarter, cfg ingestConfig
 	if err != nil {
 		return nil, err
 	}
-	kafka, err := createBindingKafka(strings.Split(brokers, ","), bindingGroup)
+	group := strings.TrimSpace(getenv("BINDING_KAFKA_GROUP"))
+	if group == "" {
+		group = bindingGroup
+	}
+	kafka, err := createBindingKafka(strings.Split(brokers, ","), group)
 	if err != nil {
 		return nil, err
 	}
-	feed := &BindingFeed{DB: db, MaxStale: cfg.BindingFeedMaxStale, Partitions: 6, Now: time.Now}
+	feed := &BindingFeed{DB: db, TransportTopic: kafka.topicPrefix + bindingTopic, MaxStale: cfg.BindingFeedMaxStale, Partitions: 6, Now: time.Now}
 	consumer := &BindingConsumer{Validate: schemas.Validate, Source: kafka, Sink: kafka, Attempts: 5, RetryDelay: time.Second, Timeout: 20 * time.Second,
 		Apply: func(ctx context.Context, body []byte) (BindingOutcome, error) {
 			var event struct {

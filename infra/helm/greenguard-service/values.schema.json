@@ -56,6 +56,15 @@
         "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
+    "appMetrics": {
+      "type": "object",
+      "required": ["enabled", "port"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+        "allowedPrincipals": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
     "container": {
       "type": "object",
       "required": ["name", "env", "envFrom", "command", "args", "volumeMounts"],

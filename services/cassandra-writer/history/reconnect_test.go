@@ -170,3 +170,26 @@ func TestTransientClassifiesReconnectErrors(t *testing.T) {
 		t.Fatal("permanent error classified transient")
 	}
 }
+
+func TestTransientClassifiesWrappedGocqlStartupDialFailures(t *testing.T) {
+	if Transient(nil) {
+		t.Fatal("nil error classified transient")
+	}
+	for _, message := range []string{
+		"connect cassandra: gocql: unable to discover protocol version: dial tcp 127.0.0.1:9042: connect: connection refused",
+		"connect cassandra: gocql: unable to create session: dial tcp 10.0.0.2:9042: i/o timeout",
+		"connect cassandra: gocql: unable to discover protocol version: EOF",
+	} {
+		if !Transient(errors.New(message)) {
+			t.Errorf("network startup failure must be retried: %s", message)
+		}
+	}
+	for _, message := range []string{
+		"connect cassandra: gocql: unable to discover protocol version: unsupported protocol version",
+		"connect cassandra: authentication failed",
+	} {
+		if Transient(errors.New(message)) {
+			t.Errorf("permanent Cassandra failure must not be retried: %s", message)
+		}
+	}
+}

@@ -136,3 +136,27 @@ Set `ML_OPERATIONS_URL` to the internal ML scorer URL to enable the operator-onl
 end-user principal; the browser cannot choose a tenant. If `ML_OPERATIONS_TOKEN`
 is configured, the BFF sends it as `X-Internal-Token` and the scorer rejects
 unauthenticated operations snapshots.
+
+### Complete PDF summaries
+
+`POST /v1/knowledge/query` and `POST /v1/assistant/conversations/{id}/messages`
+accept `{ "question": "Summarize every section", "mode": "document_summary",
+"document_id": "<canonical lowercase UUID>", "document_version": 1 }`.
+All three scope fields are required together; versions are positive PostgreSQL
+integers. Ordinary questions remain compatible with `{ "question": "..." }`.
+The BFF rejects tenant/user overrides and derives tenant identity from the
+verified principal. The Knowledge owner enforces document/version authorization
+and full source coverage. Summary calls have a bounded 300-second upstream
+timeout. Unavailable versions, changed sources and summary safety/size failures
+are returned without exposing internal errors.
+
+
+### Clickable PDF citations
+
+`KNOWLEDGE_API_URL` enables Knowledge/Assistant routes; suggestions additionally
+require the rate-limit Redis client. Missing dependencies leave those endpoints
+unavailable. Protected `GET /v1/assistant/documents/{id}/versions/{version}/source-info`
+returns the stored filename. `/source` proxies at most 25 MiB of PDF bytes after
+owner authorization, with `no-store` and `nosniff`. No object keys, presigned URLs
+or bearer tokens are embedded in browser links. Filenames on new uploads use an
+encoded `X-PDF-Filename` header; the owner validates and stores them per version.

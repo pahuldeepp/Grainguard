@@ -1,5 +1,5 @@
 {{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "revision must be an exact Git commit SHA" }}{{ end }}
-{{- if not (hasPrefix "https://" .Values.repositoryUrl) }}{{ fail "repositoryUrl must use HTTPS" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "repositoryUrl must be an HTTPS Git URL or a GitHub SSH deploy-key URL" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "cell is required" }}{{ end }}
 {{- $data := .Values.dataPlane | default dict }}
 {{- if and (hasKey $data "enabled") (not (kindIs "bool" $data.enabled)) }}{{ fail "dataPlane.enabled must be boolean" }}{{ end }}
@@ -24,7 +24,7 @@
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($shard.rdsHost | default "")) }}{{ fail "shard RDS endpoint missing" }}{{ end }}
 {{- if hasKey $seenHosts (lower $shard.rdsHost) }}{{ fail "central and shard RDS endpoints must be distinct" }}{{ end }}
 {{- $_ := set $seenHosts (lower $shard.rdsHost) true }}
-{{- range $key := list "bootstrapSecret" "pgbouncerAuthSecret" "cdcSecret" }}
+{{- range $key := list "bootstrapSecret" "tenantBootstrapSecret" "pgbouncerAuthSecret" "cdcSecret" }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $shard $key | default "")) }}{{ fail "shard Secret missing" }}{{ end }}
 {{- end }}
 {{- end }}
@@ -74,6 +74,10 @@ spec:
         revision: {{ .Values.revision | quote }}
         releases:
 {{ toYaml .Values.releases | indent 10 }}
+        edgeRouting:
+{{ toYaml .Values.edgeRouting | indent 10 }}
+        clickhousePlane:
+{{ toYaml .Values.clickhousePlane | indent 10 }}
         observabilityImages:
 {{ toYaml .Values.observabilityImages | indent 10 }}
         dataPlane:
@@ -86,6 +90,14 @@ spec:
 {{ toYaml .Values.mqttPlane | indent 10 }}
         ownerMigrations:
 {{ toYaml .Values.ownerMigrations | indent 10 }}
+        aiRuntime:
+{{ toYaml .Values.aiRuntime | indent 10 }}
+        managedDex:
+{{ toYaml .Values.managedDex | indent 10 }}
+        acceptanceProbes:
+{{ toYaml .Values.acceptanceProbes | indent 10 }}
+        mlSynthetic:
+{{ toYaml .Values.mlSynthetic | indent 10 }}
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

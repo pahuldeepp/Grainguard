@@ -1,0 +1,90 @@
+{{- if .Values.operationalOnly }}
+{{- $sql := .Files.Get "files/provision-tenant-bootstrap-login.sql" }}
+{{- if not $sql }}{{ fail "tenant bootstrap login SQL is missing" }}{{ end }}
+{{- $revision := sha256sum (printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s" .Values.image $sql .Values.tenantBootstrapVersion .Values.tenantBootstrapRole .Values.tenantBootstrapSecret .Values.credentialSecret .Values.caSecret .Values.rdsHost) | trunc 16 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-login-{{ $revision }}
+data:
+  provision-tenant-bootstrap-login.sql: |
+{{ $sql | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.name }}-login-{{ $revision }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provision-login
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["psql"]
+          args: ["-X", "-v", "ON_ERROR_STOP=1", "-v", "gg_tenant_bootstrap_role={{ .Values.tenantBootstrapRole }}", "-f", "/bootstrap/provision-tenant-bootstrap-login.sql"]
+          env:
+            - name: PGHOST
+              value: {{ .Values.rdsHost | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: greenguard_admin
+            - name: PGDATABASE
+              value: postgres
+            - name: PGSSLMODE
+              value: verify-full
+            - name: PGSSLROOTCERT
+              value: /rds-ca/ca.pem
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credentialSecret | quote }}
+                  key: PGPASSWORD
+            - name: TENANT_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tenantBootstrapSecret | quote }}
+                  key: TENANT_BOOTSTRAP_PASSWORD
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: sql
+              mountPath: /bootstrap
+              readOnly: true
+            - name: ca
+              mountPath: /rds-ca
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            name: {{ .Values.name }}-login-{{ $revision }}
+        - name: ca
+          secret:
+            secretName: {{ .Values.caSecret | quote }}
+{{- end }}

@@ -1,0 +1,246 @@
+name: Promote signed GreenGuard images to ECR
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful main-branch CI run that produced the immutable release artifact
+        required: true
+        type: string
+      aws_account_id:
+        description: Disposable AWS account ID that owns the ECR cell
+        required: true
+        type: string
+      aws_region:
+        description: Region containing the disposable ECR repositories
+        required: true
+        default: us-east-2
+        type: string
+      environment:
+        description: Disposable Terraform environment name (never prod)
+        required: true
+        default: sandbox
+        type: string
+      cluster_name:
+        description: Exact disposable Terraform cluster name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: greenguard-ecr-promotion-${{ inputs.aws_account_id }}-${{ inputs.environment }}-${{ inputs.cluster_name }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify and promote exact CI image digests
+    if: github.repository == 'pahuldeepp/Grainguard' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: greenguard-ecr-promotion
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Validate the source CI run and deployment cell
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.release_run_id }}
+          ACCOUNT_ID: ${{ inputs.aws_account_id }}
+          REGION: ${{ inputs.aws_region }}
+          CELL_ENVIRONMENT: ${{ inputs.environment }}
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "pahuldeepp/Grainguard" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]]
+          [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]
+          [[ "$CELL_ENVIRONMENT" =~ ^[a-z][a-z0-9-]{1,15}$ ]]
+          [[ ! "$CELL_ENVIRONMENT" =~ ^(prod|production)$ ]]
+          [[ "$CLUSTER_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$ ]]
+          workflow_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml" --jq .id)"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/greenguard-source-run.json"
+          python3 - "$RUNNER_TEMP/greenguard-source-run.json" "$workflow_id" <<'PY'
+          import json, re, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          expected_workflow_id = int(sys.argv[2])
+          if (run.get("workflow_id") != expected_workflow_id or
+              run.get("path") != ".github/workflows/ci.yml" or
+              run.get("event") != "push" or
+              run.get("head_branch") != "main" or
+              run.get("status") != "completed" or
+              run.get("conclusion") != "success" or
+              run.get("repository", {}).get("full_name", "").lower() != "pahuldeepp/grainguard" or
+              not re.fullmatch(r"[a-f0-9]{40}", run.get("head_sha", ""))):
+              raise SystemExit("source must be a successful push CI run from this repository's main branch")
+          with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"source_sha={run['head_sha']}\n")
+          PY
+      - name: Check out the exact source commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
+          persist-credentials: false
+      - name: Download only the release artifact from that successful CI run
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: greenguard-release-inputs-${{ steps.source.outputs.source_sha }}
+          path: source-release
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify release artifact commit binding
+        env:
+          EXPECTED_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("source-release/release-inputs.tfvars.json")
+          release = json.loads(path.read_text())
+          if release.get("gitops_revision") != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("release artifact revision does not match the successful CI source run")
+          if "ml_synthetic_scorer_image_digest" not in release:
+              raise SystemExit("release artifact is missing the CI-produced synthetic scorer image digest")
+          coverage_path = Path("source-release/release-coverage.json")
+          if not coverage_path.is_file():
+              raise SystemExit("release artifact has no machine-readable completeness evidence")
+          coverage = json.loads(coverage_path.read_text())
+          if coverage.get("revision") != os.environ.get("EXPECTED_SHA"):
+              raise SystemExit("release coverage revision does not match the successful CI source run")
+          if coverage.get("upstream_signature_gaps") != [] or coverage.get("application_release_gaps") != []:
+              raise SystemExit("release coverage still has unverified vendor sources or unprovisioned application images")
+          if (release.get("ai_runtime_enabled") is not False or
+              release.get("ai_runtime_sources_complete") != coverage.get("ai_runtime_images_complete") or
+              (not coverage.get("ai_runtime_images_complete") and release.get("ai_runtime_image_digests") != {})):
+              raise SystemExit("AI runtime must remain disabled until every service source and digest is present")
+          if coverage.get("terraform_apply_eligible") is not True or coverage.get("release_status") not in ("ready", "ready_core_ai_disabled"):
+              reasons = "; ".join(coverage.get("blocking_reasons", [])) or "release is not marked ready"
+              raise SystemExit(f"refusing AWS promotion: {reasons}")
+          roles = coverage.get("acceptance_probes", {})
+          expected_roles = {
+              "clickhouse": release.get("clickhouse_image_digest"),
+              "tenant_membership_readback": release.get("deployment_image_digests", {}).get("tenant-control-plane")
+          }
+          if (roles.get("status") != "ready" or
+              roles.get("chart") != "infra/gitops/disposable/acceptance-probes-chart" or
+              roles.get("images") != expected_roles):
+              raise SystemExit("release coverage does not bind acceptance jobs to exact ClickHouse and Node image digests")
+          PY
+      - name: Derive the exact ECR URLs and role ARN for this Terraform cell
+        id: cell
+        env:
+          ACCOUNT_ID: ${{ inputs.aws_account_id }}
+          REGION: ${{ inputs.aws_region }}
+          CELL_ENVIRONMENT: ${{ inputs.environment }}
+          CLUSTER_NAME: ${{ inputs.cluster_name }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          contract = json.loads(Path("infra/gitops/disposable/contract.json").read_text())
+          owners = json.loads(Path("infra/gitops/disposable/owner-migration-inventory.json").read_text())
+          services = sorted({release["image"] for release in contract["releases"]})
+          platform = json.loads(Path("infra/gitops/disposable/platform-image-inventory.json").read_text())
+          platform_repositories = [item["name"] for item in platform["images"]]
+          ai_repositories = [item["name"] for item in platform["ai_runtime_images"] if item["status"] == "source_present"]
+          repositories = sorted(set(services + [f"migration-{owner['name']}" for owner in owners] +
+                                   ["migration-gate", "migration-sql", "ml-scoring-synthetic"] + platform_repositories + ai_repositories))
+          account = os.environ["ACCOUNT_ID"]
+          region = os.environ["REGION"]
+          environment = os.environ["CELL_ENVIRONMENT"]
+          cluster = os.environ["CLUSTER_NAME"]
+          prefix = f"greenguard/{environment}/cell-{hashlib.sha256(cluster.encode()).hexdigest()[:16]}"
+          registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
+          urls = {name: f"{registry}/{prefix}/{name}" for name in repositories}
+          identity = {"account_id": account, "region": region, "environment": environment,
+                      "cluster_name": cluster}
+          Path("ecr-urls.json").write_text(json.dumps(urls, indent=2) + "\n")
+          Path("cell-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
+          role_name = f"gg-ecr-promote-{environment}-{hashlib.sha256(cluster.encode()).hexdigest()[:16]}"
+          role_arn = f"arn:aws:iam::{account}:role/{role_name}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"role_arn={role_arn}\n")
+              output.write(f"registry={registry}\n")
+              output.write(f"repository_count={len(repositories)}\n")
+          PY
+      - name: Request short-lived GitHub OIDC credentials
+        env:
+          AWS_ROLE_ARN: ${{ steps.cell.outputs.role_arn }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")"
+          token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])' <<< "$response")"
+          token_file="$RUNNER_TEMP/greenguard-ecr-promotion-oidc-token"
+          umask 077
+          printf '%s' "$token" > "$token_file"
+          {
+            echo "AWS_ROLE_ARN=$AWS_ROLE_ARN"
+            echo "AWS_REGION=$AWS_REGION"
+            echo "AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION"
+            echo "AWS_ROLE_SESSION_NAME=greenguard-ecr-${GITHUB_RUN_ID}"
+            echo "AWS_WEB_IDENTITY_TOKEN_FILE=$token_file"
+          } >> "$GITHUB_ENV"
+          unset token response
+      - name: Confirm the exact AWS account and cell repositories exist
+        env:
+          EXPECTED_ACCOUNT: ${{ inputs.aws_account_id }}
+        run: |
+          set -euo pipefail
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          test "$actual" = "$EXPECTED_ACCOUNT"
+          python3 - <<'PY'
+          import json, subprocess
+          urls = json.load(open("ecr-urls.json", encoding="utf-8"))
+          registry = next(iter(urls.values())).split("/", 1)[0]
+          names = [url.split(f"{registry}/", 1)[1] for url in urls.values()]
+          result = subprocess.run(["aws", "ecr", "describe-repositories", "--region", __import__("os").environ["AWS_REGION"],
+                                   "--repository-names", *names], check=True, capture_output=True, text=True)
+          actual = sorted(item["repositoryName"] for item in json.loads(result.stdout)["repositories"])
+          if actual != sorted(names):
+              raise SystemExit("ECR repositories do not exactly match the selected Terraform cell")
+          PY
+      - name: Install digest-preserving copy and signature tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+      - name: Install pinned Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Re-verify source signatures, preserve exact digests, and generate Terraform inputs
+        run: |
+          set -euo pipefail
+          ruby infra/gitops/disposable/promote-images-to-ecr.rb \
+            source-release/release-inputs.tfvars.json source-release/release-coverage.json \
+            ecr-urls.json cell-identity.json ecr-release
+      - name: Record release coverage from the signed CI artifact
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          coverage = json.loads(Path("source-release/release-coverage.json").read_text())
+          coverage["source_release_sha"] = __import__("os").environ["SOURCE_SHA"]
+          coverage["ecr_promotion_completed"] = True
+          coverage["complete_argo_application_tree"] = coverage.get("terraform_apply_eligible") is True
+          Path("ecr-release/promotion-coverage.json").write_text(json.dumps(coverage, indent=2) + "\n")
+          PY
+      - name: Upload immutable ECR deployment inputs for review and Terraform
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: greenguard-ecr-release-inputs-${{ inputs.environment }}-${{ inputs.cluster_name }}-${{ steps.source.outputs.source_sha }}
+          path: ecr-release/
+          if-no-files-found: error
+          retention-days: 30

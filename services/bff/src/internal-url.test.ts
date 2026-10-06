@@ -4,6 +4,8 @@ import { allowedInternalUrl } from "./internal-url.js";
 import { ReadClient } from "./read-client.js";
 import { AlertClient } from "./alerts.js";
 import { ProvisioningClient } from "./provisioning.js";
+import { BillingClient } from "./billing.js";
+import { NotificationClient } from "./notifications.js";
 
 test("mesh HTTP is opt-in and limited to Kubernetes Service DNS", () => {
   const previous = process.env.GG_MESH_INTERNAL_HTTP;
@@ -11,11 +13,23 @@ test("mesh HTTP is opt-in and limited to Kubernetes Service DNS", () => {
   try {
     delete process.env.GG_MESH_INTERNAL_HTTP;
     assert.equal(allowedInternalUrl(service), false);
-    for (const Client of [ReadClient, AlertClient, ProvisioningClient])
+    for (const Client of [
+      ReadClient,
+      AlertClient,
+      ProvisioningClient,
+      BillingClient,
+      NotificationClient,
+    ])
       assert.throws(() => new Client(service), /HTTPS/);
     process.env.GG_MESH_INTERNAL_HTTP = "1";
     assert.equal(allowedInternalUrl(service), true);
-    for (const Client of [ReadClient, AlertClient, ProvisioningClient])
+    for (const Client of [
+      ReadClient,
+      AlertClient,
+      ProvisioningClient,
+      BillingClient,
+      NotificationClient,
+    ])
       assert.doesNotThrow(() => new Client(service));
     for (const host of [
       "example.com",

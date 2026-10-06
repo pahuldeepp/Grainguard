@@ -28,6 +28,12 @@ export class ReadUpstreamError extends Error {
 
 type WireRow = Record<string, unknown>;
 
+export interface ReadingHistoryPage {
+  items: Record<string, unknown>[];
+  nextCursor: string | null;
+  sources: { postgres: boolean; cassandra: boolean };
+}
+
 type ReadPolicy = {
   overallTimeoutMs: number;
   perAttemptTimeoutMs: number;
@@ -207,6 +213,7 @@ export class ReadClient {
   ): Promise<{
     data: T;
     nextCursor?: string | null;
+    sources?: unknown;
     consistencyToken: string | null;
   }> {
     let minimum: string | undefined;
@@ -302,6 +309,7 @@ export class ReadClient {
         const body = (await abortable(response.json(), signal)) as {
           data?: T;
           nextCursor?: string | null;
+          sources?: unknown;
         };
         this.succeeded(call);
         if (!("data" in body))
@@ -331,6 +339,7 @@ export class ReadClient {
         return {
           data: body.data as T,
           nextCursor: body.nextCursor,
+          sources: body.sources,
           consistencyToken,
         };
       } catch (error) {
@@ -631,7 +640,13 @@ export class ReadClient {
 
   async history(
     authorization: string,
-    args: { deviceId: string; from: string; to: string; limit: number },
+    args: {
+      deviceId: string;
+      from: string;
+      to: string;
+      limit: number;
+      after?: string | null;
+    },
     consistency?: ReadConsistency,
   ) {
     const params = new URLSearchParams({
@@ -639,13 +654,39 @@ export class ReadClient {
       to: args.to,
       limit: String(args.limit),
     });
-    const { data: rows, consistencyToken } = await this.response<WireRow[]>(
+    if (args.after) params.set("after", args.after);
+    const {
+      data: rows,
+      nextCursor,
+      sources,
+      consistencyToken,
+    } = await this.response<WireRow[]>(
       `/api/v1/read/devices/${pathSegment(args.deviceId)}/readings?${params}`,
       authorization,
       undefined,
       consistency,
     );
-    return rows.map((row) => reading(row, consistencyToken));
+    if (
+      !sources ||
+      typeof sources !== "object" ||
+      typeof (sources as Record<string, unknown>).postgres !== "boolean" ||
+      typeof (sources as Record<string, unknown>).cassandra !== "boolean"
+    )
+      throw new ReadUpstreamError(502, "invalid_history_sources");
+    if (
+      nextCursor !== undefined &&
+      nextCursor !== null &&
+      typeof nextCursor !== "string"
+    )
+      throw new ReadUpstreamError(502, "invalid_history_cursor");
+    return {
+      items: rows.map((row) => reading(row, consistencyToken)!),
+      nextCursor: nextCursor ?? null,
+      sources: {
+        postgres: (sources as { postgres: boolean }).postgres,
+        cassandra: (sources as { cassandra: boolean }).cassandra,
+      },
+    } satisfies ReadingHistoryPage;
   }
 
   async search(

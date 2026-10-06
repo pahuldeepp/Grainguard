@@ -27,11 +27,28 @@ test(
     });
     const elastic = process.env.ELASTICSEARCH_URL ?? "http://127.0.0.1:19200";
     const alias = `read-api-live-${randomUUID().replaceAll("-", "")}`;
-    const tenant = [randomUUID(), randomUUID()];
+    const ownedTenants = await admin.query<{
+      tenant_id: string;
+      shard_id: string;
+      shard_incarnation: string;
+      placement_epoch: string;
+    }>(
+      "SELECT tenant_id::text, shard_id, shard_incarnation::text, placement_epoch::text FROM greenguard_internal.tenant_ownership WHERE state='active' ORDER BY tenant_id LIMIT 2",
+    );
+    assert.equal(
+      ownedTenants.rows.length,
+      2,
+      "live test needs two already-bootstrapped tenants",
+    );
+    const tenant = ownedTenants.rows.map((row) => row.tenant_id);
     const device = randomUUID(),
       site = randomUUID();
-    const hotTime = new Date(Date.now() - 3600_000),
-      coldTime = new Date(Date.now() - 48 * 3600_000);
+    // Derive fixtures from the live clock. Fixed historical dates become cold
+    // after read-history pruning and would make the "hot" insert target a
+    // partition that is correctly gone.
+    const liveNow = new Date();
+    const hotTime = new Date(liveNow.getTime() - 12 * 60 * 60 * 1000),
+      coldTime = new Date(liveNow.getTime() - 48 * 60 * 60 * 1000);
     const hotReading = tenant.map(() => randomUUID()),
       coldReading = tenant.map(() => randomUUID());
     const index = `${alias}-v1`;
@@ -47,26 +64,57 @@ test(
         );
       return response.json();
     };
+    const withTenant = async (
+      tenantIndex: number,
+      action: (tx: pg.PoolClient) => Promise<void>,
+    ) => {
+      const owner = ownedTenants.rows[tenantIndex]!;
+      const tx = await admin.connect();
+      try {
+        await tx.query("BEGIN");
+        await tx.query("SELECT set_config('app.tenant_id',$1,true)", [
+          owner.tenant_id,
+        ]);
+        await tx.query("SELECT set_config('app.shard_id',$1,true)", [
+          owner.shard_id,
+        ]);
+        await tx.query("SELECT set_config('app.shard_incarnation',$1,true)", [
+          owner.shard_incarnation,
+        ]);
+        await tx.query("SELECT set_config('app.placement_epoch',$1,true)", [
+          owner.placement_epoch,
+        ]);
+        await action(tx);
+        await tx.query("COMMIT");
+      } catch (error) {
+        await tx.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        tx.release();
+      }
+    };
     let server: ReturnType<ReturnType<typeof createApp>["listen"]> | undefined;
     try {
       for (let i = 0; i < 2; i++) {
-        await admin.query(
-          "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES($1,$2,$3,$4,'active',1)",
-          [tenant[i], device, site, `read-api-live-${i}`],
-        );
-        await admin.query(
-          "INSERT INTO public.reading_history(tenant_id,reading_id,device_id,event_id,stream_version,source_message_id,site_id,observed_at,received_at,temperature_c,inventory_enrichment) VALUES($1,$2,$3,$4,1,$5,$6,$7,$7,$8,'applied')",
-          [
-            tenant[i],
-            hotReading[i],
-            device,
-            randomUUID(),
-            `read-api-live-${i}`,
-            site,
-            hotTime,
-            i + 10,
-          ],
-        );
+        await withTenant(i, async (tx) => {
+          await tx.query(
+            "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES($1,$2,$3,$4,'active',1)",
+            [tenant[i], device, site, `read-api-live-${i}`],
+          );
+          await tx.query(
+            "INSERT INTO public.reading_history(tenant_id,reading_id,device_id,event_id,stream_version,source_message_id,site_id,observed_at,received_at,temperature_c,inventory_enrichment) VALUES($1,$2,$3,$4,1,$5,$6,$7,$7,$8,'applied')",
+            [
+              tenant[i],
+              hotReading[i],
+              device,
+              randomUUID(),
+              `read-api-live-${i}`,
+              site,
+              hotTime,
+              i + 10,
+            ],
+          );
+        });
         await cql.execute(
           "INSERT INTO readings_by_device_day (tenant_id,device_id,day,observed_at,reading_id,event_id,stream_version,received_at,site_id,temperature_c) VALUES (?,?,?,?,?,?,?,?,?,?)",
           [
@@ -88,7 +136,9 @@ test(
         mappings: {
           properties: {
             tenant_id: { type: "keyword" },
-            name: { type: "text" },
+            resource_type: { type: "keyword" },
+            name: { type: "text", fields: { keyword: { type: "keyword" } } },
+            serial_number: { type: "keyword" },
             resource_id: { type: "keyword" },
           },
         },
@@ -96,13 +146,17 @@ test(
       for (let i = 0; i < 2; i++)
         await es(`${index}/_doc/${i}`, "PUT", {
           tenant_id: tenant[i],
+          resource_type: "device",
           name: "shared match",
+          serial_number: `live-${i}`,
           resource_id: device,
         });
       await es(`${index}/_refresh`, "POST");
       await es("_aliases", "POST", { actions: [{ add: { index, alias } }] });
       const history = new CassandraHistory(cql);
       const app = createApp({
+        historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
+        now: () => liveNow,
         verify: async (auth) => ({
           subject: "live",
           tenantId: auth === "Bearer a" ? tenant[0] : tenant[1],
@@ -129,6 +183,8 @@ test(
         return response.json() as Promise<{
           data: Array<Record<string, unknown>> | Record<string, unknown>;
           source?: string;
+          nextCursor?: string | null;
+          sources?: { postgres: boolean; cassandra: boolean };
         }>;
       };
       for (let i = 0; i < 2; i++) {
@@ -174,7 +230,7 @@ test(
           `/api/v1/read/devices/${device}/readings?from=${encodeURIComponent(new Date(hotTime.getTime() - 60000).toISOString())}&to=${encodeURIComponent(new Date(hotTime.getTime() + 60000).toISOString())}`,
           token,
         );
-        assert.equal(hot.source, "postgres");
+        assert.deepEqual(hot.sources, { postgres: true, cassandra: false });
         assert.deepEqual(
           (hot.data as Array<Record<string, unknown>>).map(
             (row) => row.reading_id,
@@ -185,13 +241,37 @@ test(
           `/api/v1/read/devices/${device}/readings?from=${encodeURIComponent(new Date(coldTime.getTime() - 60000).toISOString())}&to=${encodeURIComponent(new Date(coldTime.getTime() + 60000).toISOString())}`,
           token,
         );
-        assert.equal(cold.source, "cassandra");
+        assert.deepEqual(cold.sources, { postgres: false, cassandra: true });
         assert.deepEqual(
           (cold.data as Array<Record<string, unknown>>).map(
             (row) => row.reading_id,
           ),
           [coldReading[i]],
         );
+        const combinedRange = `/api/v1/read/devices/${device}/readings?from=${encodeURIComponent(new Date(coldTime.getTime() - 60000).toISOString())}&to=${encodeURIComponent(new Date(hotTime.getTime() + 60000).toISOString())}&limit=1`;
+        const firstPage = await get(combinedRange, token);
+        assert.deepEqual(firstPage.sources, {
+          postgres: true,
+          cassandra: true,
+        });
+        assert.deepEqual(
+          (firstPage.data as Array<Record<string, unknown>>).map(
+            (row) => row.reading_id,
+          ),
+          [hotReading[i]],
+        );
+        assert.equal(typeof firstPage.nextCursor, "string");
+        const secondPage = await get(
+          `${combinedRange}&after=${encodeURIComponent(firstPage.nextCursor!)}`,
+          token,
+        );
+        assert.deepEqual(
+          (secondPage.data as Array<Record<string, unknown>>).map(
+            (row) => row.reading_id,
+          ),
+          [coldReading[i]],
+        );
+        assert.equal(secondPage.nextCursor, null);
         const search = await get("/api/v1/read/search?q=shared", token);
         assert.equal(search.source, "elasticsearch");
         assert.deepEqual(
@@ -207,16 +287,16 @@ test(
       await Promise.allSettled([
         es(index, "DELETE"),
         ...tenant.map((t, i) =>
-          admin.query(
-            "DELETE FROM public.reading_history WHERE tenant_id=$1 AND reading_id=$2",
-            [t, hotReading[i]],
-          ),
-        ),
-        ...tenant.map((t) =>
-          admin.query(
-            "DELETE FROM public.device_views WHERE tenant_id=$1 AND device_id=$2",
-            [t, device],
-          ),
+          withTenant(i, async (tx) => {
+            await tx.query(
+              "DELETE FROM public.reading_history WHERE tenant_id=$1 AND reading_id=$2",
+              [t, hotReading[i]],
+            );
+            await tx.query(
+              "DELETE FROM public.device_views WHERE tenant_id=$1 AND device_id=$2",
+              [t, device],
+            );
+          }),
         ),
       ]);
       await Promise.allSettled(

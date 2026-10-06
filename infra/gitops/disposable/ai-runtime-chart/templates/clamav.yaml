@@ -1,0 +1,136 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ai-clamav, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+data:
+  clamd.conf: |
+    Foreground yes
+    TCPSocket 3310
+    TCPAddr 0.0.0.0
+    LocalSocket /tmp/clamd.sock
+    DatabaseDirectory /signatures
+    TemporaryDirectory /tmp
+    SelfCheck 300
+    StreamMaxLength 26M
+    MaxScanSize 100M
+    MaxFileSize 26M
+    MaxThreads 2
+    FailIfCvdOlderThan 2
+    LogClean no
+    ExtendedDetectionInfo no
+  freshclam.conf: |
+    Foreground yes
+    DatabaseDirectory /signatures
+    DatabaseMirror database.clamav.net
+    DNSDatabaseInfo current.cvd.clamav.net
+    Checks 12
+    ConnectTimeout 10
+    ReceiveTimeout 120
+    OnUpdateExecute touch /signatures/last-success
+  clean.pdf: |
+    %PDF-1.4
+    %%EOF
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ai-clamav-signatures
+  labels: {app.kubernetes.io/name: clamav, greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: greenguard-disposable-gp3
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clamav
+  labels: {app.kubernetes.io/name: clamav, greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "15"}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: clamav}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: clamav, greenguard.io/cell: {{ .Values.cell | quote }}}
+      annotations: {sidecar.istio.io/inject: "false"}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+{{ include "ai.security" . | indent 8 }}
+      initContainers:
+        - name: signatures
+          image: {{ .Values.images.clamav | quote }}
+          command: [sh, -c, "freshclam --config-file=/config/freshclam.conf && touch /signatures/last-success"]
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 250m, memory: 1Gi}, limits: {cpu: "1", memory: 2Gi}}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: signatures, mountPath: /signatures}
+            - {name: scratch, mountPath: /tmp}
+      containers:
+        - name: clamd
+          image: {{ .Values.images.clamav | quote }}
+          command: [clamd, --config-file=/config/clamd.conf]
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 250m, memory: 2Gi}, limits: {cpu: "2", memory: 4Gi}}
+          ports: [{name: scan, containerPort: 3310}]
+          startupProbe:
+            exec: {command: [clamdscan, --config-file=/config/clamd.conf, --stream, --no-summary, /config/clean.pdf]}
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [sh, -c, 'test -n "$(find /signatures -name last-success -mmin -2880 -print)" && clamdscan --config-file=/config/clamd.conf --stream --no-summary /config/clean.pdf']}
+            periodSeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: signatures, mountPath: /signatures, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+        - name: freshclam
+          image: {{ .Values.images.clamav | quote }}
+          command: [freshclam, --daemon, --foreground, --config-file=/config/freshclam.conf]
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 100m, memory: 1Gi}, limits: {cpu: "1", memory: 2Gi}}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: signatures, mountPath: /signatures}
+            - {name: scratch, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: ai-clamav, defaultMode: 0444}}
+        - {name: signatures, persistentVolumeClaim: {claimName: ai-clamav-signatures}}
+        # Two concurrent scans may each expand to MaxScanSize (100 MiB).
+        # 256 MiB provides bounded headroom and fits within the pod's 6 GiB limit.
+        - {name: scratch, emptyDir: {medium: Memory, sizeLimit: 256Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: clamav, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  selector: {app.kubernetes.io/name: clamav}
+  ports: [{name: scan, port: 3310, targetPort: scan}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ai-clamav-boundary, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: clamav}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: knowledge-indexer}}}]
+      ports: [{protocol: TCP, port: 3310}]
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+{{- range .Values.externalHTTPSCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 443}]
+{{- end }}

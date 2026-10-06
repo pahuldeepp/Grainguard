@@ -47,7 +47,11 @@ function harness() {
         Response.json({
           data: {
             latestReading: { consistencyToken: token("9", grant.tenantId) },
-            readingHistory: [],
+            readingHistory: {
+              items: [],
+              nextCursor: null,
+              sources: { postgres: true, cassandra: false },
+            },
             searchDevices: [],
           },
         })
@@ -584,4 +588,54 @@ test("a cleared session cannot start a recovery request after an old409", async 
   await client.current("d");
   await assert.rejects(client.current("d"), IdentityChangedError);
   assert.equal(calls, 2);
+});
+
+test("mobile history reads items from the persisted paginated response", async () => {
+  const h = harness();
+  const reading = { readingId: "reading-fixture", consistencyToken: token() };
+  h.queue.push(
+    Response.json({
+      data: {
+        readingHistory: {
+          items: [reading],
+          nextCursor: "next-page",
+          sources: { postgres: true, cassandra: false },
+        },
+      },
+    }),
+  );
+  assert.deepEqual(await h.client.history("d", "from", "to", 1), [reading]);
+});
+
+test("mobile historyPage exposes source and cursor metadata and forwards a next-page cursor", async () => {
+  const h = harness();
+  const first = {
+    items: [{ readingId: "first", consistencyToken: token() }],
+    nextCursor: "opaque-next",
+    sources: { postgres: true, cassandra: false },
+  };
+  const second = {
+    items: [{ readingId: "second", consistencyToken: token() }],
+    nextCursor: null,
+    sources: { postgres: false, cassandra: true },
+  };
+  h.queue.push(
+    Response.json({ data: { readingHistory: first } }),
+    Response.json({ data: { readingHistory: second } }),
+  );
+  const page = await h.client.historyPage("d", "from", "to", 1);
+  assert.deepEqual(page, first);
+  assert.deepEqual(
+    await h.client.historyPage(
+      "d",
+      "from",
+      "to",
+      1,
+      token(),
+      page.nextCursor ?? undefined,
+    ),
+    second,
+  );
+  assert.equal(h.bodies[1].variables.after, "opaque-next");
+  assert.equal(h.bodies[1].variables.minimumConsistency, token());
 });

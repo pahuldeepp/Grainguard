@@ -78,6 +78,8 @@ test("all shipped operation documents fit the resolver budget and new hashes sta
   for (const query of Object.values(operations))
     assertQueryBudget(parse(query));
   const expected = {
+    deviceHistory:
+      "a1fba25351d29fc350e32cb67d95327ea28e1641257212c4dfbf0e1cb9108a5f",
     alertListV2:
       "396838eb74e8646aaa0eff147eaf1ec7c828709e47d506fe13206a5b643c5da3",
     alertDetailV2:

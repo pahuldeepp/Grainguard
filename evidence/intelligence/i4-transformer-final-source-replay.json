@@ -1,0 +1,449 @@
+{
+  "class_rates": {
+    "test": 0.13768115639686584,
+    "train": 0.14351852238178253,
+    "validation": 0.19565217196941376
+  },
+  "created_at_utc": "2026-10-01T03:16:52.420109+00:00",
+  "data_origin": "synthetic_grain_sim",
+  "drift_reference": {
+    "data_origin": "synthetic_grain_sim",
+    "features": {
+      "relative_humidity_percent": {
+        "edges": [
+          47.03099822998047,
+          48.66999816894531,
+          51.34400177001953,
+          54.643001556396484,
+          58.33300018310547,
+          62.05500030517578,
+          65.36299896240234,
+          67.95500183105469,
+          69.59500122070312
+        ],
+        "reference_count": 331776,
+        "reference_proportions": [
+          0.10010067033179013,
+          0.09992886766975309,
+          0.09999216338734568,
+          0.10004340277777778,
+          0.09998613522376543,
+          0.09995298032407407,
+          0.1000072337962963,
+          0.10001929012345678,
+          0.10004340277777778,
+          0.09992585358796297
+        ]
+      },
+      "temperature_c": {
+        "edges": [
+          16.89699935913086,
+          16.98200035095215,
+          17.047000885009766,
+          17.104000091552734,
+          17.1560001373291,
+          17.20599937438965,
+          17.257999420166016,
+          17.31599998474121,
+          17.393999099731445
+        ],
+        "reference_count": 331776,
+        "reference_proportions": [
+          0.10045633198302469,
+          0.10044126157407407,
+          0.10016396604938271,
+          0.10046537422839506,
+          0.09987461419753087,
+          0.09867802372685185,
+          0.1003689236111111,
+          0.10098078221450617,
+          0.09869008005401235,
+          0.0998806423611111
+        ]
+      }
+    },
+    "minimum_samples": 512,
+    "reference_split": "train",
+    "schema_version": "greenguard-drift-reference-v1",
+    "synthetic_only": true,
+    "training_split_fingerprint": "6778dcebddc3b773b6706ac4c1af87f58d07c7df2532b0a4af234ac2e1d53965",
+    "update_every": 128,
+    "window_size": 2048
+  },
+  "environment": {
+    "lightgbm": "4.7.0",
+    "machine": "arm64",
+    "narwhals": "2.26.0",
+    "numpy": "2.5.3",
+    "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+    "pyarrow": "25.0.1",
+    "python": "3.14.7",
+    "scipy": "1.18.1",
+    "torch": "2.14.0"
+  },
+  "examples": {
+    "test": 138,
+    "train": 216,
+    "validation": 138
+  },
+  "frozen_comparison": {
+    "path": "i4-transformer-comparison.frozen-split.json",
+    "sha256": "584f4a602a2dd53aa7d2f30ee9c49eb9113f0dad5c9e070fcea3fe15448dbd57",
+    "validated_before_training": true
+  },
+  "input_shape_per_example": [
+    96,
+    48
+  ],
+  "inputs": [
+    {
+      "corpus_manifest_sha256": "6daae6d58356a8f82048513181ce843f9fe9b18a69694aa2b887c92d30762655",
+      "scenario": "wet-pocket",
+      "seed": 100,
+      "simulator_manifest_sha256": "ecc0cdf6fea526c36f2e701d80a47f99b63aa5a0a0c9b156492d72704dc9b760",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "b069f1edb01c49b38937898296c9af4cd3bcd1f9c7dcc2faf5ce38f76571f212",
+      "scenario": "wet-pocket",
+      "seed": 101,
+      "simulator_manifest_sha256": "d00445873443226d7214487d9cc324a7cd39b527a0fd418ecfb4e56c7efa081e",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "9f4b8c46075a5193c272c92b84101b513f71e4b34a86cea21fd6df69b5423491",
+      "scenario": "wet-pocket",
+      "seed": 102,
+      "simulator_manifest_sha256": "7066dd7f77fc2899c71da92a850274845af1230f634e02c6ecac66c9425dd39e",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "6afb1ac90564013981eec6f6a4234269482af58530cf60e95d20a383aa8d7354",
+      "scenario": "baseline",
+      "seed": 103,
+      "simulator_manifest_sha256": "ffb5cff793350ec0785798f42688334a8e734d823dea04ebc1e58a587cdc54c3",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "2ea037aadbf36438ce54f09c6d59e49c10e82ce87283940704a43faa738f1042",
+      "scenario": "aeration",
+      "seed": 104,
+      "simulator_manifest_sha256": "f1d83d9a5cddcf9e885889268059bd82c08b0695637d2b1d182c12a8359a26fa",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "a0795bd5b616d25888b46cecac00f41b1ad15e36f5e4275881450ff3a3ca3bf5",
+      "scenario": "baseline",
+      "seed": 105,
+      "simulator_manifest_sha256": "0d47db2504bbc2877c63cef491a5c1d90a277da28a7ddb6620d4b262d8175e0e",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "0735448e6f841189472b97eda5911599c015529224deccdb35ab518bbdaf8e37",
+      "scenario": "wet-pocket",
+      "seed": 106,
+      "simulator_manifest_sha256": "4042703de2ed7633e15953060b44b4d7ad08039f0421022adf57fffead6bac56",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "8eec02f12e53fcaa7450cd61e5350a520ab35e2560fc6b0170a42da8bd37e9cb",
+      "scenario": "wet-pocket",
+      "seed": 107,
+      "simulator_manifest_sha256": "84881a1c8fe151e436e1f7c2f2e339ad076123461c78f797f50bc34986b50df9",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "49b00b0a488ebc56c633ce1705c9b3f5079d1f189c84f27152b7f63ac4c839d0",
+      "scenario": "wet-pocket",
+      "seed": 108,
+      "simulator_manifest_sha256": "d3fea16b40dcff40f41159c3f5951854f0edfe2d4d3af68af568aded89100749",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "fe3e3509fa068089a99b93c6f98bc917e65deafb38959ad931e0cdd73030be63",
+      "scenario": "baseline",
+      "seed": 109,
+      "simulator_manifest_sha256": "e0e06b544cf9565262a816055964b1f906d208e10d61a776a2df9ba7f9c78e1f",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "9492092959e4f6e9fdcac2854f2c1891da27358598efe8edb45b53b7504fc685",
+      "scenario": "aeration",
+      "seed": 110,
+      "simulator_manifest_sha256": "b37ef92d1abe88385dc7f3cedc52878d7f6d4aee5cd0b4c69ca5c6194c64f5c8",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "c13bc44acf1b588521d5c6ee501368a9a5822243b89d17ea4915545500e313d8",
+      "scenario": "baseline",
+      "seed": 111,
+      "simulator_manifest_sha256": "71f69617ca95f22661c3601200449ab9f18a6d571dd9bf0543730e64abdb0418",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "bdeadde0af875935b5d2d0062a817454b668d6d05a841fec611c290d539558fb",
+      "scenario": "wet-pocket",
+      "seed": 112,
+      "simulator_manifest_sha256": "064d9842a7b1da64305973c2cddd4baadbc17ce6282a95dc661812b682eeef7e",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "850871abf041df05dafca26802105f3f90962842df54e4c84ac73f37485a6c0d",
+      "scenario": "wet-pocket",
+      "seed": 113,
+      "simulator_manifest_sha256": "9d2dc14ada8db3945b3130e6b0bee552248e4ad2d1cefd137ab819510ca8a58a",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "391c2879ba16d53ddd54bc761616d140c3cd70f44493ce0840857f1381acd8da",
+      "scenario": "wet-pocket",
+      "seed": 114,
+      "simulator_manifest_sha256": "2087aecb2b8c3047538c04b003648f56865d97abf2e17cda20bb523cd4f53429",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "3fbcfd7b3ae84b31c074165d0022751b3cd95a09d32d45b5ceeb5283dfe6de15",
+      "scenario": "baseline",
+      "seed": 115,
+      "simulator_manifest_sha256": "b08dc0346f2aa56f1d9e84f3d4673eeb670149270940dce13459e1d6059c7c32",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "c3a36f512548f4faab2a0dd4e4057da2e6de77722309675e0e7352bbc94e75b9",
+      "scenario": "aeration",
+      "seed": 116,
+      "simulator_manifest_sha256": "80caa50d09f21b410275ff5991918ce3efef492fe1aa560307313ddea302e164",
+      "windows": 2496
+    },
+    {
+      "corpus_manifest_sha256": "eca279031abf294f2d933620d0d3021a7898cdec853d961a3ac7d04fad40b5dc",
+      "scenario": "baseline",
+      "seed": 117,
+      "simulator_manifest_sha256": "5913e31c15accb787c2bfe6dabb05f5bf02b7a2afd15313504ca4fbc0ef123e7",
+      "windows": 2496
+    }
+  ],
+  "label_class_diversity": {
+    "test": true,
+    "train": true,
+    "validation": true
+  },
+  "label_counts": {
+    "test": {
+      "negative": 119,
+      "positive": 19
+    },
+    "train": {
+      "negative": 185,
+      "positive": 31
+    },
+    "validation": {
+      "negative": 111,
+      "positive": 27
+    }
+  },
+  "label_fingerprints": {
+    "test": "4c76dc03244327e193f1fae8f4c9efe7919326d1bf3a40f41a383496f34aa503",
+    "train": "025abfa9e71271df314c3ce7b89fc64ff09ee7f3ef8663235b1abd0f8ebed314",
+    "validation": "b801df836f486f42c11359541b12ac6237d106ae8c9e8ac46ad7e9b17718c073"
+  },
+  "label_not_spoilage": true,
+  "limitations": [
+    "The target is an uncalibrated simulator false-to-true hotspot transition in the next 48 hours, not spoilage or an agronomic outcome.",
+    "Only synthetic seeds are present; independent sites and weather years are absent.",
+    "Seeds are random simulator realizations of only three declared scenarios; independent sites and weather years are absent.",
+    "This small fixed-epoch CPU experiment is descriptive, not a model-selection gate or promotion.",
+    "This is a binary simulated-hotspot classifier comparison, not the I4 direct multi-horizon quantile forecast acceptance task.",
+    "Ambient, lot, mount geometry and inventory context are not model inputs in this first sequence adapter.",
+    "No real telemetry, ingest/Kafka/CDC parity, product wiring, or operational scoring was used."
+  ],
+  "metrics": {
+    "brier": "mean((label - probability)^2) in float64; no tuned threshold"
+  },
+  "model_artifacts": {
+    "transformer": {
+      "architecture": "greenguard-patch-transformer-classifier-v1",
+      "data_origin": "synthetic_grain_sim",
+      "path": "i4-transformer-final-source-replay.state.pt",
+      "production_eligible": false,
+      "sha256": "f132c9554c644dedad3092a7fb1c6897e2d9f63317549d3afbafe0a8ba09ef7d",
+      "state_tensor_sha256": "787dddb66f1e6912ef45bd0b74cffd2cf11709e6d431333f5da515fc357dc267"
+    }
+  },
+  "models": {
+    "lightgbm_i2_features": {
+      "test": {
+        "brier": 0.7101813555968582,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.13768115942028986
+      },
+      "validation": {
+        "brier": 0.06751678952217922,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.1956521739130435
+      }
+    },
+    "logistic_i2_features": {
+      "test": {
+        "brier": 0.8622909336689514,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.13768115942028986
+      },
+      "validation": {
+        "brier": 0.5512583970725182,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.1956521739130435
+      }
+    },
+    "lstm": {
+      "test": {
+        "brier": 0.1619890521484515,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.13768115942028986
+      },
+      "validation": {
+        "brier": 0.13995477810400364,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.1956521739130435
+      }
+    },
+    "tcn": {
+      "test": {
+        "brier": 0.058804805973008675,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.13768115942028986
+      },
+      "validation": {
+        "brier": 0.16482846519805294,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.1956521739130435
+      }
+    },
+    "transformer": {
+      "test": {
+        "brier": 0.09243162214492325,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.13768115942028986
+      },
+      "validation": {
+        "brier": 0.10434321616362925,
+        "class_degenerate": false,
+        "n": 138,
+        "positive_rate": 0.1956521739130435
+      }
+    }
+  },
+  "normalization": {
+    "lstm_tcn": "feature-wise mean/std fit on training examples only",
+    "transformer": "per-window per-sensor RevIN-style stats from observed input context only"
+  },
+  "same_split_comparison_status": "descriptive_metrics_only_no_selection",
+  "schema_version": "synthetic-i4-transformer-experiment-v1",
+  "seeds": {
+    "test": [
+      112,
+      113,
+      114,
+      115,
+      116,
+      117
+    ],
+    "train": [
+      100,
+      101,
+      102,
+      103,
+      104,
+      105
+    ],
+    "validation": [
+      106,
+      107,
+      108,
+      109,
+      110,
+      111
+    ]
+  },
+  "sensor_feature_order": "mount cable_label then node_index; temperature_c, relative_humidity_percent, missing_indicator",
+  "source_sha256": {
+    "classical_baseline_adapter": "99f2474ad3771ae729f3b66e44b2aff98be43c18e2c4f23be7c67c5fad01f5ad",
+    "comparison_contract": "e76098f7823eaf835e547e4ed63b86038633983ac7b8e2ee5de3e1664711da13",
+    "corpus_builder": "d9c6e8f114d349d199a30dbde6353ce369cc8fa7a7359cbd2bb558a55e9d0fa9",
+    "i2_lightgbm_trainer": "f171e06149453fae47d9e5aa0a8d37a06e6dfe98f2f1fd25fe519688e54d0c76",
+    "i2_logistic_trainer": "1df2eba15240e19aae2e54ed81c854bc7160a59b3d35a96225a2afca438869d1",
+    "runner": "34b9e7aab9fba59f2bab73d447e8053ac26f827e58cd217d7c119782f0006aa0",
+    "sequence_models": "b4318d8108e3c1b929f1a02d7769c36be9b4fe58143fbc9a0d36fd11cfec7285",
+    "simulator": "f1a7a31b9e2c1f1c7132cb8847e4a82de21a0b03a7f5f6ab7021980bea7f84ea"
+  },
+  "split_definition": {
+    "context_hours": 24.0,
+    "label_horizon_hours": 48.0,
+    "purge_gap_hours": 72.0,
+    "test_end_exclusive": "2025-01-15T00:15:00+00:00",
+    "test_seeds": [
+      112,
+      113,
+      114,
+      115,
+      116,
+      117
+    ],
+    "test_start_inclusive": "2025-01-13T00:15:00+00:00",
+    "train_end_exclusive": "2025-01-05T00:00:00+00:00",
+    "train_seeds": [
+      100,
+      101,
+      102,
+      103,
+      104,
+      105
+    ],
+    "train_start": "first eligible corpus timestamp",
+    "validation_end_exclusive": "2025-01-10T00:00:00+00:00",
+    "validation_seeds": [
+      106,
+      107,
+      108,
+      109,
+      110,
+      111
+    ],
+    "validation_start_inclusive": "2025-01-08T00:15:00+00:00"
+  },
+  "split_fingerprints": {
+    "test": "95efc191e488b17a0a4732dbe420c6593c263c0d4e381d943c61dfd2ee90603b",
+    "train": "6778dcebddc3b773b6706ac4c1af87f58d07c7df2532b0a4af234ac2e1d53965",
+    "validation": "b90a0965638c3000783726dadedb8c00e33e31c2dbd3475a25b9836e63bd550f"
+  },
+  "split_unit": "disjoint simulator run cohorts plus chronological windows with a purged 24h context + 48h label horizon",
+  "stage": "I4",
+  "synthetic_only": true,
+  "target": "simulated_hotspot_onset_48h",
+  "target_semantics": "a simulator hotspot false-to-true transition occurs within the following 48 hours; an already-active hotspot is negative",
+  "training": {
+    "batch_size": 32,
+    "deterministic_algorithms": true,
+    "device": "cpu",
+    "early_stopping": false,
+    "epochs": 8,
+    "model_seeds": {
+      "lstm": 20260930,
+      "tcn": 20260931,
+      "transformer": 20260932
+    },
+    "optimizer": "AdamW(lr=0.001, weight_decay=0.01)",
+    "seed": 20260930,
+    "test_used_for_selection": false,
+    "torch_threads": 1
+  }
+}

@@ -43,12 +43,34 @@ def resource_blocks(source, kind):
 
 
 class SecretStateBoundaryTests(unittest.TestCase):
+    def test_billing_secret_precondition_is_fail_closed_for_provider_contract(self):
+        runtime = (ROOT / "runtime-secrets.tf").read_text()
+        self.assertIn('each.key != "billing-service-config" || (', runtime)
+        self.assertIn('"STRIPE_API_KEY"', runtime)
+        self.assertIn('^(sk|rk)_test_[A-Za-z0-9]+$', runtime)
+        self.assertIn('"STRIPE_WEBHOOK_SECRETS"', runtime)
+        self.assertIn('^whsec_[A-Za-z0-9]+$', runtime)
+        self.assertIn('"BILLING_INBOX_ENCRYPTION_KEY"', runtime)
+        self.assertIn('^[A-Za-z0-9+/]{43}=$', runtime)
+        self.assertIn('BILLING_RETURN_ORIGINS', runtime)
+        self.assertIn('https://${aws_cloudfront_distribution.web.domain_name}', runtime)
+
+    def test_heartbeat_secret_is_generated_from_only_scoped_kafka_fields(self):
+        runtime = (ROOT / "runtime-secrets.tf").read_text()
+        generated = runtime.split('"entitlement-heartbeat-config" = {', 1)[1].split("\n    }", 1)[0]
+        self.assertIn('for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"]', generated)
+        self.assertIn('var.runtime_secret_values["billing-service-config"][key]', generated)
+        self.assertIn('each.key != "entitlement-heartbeat-config" || (', runtime)
+        self.assertIn('== "billing-service"', runtime)
+        self.assertNotIn("STRIPE", generated)
+
     def test_secret_material_variables_are_ephemeral(self):
         expected = {
             "runtime_secret_values": ROOT / "runtime-secrets.tf",
             "audit_export_signing_material": ROOT / "runtime-secrets.tf",
             "shard_role_passwords": ROOT / "shard-secret-values.tf",
             "shard_registry_passwords": ROOT / "shard-secret-values.tf",
+            "tenant_bootstrap_passwords": ROOT / "shard-secret-values.tf",
         }
         for name, path in expected.items():
             block = variable_block(path.read_text(), name)
@@ -58,7 +80,7 @@ class SecretStateBoundaryTests(unittest.TestCase):
     def test_secret_version_payloads_only_use_write_only_argument(self):
         sources = (ROOT / "runtime-secrets.tf").read_text() + (ROOT / "shard-secret-values.tf").read_text()
         blocks = list(resource_blocks(sources, "aws_secretsmanager_secret_version"))
-        self.assertEqual(len(blocks), 5)
+        self.assertEqual(len(blocks), 6)
         for block in blocks:
             self.assertIn("secret_string_wo", block)
             self.assertNotIn("secret_string =", block)
@@ -70,6 +92,7 @@ class SecretStateBoundaryTests(unittest.TestCase):
         self.assertIn("contains(var.secret_names, trimprefix(key, \"runtime/\"))", counters)
         self.assertIn("\"shard-routing/\") ? contains([", counters)
         self.assertIn("\"shard-bootstrap/\") ? contains([\"s1\", \"s2\", \"s3\", \"s4\"]", counters)
+        self.assertIn("\"tenant-bootstrap/\") ? contains([\"s1\", \"s2\", \"s3\", \"s4\"]", counters)
         self.assertIn("\"shard-data/\") ? contains(flatten(", counters)
         self.assertIn("\"projector-routing/\") ? contains([", counters)
         self.assertIn("unknown scope/name keys are rejected", counters)
@@ -128,7 +151,7 @@ class SecretStateBoundaryTests(unittest.TestCase):
         scope_start = runtime.index("runtime_secret_sync_scope = {")
         scope_end = runtime.index("\n  }\n}", scope_start)
         scope = runtime[scope_start:scope_end]
-        for secret_input in ("runtime_secret_values", "audit_export_signing_material", "shard_role_passwords", "shard_registry_passwords"):
+        for secret_input in ("runtime_secret_values", "audit_export_signing_material", "shard_role_passwords", "shard_registry_passwords", "tenant_bootstrap_passwords"):
             self.assertNotIn(secret_input, scope)
             self.assertNotIn(secret_input, gitops)
         self.assertIn("version_ids", scope)

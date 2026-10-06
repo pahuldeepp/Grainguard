@@ -83,6 +83,57 @@ test("duplicate or unexpected owner adapters fail exact-roster validation", () =
   );
 });
 
+test("malformed adapter boundary declarations fail closed instead of throwing a TypeError", () => {
+  const complete = SHARDED_MOVE_OWNERS.map((owner) => adapter(owner));
+  const index = complete.findIndex((item) => item.owner === "risk");
+  complete[index] = {
+    ...complete[index],
+    boundaries: undefined,
+  } as unknown as TenantMoveOwnerAdapter;
+  assert.throws(
+    () => preflightTenantMoveAdapters(complete),
+    (error) => {
+      assert.ok(error instanceof TenantMoveAdaptersUnavailableError);
+      assert.deepEqual(error.incomplete.risk, [
+        "adapter boundary declaration is invalid",
+      ]);
+      return true;
+    },
+  );
+});
+
+test("boundary declarations cannot spoof completeness with a duck-typed or overridden has method", () => {
+  const fake = SHARDED_MOVE_OWNERS.map((owner) => adapter(owner));
+  const riskIndex = fake.findIndex((item) => item.owner === "risk");
+  fake[riskIndex] = {
+    ...fake[riskIndex],
+    boundaries: { has: () => true },
+  } as unknown as TenantMoveOwnerAdapter;
+  assert.throws(
+    () => preflightTenantMoveAdapters(fake),
+    /risk missing boundaries: adapter boundary declaration is invalid/,
+  );
+
+  const overridden = SHARDED_MOVE_OWNERS.map((owner) => adapter(owner));
+  const telemetryIndex = overridden.findIndex(
+    (item) => item.owner === "telemetry",
+  );
+  const incomplete = new Set(
+    TENANT_MOVE_BOUNDARIES.filter(
+      (boundary) => boundary !== "verify_replica_freshness",
+    ),
+  );
+  incomplete.has = (() => true) as typeof incomplete.has;
+  overridden[telemetryIndex] = {
+    ...overridden[telemetryIndex],
+    boundaries: incomplete,
+  };
+  assert.throws(
+    () => preflightTenantMoveAdapters(overridden),
+    /telemetry missing boundaries: verify_replica_freshness/,
+  );
+});
+
 test("complete owner-local adapters pass the pure preflight without running work", () => {
   const complete = SHARDED_MOVE_OWNERS.map((owner) => adapter(owner));
   const result = preflightTenantMoveAdapters(complete);

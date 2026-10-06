@@ -1,0 +1,38 @@
+{{- $dex := .Values.managedDex | default dict }}
+{{- if $dex.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "managed Dex requires an exact Git commit revision" }}{{ end }}
+{{- if not (regexMatch "^ghcr\\.io/dexidp/dex:v2\\.[0-9]+\\.[0-9]+@sha256:[a-f0-9]{64}$" ($dex.image | default "")) }}{{ fail "managed Dex requires a versioned immutable image" }}{{ end }}
+{{- if not (hasPrefix "https://" ($dex.issuer | default "")) }}{{ fail "managed Dex issuer must be public HTTPS" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-managed-dex
+  namespace: argocd
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "21"}
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/dex-chart
+    helm:
+      releaseName: greenguard-dex
+      valuesObject:
+        cell: {{ .Values.cell | quote }}
+        image: {{ $dex.image | quote }}
+        issuer: {{ $dex.issuer | quote }}
+        webOrigin: {{ $dex.webOrigin | quote }}
+        databaseHost: {{ $dex.databaseHost | quote }}
+        databaseCIDRs:
+{{ toYaml $dex.databaseCIDRs | indent 10 }}
+        secret: {{ $dex.secret | quote }}
+        caSecret: {{ $dex.caSecret | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+{{- end }}

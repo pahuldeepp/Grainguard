@@ -13,6 +13,27 @@ data dependencies, membership enrollment, routing and network peer checks.
 Set an approved cost/time ceiling, abort conditions, cleanup owner and two
 isolated test tenants. Keep test passwords and tokens out of evidence.
 
+## Data dependency probes
+
+Run each probe against the deployed disposable cell and retain redacted,
+timestamped request/response evidence. A healthy Pod, open TCP port, rendered
+manifest, or migration Job alone does not pass a probe.
+
+| Manifest id | Live action and required observation |
+| --- | --- |
+| `postgres-shard-read-write-replica-freshness` | Write through the tenant's selected shard primary, observe the read path honor the required version/watermark, and confirm replica freshness or primary fallback. |
+| `pgbouncer-transaction-pool` | Connect through the application PgBouncer endpoint, run a transaction and verify it returns to the pool without leaking session state. |
+| `kafka-produce-consume` | Produce a uniquely identified event to an authorized topic and consume it with the intended workload identity. |
+| `kafka-connect-connector-status` | Verify the required connector is registered, RUNNING, and advances its source offset for a disposable test event. |
+| `schema-registry-subject-compatibility` | Fetch the deployed subject/version and verify an approved compatible schema can be checked without registering an unintended schema. |
+| `rabbitmq-publish-consume` | Publish a uniquely identified message to the intended exchange/queue and consume it with the expected acknowledgement semantics. |
+| `redis-tenant-cache-roundtrip` | Fill and retrieve a tenant-scoped cache entry, verify cross-tenant separation, and exercise the configured invalidation path. |
+| `cassandra-tenant-partition-roundtrip` | Write and read a disposable record using the tenant/device/day partition key and the runtime TLS/auth identity. |
+| `opensearch-index-search` | Index a disposable tenant-scoped document, refresh/search it through the application identity, and verify tenant filtering. |
+| `mqtt-tls-auth-publish-subscribe` | Connect with the provisioned device identity and trusted TLS, publish/subscribe only to its authorized topic, and verify an unauthorized topic is rejected. |
+| `object-storage-audit-export-roundtrip` | Produce a signed audit export, upload it to the owned bucket, download/verify its signature, and confirm an unauthorized object access is denied. |
+| `oauth-discovery-jwks` | Fetch the configured HTTPS issuer discovery document and JWKS; verify issuer, audience/client settings, key availability, and TLS validation. |
+
 ## Functional journeys
 
 For each journey, save a timestamped command transcript or screenshot under
@@ -23,7 +44,7 @@ not a rendered Helm manifest.
 
 | Manifest id | Live action and required observation |
 | --- | --- |
-| `web-login` | Sign in through the deployed Cognito hosted page; browser returns to the dashboard and loads authenticated data. |
+| `web-login` | Sign in through the selected OIDC provider using Authorization Code + PKCE; the browser returns to the registered dashboard callback and loads authenticated data for the enrolled tenant. This is provider-neutral: Cognito is used only when `identity_mode = "cognito"` is explicitly selected. |
 | `api-auth` | Call the deployed BFF as the enrolled user; valid token succeeds, expired/invalid token is denied. |
 | `tenant-isolation` | Use two enrolled tenants; a tenant A identity cannot read or acknowledge tenant B data through the deployed API. |
 | `alert-create` | Send a sensor reading that crosses an approved rule; one durable alert appears with correct tenant/device identity. |
@@ -36,7 +57,8 @@ not a rendered Helm manifest.
 ## Physical iPhone
 
 Use a signed Release or reachable Debug build on a physical iPhone, configured
-with the same deployed public Cognito/BFF endpoints. Record device model, iOS
+with the selected deployed OIDC issuer and BFF endpoints (Cognito only when
+explicitly selected). Record device model, iOS
 version, app build digest/version, public client ID and callback registration.
 Keep device identifiers and account secrets out of public evidence.
 
@@ -50,7 +72,8 @@ Keep device identifiers and account secrets out of public evidence.
 
 Create a private JSON manifest with `schemaVersion: 1`, `scope` fields
 `accountId`, `region`, `cluster`, `gitRevision`, `startedAt`, `endedAt`, and a
-`checks` array containing every ID above. Each check needs `status: "PASS"`,
+`checks` array containing every ID in the data probe and functional journey
+tables above. Each check needs `status: "PASS"`,
 `expected`, `observation`, `operator`, `observedAt` (UTC or offset timestamp),
 and at least one `artifacts` entry with a repository-relative `path` under
 `evidence/` and its lowercase `sha256`. Keep the manifest under `evidence/`
@@ -63,8 +86,9 @@ exists: it must exit nonzero. With a completed manifest, run:
 python3 infra/gitops/disposable/check-live-acceptance.py evidence/disposable-live-manifest.json
 ```
 
-A zero exit confirms only that the evidence inventory is complete and the
-artifact hashes match. A reviewer must inspect the responses, isolation proof,
-physical-device proof, cost/abort record and teardown inventory before marking
-functional acceptance. Capacity, 24-hour soak and 30-day availability remain
-separate Stage 13 gates in `docs/STAGE_13_PLAN.md`.
+Exit status 2 means the inventory is structurally complete and artifact hashes
+match; it is still `BLOCKED`, not an acceptance pass. The checker never returns
+zero for a complete evidence manifest. An authorized reviewer must inspect the
+responses, isolation proof, physical-device proof, cost/abort record and teardown
+inventory, then record acceptance separately. Capacity, 24-hour soak and 30-day
+availability remain separate Stage 13 gates in `docs/STAGE_13_PLAN.md`.

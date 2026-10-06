@@ -26,6 +26,10 @@ service:
   enabled: true
   port: 80
   containerPort: 8080
+appMetrics:
+  enabled: false
+  port: 9464
+  allowedPrincipals: []
 container:
   name: app
   env: []
@@ -34,6 +38,8 @@ container:
   args: []
   volumeMounts: []
 volumes: []
+tmpVolume:
+  enabled: true
 kafka:
   caSecretName: ""
 probes:
@@ -93,7 +99,7 @@ observability:
     enabled: false
     namespace: monitoring
     selector:
-      app.kubernetes.io/name: prometheus
+      app: prometheus
     mergeMetrics: true
     scrapePort: 15020
 

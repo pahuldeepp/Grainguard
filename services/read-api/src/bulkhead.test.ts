@@ -27,6 +27,14 @@ test("cold history protects global and tenant capacity and releases slots", asyn
     second = deferred<unknown[]>();
   let loads = 0;
   const backends: ReadBackends = {
+    deviceRisk: async () => ({
+      status: "no_assessments",
+      assessments: [],
+      truncated: false,
+      validity: "unverified",
+      actionable: false,
+      caveat: "fixture",
+    }),
     deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
@@ -68,6 +76,14 @@ test("search has an independent pool and errors release its slot", async () => {
   const pending = deferred<unknown[]>();
   let calls = 0;
   const backends: ReadBackends = {
+    deviceRisk: async () => ({
+      status: "no_assessments",
+      assessments: [],
+      truncated: false,
+      validity: "unverified",
+      actionable: false,
+      caveat: "fixture",
+    }),
     deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
@@ -104,6 +120,14 @@ test("HTTP returns a retry hint when Cassandra has no origin capacity", async ()
   const started = deferred<void>();
   const pending = deferred<unknown[]>();
   const backends: ReadBackends = {
+    deviceRisk: async () => ({
+      status: "no_assessments",
+      assessments: [],
+      truncated: false,
+      validity: "unverified",
+      actionable: false,
+      caveat: "fixture",
+    }),
     deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],
@@ -125,6 +149,7 @@ test("HTTP returns a retry hint when Cassandra has no origin capacity", async ()
     search: { search: async () => [] },
   };
   const app = createApp({
+    historyCursorSecret: "read-api-test-dedicated-cursor-secret-32bytes",
     verify: async () => ({
       subject: "user",
       tenantId: "11111111-1111-4111-8111-111111111111",
@@ -168,6 +193,14 @@ test("bin read admission queues per tenant and schedules another tenant before a
     third = deferred<unknown>();
   const started: string[] = [];
   const backends: ReadBackends = {
+    deviceRisk: async () => ({
+      status: "no_assessments",
+      assessments: [],
+      truncated: false,
+      validity: "unverified",
+      actionable: false,
+      caveat: "fixture",
+    }),
     deviceCurrent: async () => ({ device: null, latestReading: null }),
     device: async () => null,
     devices: async () => [],

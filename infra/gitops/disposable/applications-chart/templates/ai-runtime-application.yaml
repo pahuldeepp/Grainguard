@@ -1,0 +1,26 @@
+{{- $ai := .Values.aiRuntime | default dict }}
+{{- if $ai.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "AI runtime requires exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "AI runtime requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
+{{- if not $ai.secretSyncEpoch }}{{ fail "AI runtime requires exact-cell secret synchronization first" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-ai-runtime
+  namespace: argocd
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "30"}
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/ai-runtime-chart
+    helm:
+      valuesObject:
+{{ toYaml (merge (dict "cell" .Values.cell "revision" .Values.revision) $ai) | indent 8 }}
+  destination: {server: https://kubernetes.default.svc, namespace: greenguard}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+{{- end }}

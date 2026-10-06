@@ -17,6 +17,24 @@ import (
 func env(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
+func TestConfiguredWriterTarget(t *testing.T) {
+	for _, tc := range []struct {
+		schema, override, want string
+		invalid                bool
+	}{
+		{"", "", consumerName, false},
+		{"", "local-provisioning-projection-v1", "local-provisioning-projection-v1", false},
+		{"read_v1", "", "greenguard.projection-builder.read_v1", false},
+		{"read_v1", "custom", "", true},
+		{"", "bad group", "", true},
+		{"", strings.Repeat("a", 250), "", true},
+	} {
+		_, group, err := configuredWriterTarget(env(map[string]string{"PROJECTION_WRITE_SCHEMA": tc.schema, "KAFKA_GROUP_ID": tc.override}), "greenguard_read", "projection_app")
+		if (err != nil) != tc.invalid || group != tc.want {
+			t.Fatalf("%+v: group=%q err=%v", tc, group, err)
+		}
+	}
+}
 func TestBuildAppConfigurations(t *testing.T) {
 	for _, values := range []map[string]string{
 		{}, {"PROJECTION_HISTORY_HOT_WINDOW": "59m"}, {"PROJECTION_DATABASE_URL": "postgresql://nobody@127.0.0.1:1/none", "KAFKA_BROKERS": "localhost:9092", "EVENT_SCHEMA_DIR": t.TempDir()},

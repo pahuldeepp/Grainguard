@@ -27,6 +27,7 @@ export interface HistoryQuery {
   from: Date;
   to: Date;
   limit: number;
+  after?: { observedAt: Date; readingId: string };
 }
 export interface HistoryBackend {
   list(query: HistoryQuery): Promise<unknown[]>;
@@ -68,7 +69,16 @@ export interface DeviceCurrentSnapshot {
   device: JsonView<DeviceView> | null;
   latestReading: JsonView<Reading> | null;
 }
+export interface DeviceRiskSnapshot {
+  status: "available" | "no_assessments" | "device_not_found";
+  assessments: Record<string, unknown>[];
+  truncated: boolean;
+  validity: "unverified";
+  actionable: false;
+  caveat: string;
+}
 export interface ReadBackends {
+  deviceRisk(query: HistoryQuery): Promise<DeviceRiskSnapshot>;
   deviceCurrent(
     tenantId: string,
     deviceId: string,
@@ -116,6 +126,45 @@ export function postgresReads(
   };
   // The transaction executor chooses the endpoint before invoking any query helper.
   return {
+    deviceRisk: (q: HistoryQuery) =>
+      read(q.tenantId, async (tx): Promise<DeviceRiskSnapshot> => {
+        // Fixed projection query only. security_invoker views retain forced RLS;
+        // every scalar subquery also binds the authenticated tenant explicitly.
+        // Known withdrawals are excluded; absence of one does not prove current risk.
+        const result = await tx.query<{
+          known: boolean;
+          assessments: Record<string, unknown>[];
+        }>(
+          `SELECT EXISTS(SELECT 1 FROM read.device_views WHERE tenant_id=$1 AND device_id=$2) AS known,
+           COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.occurred_at DESC,a.assessment_id)
+             FROM (SELECT assessment_id,reading_id,bin_id,lot_id,grain_type,policy_id,
+                 policy_version::text,assessment_version::text,policy_calibrated,policy_provenance,
+                 score,severity,alert_eligible,reasons,occurred_at
+               FROM read.risk_assessments ra WHERE tenant_id=$1 AND device_id=$2
+                 AND NOT EXISTS(SELECT 1 FROM read.risk_assessment_invalidations i
+                   WHERE i.tenant_id=$1 AND i.tenant_id=ra.tenant_id
+                     AND i.assessment_id=ra.assessment_id)
+                 AND occurred_at >= $3 AND occurred_at < $4
+                 AND EXISTS(SELECT 1 FROM read.device_views WHERE tenant_id=$1 AND device_id=$2)
+               ORDER BY occurred_at DESC,assessment_id LIMIT $5) a),'[]'::jsonb) AS assessments`,
+          [q.tenantId, q.deviceId, q.from, q.to, q.limit + 1],
+        );
+        const row = result.rows[0];
+        const assessments = (row?.assessments ?? []).slice(0, q.limit);
+        return {
+          status: !row?.known
+            ? "device_not_found"
+            : assessments.length
+              ? "available"
+              : "no_assessments",
+          assessments,
+          truncated: (row?.assessments.length ?? 0) > q.limit,
+          validity: "unverified",
+          actionable: false,
+          caveat:
+            "Historical projected assessments; known withdrawn or superseded assessments are excluded. Absence of a projected invalidation does not establish current validity, policy applicability, source freshness or actionable risk. Range uses assessment event time (occurred_at).",
+        };
+      }),
     deviceCurrent: (tenantId: string, deviceId: string) =>
       read(tenantId, async (tx): Promise<DeviceCurrentSnapshot> => {
         // Scalar subqueries are one SQL statement/snapshot, including legacy primary mode.
@@ -184,7 +233,15 @@ export function postgresReads(
       read(tenantId, (tx) => getFreshness(tx, tenantId, deviceId)),
     hotReadings: (q: HistoryQuery) =>
       read(q.tenantId, (tx) =>
-        listReadings(tx, q.tenantId, q.deviceId, q.from, q.to, q.limit),
+        listReadings(
+          tx,
+          q.tenantId,
+          q.deviceId,
+          q.from,
+          q.to,
+          q.limit,
+          q.after,
+        ),
       ),
     rollup: (q: HistoryQuery, bucket: "hour" | "day") =>
       read(q.tenantId, async (tx) => {
@@ -223,34 +280,87 @@ export class CassandraHistory implements HistoryBackend {
         ) && rows.length < q.limit;
       day -= 86_400_000
     ) {
+      const cursorDay = q.after
+        ? Date.UTC(
+            q.after.observedAt.getUTCFullYear(),
+            q.after.observedAt.getUTCMonth(),
+            q.after.observedAt.getUTCDate(),
+          )
+        : undefined;
+      if (cursorDay !== undefined && day > cursorDay) continue;
       const date = new Date(day).toISOString().slice(0, 10);
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) throw new Error("cassandra_history_timeout");
-      const result = await this.client.execute(
-        "SELECT tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id=? AND device_id=? AND day=? AND observed_at >= ? AND observed_at < ? LIMIT ?",
-        [q.tenantId, q.deviceId, date, q.from, q.to, q.limit - rows.length],
-        {
-          prepare: true,
-          consistency: cassandra.types.consistencies.localQuorum,
-          fetchSize: q.limit,
-          readTimeout: remainingMs,
-        },
-      );
-      rows.push(
-        ...result.rows.map((row) => ({
-          tenant_id: row.get("tenant_id").toString(),
-          device_id: row.get("device_id").toString(),
-          reading_id: row.get("reading_id").toString(),
-          event_id: row.get("event_id").toString(),
-          stream_version: row.get("stream_version").toString(),
-          site_id: row.get("site_id")?.toString() ?? null,
-          bin_id: row.get("bin_id")?.toString() ?? null,
-          observed_at: row.get("observed_at"),
-          received_at: row.get("received_at"),
-          temperature_c: row.get("temperature_c"),
-          relative_humidity_percent: row.get("relative_humidity_percent"),
-        })),
-      );
+      const dayStart = new Date(day);
+      const dayEnd = new Date(day + 86_400_000);
+      const start = new Date(Math.max(q.from.getTime(), dayStart.getTime()));
+      const end = new Date(Math.min(q.to.getTime(), dayEnd.getTime()));
+      const statements: Array<{ cql: string; values: unknown[] }> = [];
+      if (
+        q.after &&
+        cursorDay === day &&
+        q.after.observedAt >= start &&
+        q.after.observedAt < end
+      ) {
+        statements.push({
+          cql: "SELECT tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id=? AND device_id=? AND day=? AND observed_at=? AND reading_id>? LIMIT ?",
+          values: [
+            q.tenantId,
+            q.deviceId,
+            date,
+            q.after.observedAt,
+            q.after.readingId,
+          ],
+        });
+      }
+      const rangeEnd =
+        q.after && cursorDay === day
+          ? new Date(Math.min(end.getTime(), q.after.observedAt.getTime()))
+          : end;
+      if (start < rangeEnd) {
+        statements.push({
+          cql: "SELECT tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id=? AND device_id=? AND day=? AND observed_at >= ? AND observed_at < ? LIMIT ?",
+          values: [q.tenantId, q.deviceId, date, start, rangeEnd],
+        });
+      }
+      for (const statement of statements) {
+        if (rows.length >= q.limit) break;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw new Error("cassandra_history_timeout");
+        const values = [...statement.values, q.limit - rows.length];
+        let pageState: string | undefined;
+        const seenPages = new Set<string>();
+        do {
+          const pageBudgetMs = deadline - Date.now();
+          if (pageBudgetMs <= 0) throw new Error("cassandra_history_timeout");
+          const result = await this.client.execute(statement.cql, values, {
+            prepare: true,
+            consistency: cassandra.types.consistencies.localQuorum,
+            fetchSize: q.limit,
+            readTimeout: pageBudgetMs,
+            ...(pageState ? { pageState } : {}),
+          });
+          rows.push(
+            ...result.rows.map((row) => ({
+              tenant_id: row.get("tenant_id").toString(),
+              device_id: row.get("device_id").toString(),
+              reading_id: row.get("reading_id").toString(),
+              event_id: row.get("event_id").toString(),
+              stream_version: row.get("stream_version").toString(),
+              site_id: row.get("site_id")?.toString() ?? null,
+              bin_id: row.get("bin_id")?.toString() ?? null,
+              observed_at: row.get("observed_at"),
+              received_at: row.get("received_at"),
+              temperature_c: row.get("temperature_c"),
+              relative_humidity_percent: row.get("relative_humidity_percent"),
+            })),
+          );
+          pageState = result.pageState;
+          if (pageState && seenPages.has(pageState))
+            throw new Error("cassandra_history_cursor_not_advancing");
+          if (pageState) seenPages.add(pageState);
+        } while (pageState && rows.length < q.limit);
+      }
     }
     return rows;
   }
@@ -292,6 +402,8 @@ export class ElasticSearch implements SearchBackend {
     query: string,
     limit: number,
   ): Promise<unknown[]> {
+    const text = query.trim();
+    const literal = text.replace(/([\\*?])/g, "\\$1");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     try {
@@ -308,12 +420,42 @@ export class ElasticSearch implements SearchBackend {
           },
           body: JSON.stringify({
             size: limit,
+            sort: [
+              ...(text ? [{ _score: "desc" }] : []),
+              { "name.keyword": { order: "asc", missing: "_last" } },
+              { serial_number: { order: "asc", missing: "_last" } },
+              { resource_id: "asc" },
+            ],
             query: {
               bool: {
-                filter: [{ term: { tenant_id: tenantId } }],
-                must: [
-                  { multi_match: { query, fields: ["name", "serial_number"] } },
+                filter: [
+                  { term: { tenant_id: tenantId } },
+                  { term: { resource_type: "device" } },
                 ],
+                ...(text
+                  ? {
+                      minimum_should_match: 1,
+                      should: [
+                        { match_phrase_prefix: { name: text } },
+                        {
+                          wildcard: {
+                            serial_number: {
+                              value: `*${literal}*`,
+                              case_insensitive: true,
+                            },
+                          },
+                        },
+                        {
+                          wildcard: {
+                            resource_id: {
+                              value: `*${literal}*`,
+                              case_insensitive: true,
+                            },
+                          },
+                        },
+                      ],
+                    }
+                  : {}),
               },
             },
           }),

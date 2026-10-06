@@ -4,10 +4,10 @@ import { after, test } from "node:test";
 import {
   adminQuery,
   asRuntime,
+  createActiveTenantFixture,
   runtimeDb,
   uniqueSubject,
 } from "../testing/fixtures.js";
-import { createOrganization } from "./store.js";
 import {
   beginPlacementMove,
   compareAndSetPlacement,
@@ -21,13 +21,13 @@ const db = runtimeDb(4);
 after(() => db.$disconnect());
 
 test("control_app can quiesce for read safety but cannot forge owner receipts or switch/advance placement", async () => {
-  const created = await createOrganization(
+  const created = await createActiveTenantFixture(
     db,
     {
       issuer: "https://placement-boundary.test",
       subject: uniqueSubject("deny-move"),
     },
-    { name: "untrusted mover boundary" },
+    "untrusted mover boundary",
     {
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),

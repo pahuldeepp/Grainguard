@@ -43,6 +43,26 @@
     "envFrom": { "type": "array", "items": { "type": "object" } },
     "volumeMounts": { "type": "array", "items": { "type": "object" } },
     "volumes": { "type": "array", "items": { "type": "object" } },
+    "modelGatewayTokens": {
+      "type": "object",
+      "required": ["enabled", "secretName", "secretKey", "filePath"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "secretName": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+        "secretKey": { "type": "string", "minLength": 1 },
+        "filePath": { "type": "string", "pattern": "^/" }
+      }
+    },
+    "delegationKey": {
+      "type": "object",
+      "required": ["secretName", "privateKeySecretKey", "keyIdSecretKey", "filePath"],
+      "properties": {
+        "secretName": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+        "privateKeySecretKey": { "type": "string", "minLength": 1 },
+        "keyIdSecretKey": { "type": "string", "minLength": 1 },
+        "filePath": { "type": "string", "pattern": "^/" }
+      }
+    },
     "kafka": { "type": "object", "required": ["caSecretName"], "properties": { "caSecretName": { "type": "string", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" } } },
     "resources": {
       "type": "object",

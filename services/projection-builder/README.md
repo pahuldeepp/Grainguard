@@ -17,6 +17,17 @@ After the owner provisions the local stack with `make bootstrap` and `make db-up
 `PROJECTION_DATABASE_URL` from the generated `.env` first. Runtime traffic uses
 `projection_app` through PgBouncer with unnamed pgx statements.
 
+Public-schema writers accept `KAFKA_GROUP_ID` for an isolated deployment's
+consumer group; the default remains `projection-builder`. The durable projection
+identity stays unchanged. Versioned writers reject this override and retain the
+group assigned by their promotion schema. A new group reads retained history
+from the beginning and does not reset another group's offsets.
+
+`KAFKA_TOPIC_PREFIX` optionally selects a deployment's prefixed source topics and
+quarantine topic. Validation and projection routing use canonical topic names;
+Kafka commits retain the original prefixed topic coordinates. The default is
+empty, preserving the shared topic names.
+
 ```sh
 GOFLAGS=-mod=mod GOPROXY=off go vet ./...
 GOFLAGS=-mod=mod GOPROXY=off go test -race -cover ./...
@@ -178,14 +189,31 @@ To add facility handling later, extend `eventTopics`, the schema map, subscribed
 topics and effect dispatch with new migrations/tests. The current subscription
 and schema allowlists intentionally accept only device and telemetry events.
 
-## Hot history retention
+## Hot history window and partition maintenance
 
-[ADR-0011](../../docs/adr/0011-read-history-retention.md) is Proposed and records
-this owner-requested read-side retention change. Forward-only migration **000002**
+[ADR-0011](../../docs/adr/0011-read-history-retention.md) and
+[ADR-0028](../../docs/adr/0028-telemetry-retention-and-durable-archive.md) record
+the read-side window and cold-store safety requirements. Forward-only migration **000002**
 converts the existing heap to daily UTC `observed_at` partitions, preserving all
 existing data before retiring the heap. Stop consumers for migration and budget
 space for both copies. Apply with the existing migration command; 000001 is
 unchanged. Initial conversion does not prune data.
+
+Migrations **000026** and **000032** guard partition pruning with a durable
+Cassandra verification receipt. Maintenance creates partitions ahead, then considers
+at most 32 receipted partitions older than the hot window plus a one-hour margin,
+pruning at most one partition pair per transaction. A successful drop ends the
+pass so parent-table locks are released before the next scheduled pass. Before
+pruning it checks the partition OID, reading and sensor counts, and the current
+version-seeded SHA-256 chain of UTC JSONB manifest rows against the receipt. Hashing and dropping run
+under the shared application advisory-lock protocol and partition SHARE
+locks, preventing intervening writes while allowing reads; dropping upgrades the locks. A changed manifest retains both partitions.
+
+Run the updated Cassandra verifier after migration 000032: older receipt hashes
+use a different serialization and fail closed. The hash covers the reading/event
+identities and sensor observations checked by Cassandra verification. Unverified
+partitions remain on PostgreSQL; monitor database capacity while receipts are
+missing. The 24-hour query-routing boundary does not delete physical rows.
 
 | Configuration                   | Default | Accepted range                      |
 | ------------------------------- | ------- | ----------------------------------- |
@@ -195,8 +223,9 @@ unchanged. Initial conversion does not prune data.
 The consumer and maintenance command must receive the same hot-window value.
 Future PostgreSQL/Cassandra query routing must use that same configuration and
 cutoff (`now - hot window`), not the physical oldest retained partition. Cold data
-belongs on the Cassandra route; the one-hour pruning safety margin provides overlap.
-Increasing the window cannot restore already-pruned data without a backfill.
+belongs on the Cassandra route. The former one-hour drop margin does not authorize
+dropping a partition without Cassandra verification. Increasing the window cannot
+restore already-pruned data without a backfill.
 
 Build and run a **separate scheduled maintenance job** from this service directory:
 
@@ -211,7 +240,7 @@ go build -o /tmp/projection-maintain ./cmd/maintain
 Run once before starting consumers and every ten minutes thereafter. The image
 also includes `/projection-maintain` for a scheduled job with an entrypoint
 override. Use a direct `projection_migrator` connection through
-`PROJECTION_MIGRATION_URL`; never give migrator credentials to the consumer.
+`PROJECTION_MAINTENANCE_URL`; never give maintenance credentials to the consumer.
 Set `PROJECTION_HISTORY_SCHEMA=read_vN` for each provisioned version and schedule
 a separate maintenance job for that schema. An unset value maintains `public`.
 Versioned writers fail closed if their own hot history partitions are absent.
@@ -242,6 +271,15 @@ inbox consumer/tenant/event identity. Neither depends on a retained history row.
 Use the tenant-filtered inbox event for latest payloads after history expires.
 Every partition has its own forced RLS policy and runtime SELECT/INSERT/enrichment
 UPDATE grants. `projection_app` has no DELETE or maintenance execution privilege.
+Before an expired read-history partition can be dropped, the isolated
+`verify-read-history` command compares each PostgreSQL reading/event identity and
+sensor observation with Cassandra and records a receipt bound to the partition
+OID and verified row counts. The dedicated `projection_history_maintainer` login
+can call only the verifier/maintenance routines; it has no direct table read
+grant. The migration owner crosses forced RLS only inside those security-definer
+routines when invoked through that maintainer identity. Any changed row count,
+partition replacement, missing Cassandra row, or mismatch makes maintenance
+retain the partition.
 
 Only rebuildable **read-side** history may be pruned here. Write-side telemetry
 PostgreSQL requires a durable **Cassandra confirmation watermark before deletion**;
@@ -373,4 +411,19 @@ and changed topic/window rejection. See Stage 05b evidence for executed results.
 
 ### Placement routing
 
-`SHARD_REGISTRY_FILE` enables four-primary placement routing through the shared Go registry. Customer events resolve the authenticated control-plane placement before BEGIN; inbox, effect, completion, watermark and notification remain one owner transaction. Infrastructure barriers and version writer leases admit the reserved tenant independently on each configured shard. Versioned readiness checks every shard lease. Operational replay currently rejects registry mode explicitly; it needs a shard migration/replay protocol before sharded promotion is admitted. See [Go sharding contract](../../packages/go-common/SHARDING.md).
+`SHARD_REGISTRY_FILE` enables four-primary placement routing through the shared Go registry. Customer events resolve the authenticated control-plane placement before BEGIN; inbox, effect, completion, watermark and notification remain one owner transaction. Infrastructure barriers and version writer leases admit the reserved tenant independently on each configured shard. Versioned readiness checks every shard lease. The operator `replay` command is deliberately unavailable in registry mode: its shadow target, per-tenant durable checkpoint/manifest placement, and cutover/fencing protocol are not shard-aware. It rejects a configured shard registry before opening PostgreSQL or Kafka and never falls back to `PROJECTION_REPLAY_DATABASE_URL`. Replay is not a deployed workload or a Stage 12 live acceptance claim; sharded replay remains a separate recovery capability that must be designed and tested before use. See [Go sharding contract](../../packages/go-common/SHARDING.md).
+
+## Risk withdrawals
+
+`greenguard.risk.assessment_invalidated.v1` uses the existing inbox, tenant
+watermark lock, notification and checkpoint transaction. Migration 000028 adds
+an immutable forced-RLS withdrawal ledger without an assessment foreign key:
+withdrawals may arrive before the named assessment. Matching assessment identity
+is checked in either arrival order; conflicting targets reject the transaction.
+Multiple owner withdrawal events remain durable and cannot resurrect an old
+assessment. Migration 000029 installs the ledger in existing replay schemas and
+an invoker-security view following the active assessment schema. New schema
+provisioning, canonical comparison and promotion include this ledger. Read API
+excludes known withdrawals before page limits, without claiming current validity
+or actionable risk. Run the focused rollback-only read acceptance after applying
+the additive migrations; no read-side test commits customer fixtures.

@@ -52,10 +52,11 @@ services:
       CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
       CONTROL_AUDIT_WORKER_PASSWORD: ${CONTROL_AUDIT_WORKER_PASSWORD:?Run make bootstrap}
+      CONTROL_BOOTSTRAP_WORKER_PASSWORD: ${CONTROL_BOOTSTRAP_WORKER_PASSWORD:?Run make bootstrap}
       BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?Run make bootstrap}
       BILLING_MIGRATOR_PASSWORD: ${BILLING_MIGRATOR_PASSWORD:?Run make bootstrap}
       BILLING_AUDIT_READER_PASSWORD: ${BILLING_AUDIT_READER_PASSWORD:?Run make bootstrap}
-    ports: ["127.0.0.1:55432:5432"]
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
@@ -70,7 +71,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports: ["127.0.0.1:56432:6432"]
+    ports: ["127.0.0.1:${PGBOUNCER_HOST_PORT:-56432}:6432"]
     volumes:
       - type: bind
         source: ../../.local/pgbouncer/userlist.txt

@@ -13,6 +13,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE = ROOT / "evidence"
 REQUIRED = (
+    # Per-system probes prove more than pod readiness or the PostgreSQL
+    # migration gate. Keep these separate so a healthy deployment cannot
+    # silently stand in for data-plane behavior.
+    "postgres-shard-read-write-replica-freshness",
+    "pgbouncer-transaction-pool",
+    "kafka-produce-consume",
+    "kafka-connect-connector-status",
+    "schema-registry-subject-compatibility",
+    "rabbitmq-publish-consume",
+    "redis-tenant-cache-roundtrip",
+    "cassandra-tenant-partition-roundtrip",
+    "opensearch-index-search",
+    # ClickHouse is a separate analytics store. A Ready StatefulSet does not
+    # prove that the ingestion identity can write rows or that they can be
+    # queried back, so require an explicit insert/select receipt.
+    "clickhouse-roundtrip",
+    "mqtt-tls-auth-publish-subscribe",
+    "object-storage-audit-export-roundtrip",
+    "oauth-discovery-jwks",
+    # Issuer login alone is not tenant onboarding. Require authoritative
+    # control-plane membership read-back before accepting the app as usable.
+    "tenant-membership-readback",
     "web-login", "api-auth", "tenant-isolation", "alert-create",
     "alert-live-update", "alert-ack", "iphone-physical-login",
     "iphone-alert-ack", "iphone-signout-offline",
@@ -129,8 +151,15 @@ def main():
         for failure in failures:
             print(f"BLOCKED: {failure}", file=sys.stderr)
         return 1
-    print("Evidence inventory complete; operator must review live outcomes before acceptance")
-    return 0
+    print(
+        "BLOCKED: evidence inventory is structurally complete, but this checker "
+        "does not certify live acceptance; an authorized reviewer must inspect "
+        "the artifacts and record approval separately."
+    )
+    # A valid evidence inventory is not an acceptance PASS. Use a distinct
+    # non-zero status so automation cannot mistake structural validation for
+    # completed live acceptance.
+    return 2
 
 
 if __name__ == "__main__":

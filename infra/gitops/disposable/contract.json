@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "namespace": "greenguard",
+  "requiredApplications": ["greenguard-edge-routing"],
   "phases": [
     {
       "id": "controllers",
@@ -43,6 +44,36 @@
     },
     {
       "id": "acceptance",
+      "probes": [
+        "postgres-shard-read-write-replica-freshness",
+        "pgbouncer-transaction-pool",
+        "kafka-produce-consume",
+        "kafka-connect-connector-status",
+        "schema-registry-subject-compatibility",
+        "rabbitmq-publish-consume",
+        "redis-tenant-cache-roundtrip",
+        "cassandra-tenant-partition-roundtrip",
+        "opensearch-index-search",
+        "clickhouse-roundtrip",
+        "mqtt-tls-auth-publish-subscribe",
+        "object-storage-audit-export-roundtrip",
+        "oauth-discovery-jwks",
+        "tenant-membership-readback"
+      ],
+      "journeys": [
+        "web-login",
+        "api-auth",
+        "tenant-isolation",
+        "alert-create",
+        "alert-live-update",
+        "alert-ack",
+        "iphone-physical-login",
+        "iphone-alert-ack",
+        "iphone-signout-offline",
+        "telemetry-projection",
+        "recovery",
+        "teardown"
+      ],
       "requires": [
         "all workloads Available/Ready",
         "web and iPhone OAuth/API journeys",
@@ -212,6 +243,15 @@
       "health": "/readyz"
     },
     {
+      "name": "tenant-bootstrap-worker",
+      "chart": "greenguard-service",
+      "profile": "tenant-bootstrap-worker",
+      "image": "tenant-control-plane",
+      "phase": "applications",
+      "secret": "tenant-bootstrap-worker-config",
+      "kafka": false
+    },
+    {
       "name": "billing-service",
       "chart": "greenguard-service",
       "profile": "billing-service",
@@ -329,7 +369,7 @@
       "profile": "entitlement-heartbeat",
       "image": "device-service",
       "phase": "applications",
-      "secret": "billing-service-config",
+      "secret": "entitlement-heartbeat-config",
       "kafkaPrincipal": "billing-service",
       "health": "/readyz"
     },
@@ -342,6 +382,26 @@
       "secret": "notification-contacts-projector-config",
       "kafkaPrincipal": "notification-service",
       "health": "/readyz"
+    },
+    {
+      "name": "telemetry-s3-archive",
+      "chart": "greenguard-service",
+      "profile": "telemetry-s3-archive",
+      "image": "telemetry-sinks",
+      "phase": "applications",
+      "secret": "greenguard-telemetry-archive-config",
+      "kafkaPrincipal": "telemetry-sinks",
+      "health": {"type": "exec", "command": ["python", "-c", "import os; assert os.environ['TELEMETRY_ARCHIVE_BUCKET']"]}
+    },
+    {
+      "name": "telemetry-clickhouse-sink",
+      "chart": "greenguard-service",
+      "profile": "telemetry-clickhouse-sink",
+      "image": "telemetry-sinks",
+      "phase": "applications",
+      "secret": "greenguard-telemetry-clickhouse-config",
+      "kafkaPrincipal": "telemetry-sinks",
+      "health": {"type": "exec", "command": ["python", "-c", "import os; assert os.environ['CLICKHOUSE_URL']"]}
     }
   ],
   "scheduledTasks": [
@@ -378,6 +438,7 @@
       "initialJob": "projection-history-s4-initial"
     }
   ],
+  "operatorSecrets": ["greenguard-telemetry-replay-config"],
   "acceptanceJobs": [
     {
       "name": "postgres-owner-migration-gate",
@@ -388,6 +449,27 @@
         "migration-gate",
         "migration-sql"
       ]
+    },
+    {
+      "name": "clickhouse-roundtrip",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "clickhouse-roundtrip"
+      },
+      "images": [
+        "clickhouse"
+      ]
+    },
+    {
+      "name": "tenant-membership-readback",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "tenant-membership-readback"
+      },
+      "images": [
+        "tenant-control-plane"
+      ],
+      "releaseFlag": "membership_acceptance_enabled"
     }
   ],
   "blockingGaps": [

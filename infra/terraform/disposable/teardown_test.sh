@@ -50,6 +50,12 @@ case "$1 $2" in
       cat "$STUB_DIR/tagged" 2>/dev/null || true
     fi ;;
   "ec2 describe-volumes") cat "$STUB_DIR/volumes" 2>/dev/null || true ;;
+  "ec2 describe-vpcs") cat "$STUB_DIR/cell_vpcs" 2>/dev/null || true ;;
+  "ec2 describe-internet-gateways") cat "$STUB_DIR/cell_igws" 2>/dev/null || true ;;
+  "ec2 describe-nat-gateways") cat "$STUB_DIR/cell_nat_gateways" 2>/dev/null || true ;;
+  "ec2 describe-addresses")
+    if [[ "$*" == *"Name=tag:Name"* ]]; then cat "$STUB_DIR/cell_nat_eips" 2>/dev/null || true
+    else cat "$STUB_DIR/elastic_ips" 2>/dev/null || true; fi ;;
   "rds describe-db-instances")
     if [ -f "$STUB_DIR/rds_error" ]; then
       echo 'An error occurred (AccessDenied)' >&2; exit 254
@@ -65,6 +71,20 @@ case "$1 $2" in
       echo 'An error occurred (ResourceNotFoundException)' >&2; exit 254
     fi ;;
   "s3api list-buckets") cat "$STUB_DIR/s3_buckets" 2>/dev/null || true ;;
+  "ecr describe-repositories")
+    if [ -f "$STUB_DIR/ecr_error" ]; then echo 'AccessDenied: ECR inventory unavailable' >&2; exit 254; fi
+    if [[ "$*" != *"starts_with(repositoryName, 'greenguard/sandbox/cell-"* ]]; then
+      echo 'ECR inventory must be scoped to Terraform-owned GreenGuard repositories' >&2; exit 254
+    fi
+    prefix="${*#*starts_with(repositoryName, \'}"
+    prefix="${prefix%%\'*}"
+    grep "^${prefix}" "$STUB_DIR/ecr_repositories" 2>/dev/null || true ;;
+  "secretsmanager list-secrets")
+    if [ -f "$STUB_DIR/customer_secrets_error" ]; then echo 'AccessDenied: Secrets Manager inventory unavailable' >&2; exit 254; fi
+    if [[ "$*" != *"--include-planned-deletion"* || "$*" != *"starts_with(Name, 'greenguard/sandbox/')"* ]]; then
+      echo 'Secrets Manager inventory must be scoped to the requested environment' >&2; exit 254
+    fi
+    cat "$STUB_DIR/customer_secret_arns" 2>/dev/null || true ;;
   "elbv2 describe-load-balancers") cat "$STUB_DIR/edge_alb" 2>/dev/null || true ;;
   "cloudfront list-distributions")
     if [ -f "$STUB_DIR/edge_inventory_error" ]; then echo 'AccessDenied: CloudFront inventory unavailable' >&2; exit 254; fi
@@ -160,7 +180,8 @@ ok() { pass=$((pass + 1)); echo "ok - $1"; }
 fail() { echo "not ok - $1" >&2; cat "$STUB_DIR/out" >&2 2>/dev/null || true; cat "$STUB_DIR/calls" >&2 2>/dev/null || true; exit 1; }
 run_pre() {
   GG_PV_INVENTORY_FILE="$STUB_DIR/pv-ids" GG_CLUSTER=greenguard-sandbox-cell-1 GG_REGION=us-east-1 GG_ENVIRONMENT="${1:-sandbox}" GG_ACCOUNT=123456789012 \
-    GG_WAIT_SECONDS="${2:-900}" "$here/pre-destroy.sh" >"$STUB_DIR/out" 2>&1
+    GG_WAIT_SECONDS="${2:-900}" GG_DESTROY_INVENTORY_SENTINEL_ENABLED="${3:-true}" \
+    GG_VERIFIED_DESTROY_SCOPE="${4:-}" "$here/pre-destroy.sh" >"$STUB_DIR/out" 2>&1
 }
 
 setup prod
@@ -168,6 +189,16 @@ if run_pre prod; then fail "prod is refused"; fi
 grep -q "refusing" "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] && ok "prod is refused before any AWS call"
 if run_pre production; then fail "production is refused"; fi
 grep -q "refusing" "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] && ok "production alias is refused before any AWS call"
+
+setup legacy-raw-destroy
+if run_pre sandbox 900 false; then fail "legacy raw destroy must be blocked without the final inventory sentinel"; fi
+grep -q 'state has no final-inventory sentinel' "$STUB_DIR/out" && [ ! -f "$STUB_DIR/calls" ] &&
+  ok "legacy raw destroy without final inventory sentinel is refused before AWS calls"
+
+setup legacy-verified-destroy
+run_pre sandbox 900 false '123456789012:us-east-1:sandbox:greenguard-sandbox-cell-1' || fail "exact verified wrapper scope should authorize the legacy cleanup path"
+grep -q 'inventory read permissions verified' "$STUB_DIR/out" && [ -f "$STUB_DIR/calls" ] &&
+  ok "exact verified wrapper scope authorizes legacy cleanup with mocked AWS"
 
 setup production-inventory
 if "$here/check-teardown.sh" us-east-1 production greenguard-production 123456789012 >"$STUB_DIR/out" 2>&1; then fail "production inventory is refused"; fi
@@ -271,6 +302,30 @@ setup clean
 "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1 || fail "clean account passes"
 grep -q "no GreenGuard resources found" "$STUB_DIR/out" && ok "post-destroy check passes on a clean account"
 
+setup sentinel-missing-manifest
+if "$here/post-destroy-inventory.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 "$GG_PV_INVENTORY_FILE.scope.json" "$GG_PV_INVENTORY_FILE" >"$STUB_DIR/out" 2>&1; then fail "sentinel must fail without its pre-destroy manifest"; fi
+grep -q 'saved destroy inventory is missing or invalid' "$STUB_DIR/out" &&
+  [ ! -f "$STUB_DIR/calls" ] && ok "sentinel refuses missing manifest before AWS inventory calls"
+
+setup sentinel-invalid-manifest
+echo '{invalid' >"$GG_PV_INVENTORY_FILE.scope.json"
+chmod 600 "$GG_PV_INVENTORY_FILE.scope.json"
+if "$here/post-destroy-inventory.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 "$GG_PV_INVENTORY_FILE.scope.json" "$GG_PV_INVENTORY_FILE" >"$STUB_DIR/out" 2>&1; then fail "sentinel must fail on invalid manifest"; fi
+grep -q 'saved destroy inventory is missing or invalid' "$STUB_DIR/out" &&
+  [ ! -f "$STUB_DIR/calls" ] && ok "sentinel refuses invalid manifest before AWS inventory calls"
+
+setup sentinel-dirty-retry
+GG_REGION=us-east-1 GG_ENVIRONMENT=sandbox GG_CLUSTER=greenguard-sandbox-cell-1 GG_ACCOUNT=123456789012 \
+  GG_MASTER_SECRET_ARN= GG_SHARD_MASTER_SECRET_ARNS='[]' \
+  python3 "$here/destroy-scope-manifest.py" save-env "$GG_PV_INVENTORY_FILE.scope.json"
+echo 'arn:aws:ec2:us-east-1:123456789012:natgateway/nat-1' >"$STUB_DIR/tagged"
+if "$here/post-destroy-inventory.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 "$GG_PV_INVENTORY_FILE.scope.json" "$GG_PV_INVENTORY_FILE" >"$STUB_DIR/out" 2>&1; then fail "sentinel must fail when inventory finds a resource"; fi
+grep -q 'natgateway/nat-1' "$STUB_DIR/out" &&
+  [ -f "$GG_PV_INVENTORY_FILE.scope.json" ] && ok "dirty final inventory fails and retains retry manifest"
+rm "$STUB_DIR/tagged"
+"$here/post-destroy-inventory.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 "$GG_PV_INVENTORY_FILE.scope.json" "$GG_PV_INVENTORY_FILE" >"$STUB_DIR/out" 2>&1 || fail "sentinel inventory retry should pass after resource deletion"
+[ ! -e "$GG_PV_INVENTORY_FILE.scope.json" ] && ok "clean sentinel retry passes and removes its stale scope manifest"
+
 setup rds-not-found
 touch "$STUB_DIR/rds_missing"
 "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1 || fail "missing disposable RDS instance should pass"
@@ -283,23 +338,69 @@ grep -q 'PostgreSQL instance inventory failed' "$STUB_DIR/out" && ok "exact RDS 
 
 if command -v shasum >/dev/null; then
   cell_hash="$(printf '%s' greenguard-sandbox-cell-1 | shasum -a 256 | awk '{print substr($1,1,8)}')"
+  ecr_cell_hash="$(printf '%s' greenguard-sandbox-cell-1 | shasum -a 256 | awk '{print substr($1,1,16)}')"
 else
   cell_hash="$(printf '%s' greenguard-sandbox-cell-1 | sha256sum | awk '{print substr($1,1,8)}')"
+  ecr_cell_hash="$(printf '%s' greenguard-sandbox-cell-1 | sha256sum | awk '{print substr($1,1,16)}')"
 fi
 postgres_name="gg-greenguard-sandbox-cell-1-${cell_hash}-postgres"
 audit_bucket="greenguard-sandbox-cell-1-${cell_hash}-123456789012-us-east-1-audit"
+region=us-east-1
+cluster_name=greenguard-sandbox-cell-1
+archive_prefix_length=$((29 - ${#region}))
+telemetry_archive_bucket="${cluster_name:0:archive_prefix_length}-${cell_hash}-123456789012-${region}-telemetry"
 notification_state_table="greenguard-sandbox-cell-1-${cell_hash}-notification-state"
 
 setup inventory-data
 echo "$postgres_name" >"$STUB_DIR/rds_instances"
 echo "${postgres_name}-manual-backup" >"$STUB_DIR/rds_snapshots"
-echo "$audit_bucket" >"$STUB_DIR/s3_buckets"
+printf '%s\n%s\n' "$audit_bucket" "$telemetry_archive_bucket" >"$STUB_DIR/s3_buckets"
 echo "$notification_state_table" >"$STUB_DIR/notification_state_table"
 if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "data resources must fail the inventory"; fi
 grep -q "Disposable PostgreSQL instance" "$STUB_DIR/out" &&
   grep -q "Disposable PostgreSQL manual snapshots" "$STUB_DIR/out" &&
   grep -q "Disposable audit export S3 bucket" "$STUB_DIR/out" &&
+  grep -q "Disposable telemetry archive S3 bucket" "$STUB_DIR/out" &&
   grep -q "Disposable notification state DynamoDB table" "$STUB_DIR/out" && ok "exact RDS, snapshot, S3, and DynamoDB leftovers are reported"
+
+setup inventory-ecr-and-customer-secrets
+printf 'greenguard/sandbox/cell-%s/device-service\ngreenguard/sandbox/cell-%s/read-api\ngreenguard/read-api\n' "$ecr_cell_hash" "$ecr_cell_hash" >"$STUB_DIR/ecr_repositories"
+printf 'arn:aws:secretsmanager:us-east-1:123456789012:secret:greenguard/sandbox/read-api-Ab12\narn:aws:secretsmanager:us-east-1:123456789012:secret:greenguard/sandbox/shards/s1/bootstrap-Cd34\narn:aws:secretsmanager:us-east-1:123456789012:secret:greenguard/sandbox/retiring-secret-Ef56\n' >"$STUB_DIR/customer_secret_arns"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "Terraform-owned ECR repositories and customer secret containers must fail inventory"; fi
+grep -q 'Terraform-owned ECR repositories for sandbox/greenguard-sandbox-cell-1' "$STUB_DIR/out" &&
+  grep -q "greenguard/sandbox/cell-$ecr_cell_hash/device-service" "$STUB_DIR/out" &&
+  grep -q 'Disposable customer Secrets Manager containers' "$STUB_DIR/out" &&
+  grep -q 'greenguard/sandbox/shards/s1/bootstrap-Cd34' "$STUB_DIR/out" &&
+  grep -q 'greenguard/sandbox/retiring-secret-Ef56' "$STUB_DIR/out" &&
+  grep -q "ecr describe-repositories.*starts_with(repositoryName, 'greenguard/sandbox/cell-$ecr_cell_hash/')" "$STUB_DIR/calls" &&
+  grep -q "secretsmanager list-secrets --include-planned-deletion.*starts_with(Name, 'greenguard/sandbox/')" "$STUB_DIR/calls" &&
+  grep -Fq "contains(not_null(" "$STUB_DIR/calls" &&
+  grep -Fq "Tags[?Key=='Cell'].Value" "$STUB_DIR/calls" &&
+  grep -Fq "'greenguard-sandbox-cell-1')" "$STUB_DIR/calls" &&
+  ! grep -q '^greenguard/read-api$' "$STUB_DIR/out" &&
+  ok "direct regional inventory scopes ECR and customer secrets to the disposable cell"
+
+setup inventory-vpc-nat-eip
+printf 'vpc-cell\n' >"$STUB_DIR/cell_vpcs"
+printf 'igw-cell\n' >"$STUB_DIR/cell_igws"
+printf 'nat-cell\n' >"$STUB_DIR/cell_nat_gateways"
+printf 'eipalloc-cell\n' >"$STUB_DIR/cell_nat_eips"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "orphaned cell VPC/NAT/EIP resources must fail inventory"; fi
+grep -q 'Disposable VPC' "$STUB_DIR/out" && grep -q 'vpc-cell' "$STUB_DIR/out" &&
+  grep -q 'Disposable internet gateway' "$STUB_DIR/out" && grep -q 'igw-cell' "$STUB_DIR/out" &&
+  grep -q 'Disposable NAT gateways' "$STUB_DIR/out" && grep -q 'nat-cell' "$STUB_DIR/out" &&
+  grep -q 'Disposable NAT gateway Elastic IPs' "$STUB_DIR/out" && grep -q 'eipalloc-cell' "$STUB_DIR/out" &&
+  grep -q 'ec2 describe-nat-gateways.*tag:Name' "$STUB_DIR/calls" && ok "exact cell Name inventory catches orphaned VPC, IGW, NAT and NAT EIP"
+
+setup inventory-ecr-denied
+touch "$STUB_DIR/ecr_error"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "ECR inventory API errors must fail closed"; fi
+grep -q 'ECR repository inventory failed: AccessDenied' "$STUB_DIR/out" && ok "ECR inventory errors fail closed"
+
+setup inventory-customer-secrets-denied
+touch "$STUB_DIR/customer_secrets_error"
+if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "customer Secrets Manager inventory API errors must fail closed"; fi
+grep -q 'customer Secrets Manager inventory failed: AccessDenied' "$STUB_DIR/out" && ok "customer Secrets Manager inventory errors fail closed"
 
 setup notification-table-inventory-error
 touch "$STUB_DIR/dynamodb_error"
@@ -359,11 +460,12 @@ echo /aws/lambda/greenguard-escalation-mirror-sandbox-old >"$STUB_DIR/logs"
 grep -q "no GreenGuard resources found" "$STUB_DIR/out" && ok "post-destroy check ignores a neighboring environment log group"
 
 setup dirty
-printf 'arn:aws:ec2:us-east-1:1:natgateway/nat-1\tarn:aws:kms:us-east-1:1:key/k\n' >"$STUB_DIR/tagged"
+printf 'arn:aws:ec2:us-east-1:1:natgateway/nat-1\tarn:aws:kms:us-east-1:1:key/k\tarn:aws:iam::123456789012:role/greenguard-sandbox-role\tarn:aws:ec2:us-east-1:123456789012:vpc/vpc-1234\n' >"$STUB_DIR/tagged"
 touch "$STUB_DIR/cluster"
 if "$here/check-teardown.sh" us-east-1 sandbox greenguard-sandbox-cell-1 123456789012 >"$STUB_DIR/out" 2>&1; then fail "dirty account fails"; fi
 grep -q "natgateway/nat-1" "$STUB_DIR/out" && grep -q "EKS cluster" "$STUB_DIR/out" &&
-  ! grep -q "KMS key not scheduled" "$STUB_DIR/out" && ok "post-destroy check reports leftovers and ignores pending KMS keys"
+  grep -q 'role/greenguard-sandbox-role' "$STUB_DIR/out" && grep -q 'vpc/vpc-1234' "$STUB_DIR/out" &&
+  ! grep -q "KMS key not scheduled" "$STUB_DIR/out" && ok "tag inventory reports NAT, IAM and VPC leftovers while ignoring pending-deletion KMS"
 
 setup inventory-wrong-account
 echo 999999999999 >"$STUB_DIR/account"
@@ -491,7 +593,7 @@ if GG_TERRAFORM_BIN="$work/terraform" "$here/destroy-verified.sh" >"$STUB_DIR/ou
 grep -q 'Terraform state outputs unavailable' "$STUB_DIR/out" &&
   ! grep -q '^terraform destroy$' "$STUB_DIR/calls" && ok "verified wrapper fails closed on state output read error"
 
-[ "$pass" -eq 47 ]
+[ "$pass" -eq 56 ]
 
 setup shard_leftovers
 echo 'gg-greenguard-sandbox-cell-1-deadbeef-shard-s3-r1' >"$STUB_DIR/shard_instances"

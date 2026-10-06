@@ -1,27 +1,14 @@
-# This root has a partial AWS foundation, data store, HTTPS edge and OIDC
-# issuer. Keep ordinary plan and apply fail-closed until controller bootstrap is
-# proven, all data services, migrations, application releases, tenant
-# enrollment and acceptance gates are actually owned by the deployment.
-# Controller archive integrity has a local checksum check, but live controller
-# and workload health still need proof. A user deliberately
-# inspecting these resources can opt in to an incomplete plan; this switch
-# must never be used as evidence that GreenGuard is deployable.
-variable "allow_incomplete_foundation_plan" {
-  description = "Explicitly acknowledge that this root is an incomplete deployment plan. Never set for a full GreenGuard deployment."
-  type        = bool
-  default     = false
-}
-
+# A Terraform apply must own the application tree as well as the AWS substrate.
+# Post-deployment health and acceptance are checked by the deployed workload
+# acceptance resource after Argo has reconciled the pinned application tree.
 resource "terraform_data" "deployment_readiness_gate" {
-  # When the deliberate incomplete-plan override is true, this resource is
-  # absent from state. A later destroy with the default false therefore has
-  # no gate instance to evaluate or create: destroy only removes state objects.
-  count = var.allow_incomplete_foundation_plan ? 0 : 1
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  input      = { application_tree_enabled = var.enable_application_tree }
 
   lifecycle {
     precondition {
-      condition     = var.allow_incomplete_foundation_plan
-      error_message = "This disposable root does not yet have end-to-end live acceptance. Controller and data-service bootstrap, populated Secrets, migrations, application health, Stage 11 telemetry, real-user tenant enrollment and web/iPhone acceptance need live proof. Secret payloads now use ephemeral Terraform inputs and AWS Secrets Manager write-only arguments; the mocked state-boundary fixture passed, but live secret synchronization and rotation still need acceptance. Audit export is an additional first-cell blocker: Standard/Enterprise advertise audit_export, and the worker/S3 path is configured but still needs live signature, storage, and download acceptance. Do not apply it as a complete cell."
+      condition     = var.enable_application_tree
+      error_message = "Refusing an infrastructure-only GreenGuard apply. Enable the complete Argo application tree and provide its exact Git revision, immutable runtime/migration/data-plane/observability image digests, OIDC configuration and required ephemeral secret payloads. Terraform then waits for Argo workloads and migration acceptance; user journeys and physical iPhone acceptance remain explicit post-deployment gates."
     }
   }
 }

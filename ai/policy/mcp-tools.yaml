@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "max_calls": 8,
+  "turn_seconds": 60,
+  "tools": {
+    "query_structured_knowledge": {"kind": "read", "min_role": "viewer", "audience": "knowledge-service", "four_eyes": false},
+    "search_knowledge": {"kind": "read", "min_role": "viewer", "audience": "knowledge-service", "four_eyes": false},
+    "query_device_facts": {"kind": "read", "min_role": "viewer", "audience": "read-api", "four_eyes": false},
+    "get_alert": {"kind": "read", "min_role": "viewer", "audience": "workflow-alerts", "four_eyes": false},
+    "get_risk": {"kind": "read", "min_role": "viewer", "audience": "read-api", "four_eyes": false},
+    "propose_acknowledge_alert": {"kind": "propose", "min_role": "operator", "audience": "grain-advisor", "four_eyes": false}
+  }
+}

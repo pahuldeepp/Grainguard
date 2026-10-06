@@ -8,6 +8,7 @@ from datetime import datetime
 import hashlib
 import json
 import os
+import re
 import signal
 import ssl
 import time
@@ -19,7 +20,13 @@ from typing import Any
 from worker_health import WorkerHealth, start_health_server
 
 ALIAS = os.getenv("SEARCH_ALIAS", "greenguard-inventory")
-TOPICS = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+def inventory_topics(prefix: str) -> tuple[str, str]:
+    names = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+    if (prefix and not re.fullmatch(r"[A-Za-z0-9._-]+", prefix)) or any(len(prefix + name) > 249 for name in names):
+        raise ValueError("invalid KAFKA_TOPIC_PREFIX")
+    return tuple(prefix + name for name in names)
+
+TOPICS = inventory_topics(os.getenv("KAFKA_TOPIC_PREFIX", ""))
 CHECKPOINT_FIELDS = {"event_type", "schema_version", "source_time", "source_position", "raw_position", "partitions"}
 MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "tenant_id": {"type": "keyword"}, "resource_type": {"type": "keyword"},
@@ -122,7 +129,7 @@ class Elastic:
             raise ValueError("tenant_id required")
         return self.request("POST", f"/{index}/_search", {"query": {"bool": {
             "filter": [{"term": {"tenant_id": tenant_id}}],
-            "must": [{"multi_match": {"query": query, "fields": ["name", "serial_number"]}}]
+            "must": [{"multi_match": {"query": query, "fields": ["name", "serial_number", "resource_id"]}}]
         }}})
 
     def count_by_tenant(self, index: str) -> dict[str, int]:

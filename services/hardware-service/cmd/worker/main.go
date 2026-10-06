@@ -79,7 +79,11 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("connect hardware database: %w", err)
 	}
 	var readiness workerReadiness
-	client, err := hardware.KafkaClientWithReadiness(brokers, readiness.consumerAssigned.Store)
+	group := strings.TrimSpace(os.Getenv("HARDWARE_KAFKA_GROUP"))
+	if group == "" {
+		group = hardware.ConsumerGroup
+	}
+	client, err := hardware.KafkaClientForGroupWithReadiness(brokers, group, readiness.consumerAssigned.Store)
 	if err != nil {
 		return err
 	}

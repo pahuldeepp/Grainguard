@@ -1,0 +1,2 @@
+DROP TABLE knowledge_index_failures;
+ALTER TABLE knowledge_index_outbox DROP CONSTRAINT knowledge_index_outbox_tenant_event_uq;

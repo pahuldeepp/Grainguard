@@ -37,6 +37,18 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.observability.prometheus.scrapePort }}
+      {{- if .Values.appMetrics.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.prometheus.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.observability.prometheus.selector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.appMetrics.port }}
+      {{- end }}
     {{- end }}
   egress:
     - to:

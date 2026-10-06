@@ -1,14 +1,85 @@
 import { SHARDED_MOVE_OWNERS } from "../domain/placement.js";
 
 /**
- * Offline contract for a future greenfield ownership provisioner.
- *
- * This module deliberately has no database writes and cannot activate tenants.
- * A deployed provisioner must first supply one least-privilege adapter for every
- * sharded owner, prove every selected-shard owner is ready, seed and read back
- * ownership on each owner database, and only then activate the control-plane
- * placement. No current event consumer performs that workflow.
+ * Repository-owned bootstrap contract inventory. The database names are the
+ * operational owner databases from infra/gitops/disposable/owner-migration-
+ * inventory.json. The ownership SQL contract version is a capability marker,
+ * not a service migration fingerprint. Null service ledger fingerprint / adapter
+ * means the owner still lacks a reviewed readiness verifier. The adapter and
+ * migration fingerprint are verified at runtime from repository-owned SQL and
+ * migration-ledger probes, never from a request or caller-supplied assertion.
  */
+export const TENANT_BOOTSTRAP_OWNER_CONTRACTS = Object.freeze({
+  telemetry: Object.freeze({
+    database: "greenguard_telemetry",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  projection: Object.freeze({
+    database: "greenguard_read",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  jobs: Object.freeze({
+    database: "greenguard_jobs",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  saga: Object.freeze({
+    database: "greenguard_sagas",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  hardware: Object.freeze({
+    database: "greenguard_hardware",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  inventory: Object.freeze({
+    database: "greenguard_inventory",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  alerts: Object.freeze({
+    database: "greenguard_alerts",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  risk: Object.freeze({
+    database: "greenguard_risk",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+  notifications: Object.freeze({
+    database: "greenguard_notifications",
+    ownershipContractVersion: "tenant-ownership-bootstrap-v2",
+    adapter: "repository-direct-sql",
+  }),
+} as const);
+
+const CONTRACT_OWNERS = Object.keys(TENANT_BOOTSTRAP_OWNER_CONTRACTS).sort();
+if (
+  CONTRACT_OWNERS.length !== SHARDED_MOVE_OWNERS.length ||
+  SHARDED_MOVE_OWNERS.some(
+    (owner) => !(owner in TENANT_BOOTSTRAP_OWNER_CONTRACTS),
+  )
+)
+  throw new Error(
+    "tenant bootstrap owner contracts do not match the sharded owner roster",
+  );
+
+export type TenantBootstrapOwner =
+  keyof typeof TENANT_BOOTSTRAP_OWNER_CONTRACTS;
+
+/** Names owners that lack repository-reviewed, concrete DB verifiers. */
+export function unavailableTenantBootstrapOwners(): readonly TenantBootstrapOwner[] {
+  return SHARDED_MOVE_OWNERS.filter((owner) => {
+    const contract = TENANT_BOOTSTRAP_OWNER_CONTRACTS[owner];
+    return contract.adapter === null;
+  });
+}
+
+/** Runtime identity for a greenfield tenant and its selected operational shard. */
 export interface TenantBootstrapPlacement {
   tenantId: string;
   shardId: string;
@@ -23,7 +94,8 @@ export interface TenantBootstrapOwnerAdapter {
   ) => Promise<unknown>;
   verifyTenantOwnership: (
     placement: TenantBootstrapPlacement,
-  ) => Promise<unknown>;
+    phase?: "prepared" | "active",
+  ) => Promise<TenantBootstrapOwnerProof>;
   activateTenantOwnership: (
     placement: TenantBootstrapPlacement,
   ) => Promise<unknown>;
@@ -34,10 +106,14 @@ export interface TenantBootstrapOwnerReadiness {
   shardId: string;
   shardIncarnation: string;
   status: "ready";
-  migrationVersion: string;
+  ownershipContractVersion: string;
+  /** Must come from the owner's actual migration ledger verifier. */
+  serviceMigrationFingerprint: string;
 }
 
 const SHA256 = /^[0-9a-f]{64}$/;
+export const TENANT_OWNERSHIP_BOOTSTRAP_CONTRACT_VERSION =
+  "tenant-ownership-bootstrap-v2" as const;
 const SHARD = /^s[1-4]$/;
 const TENANT_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -105,10 +181,9 @@ export function requireCompleteBootstrapAdapters(
 }
 
 /**
- * Validate the shape and cross-owner consistency of readiness assertions.
- * This function does not authenticate probe results or compare them with an
- * expected per-owner migration manifest. It is not sufficient to authorize
- * tenant activation.
+ * Validate shape and owner-specific contract identity. This is structural
+ * validation only: readiness objects supplied by a caller are not trusted
+ * probes and cannot authorize tenant activation.
  */
 export function requireReadyShardOwners(
   placement: TenantBootstrapPlacement,
@@ -135,8 +210,12 @@ export function requireReadyShardOwners(
       proof.status !== "ready" ||
       proof.shardId !== placement.shardId ||
       proof.shardIncarnation !== placement.shardIncarnation ||
-      !proof.migrationVersion ||
-      !SHA256.test(proof.migrationVersion)
+      proof.ownershipContractVersion !==
+        TENANT_BOOTSTRAP_OWNER_CONTRACTS[proof.owner as TenantBootstrapOwner]
+          .ownershipContractVersion ||
+      proof.ownershipContractVersion !==
+        TENANT_OWNERSHIP_BOOTSTRAP_CONTRACT_VERSION ||
+      !SHA256.test(proof.serviceMigrationFingerprint)
     )
       throw new TenantBootstrapPreflightError(
         "tenant bootstrap shard readiness proof is invalid or stale",
@@ -151,18 +230,19 @@ export function requireReadyShardOwners(
 
 export interface TenantBootstrapOwnerProof extends TenantBootstrapPlacement {
   owner: (typeof SHARDED_MOVE_OWNERS)[number];
-  phase: "prepared" | "active";
+  receiptVersion: typeof TENANT_OWNERSHIP_BOOTSTRAP_CONTRACT_VERSION;
+  observedAt: string;
   state: "prepared" | "active";
-  verified: true;
 }
 
 /**
- * Validate the shape of caller-supplied ownership assertions. This does not
- * authenticate their provenance and must not authorize routing activation.
+ * Validate the shape of caller-supplied ownership assertions against the
+ * repository owner contract. A matching contract string remains forgeable;
+ * this helper is structural only and never authorizes routing activation.
  */
 export function requireCompleteBootstrapProofs(
   placement: TenantBootstrapPlacement,
-  phase: TenantBootstrapOwnerProof["phase"],
+  phase: TenantBootstrapOwnerProof["state"],
   proofs: readonly TenantBootstrapOwnerProof[],
 ): void {
   if (!validPlacement(placement))
@@ -174,6 +254,16 @@ export function requireCompleteBootstrapProofs(
       "tenant bootstrap cannot activate without an exact owner proof set",
     );
   const byOwner = new Map<string, TenantBootstrapOwnerProof>();
+  const receiptKeys = [
+    "owner",
+    "receiptVersion",
+    "tenantId",
+    "shardId",
+    "shardIncarnation",
+    "placementEpoch",
+    "state",
+    "observedAt",
+  ].sort();
   for (const proof of proofs) {
     if (
       !proof ||
@@ -183,9 +273,14 @@ export function requireCompleteBootstrapProofs(
       proof.shardId !== placement.shardId ||
       proof.shardIncarnation !== placement.shardIncarnation ||
       proof.placementEpoch !== placement.placementEpoch ||
-      proof.phase !== phase ||
       proof.state !== phase ||
-      proof.verified !== true
+      proof.receiptVersion !==
+        TENANT_BOOTSTRAP_OWNER_CONTRACTS[proof.owner as TenantBootstrapOwner]
+          .ownershipContractVersion ||
+      proof.receiptVersion !== TENANT_OWNERSHIP_BOOTSTRAP_CONTRACT_VERSION ||
+      typeof proof.observedAt !== "string" ||
+      Number.isNaN(Date.parse(proof.observedAt)) ||
+      Object.keys(proof).sort().join("\0") !== receiptKeys.join("\0")
     )
       throw new TenantBootstrapPreflightError(
         "tenant bootstrap owner read-back proof does not match the placement",

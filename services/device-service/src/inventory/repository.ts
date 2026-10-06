@@ -797,3 +797,28 @@ export function getDevice(db: Db, tenantId: string, deviceId: string) {
     }),
   );
 }
+
+// Exact serial identity resolution stays in the owning inventory transaction.
+export function lookupDeviceBySerial(
+  db: Db,
+  tenantId: string,
+  serialNumber: string,
+) {
+  if (
+    !serialNumber ||
+    serialNumber.length > 128 ||
+    serialNumber.trim() !== serialNumber ||
+    Array.from(serialNumber).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    })
+  )
+    throw new InvalidInputError("invalid serial number");
+  return withTenant(db, tenantId, (tx) =>
+    tx.device.findMany({
+      where: { tenantId, serialNumber, status: { not: "deleted" } },
+      select: { deviceId: true, serialNumber: true },
+      take: 2,
+    }),
+  );
+}

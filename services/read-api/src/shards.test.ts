@@ -132,6 +132,58 @@ test("registry validates all four private bundles before allocating pools and li
   assert.equal(registry.providers.size, 4);
   void registry.close();
 });
+
+test("read shard registry readiness requires all four shard providers", async () => {
+  const config = {
+    formatVersion: 1,
+    service: "read-api",
+    database: "greenguard_read",
+    shards: Object.fromEntries(
+      ["s1", "s2", "s3", "s4"].map((id) => [
+        id,
+        {
+          incarnation,
+          primaryUrl: `postgres://read_query:secret@${id}/greenguard_read?sslmode=verify-full&sslrootcert=/ca.pem`,
+          replicaUrls: [],
+        },
+      ]),
+    ),
+  };
+  const registryWithUnavailable = (unavailable: Set<string>) =>
+    createShardReadRegistry(JSON.stringify(config), {
+      poolFactory: (connectionString) => {
+        const host = new URL(connectionString).hostname;
+        return {
+          on: () => {},
+          end: async () => {},
+          connect: async () => {
+            if (unavailable.has(host)) throw new Error(`${host} unavailable`);
+            return {
+              query: async () => ({ rows: [] }),
+              release: () => {},
+            } as unknown as PoolClient;
+          },
+        } as unknown as Pool;
+      },
+    });
+
+  const healthy = registryWithUnavailable(new Set());
+  try {
+    await healthy.ready();
+  } finally {
+    await healthy.close();
+  }
+
+  for (const unavailable of [new Set(["s4"]), new Set(["s2", "s3", "s4"])]) {
+    const registry = registryWithUnavailable(unavailable);
+    try {
+      await assert.rejects(registry.ready(), FreshnessUnavailable);
+    } finally {
+      await registry.close();
+    }
+  }
+});
+
 test("trusted lease selects only its shard; missing, foreign and stale config fail before pool access", async () => {
   const calls: string[] = [];
   const fake = (shard: string): ReplicaProvider => ({

@@ -103,8 +103,8 @@ func applyTx(ctx context.Context, tx pgx.Tx, c Command, hash []byte) (Result, er
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO hardware_command_receipts
 		(tenant_id,command_id,saga_id,step,saga_version,fencing_token,request_hash,outcome,request_payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING result_id`,
-		c.TenantID, c.CommandID, c.SagaID, c.Step, c.SagaVersion, c.FencingToken, hash, status, dataFor(c)).Scan(&id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING result_id`,
+		c.TenantID, c.CommandID, c.SagaID, c.Step, c.SagaVersion, c.FencingToken, hash, status, string(dataFor(c))).Scan(&id)
 	if err != nil {
 		return Result{}, fmt.Errorf("insert receipt: %w", err)
 	}

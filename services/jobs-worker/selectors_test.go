@@ -122,6 +122,9 @@ func TestSelectorsReturnIdentifiersOnly(t *testing.T) {
 	}
 }
 
+// Accept the migration's original pinned public schema and the equivalent
+// hardened form with pg_temp explicitly last. Additional schemas or pg_temp
+// first remain rejected; ACL and SECURITY DEFINER requirements are unchanged.
 func TestSelectorsAreNotExecutableByPublic(t *testing.T) {
 	db := dbPool(t)
 	var open []string
@@ -129,7 +132,7 @@ func TestSelectorsAreNotExecutableByPublic(t *testing.T) {
 		rows, err := tx.Query(ctx, `SELECT p.proname || ':' || (p.proacl IS NOT NULL AND p.prosecdef
 			  AND NOT has_function_privilege('public', p.oid, 'EXECUTE')
 			  AND has_function_privilege('jobs_app', p.oid, 'EXECUTE')
-			  AND 'search_path=public' = ANY(coalesce(p.proconfig, '{}')))::text
+			  AND coalesce(p.proconfig, '{}') && ARRAY['search_path=public', 'search_path=public, pg_temp']::text[])::text
 			FROM pg_proc p WHERE p.proname LIKE 'jobs\_%\_refs' ORDER BY 1`)
 		if err != nil {
 			return err

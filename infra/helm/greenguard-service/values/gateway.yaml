@@ -1,4 +1,19 @@
 nameOverride: gateway
+mesh:
+  enabled: true
+  strictMtls: true
+appMetrics:
+  enabled: true
+  port: 9464
+  allowedPrincipals:
+    - cluster.local/ns/greenguard/sa/greenguard-prometheus
+observability:
+  prometheus:
+    enabled: true
+    namespace: greenguard
+    selector: { app: prometheus }
+    mergeMetrics: true
+    scrapePort: 15020
 autoscaling:
   hpa: { enabled: true }
 networkPolicy:
@@ -32,6 +47,10 @@ service:
   containerPort: 4002
 container:
   name: gateway
+  env:
+    # Prometheus scrapes the pod IP directly, so this deployment explicitly
+    # opts into a pod-reachable metrics listener. The application default stays loopback-only.
+    - { name: GATEWAY_METRICS_HOST, value: "0.0.0.0" }
 probes:
   startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
   readiness: { enabled: true, path: /readyz, periodSeconds: 5 }

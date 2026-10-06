@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Principal } from "@greenguard/tenant-auth";
 import { AuthError } from "@greenguard/tenant-auth";
 import { createApp } from "./main.js";
+import { KnowledgeClient } from "./knowledge.js";
 import { ProvisioningClient } from "./provisioning.js";
 import { operationHash, operations } from "./query-policy.js";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
@@ -268,6 +269,59 @@ test("readiness is separate from liveness and a stalled rate check is bounded", 
     });
     assert.equal(response.status, 503);
     assert.equal((await response.json()).code, "rate_limit_unavailable");
+  } finally {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+    await server.stop();
+  }
+});
+
+test("Assistant messages and PDF uploads preserve provider Retry-After through the BFF", async () => {
+  const principal: Principal = {
+    subject: "u1",
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    roles: ["operator"],
+    expiresAt: new Date(Date.now() + 60_000),
+  };
+  const knowledge = new KnowledgeClient("http://127.0.0.1:8111", async () =>
+    Response.json(
+      { code: "provider_rate_limited" },
+      { status: 429, headers: { "Retry-After": "120" } },
+    ),
+  );
+  const { app, server } = await createApp({
+    verify: async () => principal,
+    provisioning: new ProvisioningClient("http://127.0.0.1:8092"),
+    knowledge,
+  });
+  const listener = app.listen(0);
+  try {
+    const address = listener.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}`;
+    const id = "22222222-2222-4222-8222-222222222222";
+    for (const [path, contentType, body] of [
+      [
+        `/v1/assistant/conversations/${id}/messages`,
+        "application/json",
+        JSON.stringify({ question: "Summarize this PDF" }),
+      ],
+      [`/v1/assistant/documents/${id}`, "application/pdf", "%PDF-1.7 fixture"],
+    ]) {
+      const response = await fetch(base + path, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer local-test",
+          "Content-Type": contentType,
+        },
+        body,
+      });
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get("Retry-After"), "120");
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.deepEqual(await response.json(), {
+        code: "provider_rate_limited",
+      });
+    }
   } finally {
     await new Promise<void>((resolve) => listener.close(() => resolve()));
     await server.stop();

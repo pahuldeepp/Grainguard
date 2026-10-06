@@ -33,7 +33,8 @@ test("ReadClient forwards bearer and maps each owning store's records", async ()
               received_at: "2026-08-24T00:00:01Z",
             },
           ],
-          source: "cassandra",
+          nextCursor: "opaque-page-2",
+          sources: { postgres: true, cassandra: true },
         });
       if (path.endsWith("/search"))
         return Response.json({
@@ -61,17 +62,17 @@ test("ReadClient forwards bearer and maps each owning store's records", async ()
     (await client.latest("Bearer tenant-one", "d1"))?.temperatureC,
     23,
   );
-  assert.equal(
-    (
-      await client.history("Bearer tenant-one", {
-        deviceId: "d1",
-        from: "2026-08-01T00:00:00Z",
-        to: "2026-09-01T00:00:00Z",
-        limit: 10,
-      })
-    ).length,
-    1,
-  );
+  const historyPage = await client.history("Bearer tenant-one", {
+    deviceId: "d1",
+    from: "2026-08-01T00:00:00Z",
+    to: "2026-09-01T00:00:00Z",
+    limit: 10,
+    after: "opaque-page-1",
+  });
+  assert.equal(historyPage.items.length, 1);
+  assert.equal(historyPage.items[0]?.readingId, "r2");
+  assert.equal(historyPage.nextCursor, "opaque-page-2");
+  assert.deepEqual(historyPage.sources, { postgres: true, cassandra: true });
   assert.deepEqual(
     (await client.search("Bearer tenant-one", "North", 10)).map(
       (hit) => hit?.deviceId,
@@ -84,6 +85,40 @@ test("ReadClient forwards bearer and maps each owning store's records", async ()
     "/api/v1/read/devices/d1/readings",
     "/api/v1/read/search",
   ]);
+});
+
+test("ReadClient forwards an opaque history cursor and rejects malformed source metadata", async () => {
+  let requested: URL | undefined;
+  const client = new ReadClient("http://127.0.0.1:8093", async (input) => {
+    requested = new URL(input.toString());
+    return Response.json({
+      data: [],
+      nextCursor: null,
+      sources: { postgres: true, cassandra: false },
+    });
+  });
+  const result = await client.history("Bearer token", {
+    deviceId: "d1",
+    from: "2026-08-01T00:00:00Z",
+    to: "2026-09-01T00:00:00Z",
+    limit: 10,
+    after: "opaque/cursor+value",
+  });
+  assert.equal(requested?.searchParams.get("after"), "opaque/cursor+value");
+  assert.deepEqual(result.sources, { postgres: true, cassandra: false });
+
+  const malformed = new ReadClient("http://127.0.0.1:8093", async () =>
+    Response.json({ data: [], nextCursor: null, sources: "cassandra" }),
+  );
+  await assert.rejects(
+    malformed.history("Bearer token", {
+      deviceId: "d1",
+      from: "2026-08-01T00:00:00Z",
+      to: "2026-09-01T00:00:00Z",
+      limit: 10,
+    }),
+    { code: "invalid_history_sources", status: 502 },
+  );
 });
 
 test("ReadClient preserves opaque upstream errors and rejects unsafe URL", async () => {
@@ -723,4 +758,22 @@ test("caller disconnect neither opens the shared breaker nor strands a half-open
   );
   mode = "healthy";
   await client.device("Bearer two", "d");
+});
+
+test("null history cursor is omitted from owner query", async () => {
+  const client = new ReadClient("http://127.0.0.1:8093", async (input) => {
+    assert.equal(new URL(input.toString()).searchParams.has("after"), false);
+    return Response.json({
+      data: [],
+      nextCursor: null,
+      sources: { postgres: true, cassandra: false },
+    });
+  });
+  await client.history("Bearer test", {
+    deviceId: "d1",
+    from: "2026-10-01T00:00:00Z",
+    to: "2026-10-02T00:00:00Z",
+    limit: 10,
+    after: null,
+  });
 });

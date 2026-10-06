@@ -1,37 +1,50 @@
 # Disposable OIDC first-admin enrollment
 
 The selected OIDC provider authenticates people. GreenGuard's tenant control
-plane separately owns tenant membership. A valid provider account alone never
-grants GreenGuard data access. This operator workflow binds the holder of a
-verified access token to the first admin of a **new** tenant; existing tenants
-must use the authenticated invitation workflow.
+plane separately owns tenant membership; a valid provider account alone never
+grants tenant data access. This procedure enrolls the verified token holder as
+the first admin of a new disposable-cell tenant through the durable tenant
+bootstrap workflow.
 
 ## Prerequisites
 
 - Deploy and migrate the disposable control-plane database and services.
-- Configure Terraform with the existing provider's exact HTTPS issuer, JWKS
-  URL, API audience and public client IDs. The identity contract requires JWT
-  access tokens, Authorization Code + PKCE for web/mobile, and the scopes
-  `openid profile email offline_access` for the dashboard.
-- Register the deployed web callback from `oidc_public_configuration.web_callback`
-  and `greenguard://auth/callback` at the provider. The web callback uses the
-  AWS-owned CloudFront HTTPS hostname; there is no custom domain requirement.
-- Obtain a short-lived access token by signing into GreenGuard with the intended
-  human account. It must be signed by the configured issuer and have the exact
-  configured API audience. Do not use an ID token.
-- Run the helper from an authorized private operator host with permission to
-  read the exact Terraform-owned `tenant-control-plane-config` secret in the
-  selected disposable AWS account. The helper extracts only its TLS-verified
-  control database URL into the child process environment; it never prints or
-  places the URL in command arguments. The database must be reachable over the
-  private route.
+- If using `identity_mode = "managed-dex"`, first provide an explicit owner
+  account through the ephemeral Terraform secret input. Set
+  `secret_names` to include `greenguard-dex-config`, and provide
+  `runtime_secret_values["greenguard-dex-config"]` with exactly
+  `DEX_FIRST_ADMIN_EMAIL` and `DEX_FIRST_ADMIN_PASSWORD_HASH` (a bcrypt hash,
+  never a plaintext password). The central `greenguard-rds-bootstrap` payload
+  must also include a distinct strong `DEX_DB_PASSWORD`. These values are
+  ephemeral, written to the disposable Secrets Manager containers, and synced
+  into namespace `greenguard`; the local Dex `.env`, fixture users and signing
+  keys are not copied. Terraform fails closed when either input is missing or
+  malformed.
+- Managed Dex's issuer is the current cell's API CloudFront HTTPS hostname at
+  `/dex`, which differs from the local `127.0.0.1` issuer. Destroy/recreate
+  changes that issuer, so the owner must re-enroll. Managed Dex currently
+  creates only the explicitly supplied first login; it does not import demo
+  accounts or grant any tenant membership.
+- `DEX_FIRST_ADMIN_USER_ID` is an internal Dex static-password record UUID,
+  not the OIDC token `sub` and not a GreenGuard membership subject. With Dex's
+  `local` password connector the verified token subject is connector-qualified.
+  Enrollment and acceptance must take `sub` from the signature-verified live
+  access token; never copy the configured UUID into tenant membership.
+- Configure Terraform with the provider's exact HTTPS issuer, JWKS URL, API
+  audience and public client IDs, unless `identity_mode = "managed-dex"` is
+  selected, in which case Terraform derives them from that cell's CloudFront
+  endpoints. Web and mobile use Authorization Code + PKCE with S256.
+- Register the web callback from `oidc_public_configuration.web_callback` and
+  `greenguard://auth/callback` at the provider.
+- Sign in as the intended human user and obtain a short-lived **access token**;
+  do not use an ID token.
+- Run from an operator host whose AWS identity can access the selected EKS API.
+  The host does not need database access or permission to read runtime Secrets.
 
-## Enroll the first admin
+## Run enrollment
 
-Write the access token into a temporary file with owner-only permissions, for
-example from a secret manager or a password manager's secure file export. Do
-not put the token in a command argument, Terraform variable, shell history, or
-repository file. Confirm the Terraform workspace is the disposable cell, then:
+Write the token to an owner-only file through a secure mechanism. Never place it
+in a command argument, shell history, Terraform variable, or repository file.
 
 ```sh
 umask 077
@@ -42,35 +55,28 @@ terraform output -json oidc_public_configuration
 ./enroll-first-admin.sh --enroll 00000000-0000-4000-8000-000000000002 --token-file /secure/operator/path/access-token.txt --confirm '00000000-0000-4000-8000-000000000002:https://your-exact-issuer/'
 ```
 
-Replace the UUID with a newly generated tenant ID. The helper checks the
-Terraform cell is not production, requires the currently authenticated AWS
-account to equal the account in Terraform state, and requires a token file
-owned by the operator with mode `0600` or stricter. It reads issuer, JWKS,
-audience/token mode and client allowlist from Terraform outputs, then passes
-the TLS-verified database URL from the exact cell-scoped Secrets Manager ARN
-and the token on standard input to a verifier using GreenGuard's same JWT rules:
-signature, exact issuer, audience or client binding, algorithm, and expiration.
-The subject is taken only from the verified token. It supports provider-defined
-non-UUID `sub` values. No token or identity is logged or stored in Terraform.
+Use a newly generated tenant UUID and the exact issuer from Terraform output.
+The helper rejects production, checks the current AWS account against the
+Terraform cell, selects the exact EKS cluster and checks its ARN, API endpoint,
+and CA. It waits for a Ready tenant-control-plane pod, then execs the CLI in
+that pod. The token bytes travel on stdin only; Terraform state, process
+arguments, environment, logs, and helper output do not contain the token.
 
-An explicit `TENANT_ID:ISSUER` confirmation, copied from the Terraform output,
-is required and must match exactly. Enrollment creates
-the organization, active admin membership, audit row and outbox event in the
-existing database transaction. Repeating the exact identity for that tenant
-is idempotent; trying to seed an existing tenant with a different identity
-fails. The token holder is trusted by the operator as the intended first
-admin; this command does not implement a self-service invitation workflow.
+Inside the pod the CLI uses the normal mounted `CONTROL_DATABASE_URL` and RDS
+CA. It verifies token signature, exact issuer, audience or configured Cognito
+client binding, algorithm, expiry, and subject. It queues the durable tenant
+bootstrap. Owner-specific bootstrap workers must establish their ownership
+receipts before activation. The CLI polls the authoritative membership lookup
+with a bounded timeout and exits successfully only when the same verified
+`(issuer, sub)` has an active admin membership for the requested tenant.
+Timeouts, tenant mismatches, and non-admin membership fail closed.
 
-After enrollment, sign in on web/iPhone and verify that the BFF resolves the
-exact `(issuer, sub)` pair to the new tenant. A valid but unregistered identity
-must be denied tenant data. Exercise the normal invitation and revocation
-flows for subsequent users.
+## Acceptance boundary
 
-## Limits of offline proof
-
-The offline tests verify signed test tokens and reject wrong issuer, wrong
-audience and expired-token cases, plus the account/environment/file-permission
-guards. They do not prove the real provider's discovery/JWKS behavior, a live
-user's membership, or the deployed database route. Those require the actual
-disposable cell and real-user web/iPhone acceptance. Never point this workflow
-at production.
+The offline unit and command-stub tests prove operator guards, token transport
+boundaries, and wait/read-back behavior. They do not prove a live provider,
+AWS/EKS connectivity, all bootstrap workers completing, or web/iPhone access.
+After running in the disposable cell, verify the resulting active tenant with
+the disposable live acceptance procedure and exercise web/mobile login. Never
+use this workflow against production. Existing tenants use the invitation and
+revocation workflows.

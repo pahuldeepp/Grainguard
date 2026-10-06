@@ -3,6 +3,7 @@ locals {
 }
 
 resource "aws_dynamodb_table" "notification_state" {
+  depends_on   = [terraform_data.destroy_inventory_sentinel]
   count        = var.enable_application_tree ? 1 : 0
   name         = local.notification_state_table_name
   billing_mode = "PAY_PER_REQUEST"
@@ -46,6 +47,7 @@ resource "aws_dynamodb_table" "notification_state" {
 # Gateway endpoint avoids sending DynamoDB traffic through a public NAT path.
 # Its policy and the pod role both permit only PutItem to this one table.
 resource "aws_vpc_endpoint" "dynamodb" {
+  depends_on        = [terraform_data.destroy_inventory_sentinel]
   count             = var.enable_application_tree ? 1 : 0
   vpc_id            = aws_vpc.cell.id
   service_name      = "com.amazonaws.${var.aws_region}.dynamodb"
@@ -101,6 +103,7 @@ data "aws_iam_policy_document" "notification_contacts_projector" {
 }
 
 resource "aws_iam_role" "notification_contacts_projector" {
+  depends_on         = [terraform_data.destroy_inventory_sentinel]
   count              = var.enable_application_tree ? 1 : 0
   name               = "${var.cluster_name}-notification-contacts-projector"
   assume_role_policy = data.aws_iam_policy_document.notification_contacts_projector[0].json
@@ -114,9 +117,10 @@ resource "aws_iam_role" "notification_contacts_projector" {
 }
 
 resource "aws_iam_role_policy" "notification_contacts_projector" {
-  count = var.enable_application_tree ? 1 : 0
-  name  = "${var.cluster_name}-notification-contacts-write"
-  role  = aws_iam_role.notification_contacts_projector[0].id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  count      = var.enable_application_tree ? 1 : 0
+  name       = "${var.cluster_name}-notification-contacts-write"
+  role       = aws_iam_role.notification_contacts_projector[0].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -134,7 +138,9 @@ resource "aws_eks_pod_identity_association" "notification_contacts_projector" {
   service_account = "notification-contacts-projector"
   role_arn        = aws_iam_role.notification_contacts_projector[0].arn
 
-  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy.notification_contacts_projector]
+  depends_on = [aws_eks_addon.pod_identity_agent, aws_iam_role_policy.notification_contacts_projector,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 output "notification_state_table" {

@@ -68,6 +68,25 @@ func TestAuthorityPlacementAuthenticationExpiryAndQuiesce(t *testing.T) {
 	}
 }
 
+func TestAuthorityNotFoundIsDistinctFromUnavailable(t *testing.T) {
+	status := http.StatusNotFound
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	r, err := NewHTTPPlacementResolver(server.URL, "private-test-token", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve(context.Background(), tenantID); !errors.Is(err, ErrTenantPlacementNotFound) {
+		t.Fatalf("404 must remain a distinct authoritative result: %v", err)
+	}
+	status = http.StatusServiceUnavailable
+	if _, err := r.Resolve(context.Background(), tenantID); !errors.Is(err, ErrPlacementUnavailable) || errors.Is(err, ErrTenantPlacementNotFound) {
+		t.Fatalf("service failure must remain unavailable, not missing: %v", err)
+	}
+}
+
 func testShardRegistry() ShardRegistry {
 	s := ShardRegistry{FormatVersion: 1, Service: "test", Database: "greenguard_test", Shards: map[string]ShardEndpoint{}}
 	for index, id := range []string{"s1", "s2", "s3", "s4"} {

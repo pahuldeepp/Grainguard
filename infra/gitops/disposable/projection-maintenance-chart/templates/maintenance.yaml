@@ -5,9 +5,12 @@
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($v.rdsHost | default "")) }}{{ fail "maintenance requires a shard RDS host" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" ($v.credentialSecret | default "")) }}{{ fail "maintenance credential Secret required" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" ($v.caSecret | default "")) }}{{ fail "maintenance CA Secret required" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($v.verifierImage | default "")) }}{{ fail "Cassandra verifier image must be immutable" }}{{ end }}
+{{- if ne ($v.cassandraAuthSecret | default "") "greenguard-cassandra-auth" }}{{ fail "Cassandra reader Secret must be the disposable Cassandra auth Secret" }}{{ end }}
+{{- if ne ($v.cassandraTlsSecret | default "") "greenguard-cassandra-tls" }}{{ fail "Cassandra CA Secret must be the disposable Cassandra TLS Secret" }}{{ end }}
 {{- if ne $v.schema "public" }}{{ fail "first-cell maintenance schema must be public" }}{{ end }}
 {{- if not (regexMatch "^(10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3}|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3})/(1[6-9]|2[0-9]|3[0-2])$" (index $v.rdsCIDRs 0 | default "")) }}{{ fail "private RDS CIDRs required" }}{{ end }}
-{{- $labels := dict "app.kubernetes.io/name" "projection-history-maintenance" "app.kubernetes.io/instance" $v.name "greenguard.io/shard" $v.shard "greenguard.io/projection-history-maintenance" "true" -}}
+{{- $labels := dict "app.kubernetes.io/name" "projection-history-maintenance" "app.kubernetes.io/instance" $v.name "greenguard.io/shard" $v.shard "greenguard.io/projection-history-maintenance" "true" "greenguard.io/cassandra-job" "true" "app" "greenguard-history-verifier" -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -19,7 +22,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 1
-  activeDeadlineSeconds: 90
+  activeDeadlineSeconds: 900
   template:
     metadata:
       labels:
@@ -55,11 +58,77 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+      initContainers:
+        - name: verify-cassandra-history
+          image: {{ $v.verifierImage | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/verify-read-history"]
+          env:
+            - name: PROJECTION_MAINTENANCE_URL
+              valueFrom: {secretKeyRef: {name: {{ $v.credentialSecret | quote }}, key: PROJECTION_MAINTENANCE_URL}}
+            - {name: PROJECTION_HISTORY_HOT_WINDOW, value: {{ $v.hotWindow | quote }}}
+            - {name: CASSANDRA_HOSTS, value: greenguard-cassandra}
+            - {name: CASSANDRA_KEYSPACE, value: greenguard_history}
+            - {name: CASSANDRA_DATACENTER, value: datacenter1}
+            - {name: CASSANDRA_REQUIRE_SECURE, value: "1"}
+            - {name: CASSANDRA_USERNAME, value: gg_history_reader}
+            - {name: CASSANDRA_TLS_CA_FILE, value: /cql-ca/ca.crt}
+            - {name: CASSANDRA_TLS_SERVER_NAME, value: greenguard-cassandra}
+            - name: CASSANDRA_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $v.cassandraAuthSecret | quote }}, key: reader-password}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 1, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+            - {name: cassandra-ca, mountPath: /cql-ca, readOnly: true}
       volumes:
         - name: rds-ca
           secret:
             secretName: {{ $v.caSecret | quote }}
             items: [{key: ca.pem, path: ca.pem}]
+        - name: cassandra-ca
+          secret:
+            secretName: {{ $v.cassandraTlsSecret | quote }}
+            items: [{key: ca.crt, path: ca.crt}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $v.name }}-verifier-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: greenguard-history-verifier
+      greenguard.io/cassandra-job: "true"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: {{ index $v.rdsCIDRs 0 | quote }}
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- range $cidr := (slice $v.rdsCIDRs 1) }}
+    - to:
+        - ipBlock:
+            cidr: {{ $cidr | quote }}
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -79,7 +148,7 @@ spec:
         {{- toYaml $labels | nindent 8 }}
     spec:
       backoffLimit: 1
-      activeDeadlineSeconds: 90
+      activeDeadlineSeconds: 900
       template:
         metadata:
           labels:
@@ -115,8 +184,40 @@ spec:
                 capabilities: {drop: [ALL]}
               volumeMounts:
                 - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+          initContainers:
+            - name: verify-cassandra-history
+              image: {{ $v.verifierImage | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["/usr/local/bin/verify-read-history"]
+              env:
+                - name: PROJECTION_MAINTENANCE_URL
+                  valueFrom: {secretKeyRef: {name: {{ $v.credentialSecret | quote }}, key: PROJECTION_MAINTENANCE_URL}}
+                - {name: PROJECTION_HISTORY_HOT_WINDOW, value: {{ $v.hotWindow | quote }}}
+                - {name: CASSANDRA_HOSTS, value: greenguard-cassandra}
+                - {name: CASSANDRA_KEYSPACE, value: greenguard_history}
+                - {name: CASSANDRA_DATACENTER, value: datacenter1}
+                - {name: CASSANDRA_REQUIRE_SECURE, value: "1"}
+                - {name: CASSANDRA_USERNAME, value: gg_history_reader}
+                - {name: CASSANDRA_TLS_CA_FILE, value: /cql-ca/ca.crt}
+                - {name: CASSANDRA_TLS_SERVER_NAME, value: greenguard-cassandra}
+                - name: CASSANDRA_PASSWORD
+                  valueFrom: {secretKeyRef: {name: {{ $v.cassandraAuthSecret | quote }}, key: reader-password}}
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {cpu: 1, memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+                - {name: cassandra-ca, mountPath: /cql-ca, readOnly: true}
           volumes:
             - name: rds-ca
               secret:
                 secretName: {{ $v.caSecret | quote }}
                 items: [{key: ca.pem, path: ca.pem}]
+            - name: cassandra-ca
+              secret:
+                secretName: {{ $v.cassandraTlsSecret | quote }}
+                items: [{key: ca.crt, path: ca.crt}]

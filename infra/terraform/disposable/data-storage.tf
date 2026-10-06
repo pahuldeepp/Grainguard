@@ -10,12 +10,14 @@ locals {
 }
 
 resource "aws_db_subnet_group" "postgres" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   name       = local.postgres_name
   subnet_ids = [for zone in local.az_names : aws_subnet.private[zone].id]
   tags       = { Name = "${var.cluster_name}-postgres" }
 }
 
 resource "aws_security_group" "postgres" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "${local.postgres_name}-"
   description = "GreenGuard disposable PostgreSQL from EKS workloads"
   vpc_id      = aws_vpc.cell.id
@@ -36,6 +38,7 @@ resource "aws_security_group" "postgres" {
 }
 
 resource "aws_db_parameter_group" "postgres" {
+  depends_on  = [terraform_data.destroy_inventory_sentinel]
   name_prefix = "${local.postgres_name}-"
   family      = "postgres16"
 
@@ -70,6 +73,7 @@ resource "aws_db_parameter_group" "postgres" {
 }
 
 resource "aws_db_instance" "postgres" {
+  depends_on                  = [terraform_data.destroy_inventory_sentinel]
   identifier                  = local.postgres_name
   engine                      = "postgres"
   engine_version              = "16"
@@ -127,6 +131,7 @@ output "postgres_master_secret_arn" {
 # object data is intentionally disposable; force_destroy is limited to this
 # dedicated environment- and account-qualified bucket.
 resource "aws_s3_bucket" "audit_exports" {
+  depends_on    = [terraform_data.destroy_inventory_sentinel]
   bucket        = local.audit_bucket
   force_destroy = true
   tags = {
@@ -146,6 +151,7 @@ resource "aws_s3_bucket" "audit_exports" {
 }
 
 resource "aws_s3_bucket_public_access_block" "audit_exports" {
+  depends_on              = [terraform_data.destroy_inventory_sentinel]
   bucket                  = aws_s3_bucket.audit_exports.id
   block_public_acls       = true
   block_public_policy     = true
@@ -154,12 +160,14 @@ resource "aws_s3_bucket_public_access_block" "audit_exports" {
 }
 
 resource "aws_s3_bucket_ownership_controls" "audit_exports" {
-  bucket = aws_s3_bucket.audit_exports.id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  bucket     = aws_s3_bucket.audit_exports.id
   rule { object_ownership = "BucketOwnerEnforced" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "audit_exports" {
-  bucket = aws_s3_bucket.audit_exports.id
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  bucket     = aws_s3_bucket.audit_exports.id
   rule {
     apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
     bucket_key_enabled = false
@@ -179,7 +187,9 @@ resource "aws_s3_bucket_policy" "audit_exports" {
       Condition = { Bool = { "aws:SecureTransport" = "false" } }
     }]
   })
-  depends_on = [aws_s3_bucket_public_access_block.audit_exports]
+  depends_on = [aws_s3_bucket_public_access_block.audit_exports,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 output "audit_export_bucket" {

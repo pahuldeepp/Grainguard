@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
-import { adminQuery, runtimeDb, uniqueSubject } from "../testing/fixtures.js";
+import {
+  adminQuery,
+  createActiveTenantFixture,
+  runtimeDb,
+  uniqueSubject,
+} from "../testing/fixtures.js";
 import { outboxEvents } from "../testing/fixtures.js";
 import { validateEvent } from "@greenguard/contracts";
-import { createOrganization, revokeMember, type Actor } from "./store.js";
+import { revokeMember, type Actor } from "./store.js";
 import {
   createApiKey,
   KEY_PATTERN,
@@ -37,12 +42,7 @@ async function org(label: string) {
     issuer: "https://issuer.test",
     subject: uniqueSubject(label),
   };
-  const created = await createOrganization(
-    db,
-    actor,
-    { name: label },
-    command(),
-  );
+  const created = await createActiveTenantFixture(db, actor, label, command());
   return { actor, tenantId: created.body.tenantId as string };
 }
 const ISSUER = "https://idp.test";

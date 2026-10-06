@@ -14,6 +14,20 @@ export const RISK_TOPICS = [
 ] as const;
 const QUARANTINE_TOPIC = "greenguard.quarantine.v1";
 
+export function riskTransportTopics(prefix = "") {
+  const topics = [...RISK_TOPICS, QUARANTINE_TOPIC];
+  if (
+    !/^[A-Za-z0-9_.-]*$/.test(prefix) ||
+    prefix.includes("..") ||
+    topics.some((topic) => (prefix + topic).length > 249)
+  )
+    throw new Error("invalid KAFKA_TOPIC_PREFIX");
+  return {
+    risk: RISK_TOPICS.map((topic) => prefix + topic),
+    quarantine: prefix + QUARANTINE_TOPIC,
+  };
+}
+
 // KafkaJS ships a placeholder for Snappy. The canonical CDC stream may contain
 // Snappy batches even when this consumer never produces compressed messages.
 // Registration must happen before the first broker fetch.
@@ -38,6 +52,7 @@ export async function startRiskKafkaConsumer(
   groupId = "workflow-alerts",
   onFatal?: () => void,
 ) {
+  const topics = riskTransportTopics(process.env.KAFKA_TOPIC_PREFIX);
   registerSnappyCodec();
   const kafka = new Kafka({
     clientId: "workflow-alerts",
@@ -53,7 +68,7 @@ export async function startRiskKafkaConsumer(
   await producer.connect();
   try {
     await consumer.connect();
-    for (const topic of RISK_TOPICS)
+    for (const topic of topics.risk)
       await consumer.subscribe({ topic, fromBeginning: true });
     await consumer.run({
       autoCommit: false,
@@ -89,7 +104,7 @@ export async function startRiskKafkaConsumer(
               },
               quarantine: async (_record, errors) => {
                 await producer.send({
-                  topic: QUARANTINE_TOPIC,
+                  topic: topics.quarantine,
                   messages: [
                     {
                       key: `${topic}:${partition}:${message.offset}`,

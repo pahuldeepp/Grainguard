@@ -11,7 +11,14 @@ The BFF requires runtime configuration such as OIDC issuer/audience/JWKS and
 service URLs. Supply sensitive values through `envFrom`/`env` Secret references
 in an environment-specific values file; never put secret values in chart
 defaults. Its policy allows named Read API, workflow-alerts and Saga API peers
-on their service ports. Verify the Saga release and all selectors in the target
+on their service ports, plus knowledge-service pods in greenguard-knowledge
+with release label knowledge-api on TCP8080. Configure KNOWLEDGE_API_URL
+to the actual private knowledge API service origin; this policy selects pods,
+not a Kubernetes Service DNS name. The separately deployed API must carry
+app.kubernetes.io/name=knowledge-service and app.kubernetes.io/instance=knowledge-api,
+and its ingress policy must allow the BFF. Override the peer tuple when the
+release uses different labels or port. Run `ruby infra/helm/greenguard-bff/check-knowledge-egress.rb`
+for the local rendered default/custom selector contract. Verify the Saga release and all selectors in the target
 cluster. External OIDC/JWKS connectivity needs an approved egress design (for
 example an egress gateway) before a cluster rollout.
 

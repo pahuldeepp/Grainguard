@@ -150,6 +150,10 @@ function start(binary, port) {
       AUTH_ISSUER: issuer,
       AUTH_AUDIENCE: audience,
       AUTH_JWKS_URL: jwksURL,
+      // Machine API keys are out of scope here; a lookup token inherited from
+      // .env without CONTROL_PLANE_URL would abort startup.
+      CONTROL_PLANE_URL: "",
+      CONTROL_LOOKUP_TOKEN: "",
       // Checkpoints arrive every 30s; 45s keeps a live feed fresh and lets a stopped
       // connector turn it stale within about a minute.
       INGEST_BINDING_FEED_MAX_STALE: "45s",

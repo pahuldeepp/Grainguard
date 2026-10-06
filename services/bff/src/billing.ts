@@ -1,23 +1,62 @@
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
+import { allowedInternalUrl } from "./internal-url.js";
 
 export class BillingUpstreamError extends Error {
-  constructor(readonly status: number, readonly code: string) { super(code); }
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+  }
 }
 
 export interface BillingSnapshot {
-  subscription: { status: string; planKey: string; entitlementPlanKey: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; version?: string };
-  usage: Array<{ meter: string; periodStart: string; periodEnd: string; state: string; total: string }>;
+  subscription: {
+    status: string;
+    planKey: string;
+    entitlementPlanKey: string;
+    currentPeriodEnd?: string;
+    cancelAtPeriodEnd?: boolean;
+    version?: string;
+  };
+  usage: Array<{
+    meter: string;
+    periodStart: string;
+    periodEnd: string;
+    state: string;
+    total: string;
+  }>;
 }
-export interface BillingCommand { commandId: string; status: string; result?: { url?: string } | null }
+export interface BillingCommand {
+  commandId: string;
+  status: string;
+  result?: { url?: string } | null;
+}
 
 /** Tenant-scoped billing facade. Stripe is only reached by billing-service. */
 export class BillingClient {
-  constructor(private readonly baseURL: string, private readonly fetcher: typeof fetch = fetch) {
+  constructor(
+    private readonly baseURL: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {
     const url = new URL(baseURL);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)))
-      throw new Error("billing owner URL must use HTTPS or loopback HTTP");
+    if (
+      !allowedInternalUrl(baseURL) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      throw new Error(
+        "billing owner URL must use HTTPS, loopback HTTP, or explicitly enabled mesh HTTP without credentials",
+      );
   }
-  private async call<T>(principal: Principal, authorization: string, path: string, init: RequestInit = {}): Promise<T> {
+  private async call<T>(
+    principal: Principal,
+    authorization: string,
+    path: string,
+    init: RequestInit = {},
+  ): Promise<T> {
     requireRole(principal, "admin");
     let response: Response;
     try {
@@ -26,33 +65,77 @@ export class BillingClient {
         headers: { Authorization: authorization, ...(init.headers ?? {}) },
         signal: AbortSignal.timeout(5000),
       });
-    } catch { throw new BillingUpstreamError(503, "billing_unavailable"); }
+    } catch {
+      throw new BillingUpstreamError(503, "billing_unavailable");
+    }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new BillingUpstreamError(response.status, body || "billing_request_failed");
+      throw new BillingUpstreamError(
+        response.status,
+        body || "billing_request_failed",
+      );
     }
     return (await response.json()) as T;
   }
-  async snapshot(principal: Principal, authorization: string): Promise<BillingSnapshot> {
+  async snapshot(
+    principal: Principal,
+    authorization: string,
+  ): Promise<BillingSnapshot> {
     const [subscription, usage] = await Promise.all([
-      this.call<BillingSnapshot["subscription"]>(principal, authorization, "/v1/billing/subscription"),
-      this.call<BillingSnapshot["usage"]>(principal, authorization, "/v1/billing/usage"),
+      this.call<BillingSnapshot["subscription"]>(
+        principal,
+        authorization,
+        "/v1/billing/subscription",
+      ),
+      this.call<BillingSnapshot["usage"]>(
+        principal,
+        authorization,
+        "/v1/billing/usage",
+      ),
     ]);
     return { subscription, usage };
   }
-  checkout(principal: Principal, authorization: string, plan: string, successUrl: string, cancelUrl: string, key: string) {
-    return this.call<BillingCommand>(principal, authorization, "/v1/billing/checkout", {
-      method: "POST", headers: { "content-type": "application/json", "idempotency-key": key },
-      body: JSON.stringify({ plan, successUrl, cancelUrl }),
-    });
+  checkout(
+    principal: Principal,
+    authorization: string,
+    plan: string,
+    successUrl: string,
+    cancelUrl: string,
+    key: string,
+  ) {
+    return this.call<BillingCommand>(
+      principal,
+      authorization,
+      "/v1/billing/checkout",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": key },
+        body: JSON.stringify({ plan, successUrl, cancelUrl }),
+      },
+    );
   }
-  portal(principal: Principal, authorization: string, returnUrl: string, key: string) {
-    return this.call<BillingCommand>(principal, authorization, "/v1/billing/portal", {
-      method: "POST", headers: { "content-type": "application/json", "idempotency-key": key },
-      body: JSON.stringify({ returnUrl }),
-    });
+  portal(
+    principal: Principal,
+    authorization: string,
+    returnUrl: string,
+    key: string,
+  ) {
+    return this.call<BillingCommand>(
+      principal,
+      authorization,
+      "/v1/billing/portal",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": key },
+        body: JSON.stringify({ returnUrl }),
+      },
+    );
   }
   command(principal: Principal, authorization: string, id: string) {
-    return this.call<BillingCommand>(principal, authorization, `/v1/billing/commands/${encodeURIComponent(id)}`);
+    return this.call<BillingCommand>(
+      principal,
+      authorization,
+      `/v1/billing/commands/${encodeURIComponent(id)}`,
+    );
   }
 }

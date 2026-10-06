@@ -1,7 +1,7 @@
 {{- $data := .Values.dataPlane | default dict }}
 {{- if ($data.enabled | default false) }}
 {{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "revision must be an exact Git commit SHA" }}{{ end }}
-{{- if not (hasPrefix "https://" .Values.repositoryUrl) }}{{ fail "repositoryUrl must use HTTPS" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "repositoryUrl must be an HTTPS Git URL or a GitHub SSH deploy-key URL" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "cell is required" }}{{ end }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application

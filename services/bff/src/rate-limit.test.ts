@@ -76,6 +76,30 @@ test("operation costs separate cheap, history, search, and provisioning traffic"
     group: "alertMutation",
     cost: 1,
   });
+  assert.deepEqual(operationCharge({ query: "knowledgeQuery" }), {
+    group: "assistant",
+    cost: 5,
+  });
+  assert.deepEqual(operationCharge({ query: "assistantConversationWrite" }), {
+    group: "assistant",
+    cost: 5,
+  });
+});
+test("Assistant questions have an isolated per-user Redis budget from dashboard reads", async () => {
+  const requests: Array<{ keys: string[]; arguments: string[] }> = [];
+  const limiter = redisRateLimiter({
+    eval: async (_script, options) => {
+      requests.push(options);
+      return [1, 0];
+    },
+  });
+  const user = principal("tenant-a", "alice");
+  await limiter.check(user, { query: operations.deviceCurrent });
+  await limiter.check(user, { query: "knowledgeQuery" });
+  assert.notEqual(requests[0]?.keys[0], requests[1]?.keys[0]);
+  assert.match(requests[1]?.keys[0] ?? "", /:assistant:tenant$/);
+  assert.equal(requests[1]?.arguments[0], "5");
+  assert.equal(requests[1]?.arguments[3], "150");
 });
 test("alert acknowledgements and provisioning use separate rate buckets", async () => {
   const requests: Array<{ keys: string[]; arguments: string[] }> = [];

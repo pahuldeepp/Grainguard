@@ -35,3 +35,5 @@ export class VersionConflictError extends Error {
     super("Device was changed by another request");
   }
 }
+
+export class DeviceLookupAmbiguousError extends Error {}

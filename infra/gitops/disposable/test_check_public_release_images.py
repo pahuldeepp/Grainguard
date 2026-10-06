@@ -25,22 +25,50 @@ class PublicImagePreflightTest(unittest.TestCase):
         self.owners = ("control", "billing", "telemetry", "projection", "jobs", "saga",
                        "hardware", "inventory", "alerts", "risk", "notifications")
         self.digest = "sha256:" + "a" * 64
+        runtime = {name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}" for name in ("bff", "dashboard")}
+        platform_names = ("otel-collector", "prometheus", "grafana", "tempo", "loki", "pgbouncer",
+                          "kafka-topics", "kafka-connect", "connector-registration", "opensearch", "cassandra",
+                          "mqtt", "clickhouse", "clamav")
+        platform = {name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}" for name in platform_names}
         self.inputs = {
             "gitops_revision": "b" * 40,
-            "deployment_image_digests": {
-                name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}"
-                for name in ("bff", "dashboard")
-            },
+            "deployment_image_digests": runtime,
             "migration_image_digests": {
                 owner: f"ghcr.io/pahuldeepp/grainguard/migration-{owner}@{self.digest}"
                 for owner in self.owners
             },
             "migration_gate_image_digest": f"ghcr.io/pahuldeepp/grainguard/migration-gate@{self.digest}",
             "migration_sql_image_digest": f"ghcr.io/pahuldeepp/grainguard/migration-sql@{self.digest}",
+            "ml_synthetic_scorer_image_digest": f"ghcr.io/pahuldeepp/grainguard/ml-scoring-synthetic@{self.digest}",
+            "observability_image_digests": {name: platform[name] for name in ("otel-collector", "prometheus", "grafana", "tempo", "loki")},
+            "data_plane_image_digests": {name: platform[name] for name in ("pgbouncer", "kafka-topics", "kafka-connect", "connector-registration")},
+            "opensearch_image_digest": platform["opensearch"],
+            "cassandra_image_digest": platform["cassandra"],
+            "mqtt_image_digest": platform["mqtt"],
+            "clickhouse_image_digest": platform["clickhouse"],
+            "ai_runtime_image_digests": {
+                "knowledge": f"ghcr.io/pahuldeepp/grainguard/knowledge-service@{self.digest}",
+                "indexer": f"ghcr.io/pahuldeepp/grainguard/knowledge-indexer@{self.digest}",
+                "parser": f"ghcr.io/pahuldeepp/grainguard/knowledge-parser@{self.digest}",
+                "advisor": f"ghcr.io/pahuldeepp/grainguard/grain-advisor@{self.digest}",
+                "gateway": f"ghcr.io/pahuldeepp/grainguard/model-gateway@{self.digest}",
+                "usage": f"ghcr.io/pahuldeepp/grainguard/model-gateway-usage@{self.digest}",
+                "mcp": f"ghcr.io/pahuldeepp/grainguard/mcp-gateway@{self.digest}",
+                "clamav": platform["clamav"]
+            },
         }
 
     def test_exact_inventory(self):
-        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 15)
+        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 37)
+
+    def test_rejects_missing_or_foreign_synthetic_scorer_image(self):
+        original = self.inputs.pop("ml_synthetic_scorer_image_digest")
+        with self.assertRaises(ValueError):
+            module.inventory(self.inputs, self.contract)
+        self.inputs["ml_synthetic_scorer_image_digest"] = "ghcr.io/untrusted/ml-scoring-synthetic@" + self.digest
+        with self.assertRaises(ValueError):
+            module.inventory(self.inputs, self.contract)
+        self.inputs["ml_synthetic_scorer_image_digest"] = original
 
     def test_rejects_missing_image(self):
         del self.inputs["deployment_image_digests"]["bff"]

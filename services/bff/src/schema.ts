@@ -76,7 +76,8 @@ export const typeDefs = `#graphql
   type MlPerformance { status: String!, brierScore: Float, sampleCount: Int!, evaluatedAt: String }
   type MlModelVersion { name: String!, version: String!, mode: String!, dataOrigin: String!, productionEligible: Boolean!, status: String!, createdAt: String! }
   type MlRetrainingStatus { status: String!, runId: String, completedAt: String }
-  type MlOperationsSnapshot { capturedAt: String!, scorerReady: Boolean!, predictionsTotal: Int!, inferenceP95Ms: Float, canaryPercentage: Float!, model: MlModelStatus!, models: [MlModelVersion!]!, drift: [MlDriftMetric!]!, performance: MlPerformance!, retraining: MlRetrainingStatus! }
+  type MlAnalytics { status: String!, reason: String, rows: Int!, bins: Int!, averageTemperatureC: Float, averageHumidityPercent: Float }
+  type MlOperationsSnapshot { capturedAt: String!, scorerReady: Boolean!, predictionsTotal: Int!, inferenceP95Ms: Float, canaryPercentage: Float!, model: MlModelStatus!, models: [MlModelVersion!]!, drift: [MlDriftMetric!]!, performance: MlPerformance!, retraining: MlRetrainingStatus!, analytics: MlAnalytics! }
   type MlActionResult { action: String!, accepted: Boolean!, message: String!, runId: String }
   type BillingSubscription { status: String!, planKey: String!, entitlementPlanKey: String!, currentPeriodEnd: String, cancelAtPeriodEnd: Boolean, version: String }
   type BillingUsage { meter: String!, periodStart: String!, periodEnd: String!, state: String!, total: String! }
@@ -84,6 +85,8 @@ export const typeDefs = `#graphql
   type BillingAction { commandId: ID!, status: String!, url: String }
   type AlertPage { items: [AlertView!]!, nextCursor: String }
   type AlertPageV2 { items: [AlertV2!]!, nextCursor: String }
+  type ReadingHistorySources { postgres: Boolean!, cassandra: Boolean! }
+  type ReadingHistoryPage { items: [ReadingView!]!, nextCursor: String, sources: ReadingHistorySources! }
   type AlertAcknowledgement { episodeId: ID!, state: String!, version: String!, eventId: ID! }
   type DeviceChange { consistencyToken: String, deviceId: ID!, readingId: ID, projectedAt: String, streamVersion: String }
   type Query {
@@ -93,7 +96,7 @@ export const typeDefs = `#graphql
     reading(id: ID!, minimumConsistency: String): ReadingView
     siteDevices(siteId: ID!, limit: Int!, after: String, minimumConsistency: String): DevicePage!
     latestReading(deviceId: ID!, minimumConsistency: String): ReadingView
-    readingHistory(deviceId: ID!, from: String!, to: String!, limit: Int!, minimumConsistency: String): [ReadingView!]!
+    readingHistory(deviceId: ID!, from: String!, to: String!, limit: Int!, after: String, minimumConsistency: String): ReadingHistoryPage!
     searchDevices(query: String!, limit: Int!, minimumConsistency: String): [DeviceView!]!
     readingRollups(deviceId: ID!, from: String!, to: String!, limit: Int!, bucket: String!, minimumConsistency: String): [RollupView!]!
     binReadingsLatest(binId: ID!, minimumConsistency: String): BinReadings
@@ -127,8 +130,8 @@ function translate(error: unknown): never {
     error instanceof ReadUpstreamError ||
     error instanceof AlertUpstreamError ||
     error instanceof NotificationUpstreamError ||
-    error instanceof MlOperationsUpstreamError
-    || error instanceof BillingUpstreamError
+    error instanceof MlOperationsUpstreamError ||
+    error instanceof BillingUpstreamError
   ) {
     throw new GraphQLError(error.code, {
       extensions: { code: error.code, httpStatus: error.status },
@@ -284,16 +287,38 @@ export const resolvers = {
     },
     async billing(_: unknown, _args: unknown, context: BffContext) {
       try {
-        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
-        return await context.billing.snapshot(context.principal, context.authorization);
-      } catch (error) { return translate(error); }
+        if (!context.billing)
+          throw new BillingUpstreamError(503, "billing_unavailable");
+        return await context.billing.snapshot(
+          context.principal,
+          context.authorization,
+        );
+      } catch (error) {
+        return translate(error);
+      }
     },
-    async billingCommand(_: unknown, args: { id: string }, context: BffContext) {
+    async billingCommand(
+      _: unknown,
+      args: { id: string },
+      context: BffContext,
+    ) {
       try {
-        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
-        const result = await context.billing.command(context.principal, context.authorization, args.id);
-        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
-      } catch (error) { return translate(error); }
+        if (!context.billing)
+          throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.command(
+          context.principal,
+          context.authorization,
+          args.id,
+        );
+        return {
+          commandId: result.commandId,
+          status: result.status,
+          url:
+            typeof result.result?.url === "string" ? result.result.url : null,
+        };
+      } catch (error) {
+        return translate(error);
+      }
     },
     // Verified identity only (ADR-0014 membership mapping); lets the UI hide
     // actions the caller's role cannot perform. The API still enforces roles.
@@ -440,6 +465,7 @@ export const resolvers = {
         from: string;
         to: string;
         limit: number;
+        after?: string;
         minimumConsistency?: string;
       },
       context: BffContext,
@@ -547,28 +573,77 @@ export const resolvers = {
         return translate(error);
       }
     },
-    async promoteMlModel(_: unknown, args: { version: string }, context: BffContext) {
+    async promoteMlModel(
+      _: unknown,
+      args: { version: string },
+      context: BffContext,
+    ) {
       return mlAction(context, "promote", args.version);
     },
-    async rollbackMlModel(_: unknown, args: { version?: string }, context: BffContext) {
+    async rollbackMlModel(
+      _: unknown,
+      args: { version?: string },
+      context: BffContext,
+    ) {
       return mlAction(context, "rollback", args.version);
     },
     async startMlRetraining(_: unknown, _args: unknown, context: BffContext) {
       return mlAction(context, "retrain");
     },
-    async startBillingCheckout(_: unknown, args: { plan: string; successUrl: string; cancelUrl: string; idempotencyKey: string }, context: BffContext) {
+    async startBillingCheckout(
+      _: unknown,
+      args: {
+        plan: string;
+        successUrl: string;
+        cancelUrl: string;
+        idempotencyKey: string;
+      },
+      context: BffContext,
+    ) {
       try {
-        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
-        const result = await context.billing.checkout(context.principal, context.authorization, args.plan, args.successUrl, args.cancelUrl, args.idempotencyKey);
-        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
-      } catch (error) { return translate(error); }
+        if (!context.billing)
+          throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.checkout(
+          context.principal,
+          context.authorization,
+          args.plan,
+          args.successUrl,
+          args.cancelUrl,
+          args.idempotencyKey,
+        );
+        return {
+          commandId: result.commandId,
+          status: result.status,
+          url:
+            typeof result.result?.url === "string" ? result.result.url : null,
+        };
+      } catch (error) {
+        return translate(error);
+      }
     },
-    async openBillingPortal(_: unknown, args: { returnUrl: string; idempotencyKey: string }, context: BffContext) {
+    async openBillingPortal(
+      _: unknown,
+      args: { returnUrl: string; idempotencyKey: string },
+      context: BffContext,
+    ) {
       try {
-        if (!context.billing) throw new BillingUpstreamError(503, "billing_unavailable");
-        const result = await context.billing.portal(context.principal, context.authorization, args.returnUrl, args.idempotencyKey);
-        return { commandId: result.commandId, status: result.status, url: typeof result.result?.url === "string" ? result.result.url : null };
-      } catch (error) { return translate(error); }
+        if (!context.billing)
+          throw new BillingUpstreamError(503, "billing_unavailable");
+        const result = await context.billing.portal(
+          context.principal,
+          context.authorization,
+          args.returnUrl,
+          args.idempotencyKey,
+        );
+        return {
+          commandId: result.commandId,
+          status: result.status,
+          url:
+            typeof result.result?.url === "string" ? result.result.url : null,
+        };
+      } catch (error) {
+        return translate(error);
+      }
     },
     async startProvisioning(
       _: unknown,

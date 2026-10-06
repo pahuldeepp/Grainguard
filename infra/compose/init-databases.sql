@@ -197,19 +197,29 @@ GRANT USAGE ON SCHEMA public TO hardware_app;
 \getenv control_entitlement_projector_password CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD
 \getenv control_migrator_password CONTROL_MIGRATOR_PASSWORD
 \getenv control_audit_worker_password CONTROL_AUDIT_WORKER_PASSWORD
+\getenv control_bootstrap_worker_password CONTROL_BOOTSTRAP_WORKER_PASSWORD
 \connect postgres
 SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS', r)
-  FROM (VALUES ('control_app'), ('control_entitlement_projector'), ('control_migrator'), ('control_audit_worker')) AS roles(r)
+  FROM (VALUES ('control_app'), ('control_entitlement_projector'), ('control_migrator'), ('control_audit_worker'), ('tenant_bootstrap_worker')) AS roles(r)
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+SELECT 'CREATE ROLE control_bootstrap_worker_role NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'control_bootstrap_worker_role') \gexec
+ALTER ROLE control_bootstrap_worker_role NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 ALTER ROLE control_app PASSWORD :'control_password';
 ALTER ROLE control_entitlement_projector PASSWORD :'control_entitlement_projector_password';
 ALTER ROLE control_migrator PASSWORD :'control_migrator_password';
 ALTER ROLE control_audit_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD :'control_audit_worker_password';
+ALTER ROLE tenant_bootstrap_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD :'control_bootstrap_worker_password';
+GRANT control_bootstrap_worker_role TO tenant_bootstrap_worker WITH INHERIT FALSE, SET TRUE;
 SELECT 'CREATE DATABASE greenguard_control OWNER control_migrator'
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_control') \gexec
+REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+SELECT 'GRANT CONNECT ON DATABASE postgres TO greenguard_admin'
+ WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'greenguard_admin') \gexec
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 ALTER DATABASE greenguard_control OWNER TO control_migrator;
 REVOKE ALL ON DATABASE greenguard_control FROM PUBLIC;
-GRANT CONNECT ON DATABASE greenguard_control TO control_app, control_entitlement_projector, control_audit_worker, cdc_reader;
+GRANT CONNECT ON DATABASE greenguard_control TO control_app, control_entitlement_projector, control_audit_worker, tenant_bootstrap_worker, cdc_reader;
 \connect greenguard_control
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO control_app;

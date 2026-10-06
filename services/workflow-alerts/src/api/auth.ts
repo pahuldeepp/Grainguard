@@ -15,7 +15,10 @@ import {
 
 export const VERIFIER = "ALERTS_TOKEN_VERIFIER";
 
-export type AlertPrincipal = Principal & { issuer: string };
+export type AlertPrincipal = Principal & {
+  issuer: string;
+  scopes?: readonly string[];
+};
 
 export interface Verifier {
   verify(authorization: string | undefined): Promise<AlertPrincipal>;
@@ -38,6 +41,19 @@ export class TenantGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AlertRequest>();
     req.principal = await this.verifier.verify(req.headers.authorization);
     if (!req.principal.issuer) throw new AuthError(503, "auth_unavailable");
+    if (req.principal.scopes) {
+      const path = (req.url ?? "").split("?", 1)[0];
+      const read =
+        req.method === "GET" && /^\/v1\/alerts(?:\/[0-9a-f-]{36})?$/.test(path);
+      const write =
+        req.method === "POST" &&
+        /^\/v1\/alerts\/[0-9a-f-]{36}\/acknowledge$/.test(path);
+      if (
+        !(read && req.principal.scopes.includes("alerts:read")) &&
+        !(write && req.principal.scopes.includes("alerts:acknowledge"))
+      )
+        throw new AuthError(403, "insufficient_role");
+    }
     // These claims are inspected only after signature/audience/issuer verification.
     // The shared user verifier omits grant metadata from Principal, so deny signed
     // machine grants here as well as principals explicitly marked as services.

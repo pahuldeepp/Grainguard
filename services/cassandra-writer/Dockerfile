@@ -7,10 +7,12 @@ COPY services/cassandra-writer services/cassandra-writer
 WORKDIR /src/services/cassandra-writer
 RUN CGO_ENABLED=0 go build -trimpath -o /cassandra-writer .
 RUN CGO_ENABLED=0 go build -trimpath -o /cassandra-migrate ./cmd/migrate
+RUN CGO_ENABLED=0 go build -trimpath -o /verify-read-history ./cmd/verify-read-history
 
 FROM scratch
 COPY --from=build /cassandra-writer /usr/local/bin/cassandra-writer
 COPY --from=build /cassandra-migrate /usr/local/bin/cassandra-migrate
+COPY --from=build /verify-read-history /usr/local/bin/verify-read-history
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532
 ENV HTTP_ADDR=0.0.0.0:8083

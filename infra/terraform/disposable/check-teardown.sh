@@ -31,13 +31,16 @@ found=0
 # the tagging API so a lost tag cannot hide a billable database or S3 bucket.
 if command -v shasum >/dev/null 2>&1; then
   cell_hash="$(printf '%s' "$cluster" | shasum -a 256 | awk '{print substr($1,1,8)}')"
+  ecr_cell_hash="$(printf '%s' "$cluster" | shasum -a 256 | awk '{print substr($1,1,16)}')"
 elif command -v sha256sum >/dev/null 2>&1; then
   cell_hash="$(printf '%s' "$cluster" | sha256sum | awk '{print substr($1,1,8)}')"
+  ecr_cell_hash="$(printf '%s' "$cluster" | sha256sum | awk '{print substr($1,1,16)}')"
 else
   echo "check-teardown: shasum or sha256sum is required for exact data-resource inventory" >&2
   exit 1
 fi
 data_prefix="$(printf '%s' "$cluster" | tr '[:upper:]' '[:lower:]' | tr '_' '-')"
+ecr_prefix="greenguard/${environment}/cell-${ecr_cell_hash}/"
 postgres_name="gg-${data_prefix:0:42}-${cell_hash}-postgres"
 bucket_prefix_length=$((34 - ${#region}))
 if [ "$bucket_prefix_length" -lt 1 ]; then
@@ -45,6 +48,12 @@ if [ "$bucket_prefix_length" -lt 1 ]; then
   exit 1
 fi
 audit_bucket="${data_prefix:0:bucket_prefix_length}-${cell_hash}-${account}-${region}-audit"
+archive_prefix_length=$((29 - ${#region}))
+if [ "$archive_prefix_length" -lt 1 ]; then
+  echo "check-teardown: region name is too long for the telemetry archive bucket naming contract" >&2
+  exit 1
+fi
+telemetry_archive_bucket="${data_prefix:0:archive_prefix_length}-${cell_hash}-${account}-${region}-telemetry"
 notification_state_table="${data_prefix:0:42}-${cell_hash}-notification-state"
 
 # Terraform's edge_name is a normalized prefix plus the first eight hex
@@ -96,6 +105,13 @@ mirror_log="$(exact_log_group "/aws/lambda/greenguard-escalation-mirror-$environ
 dispatch_log="$(exact_log_group "/aws/lambda/greenguard-notification-dispatch-$environment")"
 elastic_ips="$(aws ec2 describe-addresses --filters "Name=tag:Environment,Values=$environment" Name=tag:Project,Values=GreenGuard \
   --query 'Addresses[].AllocationId' --output text)"
+cell_vpcs="$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=${cluster}-vpc" --query 'Vpcs[].VpcId' --output text)"
+cell_internet_gateways="$(aws ec2 describe-internet-gateways \
+  --filters "Name=tag:Name,Values=${cluster}-igw" --query 'InternetGateways[].InternetGatewayId' --output text)"
+cell_nat_gateways="$(aws ec2 describe-nat-gateways \
+  --filter "Name=tag:Name,Values=${cluster}-nat-*" --query 'NatGateways[?State!=`deleted`].NatGatewayId' --output text)"
+cell_nat_eips="$(aws ec2 describe-addresses --filters "Name=tag:Name,Values=${cluster}-nat-*" \
+  --query 'Addresses[].AllocationId' --output text)"
 if postgres_instances="$(aws rds describe-db-instances --db-instance-identifier "$postgres_name" \
   --query 'DBInstances[].DBInstanceIdentifier' --output text 2>&1)"; then
   :
@@ -125,6 +141,20 @@ else
 fi
 
 s3_buckets="$(aws s3api list-buckets --query 'Buckets[].Name' --output text)"
+if ecr_repositories="$(aws ecr describe-repositories \
+  --query "repositories[?starts_with(repositoryName, '${ecr_prefix}')].repositoryName" --output text 2>&1)"; then
+  :
+else
+  echo "check-teardown: ECR repository inventory failed: $ecr_repositories" >&2
+  exit 1
+fi
+if customer_secret_arns="$(aws secretsmanager list-secrets --include-planned-deletion \
+  --query "SecretList[?starts_with(Name, 'greenguard/$environment/') && contains(not_null(Tags[?Key=='Cell'].Value, \`[]\`), '$cluster')].ARN" --output text 2>&1)"; then
+  :
+else
+  echo "check-teardown: customer Secrets Manager inventory failed: $customer_secret_arns" >&2
+  exit 1
+fi
 edge_albs="$(aws elbv2 describe-load-balancers --query "LoadBalancers[?LoadBalancerName=='$edge_name'].LoadBalancerArn" --output text)"
 web_distributions="$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='$cluster dashboard'].ARN" --output text)"
 api_distributions="$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='$cluster mobile BFF'].ARN" --output text)"
@@ -182,6 +212,10 @@ $mirror_log
 $dispatch_log"
 report "Unreleased Elastic IPs tagged Environment=$environment" \
   "$elastic_ips"
+report "Disposable VPC" "$cell_vpcs"
+report "Disposable internet gateway" "$cell_internet_gateways"
+report "Disposable NAT gateways" "$cell_nat_gateways"
+report "Disposable NAT gateway Elastic IPs" "$cell_nat_eips"
 report "Disposable PostgreSQL instance" "$postgres_instances"
 report "Disposable shard primaries and read replicas" "$shard_instances"
 report "Disposable shard manual snapshots" "$shard_snapshots"
@@ -189,7 +223,11 @@ report "Disposable PostgreSQL manual snapshots" \
   "$postgres_snapshots"
 report "Disposable audit export S3 bucket" \
   "$(printf '%s\n' "$s3_buckets" | tr '\t' '\n' | grep -Fx "$audit_bucket" || true)"
+report "Disposable telemetry archive S3 bucket" \
+  "$(printf '%s\n' "$s3_buckets" | tr '\t' '\n' | grep -Fx "$telemetry_archive_bucket" || true)"
 report "Disposable notification state DynamoDB table" "$notification_state_table_found"
+report "Terraform-owned ECR repositories for $environment/$cluster" "$ecr_repositories"
+report "Disposable customer Secrets Manager containers" "$customer_secret_arns"
 report "Disposable private edge ALB" "$edge_albs"
 report "Disposable CloudFront distributions" "$web_distributions
 $api_distributions"

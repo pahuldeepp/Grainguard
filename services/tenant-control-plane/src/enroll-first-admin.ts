@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db/client.js";
 import { inScope, UUID } from "./db/session.js";
-import { identityIdOf, nameId } from "./domain/ids.js";
+import { identityIdOf } from "./domain/ids.js";
 import {
-  grantFirstMembership,
+  ensureIdentity,
   insertOrganization,
   lookupMembership,
 } from "./domain/store.js";
 import { currentTraceparent } from "./trace.js";
+import { enqueueTenantBootstrap } from "./tenant-bootstrap/jobs.js";
 
 export interface FirstAdminEnrollment {
   issuer: string;
@@ -56,26 +57,38 @@ export function validateFirstAdminEnrollment(
 export async function enrollFirstAdmin(
   db: Db,
   input: FirstAdminEnrollment,
-): Promise<"created" | "existing"> {
+): Promise<"provisioning" | "existing"> {
   const current = await lookupMembership(db, input.issuer, input.subject);
   if (current && current.tenantId !== input.tenantId)
     throw new Error("identity already belongs to another tenant");
   const identityId = identityIdOf(input.issuer, input.subject);
-  const seedActor = nameId("identity", "greenguard", "seed");
   return inScope(db, { tenantId: input.tenantId }, async (tx) => {
     const cmd = {
       idempotencyKey: "oidc-first-admin",
       correlationId: randomUUID(),
       traceparent: currentTraceparent(),
     };
+    const actor = { issuer: input.issuer, subject: input.subject };
+    await ensureIdentity(tx, actor);
     const created = await insertOrganization(
       tx,
       input.tenantId,
       `Tenant ${input.tenantId.slice(0, 8)}`,
-      seedActor,
+      identityId,
       cmd,
     );
     if (!created) {
+      const [organization] = await tx.$queryRaw<
+        { state: string; created_by: string }[]
+      >`
+        SELECT state,created_by::text FROM organizations WHERE tenant_id=${input.tenantId}::uuid`;
+      if (
+        organization?.state === "provisioning" &&
+        organization.created_by === identityId
+      ) {
+        await enqueueTenantBootstrap(tx, input.tenantId, identityId, cmd);
+        return "provisioning";
+      }
       const rows = await tx.$queryRaw<{ role: string; state: string }[]>`
         SELECT role, state FROM memberships WHERE tenant_id = ${input.tenantId}::uuid
           AND identity_id = ${identityId}::uuid`;
@@ -89,15 +102,9 @@ export async function enrollFirstAdmin(
         "tenant already exists; use the authenticated invitation workflow",
       );
     }
-    const granted = await grantFirstMembership(
-      tx,
-      input.tenantId,
-      { issuer: input.issuer, subject: input.subject },
-      "admin",
-      seedActor,
-      cmd,
-    );
-    if (!granted) throw new Error("initial admin membership already exists");
-    return "created";
+    await enqueueTenantBootstrap(tx, input.tenantId, identityId, cmd);
+    // OIDC verification and explicit enrollment are necessary, but owner DB
+    // acknowledgements are still required before this principal gains access.
+    return "provisioning";
   });
 }

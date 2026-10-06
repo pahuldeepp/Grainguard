@@ -49,3 +49,17 @@ test("a non-restartable consumer crash removes readiness", () => {
   handleConsumerCrash(false, fail);
   assert.equal(ready, false);
 });
+
+test("risk transport namespace isolates subscriptions and quarantine", async () => {
+  const { riskTransportTopics, RISK_TOPICS } = await import("./kafka.js");
+  assert.deepEqual(riskTransportTopics().risk, [...RISK_TOPICS]);
+  assert.deepEqual(riskTransportTopics("provisioning-demo."), {
+    risk: RISK_TOPICS.map((topic) => "provisioning-demo." + topic),
+    quarantine: "provisioning-demo.greenguard.quarantine.v1",
+  });
+  for (const invalid of ["bad space.", "é.", "..", "a".repeat(249)])
+    assert.throws(
+      () => riskTransportTopics(invalid),
+      /invalid KAFKA_TOPIC_PREFIX/,
+    );
+});

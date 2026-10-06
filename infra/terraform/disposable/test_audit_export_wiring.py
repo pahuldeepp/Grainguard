@@ -25,6 +25,15 @@ class AuditExportWiringTests(unittest.TestCase):
         self.assertIn("path: /readyz", profile)
         self.assertIn("port: 3010", profile)
 
+    def test_control_network_policy_retains_mcp_ingress_and_s3_egress(self):
+        source = (ROOT / "gitops.tf").read_text()
+        control = source.split('ingressSources = concat', 1)[1].split('if release.name == "tenant-control-plane"', 1)[0]
+        self.assertIn('"mcp-gateway"', control)
+        self.assertIn('egressCIDRs', control)
+        self.assertIn('data.aws_prefix_list.s3[0].cidr_blocks', control)
+        self.assertIn('if release.name == "audit-export-worker"', source)
+        self.assertNotIn('if contains(toset(["audit-export-worker", "tenant-control-plane"])', source)
+
     def test_terraform_uses_separate_pod_roles_and_object_prefix_permissions(self):
         source = (ROOT / "audit-export.tf").read_text()
         self.assertIn('toset(["audit-export-worker", "tenant-control-plane"])', source)
@@ -37,6 +46,16 @@ class AuditExportWiringTests(unittest.TestCase):
         self.assertIn('service_account = each.key', source)
         self.assertIn('vpc_endpoint_type = "Gateway"', source)
         self.assertIn('"com.amazonaws.${var.aws_region}.s3"', source)
+
+    def test_shared_s3_endpoint_keeps_deletion_outside_audit_and_archive(self):
+        source = (ROOT / "s3-endpoint-policy.tf").read_text()
+        common = source.split('dynamic "statement"')[0]
+        self.assertNotIn('"s3:DeleteObject"', common)
+        deletion = source.split('dynamic "statement"')[1]
+        self.assertIn('for_each = var.ai_runtime_enabled ? [1] : []', deletion)
+        self.assertIn('aws_s3_bucket.ai_knowledge_documents[0].arn}/tenant/*/documents/*', deletion)
+        self.assertNotIn('audit_export_object_arn', deletion)
+        self.assertNotIn('telemetry_archive', deletion)
 
     def test_worker_secret_and_registry_are_generated_from_least_privilege_roles(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
@@ -72,7 +91,9 @@ class AuditExportWiringTests(unittest.TestCase):
         self.assertIn('await sources.healthcheck()', worker)
         self.assertIn('async healthcheck(): Promise<void>', owners)
         readiness = (ROOT / "readiness.tf").read_text()
-        self.assertIn("Audit export is an additional first-cell blocker", readiness)
+        self.assertIn("condition     = var.enable_application_tree", readiness)
+        contract = json.loads((REPO / "infra/gitops/disposable/contract.json").read_text())
+        self.assertIn("audit-export-worker", {entry["name"] for entry in contract["releases"]})
 
 
 if __name__ == "__main__":

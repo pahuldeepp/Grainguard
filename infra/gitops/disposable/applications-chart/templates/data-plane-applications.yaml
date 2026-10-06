@@ -4,7 +4,7 @@
 {{- $images := $data.images | default dict }}
 {{- $secrets := $data.secrets | default dict }}
 {{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "data plane requires an exact Git revision" }}{{ end }}
-{{- if not (regexMatch "^https://[^ ]+\\.git$" .Values.repositoryUrl) }}{{ fail "data plane requires an HTTPS Git repository" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "data plane requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "data plane requires a cell" }}{{ end }}
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($data.rdsHost | default "")) }}{{ fail "data plane requires an RDS endpoint DNS name" }}{{ end }}
 {{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration" }}

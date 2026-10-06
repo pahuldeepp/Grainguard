@@ -108,7 +108,7 @@ func TestPromotionSecureViewsAndIdempotence(t *testing.T) {
 
 func assertSecurePromotion(t *testing.T, tx *promotionTx) {
 	t.Helper()
-	if tx.commits != 1 || len(tx.queries) != len(promotionViews)+27 {
+	if tx.commits != 1 || len(tx.queries) != len(promotionViews)+28 {
 		t.Fatalf("unexpected transaction: %+v", tx)
 	}
 	for _, q := range tx.queries[3 : 3+len(promotionViews)] {

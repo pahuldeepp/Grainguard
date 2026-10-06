@@ -37,12 +37,13 @@ type FeedCheckpoint struct {
 }
 
 type BindingFeed struct {
-	DB         TxStarter
-	MaxStale   time.Duration
-	Partitions int
-	Now        func() time.Time
-	Stale      atomic.Uint64
-	ClockSkew  atomic.Uint64
+	DB             TxStarter
+	TransportTopic string
+	MaxStale       time.Duration
+	Partitions     int
+	Now            func() time.Time
+	Stale          atomic.Uint64
+	ClockSkew      atomic.Uint64
 }
 
 func parseCheckpoint(m BindingMessage, partitions int) (FeedCheckpoint, error) {
@@ -97,16 +98,16 @@ func (f *BindingFeed) saveHeartbeat(ctx context.Context, m BindingMessage, cp Fe
 	// Infrastructure state is global to this telemetry database, not tenant data.
 	// Offset and source-position comparisons fence replay; old barriers cannot refresh age.
 	_, err = tx.Exec(ctx, `INSERT INTO binding_feed_checkpoints
-  (partition_id, source_time, source_position, raw_position, consumed_offset, partition_count)
-  VALUES ($1,$2,$3,$4,$5,$6)
-  ON CONFLICT (partition_id) DO UPDATE SET source_time=EXCLUDED.source_time,
+  (partition_id, source_time, source_position, raw_position, consumed_offset, partition_count, transport_topic)
+  VALUES ($1,$2,$3,$4,$5,$6,$7)
+  ON CONFLICT (transport_topic, partition_id) DO UPDATE SET source_time=EXCLUDED.source_time,
    source_position=EXCLUDED.source_position, raw_position=EXCLUDED.raw_position,
    consumed_offset=EXCLUDED.consumed_offset, consumed_at=clock_timestamp(), partition_count=EXCLUDED.partition_count
   WHERE binding_feed_checkpoints.consumed_offset < EXCLUDED.consumed_offset
    AND binding_feed_checkpoints.raw_position < EXCLUDED.raw_position
    AND binding_feed_checkpoints.source_time <= EXCLUDED.source_time
  AND binding_feed_checkpoints.source_position::numeric <= EXCLUDED.source_position::numeric`,
-		m.Partition, cp.SourceTime, cp.SourcePosition, cp.RawPosition, m.Offset, cp.Partitions)
+		m.Partition, cp.SourceTime, cp.SourcePosition, cp.RawPosition, m.Offset, cp.Partitions, f.streamTopic(m))
 	if err != nil {
 		return err
 	}
@@ -114,12 +115,22 @@ func (f *BindingFeed) saveHeartbeat(ctx context.Context, m BindingMessage, cp Fe
 }
 
 const bindingFeedQuery = `SELECT count(*), min(source_time), max(source_time)
- FROM binding_feed_checkpoints WHERE partition_id >= 0 AND partition_id < $1 AND partition_count = $1`
+ FROM binding_feed_checkpoints WHERE partition_id >= 0 AND partition_id < $1 AND partition_count = $1 AND transport_topic = $2`
+
+func (f *BindingFeed) streamTopic(m BindingMessage) string {
+	if m.TransportTopic != "" {
+		return m.TransportTopic
+	}
+	if f.TransportTopic != "" {
+		return f.TransportTopic
+	}
+	return bindingTopic
+}
 
 func (f *BindingFeed) age(ctx context.Context, tx pgx.Tx) (time.Duration, error) {
 	var count int
 	var oldest, newest *time.Time
-	if err := tx.QueryRow(ctx, bindingFeedQuery, f.Partitions).Scan(&count, &oldest, &newest); err != nil {
+	if err := tx.QueryRow(ctx, bindingFeedQuery, f.Partitions, f.streamTopic(BindingMessage{})).Scan(&count, &oldest, &newest); err != nil {
 		return 0, err
 	}
 	if count != f.Partitions || oldest == nil || newest == nil {
@@ -143,6 +154,40 @@ func (f *BindingFeed) Check(ctx context.Context, tx pgx.Tx) error {
 		return newRejection(bindingFeedStale, 503, "The inventory binding feed is stale; retry later.")
 	}
 	return nil
+}
+
+// Ready reports whether the binding feed freshness gate would admit a reading.
+// In sharded mode every primary must have a fresh checkpoint: a tenant cannot
+// safely ingest while any shard's device-binding projection may be stale.
+func (f *BindingFeed) Ready(ctx context.Context) bool {
+	if f == nil || f.MaxStale == 0 {
+		return true
+	}
+	if f.DB == nil {
+		return false
+	}
+	fresh := func(db TxStarter) bool {
+		tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return false
+		}
+		defer rollback(tx)
+		age, err := f.age(ctx, tx)
+		return err == nil && age <= f.MaxStale
+	}
+	if shards, ok := f.DB.(*common.ShardedDB); ok {
+		allFresh := true
+		if err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			if !fresh(shards.InfrastructureDB(shard)) {
+				allFresh = false
+			}
+			return nil
+		}); err != nil {
+			return false
+		}
+		return allFresh
+	}
+	return fresh(f.DB)
 }
 
 func (f *BindingFeed) metrics(ctx context.Context) string {

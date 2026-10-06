@@ -65,14 +65,16 @@ export class AlertsController {
     @Query("limit") limit?: string,
     @Query("after") after?: string,
     @Query("state") state?: string,
+    @Query("deviceId") deviceId?: string,
   ) {
     const principal = principalWith(req, READERS);
     const { tenantId } = principal;
-    const request = page(limit, after, state);
+    const request = page(limit, after, state, deviceId);
     const items = await withTenant(this.db, tenantId, (tx) =>
       listEpisodes(tx, tenantId, request),
     );
     return {
+      ...(deviceId ? { association: "current_assessment_source_device" } : {}),
       items: items.map((e) =>
         toAlertDto(
           e,

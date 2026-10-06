@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { LOOKUP_TOKEN, startApi } from "../testing/api.js";
+import { activateTenantFixture } from "../testing/fixtures.js";
 let api: Awaited<ReturnType<typeof startApi>>;
 before(async () => {
   api = await startApi();
@@ -14,7 +15,18 @@ async function org(label: string) {
     body: { name: label },
     headers: { "idempotency-key": randomUUID() },
   });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 202);
+  assert.equal(created.json.state, "provisioning");
+  await activateTenantFixture(
+    api.db,
+    { issuer: api.issuer.issuer, subject: actor.subject },
+    created.json.tenantId as string,
+    {
+      idempotencyKey: randomUUID(),
+      correlationId: randomUUID(),
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    },
+  );
   return { actor, tenantId: created.json.tenantId as string };
 }
 test("verified membership binds tenant placement and rejects forged claims", async () => {

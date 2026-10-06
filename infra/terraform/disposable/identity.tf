@@ -3,8 +3,8 @@ variable "identity_mode" {
   type    = string
   default = "existing-oidc"
   validation {
-    condition     = contains(["existing-oidc", "cognito"], var.identity_mode)
-    error_message = "identity_mode must be existing-oidc or explicit cognito opt-in."
+    condition     = contains(["existing-oidc", "managed-dex", "cognito"], var.identity_mode)
+    error_message = "identity_mode must be existing-oidc, managed-dex, or explicit cognito opt-in."
   }
 }
 
@@ -47,20 +47,42 @@ variable "existing_oidc" {
 }
 
 resource "terraform_data" "identity_contract" {
-  input = var.identity_mode
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  input      = var.identity_mode
   lifecycle {
     precondition {
-      condition     = var.identity_mode == "cognito" || var.existing_oidc != null
-      error_message = "Supply existing_oidc for the default identity mode; Cognito requires explicit opt-in."
+      condition     = contains(["cognito", "managed-dex"], var.identity_mode) || var.existing_oidc != null
+      error_message = "Supply existing_oidc for existing-oidc mode; managed-dex provisions Dex and Cognito requires explicit opt-in."
+    }
+    precondition {
+      condition = var.identity_mode != "managed-dex" || (
+        var.enable_application_tree &&
+        contains(var.secret_names, "greenguard-dex-config") &&
+        toset(keys(try(var.runtime_secret_values["greenguard-dex-config"], {}))) == toset(["DEX_FIRST_ADMIN_EMAIL", "DEX_FIRST_ADMIN_PASSWORD_HASH"])
+      )
+      error_message = "managed-dex requires enable_application_tree=true and greenguard-dex-config with an operator-chosen DEX_FIRST_ADMIN_EMAIL and bcrypt DEX_FIRST_ADMIN_PASSWORD_HASH; local demo users are never copied."
     }
   }
 }
 
 locals {
-  cognito_prefix = "gg-${substr(sha1("${var.target_account_id}:${var.cluster_name}"), 0, 24)}"
-  cognito_issuer = var.identity_mode == "cognito" ? "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.cell[0].id}" : null
-  cognito_login  = var.identity_mode == "cognito" ? "https://${aws_cognito_user_pool_domain.cell[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
-  oidc_public = var.identity_mode == "cognito" ? {
+  cognito_prefix     = "gg-${substr(sha1("${var.target_account_id}:${var.cluster_name}"), 0, 24)}"
+  cognito_issuer     = var.identity_mode == "cognito" ? "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.cell[0].id}" : null
+  cognito_login      = var.identity_mode == "cognito" ? "https://${aws_cognito_user_pool_domain.cell[0].domain}.auth.${var.aws_region}.amazoncognito.com" : null
+  managed_dex_issuer = "https://${aws_cloudfront_distribution.api.domain_name}/dex"
+  managed_dex_public = {
+    issuer                 = local.managed_dex_issuer
+    jwks_url               = "${local.managed_dex_issuer}/keys"
+    authorization_endpoint = "${local.managed_dex_issuer}/auth"
+    token_endpoint         = "${local.managed_dex_issuer}/token"
+    web_client_id          = "greenguard-dashboard"
+    mobile_client_id       = "greenguard-mobile"
+    audience               = "greenguard-dashboard"
+    scopes                 = ["openid", "profile", "email", "offline_access"]
+    token_mode             = "audience"
+    mobile_audience_mode   = "scope"
+  }
+  oidc_public = var.identity_mode == "managed-dex" ? local.managed_dex_public : var.identity_mode == "cognito" ? {
     issuer                 = local.cognito_issuer
     jwks_url               = "${local.cognito_issuer}/.well-known/jwks.json"
     authorization_endpoint = "${local.cognito_login}/oauth2/authorize"
@@ -96,13 +118,14 @@ locals {
     bffEndpoint           = "https://${aws_cloudfront_distribution.api.domain_name}/graphql"
     clientId              = local.oidc_public.mobile_client_id
     scope                 = join(" ", local.oidc_public.scopes)
-    }, var.identity_mode == "existing-oidc" ? {
+    }, contains(["existing-oidc", "managed-dex"], var.identity_mode) ? {
     audience     = local.oidc_public.audience
-    audienceMode = var.existing_oidc.mobile_audience_mode
+    audienceMode = local.oidc_public.mobile_audience_mode
   } : {})
 }
 
 resource "aws_cognito_user_pool" "cell" {
+  depends_on               = [terraform_data.destroy_inventory_sentinel]
   count                    = var.identity_mode == "cognito" ? 1 : 0
   name                     = "${local.edge_name}-users"
   deletion_protection      = "INACTIVE"
@@ -128,6 +151,7 @@ resource "aws_cognito_user_pool" "cell" {
 }
 
 resource "aws_cognito_user_pool_domain" "cell" {
+  depends_on            = [terraform_data.destroy_inventory_sentinel]
   count                 = var.identity_mode == "cognito" ? 1 : 0
   domain                = local.cognito_prefix
   user_pool_id          = aws_cognito_user_pool.cell[0].id
@@ -143,12 +167,17 @@ resource "aws_cognito_user_pool_client" "web" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
-  callback_urls                        = ["https://${aws_cloudfront_distribution.web.domain_name}/auth/callback"]
-  logout_urls                          = ["https://${aws_cloudfront_distribution.web.domain_name}"]
-  enable_token_revocation              = true
-  prevent_user_existence_errors        = "ENABLED"
+  callback_urls = [
+    "https://${aws_cloudfront_distribution.web.domain_name}/auth/callback",
+    "https://${aws_cloudfront_distribution.web.domain_name}/auth/silent-callback",
+  ]
+  logout_urls                   = ["https://${aws_cloudfront_distribution.web.domain_name}"]
+  enable_token_revocation       = true
+  prevent_user_existence_errors = "ENABLED"
 
-  depends_on = [aws_cognito_user_pool_domain.cell]
+  depends_on = [aws_cognito_user_pool_domain.cell,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 resource "aws_cognito_user_pool_client" "mobile" {
@@ -165,7 +194,9 @@ resource "aws_cognito_user_pool_client" "mobile" {
   enable_token_revocation              = true
   prevent_user_existence_errors        = "ENABLED"
 
-  depends_on = [aws_cognito_user_pool_domain.cell]
+  depends_on = [aws_cognito_user_pool_domain.cell,
+    terraform_data.destroy_inventory_sentinel,
+  ]
 }
 
 output "oidc_public_configuration" {
@@ -174,7 +205,7 @@ output "oidc_public_configuration" {
     authorize_endpoint     = local.oidc_public.authorization_endpoint
     web_callback           = "https://${aws_cloudfront_distribution.web.domain_name}/auth/callback"
     mobile_callback        = "greenguard://auth/callback"
-    bff_allowed_client_ids = var.identity_mode == "cognito" ? [local.oidc_public.web_client_id, local.oidc_public.mobile_client_id] : []
+    bff_allowed_client_ids = contains(["cognito", "managed-dex"], var.identity_mode) ? [local.oidc_public.web_client_id, local.oidc_public.mobile_client_id] : []
     bff_token_mode         = local.oidc_public.token_mode
     hosted_login_origin    = var.identity_mode == "cognito" ? local.cognito_login : null
   })

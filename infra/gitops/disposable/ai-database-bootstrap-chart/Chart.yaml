@@ -1,0 +1,6 @@
+apiVersion: v2
+name: greenguard-ai-database-bootstrap
+description: Opt-in, isolated schema-owner bootstrap for GreenGuard AI services.
+type: application
+version: 0.1.0
+appVersion: "1"

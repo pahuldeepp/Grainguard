@@ -1,14 +1,14 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { adminQuery, runtimeDb, uniqueSubject } from "../testing/fixtures.js";
-import { setFeedAge } from "../testing/entitlements.js";
 import {
-  createOrganization,
-  inviteMember,
-  acceptInvitation,
-  type Actor,
-} from "./store.js";
+  adminQuery,
+  createActiveTenantFixture,
+  runtimeDb,
+  uniqueSubject,
+} from "../testing/fixtures.js";
+import { setFeedAge } from "../testing/entitlements.js";
+import { inviteMember, acceptInvitation, type Actor } from "./store.js";
 import { createApiKey } from "./api-keys.js";
 import { SeatLimitError, ApiKeyLimitError } from "./entitlements.js";
 import { createDb } from "../db/client.js";
@@ -31,7 +31,7 @@ const actor = (s: string): Actor => {
 };
 async function org() {
   const admin = actor("quota-admin");
-  const created = await createOrganization(db, admin, { name: "quota" }, cmd());
+  const created = await createActiveTenantFixture(db, admin, "quota", cmd());
   return { admin, tenantId: created.body.tenantId as string };
 }
 async function entitlement(

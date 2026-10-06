@@ -179,7 +179,10 @@ export function createShardReadRegistry(
       const results = await Promise.allSettled(
         [...providers.values()].map((p) => p.ready()),
       );
-      if (!results.some((r) => r.status === "fulfilled"))
+      // Placement authority may route a tenant to any configured shard. The
+      // service is not ready unless every possible tenant destination can
+      // serve reads; a healthy shard does not compensate for another outage.
+      if (results.length !== 4 || results.some((r) => r.status === "rejected"))
         throw new FreshnessUnavailable();
     },
     async close() {

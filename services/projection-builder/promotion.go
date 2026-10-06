@@ -25,7 +25,7 @@ type PromotionProof struct {
 
 type PromotionVerifier func(context.Context, pgx.Tx, string) (PromotionProof, error)
 
-var promotionViews = []string{"device_views", "device_latest", "reading_history", "stream_gaps", "site_views", "bin_views", "cable_layout_versions", "cable_layout_sensors", "sensor_reading_history", "risk_policy_versions", "risk_assessments", "projection_watermarks", "projection_event_completions"}
+var promotionViews = []string{"device_views", "device_latest", "reading_history", "stream_gaps", "site_views", "bin_views", "cable_layout_versions", "cable_layout_sensors", "sensor_reading_history", "risk_policy_versions", "risk_assessments", "risk_assessment_invalidations", "projection_watermarks", "projection_event_completions"}
 var promotionIdentifier = regexp.MustCompile(`^read_v[1-9][0-9]{0,8}$`)
 
 // PromoteReadViews serializes promotions and changes all reader routes atomically.
@@ -77,7 +77,7 @@ func PromoteReadViews(ctx context.Context, db interface {
 	if _, err = tx.Exec(ctx, "GRANT SELECT ON "+schema+".projection_watermarks, "+schema+".projection_event_completions TO read_query"); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "GRANT SELECT ON "+schema+".device_views, "+schema+".device_latest, "+schema+".reading_history, "+schema+".stream_gaps, "+schema+".site_views, "+schema+".bin_views, "+schema+".cable_layout_versions, "+schema+".cable_layout_sensors, "+schema+".sensor_reading_history, "+schema+".risk_policy_versions, "+schema+".risk_assessments TO read_query"); err != nil {
+	if _, err = tx.Exec(ctx, "GRANT SELECT ON "+schema+".device_views, "+schema+".device_latest, "+schema+".reading_history, "+schema+".stream_gaps, "+schema+".site_views, "+schema+".bin_views, "+schema+".cable_layout_versions, "+schema+".cable_layout_sensors, "+schema+".sensor_reading_history, "+schema+".risk_policy_versions, "+schema+".risk_assessments, "+schema+".risk_assessment_invalidations TO read_query"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, "GRANT SELECT(tenant_id,event_id,consumer_name,event,processed_at) ON "+schema+".consumer_inbox TO read_query"); err != nil {
@@ -121,6 +121,7 @@ func PromoteReadViews(ctx context.Context, db interface {
 		"CREATE OR REPLACE VIEW read.cable_layout_sensors WITH (security_invoker=true,security_barrier=true) AS SELECT * FROM " + schema + ".cable_layout_sensors",
 		"CREATE OR REPLACE VIEW read.sensor_reading_history WITH (security_invoker=true,security_barrier=true) AS SELECT * FROM " + schema + ".sensor_reading_history",
 		"CREATE OR REPLACE VIEW read.risk_policy_versions WITH (security_invoker=true,security_barrier=true) AS SELECT * FROM " + schema + ".risk_policy_versions",
+		"CREATE OR REPLACE VIEW read.risk_assessment_invalidations WITH (security_invoker=true,security_barrier=true) AS SELECT * FROM " + schema + ".risk_assessment_invalidations",
 		"CREATE OR REPLACE VIEW read.risk_assessments WITH (security_invoker=true,security_barrier=true) AS SELECT * FROM " + schema + ".risk_assessments",
 		"CREATE OR REPLACE VIEW read.current_cables WITH (security_invoker=true,security_barrier=true) AS SELECT DISTINCT ON (tenant_id,cable_id) tenant_id,cable_id,device_id,bin_id,cable_version,operation,event_id,occurred_at FROM read.cable_layout_versions ORDER BY tenant_id,cable_id,cable_version DESC",
 		"CREATE OR REPLACE VIEW read.current_cable_sensors WITH (security_invoker=true,security_barrier=true) AS SELECT s.tenant_id,s.cable_id,s.sensor_id,s.cable_version,s.position,s.label,s.depth_m FROM read.current_cables c JOIN read.cable_layout_sensors s ON s.tenant_id=c.tenant_id AND s.cable_id=c.cable_id AND s.cable_version=c.cable_version WHERE c.operation='upsert'",
@@ -132,7 +133,7 @@ func PromoteReadViews(ctx context.Context, db interface {
 			return fmt.Errorf("replace domain read route: %w", err)
 		}
 	}
-	if _, err = tx.Exec(ctx, "GRANT SELECT ON read.site_views,read.bin_views,read.cable_layout_versions,read.cable_layout_sensors,read.sensor_reading_history,read.risk_policy_versions,read.risk_assessments,read.current_cables,read.current_cable_sensors,read.bin_metric_history,read.sensor_readings,read.latest_sensor_readings,read.latest_readings TO read_query"); err != nil {
+	if _, err = tx.Exec(ctx, "GRANT SELECT ON read.site_views,read.bin_views,read.cable_layout_versions,read.cable_layout_sensors,read.sensor_reading_history,read.risk_policy_versions,read.risk_assessments,read.risk_assessment_invalidations,read.current_cables,read.current_cable_sensors,read.bin_metric_history,read.sensor_readings,read.latest_sensor_readings,read.latest_readings TO read_query"); err != nil {
 		return err
 	}
 	if err = emitPromotionEpoch(ctx, tx, schema); err != nil {

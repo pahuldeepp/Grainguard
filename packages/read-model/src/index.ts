@@ -485,6 +485,7 @@ export async function listReadings(
   from: Date,
   to: Date,
   limit = 100,
+  after?: { observedAt: Date; readingId: string },
 ): Promise<Reading[]> {
   if (
     !Number.isInteger(limit) ||
@@ -497,8 +498,12 @@ export async function listReadings(
     throw new Error("invalid history range or limit");
   return rows<Reading>(
     tx,
-    "SELECT * FROM read.reading_history WHERE tenant_id=$1 AND device_id=$2 AND observed_at >= $3 AND observed_at < $4 ORDER BY observed_at DESC, stream_version DESC LIMIT $5",
-    [tenantId, deviceId, from, to, limit],
+    after
+      ? "SELECT * FROM read.reading_history WHERE tenant_id=$1 AND device_id=$2 AND observed_at >= $3 AND observed_at < $4 AND (observed_at < $5 OR (observed_at = $5 AND reading_id > $6)) ORDER BY observed_at DESC, reading_id ASC LIMIT $7"
+      : "SELECT * FROM read.reading_history WHERE tenant_id=$1 AND device_id=$2 AND observed_at >= $3 AND observed_at < $4 ORDER BY observed_at DESC, reading_id ASC LIMIT $5",
+    after
+      ? [tenantId, deviceId, from, to, after.observedAt, after.readingId, limit]
+      : [tenantId, deviceId, from, to, limit],
   );
 }
 export async function getFreshness(

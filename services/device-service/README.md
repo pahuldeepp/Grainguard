@@ -158,3 +158,13 @@ Set `SHARD_REGISTRY_FILE` to a private version 1 registry for `service: device-s
 API and saga manifests must use `inventory_app`. Tenant and entitlement projector manifests must use `inventory_projector`; each projector deployment supplies its own private registry through `SHARD_REGISTRY_FILE`. `INVENTORY_DATABASE_URL` / `INVENTORY_PROJECTOR_DIRECT_URL` remain the legacy configuration only when the registry is absent.
 
 Every tenant transaction resolves the verified tenant, sets transaction-local tenant/shard/incarnation/epoch settings and calls `greenguard_internal.admit_tenant_placement` before business SQL. Commands, imports, projections, receipt IDs and outbox IDs retain their existing semantics. Saga result discovery fans out only the existing ID-only SECURITY DEFINER selector, then resolves and admits each tenant before reading/publishing a result. Quiescing tenants retain pending results. Verified entitlement heartbeats update tenant-free feed metadata on every owner primary. Health probes cover all primaries; pool shutdown waits at most five seconds.
+
+### Exact device serial lookup
+
+Authenticated `GET /v1/devices/lookup?serial=<serialNumber>` resolves an exact
+serial label to `{deviceId, serialNumber}` using the verified principal's tenant.
+Viewer/operator/admin reads are allowed. The owner transaction retains placement
+admission and tenant RLS; the application also filters tenant and excludes deleted
+records. Serials are bounded to 128 characters, with control characters and extra
+query fields rejected. Missing/deleted devices return 404; ambiguity returns 409.
+The lookup runs before the UUID route and does not alter bindings or inventory.

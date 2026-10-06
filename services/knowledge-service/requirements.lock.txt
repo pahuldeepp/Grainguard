@@ -1,0 +1,15 @@
+boto3==1.42.63
+botocore==1.42.97
+cffi==2.0.0
+confluent-kafka==2.13.2
+cryptography==50.0.2
+jmespath==1.1.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pycparser==2.23
+PyJWT==2.15.1
+pypdfium2==5.13.0
+python-dateutil==2.9.0.post0
+s3transfer==0.16.1
+six==1.17.0
+urllib3==2.8.0

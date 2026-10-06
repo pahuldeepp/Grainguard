@@ -100,7 +100,7 @@ credentials and match this interface:
 
 Actual files contain all four entries. `read-api.json` uses `read_query` on each
 primary/replica, never an owner/migrator role. Set
-`SHARD_DATABASES_FILE=/etc/greenguard/shards.json` with a service-specific Secret
+`SHARD_REGISTRY_FILE=/etc/greenguard/shards.json` with a service-specific Secret
 mount. The local generated `incarnation` is a valid fixture UUID shared by all service
 configs, derived from the project, shard ID and physical PostgreSQL system ID.
 Recreated physical bundles yield a new identity; fixture onboarding must import

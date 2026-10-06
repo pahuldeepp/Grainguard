@@ -36,7 +36,12 @@ export function expectedVersion(req: AlertRequest): bigint {
 
 const STATES = new Set(["open", "acknowledged", "resolved"]);
 
-export function page(limit?: string, after?: string, state?: string) {
+export function page(
+  limit?: string,
+  after?: string,
+  state?: string,
+  deviceId?: string,
+) {
   const size = limit === undefined ? 50 : Number(limit);
   if (!Number.isInteger(size) || size < 1 || size > 200)
     throw new InvalidInputError("limit must be an integer from 1 to 200");
@@ -44,7 +49,14 @@ export function page(limit?: string, after?: string, state?: string) {
     throw new InvalidInputError("after must be a lowercase UUID");
   if (state !== undefined && !STATES.has(state))
     throw new InvalidInputError("state must be open, acknowledged or resolved");
-  return { limit: size, after, state: state as EpisodeState | undefined };
+  if (deviceId !== undefined && !isUuid(deviceId))
+    throw new InvalidInputError("deviceId must be a lowercase UUID");
+  return {
+    limit: size,
+    after,
+    state: state as EpisodeState | undefined,
+    deviceId,
+  };
 }
 
 // Correlation and trace context for commands; malformed caller values are replaced.

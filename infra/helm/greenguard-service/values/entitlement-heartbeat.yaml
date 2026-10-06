@@ -15,7 +15,7 @@ container:
   args: ["packages/entitlements/dist/heartbeat.js"]
   envFrom:
     - secretRef:
-        name: billing-service-config
+        name: entitlement-heartbeat-config
   env:
     - { name: WORKER_HEALTH_PORT, value: "8090" }
 probes:

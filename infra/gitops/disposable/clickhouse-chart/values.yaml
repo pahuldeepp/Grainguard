@@ -1,0 +1,5 @@
+image: ""
+storageClassName: gp3
+storageSize: 20Gi
+authSecret: greenguard-telemetry-clickhouse-config
+replayS3CIDRs: []

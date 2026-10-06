@@ -249,6 +249,7 @@ class IndexerTests(unittest.TestCase):
         client = Client()
         client.search("tenant-a", "north")
         self.assertEqual(client.calls[0][2]["query"]["bool"]["filter"], [{"term": {"tenant_id": "tenant-a"}}])
+        self.assertEqual(client.calls[0][2]["query"]["bool"]["must"], [{"multi_match": {"query": "north", "fields": ["name", "serial_number", "resource_id"]}}])
         with self.assertRaises(ValueError):
             client.search("", "north")
         target_index = MODULE.index_name(2)
@@ -443,3 +444,12 @@ class IndexerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TopicNamespaceTests(unittest.TestCase):
+    def test_inventory_namespace(self):
+        module = MODULE
+        self.assertEqual(module.inventory_topics('provisioning-demo.'), ('provisioning-demo.greenguard.inventory.device.v1', 'provisioning-demo.greenguard.inventory.facility.v1'))
+        self.assertEqual(module.inventory_topics(''), ('greenguard.inventory.device.v1', 'greenguard.inventory.facility.v1'))
+        for prefix in ['bad/topic', 'bad space', '\t', 'é', 'x' * 249]:
+            with self.assertRaises(ValueError):
+                module.inventory_topics(prefix)

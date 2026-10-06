@@ -88,7 +88,7 @@ class ShardRuntimeContractTests(unittest.TestCase):
             ("device-tenant-projector", "device-service", "inventory-projector"),
             ("inventory-entitlement-projector", "device-service", "inventory-projector"),
             ("telemetry-entitlement-projector", "telemetry-ingest", "telemetry-entitlement-projector"),
-            ("read-entitlement-projector", "read-entitlement-projector", "read-entitlement-projector"),
+            ("read-entitlement-projector", "read-api", "read-entitlement-projector"),
             ("tenant-control-plane", "audit-export-worker", "audit-export-worker"),
         ):
             with self.subTest(release=release):

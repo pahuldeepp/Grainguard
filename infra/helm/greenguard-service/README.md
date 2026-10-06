@@ -31,9 +31,12 @@ reverse-proxy workload and Read API/alerts profiles allow their declared
 gateway/BFF callers. Confirm every release name and selector against the
 deployed workloads before rollout.
 
-Worker profiles disable Services and HTTP probes, enforce the `compute` node
-selector and taint toleration, deny inbound pod traffic, and allow 60 seconds
-for termination (the hardware worker uses its checkpoint grace period). Their
+Worker profiles disable Services, enforce the `compute` node selector and taint
+toleration, deny inbound pod traffic, and allow 60 seconds for termination.
+They retain startup, readiness and liveness checks against private worker health
+handlers: hardware-service-worker uses its dependency-aware HTTP `/readyz` and
+`/healthz` endpoints, while eventbridge-bridge and saga-worker use loopback exec
+probes. The hardware worker uses its checkpoint grace period. Their
 environment needs explicit egress rules for Kafka, PostgreSQL, MQTT, and AWS
 endpoints. Single-replica workers have PDBs disabled
 so they cannot block drains. Installing and configuring the HPA metrics source

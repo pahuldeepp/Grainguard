@@ -27,6 +27,8 @@ volumes:
     secret:
       secretName: greenguard-opensearch-ca
       items: [{ key: ca.crt, path: ca.crt }]
+tmpVolume:
+  enabled: false
 probes:
   startup:
     enabled: true

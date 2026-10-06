@@ -180,7 +180,13 @@ for profile in gateway device-service read-api workflow-alerts telemetry-ingest 
         'app: istio-ingressgateway' \
         'kubernetes.io/metadata.name: "istio-system"' \
         'app.kubernetes.io/name: greenguard-dashboard' \
-        'app.kubernetes.io/instance: dashboard'; do
+        'app.kubernetes.io/instance: dashboard' \
+        'greenguard.io/app-metrics-scrape: "true"' \
+        'greenguard.io/app-metrics-port: "9464"' \
+        'port: 9464' \
+        'action: DENY' \
+        'notPrincipals:' \
+        'cluster.local/ns/greenguard/sa/greenguard-prometheus'; do
         if ! grep -Fq "$expected" "$rendered"; then
           echo "$profile ingress policy is missing an expected edge/dashboard peer: $expected" >&2
           exit 1
@@ -244,11 +250,24 @@ for profile in tenant-control-plane billing-service notification-service \
     fi
   done
   if [ "$profile" = search-indexer ]; then
-    if grep -Fq 'readinessProbe:' "$rendered" || \
-      ! grep -Fq 'claimName: search-indexer-quarantine' "$rendered"; then
-      echo "search-indexer must use a durable quarantine claim and no fake HTTP readiness probe" >&2
-      exit 1
-    fi
+    ruby - "$rendered" <<'RUBY'
+require 'yaml'
+objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+deployment = objects.find { |object| object['kind'] == 'Deployment' }
+abort 'search-indexer Deployment is missing' unless deployment
+pod = deployment.dig('spec', 'template', 'spec')
+container = pod.fetch('containers').find { |item| item['name'] == 'search-indexer' }
+abort 'search-indexer container is missing' unless container
+claim = pod.fetch('volumes').find { |volume| volume.dig('persistentVolumeClaim', 'claimName') == 'search-indexer-quarantine' }
+abort 'search-indexer quarantine PVC is not mounted' unless claim &&
+  container.fetch('volumeMounts').any? { |mount| mount['name'] == claim['name'] && mount['mountPath'] == '/tmp' }
+abort 'search-indexer must not mount ephemeral /tmp over its durable quarantine PVC' if
+  pod.fetch('volumes').any? { |volume| volume['name'] == 'tmp' } ||
+  container.fetch('volumeMounts').any? { |mount| mount['mountPath'] == '/tmp' && mount['name'] != claim['name'] }
+readiness = container['readinessProbe']
+abort 'search-indexer needs a real exec readiness check, not a Kubernetes HTTP probe' unless
+  readiness && readiness.key?('exec') && !readiness.key?('httpGet')
+RUBY
   elif ! grep -Fq 'livenessProbe:' "$rendered"; then
     echo "$profile is missing its HTTP liveness probe" >&2
     exit 1
@@ -260,11 +279,44 @@ for profile in hardware-service-worker eventbridge-bridge saga-worker; do
   helm lint "$service_chart" --values "$values" --set-string "image=$service_image"
   helm template "$profile" "$service_chart" --namespace greenguard \
     --values "$values" --set-string "image=$service_image" >"$rendered"
-  if grep -Eq '^kind: Service$' "$rendered" || \
-    grep -Fq 'readinessProbe:' "$rendered" || \
-    grep -Fq 'livenessProbe:' "$rendered"; then
-    echo "$profile worker profile unexpectedly renders an HTTP Service or probe" >&2
+  if grep -Eq '^kind: Service$' "$rendered"; then
+    echo "$profile worker profile unexpectedly renders an HTTP Service" >&2
     exit 1
+  fi
+  if [ "$profile" = hardware-service-worker ]; then
+    ruby - "$rendered" <<'RUBY'
+require 'yaml'
+objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+deployment = objects.find { |object| object['kind'] == 'Deployment' }
+abort 'hardware-service-worker Deployment is missing' unless deployment
+container = deployment.dig('spec', 'template', 'spec', 'containers')&.find { |item| item['name'] == 'hardware-service-worker' }
+abort 'hardware-service-worker container is missing' unless container
+probes = %w[startupProbe readinessProbe livenessProbe].to_h { |key| [key, container[key]] }
+abort 'hardware-service-worker needs startup, readiness and liveness HTTP probes' unless probes.values.all? { |probe| probe&.key?('httpGet') }
+abort 'hardware-service-worker readiness must check dependency-aware /readyz' unless
+  probes.fetch('readinessProbe').dig('httpGet', 'path') == '/readyz'
+abort 'hardware-service-worker liveness must check /healthz' unless
+  probes.fetch('livenessProbe').dig('httpGet', 'path') == '/healthz'
+abort 'hardware-service-worker health probes must use its named HTTP port' unless
+  probes.values.all? { |probe| probe.dig('httpGet', 'port') == 'http' }
+RUBY
+  else
+    ruby - "$rendered" "$profile" <<'RUBY'
+require 'yaml'
+objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+profile = ARGV.fetch(1)
+deployment = objects.find { |object| object['kind'] == 'Deployment' }
+abort "#{profile} Deployment is missing" unless deployment
+container = deployment.dig('spec', 'template', 'spec', 'containers')&.first
+abort "#{profile} container is missing" unless container
+probes = %w[startupProbe readinessProbe livenessProbe].to_h { |key| [key, container[key]] }
+abort "#{profile} needs startup, readiness and liveness probes" unless probes.values.all?
+abort "#{profile} must use exec probes for its private worker health endpoint" unless
+  probes.values.all? { |probe| probe.key?('exec') && !probe.key?('httpGet') }
+expected_path = profile == 'eventbridge-bridge' ? '127.0.0.1:8080' : '127.0.0.1:8092'
+abort "#{profile} exec probes must target its own loopback health listener" unless
+  probes.values.all? { |probe| probe.dig('exec', 'command').join(' ').include?(expected_path) }
+RUBY
   fi
   for expected in \
     'runAsNonRoot: true' \
@@ -288,12 +340,20 @@ for profile in hardware-service-worker eventbridge-bridge saga-worker; do
   fi
 done
 
-if helm template invalid-http-probes "$service_chart" \
+helm template no-service-with-probes "$service_chart" \
+  --values "$service_chart/values/hardware-service-worker.yaml" \
   --set service.enabled=false \
-  --set-string "image=$service_image" >/dev/null 2>&1; then
-  echo "Runtime chart unexpectedly allowed HTTP probes without a Service port" >&2
-  exit 1
-fi
+  --set-string "image=$service_image" >"$rendered"
+ruby - "$rendered" <<'RUBY'
+require 'yaml'
+objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
+abort 'worker probe configuration unexpectedly creates a Service' if objects.any? { |object| object['kind'] == 'Service' }
+deployment = objects.find { |object| object['kind'] == 'Deployment' }
+container = deployment&.dig('spec', 'template', 'spec', 'containers')&.first
+abort 'HTTP probes without a Service must still render their named container port' unless
+  container && container.fetch('ports', []).any? { |port| port['name'] == 'http' && port['containerPort'] == 8080 } &&
+  container['readinessProbe']&.dig('httpGet', 'port') == 'http'
+RUBY
 
 if helm template invalid-autoscaling "$service_chart" \
   --values "$service_chart/values/gateway.yaml" \

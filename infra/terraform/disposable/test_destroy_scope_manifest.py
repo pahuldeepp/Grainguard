@@ -4,6 +4,7 @@ import os
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("destroy-scope-manifest.py")
@@ -70,6 +71,25 @@ class DestroyScopeManifestTests(unittest.TestCase):
         manifest.save(self.path, self.document)
         manifest.main([str(SCRIPT), "remove", str(self.path)])
         self.assertFalse(self.path.exists())
+
+    def test_native_destroy_save_env_merges_shard_inventory_for_retry(self):
+        manifest.save(self.path, self.document)
+        environment = {
+            "GG_REGION": "us-east-1",
+            "GG_ENVIRONMENT": "sandbox",
+            "GG_CLUSTER": "greenguard-sandbox-cell-1",
+            "GG_ACCOUNT": "123456789012",
+            "GG_MASTER_SECRET_ARN": self.document["master_secret_arn"],
+            "GG_SHARD_MASTER_SECRET_ARNS": json.dumps(self.document["shard_master_secret_arns"][:2]),
+        }
+        with patch.dict(os.environ, environment):
+            manifest.main([str(SCRIPT), "save-env", str(self.path)])
+        self.assertEqual(manifest.read_manifest(self.path), self.document)
+
+    def test_native_destroy_save_env_rejects_invalid_shard_json(self):
+        with patch.dict(os.environ, {"GG_SHARD_MASTER_SECRET_ARNS": "not-json"}):
+            with self.assertRaisesRegex(ValueError, "not valid JSON"):
+                manifest.main([str(SCRIPT), "save-env", str(self.path)])
 
 
 if __name__ == "__main__":

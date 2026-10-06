@@ -1,0 +1,61 @@
+name: greenguard-cassandra-rf3
+
+# Isolated disposable 3-node ring. It does not join, restart, or remove the
+# single-node greenguard-dev Cassandra volume used by the running app.
+x-cassandra-common: &cassandra-common
+  image: cassandra@sha256:ee178b38a2746a8e15a115bd038ad1f864391d04a84162a018cb0dd79511709a
+  environment: &cassandra-environment
+    CASSANDRA_CLUSTER_NAME: greenguard-rf3-acceptance
+    CASSANDRA_SEEDS: cassandra-1
+    CASSANDRA_DC: datacenter1
+    CASSANDRA_RACK: rack1
+    CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    CASSANDRA_NUM_TOKENS: 16
+    MAX_HEAP_SIZE: 512M
+    HEAP_NEWSIZE: 128M
+  mem_limit: 2g
+  healthcheck:
+    test: ["CMD-SHELL", "cqlsh -e 'SELECT release_version FROM system.local' >/dev/null"]
+    interval: 10s
+    timeout: 5s
+    retries: 36
+    start_period: 90s
+
+services:
+  cassandra-1:
+    <<: *cassandra-common
+    hostname: cassandra-1
+    environment:
+      <<: *cassandra-environment
+      CASSANDRA_SEEDS: cassandra-1
+    ports: ["127.0.0.1:59043:9042"]
+    volumes: [cassandra-rf3-1:/var/lib/cassandra]
+
+  cassandra-2:
+    <<: *cassandra-common
+    hostname: cassandra-2
+    environment:
+      <<: *cassandra-environment
+      CASSANDRA_SEEDS: cassandra-1
+    ports: ["127.0.0.1:59044:9042"]
+    volumes: [cassandra-rf3-2:/var/lib/cassandra]
+    depends_on:
+      cassandra-1: { condition: service_healthy }
+
+  cassandra-3:
+    <<: *cassandra-common
+    hostname: cassandra-3
+    environment:
+      <<: *cassandra-environment
+      CASSANDRA_SEEDS: cassandra-1
+    ports: ["127.0.0.1:59045:9042"]
+    volumes: [cassandra-rf3-3:/var/lib/cassandra]
+    depends_on:
+      # Join nodes serially so token allocation observes the ring members
+      # that have already bootstrapped; parallel first joins can collide.
+      cassandra-2: { condition: service_healthy }
+
+volumes:
+  cassandra-rf3-1:
+  cassandra-rf3-2:
+  cassandra-rf3-3:

@@ -7,12 +7,8 @@ import {
   UNSUPPORTED_OWNER_MOVE_EFFECTS,
 } from "./owner-capabilities.js";
 
-const adapterOwners = ["inventory", "risk", "telemetry"] as const;
-
-test("every sharded owner without a receipt adapter has concrete move blockers", () => {
-  const unsupported = SHARDED_MOVE_OWNERS.filter(
-    (owner) => !adapterOwners.includes(owner as (typeof adapterOwners)[number]),
-  );
+test("every sharded owner fails closed until it has a complete all-owner move adapter", () => {
+  const unsupported = [...SHARDED_MOVE_OWNERS];
   assert.deepEqual(
     [...UNSUPPORTED_MOVE_OWNERS].sort(),
     [...unsupported].sort(),
@@ -33,7 +29,11 @@ test("every sharded owner without a receipt adapter has concrete move blockers",
   }
 });
 
-test("owner protocol guard allows only owners with implemented adapter modules", () => {
-  for (const owner of adapterOwners)
-    assert.doesNotThrow(() => assertOwnerMoveProtocolAvailable(owner));
+test("local owner primitives do not make telemetry, risk, or inventory migratable alone", () => {
+  for (const owner of ["inventory", "risk", "telemetry"] as const) {
+    assert.throws(
+      () => assertOwnerMoveProtocolAvailable(owner),
+      new RegExp(`${owner} tenant move unsupported:.*all-owner coordinator`),
+    );
+  }
 });

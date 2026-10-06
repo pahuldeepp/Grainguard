@@ -16,6 +16,7 @@ runs as UID/GID 65532.
 | --- | --- |
 | `KAFKA_BROKERS` | Required, comma-separated Kafka bootstrap addresses |
 | `KAFKA_GROUP_ID` | `greenguard-cdc-transformer-v1`; keep stable across restarts |
+| `KAFKA_TOPIC_PREFIX` | Empty by default; optional namespace ending in a dot (for example `provisioning-demo.`), applied to every raw input and canonical/quarantine output. Use matching source connectors and consumers with a fresh group for an isolated replay. Event contracts retain canonical topic validation; quarantine coordinates retain the actual transport topic. |
 | `EVENT_SCHEMA_DIR` | `../../contracts/events` relative to working directory; `/contracts/events` in the image |
 | `HTTP_ADDR` | `127.0.0.1:8081`; `0.0.0.0:8081` in the image |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP base URL; unset means no export |

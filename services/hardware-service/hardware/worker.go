@@ -95,6 +95,14 @@ func KafkaClient(brokers []string) (*kgo.Client, error) {
 // partition, and clears that signal while ownership is being revoked or lost.
 // This is a stronger worker-readiness signal than merely reaching a broker.
 func KafkaClientWithReadiness(brokers []string, onAssignment func(bool)) (*kgo.Client, error) {
+	return KafkaClientForGroupWithReadiness(brokers, ConsumerGroup, onAssignment)
+}
+
+// KafkaClientForGroupWithReadiness isolates independent environments sharing a broker.
+func KafkaClientForGroupWithReadiness(brokers []string, group string, onAssignment func(bool)) (*kgo.Client, error) {
+	if strings.TrimSpace(group) == "" {
+		return nil, errors.New("hardware consumer group required")
+	}
 	if len(brokers) == 0 {
 		return nil, errors.New("KAFKA_BROKERS required")
 	}
@@ -112,7 +120,7 @@ func KafkaClientWithReadiness(brokers []string, onAssignment func(bool)) (*kgo.C
 			kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) { onAssignment(false) }),
 		)
 	}
-	options, err := transport.SecureOptions(brokers, ConsumerGroup, []string{CommandTopic}, extra...)
+	options, err := transport.SecureOptions(brokers, group, []string{CommandTopic}, extra...)
 	if err != nil {
 		return nil, err
 	}

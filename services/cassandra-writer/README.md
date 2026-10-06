@@ -46,6 +46,24 @@ not establish RF3 multi-node failover or production capacity behavior.
 
 ## Outage behavior
 
+## Cold-history repair
+
+If verification finds a missing Cassandra row, repair can replay the immutable
+canonical event retained in `greenguard_read.consumer_inbox`. Apply the
+projection-builder migration first, then run the explicit repair command with
+the dedicated history-maintainer URL, Cassandra credentials, and matching hot
+window. It is idempotent, validates each event with the normal writer schema,
+and **does not** issue proof receipts or prune PostgreSQL:
+
+```sh
+go run . backfill-read-history --confirm
+go run ./cmd/verify-read-history
+```
+
+Only run `cmd/maintain` after verification succeeds. If the inbox lacks an event
+or repair cannot reproduce a complete partition, PostgreSQL remains the
+retained copy and pruning stays blocked.
+
 The writer never exits because Cassandra is unavailable. The session is opened
 lazily (`history.Reconnecting`): a worker that starts while Cassandra is down
 waits in `Run` with bounded exponential backoff and equal jitter (base 1 s,

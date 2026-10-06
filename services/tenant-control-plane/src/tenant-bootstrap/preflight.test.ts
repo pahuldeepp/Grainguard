@@ -5,6 +5,8 @@ import {
   requireCompleteBootstrapAdapters,
   requireCompleteBootstrapProofs,
   requireReadyShardOwners,
+  TENANT_BOOTSTRAP_OWNER_CONTRACTS,
+  unavailableTenantBootstrapOwners,
   TenantBootstrapPreflightError,
   type TenantBootstrapOwnerAdapter,
   type TenantBootstrapOwnerProof,
@@ -23,7 +25,17 @@ const adapters = (called: () => void = () => {}) =>
   SHARDED_MOVE_OWNERS.map((owner): TenantBootstrapOwnerAdapter => ({
     owner,
     prepareTenantOwnership: async () => called(),
-    verifyTenantOwnership: async () => called(),
+    verifyTenantOwnership: async (_placement, state = "prepared") => {
+      called();
+      return {
+        ...placement,
+        owner,
+        receiptVersion:
+          TENANT_BOOTSTRAP_OWNER_CONTRACTS[owner].ownershipContractVersion,
+        observedAt: "2026-09-29T00:00:00.000Z",
+        state,
+      };
+    },
     activateTenantOwnership: async () => called(),
   }));
 const readiness = (): TenantBootstrapOwnerReadiness[] =>
@@ -32,15 +44,18 @@ const readiness = (): TenantBootstrapOwnerReadiness[] =>
     shardId: placement.shardId,
     shardIncarnation: placement.shardIncarnation,
     status: "ready",
-    migrationVersion: hash,
+    serviceMigrationFingerprint: hash,
+    ownershipContractVersion:
+      TENANT_BOOTSTRAP_OWNER_CONTRACTS[owner].ownershipContractVersion,
   }));
 const proofs = (phase: "prepared" | "active" = "prepared") =>
   SHARDED_MOVE_OWNERS.map((owner): TenantBootstrapOwnerProof => ({
     ...placement,
     owner,
-    phase,
+    receiptVersion:
+      TENANT_BOOTSTRAP_OWNER_CONTRACTS[owner].ownershipContractVersion,
+    observedAt: "2026-09-29T00:00:00.000Z",
     state: phase,
-    verified: true,
   }));
 
 function rejectsPreflight(action: () => unknown) {
@@ -77,7 +92,18 @@ test("bootstrap preflight requires all nine unique provisioning adapters without
   assert.equal(calls, 0);
 });
 
-test("a target shard is ready only when every owner proves matching identity and migration", () => {
+test("the repository contract manifest covers all owners with repository-owned SQL adapters", () => {
+  assert.deepEqual(
+    Object.keys(TENANT_BOOTSTRAP_OWNER_CONTRACTS).sort(),
+    [...SHARDED_MOVE_OWNERS].sort(),
+  );
+  assert.deepEqual(unavailableTenantBootstrapOwners(), []);
+  for (const contract of Object.values(TENANT_BOOTSTRAP_OWNER_CONTRACTS)) {
+    assert.equal(contract.adapter, "repository-direct-sql");
+  }
+});
+
+test("a target shard readiness shape requires every owner and its repository contract identity", () => {
   requireReadyShardOwners(placement, readiness());
 
   rejectsPreflight(() =>
@@ -116,7 +142,16 @@ test("a target shard is ready only when every owner proves matching identity and
   rejectsPreflight(() =>
     requireReadyShardOwners(placement, [
       ...readiness().slice(1),
-      { ...readiness()[0]!, migrationVersion: "unverified" },
+      { ...readiness()[0]!, serviceMigrationFingerprint: "unverified" },
+    ]),
+  );
+  rejectsPreflight(() =>
+    requireReadyShardOwners(placement, [
+      ...readiness().slice(1),
+      {
+        ...readiness()[0]!,
+        ownershipContractVersion: "caller-invented-v9",
+      },
     ]),
   );
 });
@@ -139,8 +174,14 @@ test("placement activation proof gate requires exact positive owner read-backs",
       ...proofs().slice(1),
       {
         ...proofs()[0]!,
-        verified: false,
+        receiptVersion: "caller-invented-v9",
       } as unknown as TenantBootstrapOwnerProof,
+    ]),
+  );
+  rejectsPreflight(() =>
+    requireCompleteBootstrapProofs(placement, "prepared", [
+      ...proofs().slice(1),
+      { ...proofs()[0]!, observedAt: "not-a-timestamp" },
     ]),
   );
   rejectsPreflight(() =>

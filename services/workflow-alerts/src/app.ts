@@ -1,4 +1,10 @@
 import {
+  OwnershipController,
+  OWNERSHIP,
+  validateOwnership,
+  type OwnershipConfig,
+} from "./api/ownership.js";
+import {
   closeOwnerDatabase,
   ownerDatabases,
 } from "@greenguard/membership-client/owner-db";
@@ -27,6 +33,7 @@ import { HISTORY_CURSOR, HistoryCursor } from "./api/history.js";
 import type { Db } from "./db/client.js";
 
 export interface AlertsAppOptions {
+  ownership?: OwnershipConfig;
   db: Db;
   verifier?: Verifier;
   actorHmacKey?: string;
@@ -181,6 +188,7 @@ function requestRoute(req: Request) {
 // The /v1 API is mounted only with a token verifier; without one the service runs
 // health probes only (the risk consumer does not need HTTP).
 export async function createAlertsApp(options: AlertsAppOptions) {
+  if (options.ownership) validateOwnership(options.ownership);
   const api = options.verifier !== undefined;
   const identity = api
     ? new IdentityDisplay(options.actorHmacKey as string)
@@ -192,9 +200,18 @@ export async function createAlertsApp(options: AlertsAppOptions) {
     {
       module: AlertsModule,
       controllers: api
-        ? [ProbeController, AlertsController, AlertRulesController]
-        : [ProbeController],
+        ? [
+            ProbeController,
+            AlertsController,
+            AlertRulesController,
+            ...(options.ownership ? [OwnershipController] : []),
+          ]
+        : [
+            ProbeController,
+            ...(options.ownership ? [OwnershipController] : []),
+          ],
       providers: [
+        { provide: OWNERSHIP, useValue: options.ownership ?? null },
         { provide: IDENTITY, useValue: identity },
         { provide: HISTORY_CURSOR, useValue: cursor },
         { provide: ALERTS_DB, useValue: options.db },

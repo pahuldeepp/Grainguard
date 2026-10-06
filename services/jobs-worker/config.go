@@ -12,6 +12,7 @@ import (
 
 // Config is read from the environment by run(ctx, getenv) so tests can inject it.
 type Config struct {
+	APIOnly                 bool
 	DatabaseURL             string
 	RabbitURL               string
 	KafkaBrokers            []string
@@ -39,6 +40,7 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	c := Config{
+		APIOnly:                 getenv("JOBS_API_ONLY") == "true",
 		DatabaseURL:             getenv("JOBS_DATABASE_URL"),
 		RabbitURL:               getenv("RABBITMQ_URL"),
 		KafkaGroup:              orDefault(getenv("JOBS_KAFKA_GROUP"), "jobs-worker"),
@@ -55,7 +57,10 @@ func loadConfig(getenv func(string) string) (Config, error) {
 		AllowInsecureMembership: getenv("AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP") == "true",
 		ControlMeshMTLS:         getenv("CONTROL_PLANE_MESH_MTLS") == "true",
 	}
-	if (c.DatabaseURL == "" && getenv("SHARD_REGISTRY_FILE") == "") || c.RabbitURL == "" {
+	if raw := getenv("JOBS_API_ONLY"); raw != "" && raw != "true" && raw != "false" {
+		return c, errors.New("JOBS_API_ONLY must be true or false")
+	}
+	if (c.DatabaseURL == "" && getenv("SHARD_REGISTRY_FILE") == "") || (!c.APIOnly && c.RabbitURL == "") {
 		return c, errors.New("JOBS_DATABASE_URL or SHARD_REGISTRY_FILE, and RABBITMQ_URL, are required")
 	}
 	if c.MembershipSource != "file" && c.MembershipSource != "control-plane" {

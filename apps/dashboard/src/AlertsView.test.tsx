@@ -280,6 +280,39 @@ test("opening an alert keeps the filter in the URL and Back to alerts returns to
   client.clear();
 });
 
+test("incomplete alert lifecycle history explains the gap without implying Cassandra retention", async () => {
+  const item = make(6, "critical");
+  const client = renderAlerts(
+    {
+      list: async () => ({ items: [item], nextCursor: null }),
+      history: async (id: string) => ({
+        alertId: id,
+        items: [],
+        nextCursor: null,
+        complete: false,
+        source: { status: "partial", reasonCode: "incomplete_lifecycle" },
+      }),
+    } as unknown as AlertsApi,
+    "tenant-a:user-a",
+    `/alerts?alert=${item.alertId}`,
+  );
+  expect(
+    await screen.findByText(
+      /Some alert lifecycle transitions are missing from the stored history/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /current state is available, but its stored transition history has gaps/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("No lifecycle transitions are available for this alert."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/retained transition history/i)).toBeNull();
+  client.clear();
+});
+
 test("operator alert detail uses the owner notification surface and shows critical as not configured", async () => {
   const item = make(7, "high");
   const notifications = vi.fn(async () => ({

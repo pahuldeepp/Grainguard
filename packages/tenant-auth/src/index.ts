@@ -9,6 +9,7 @@ import {
 export type Role = "viewer" | "operator" | "admin" | "device";
 
 export interface Principal {
+  issuer?: string;
   subject: string;
   tenantId: string;
   roles: Role[];
@@ -199,7 +200,7 @@ export function createTokenVerifier(options: VerifierOptions): {
         ? options.mapIdentity(payload)
         : payload;
       if (!claims) throw new AuthError(401, "invalid_claims");
-      return toPrincipal(claims);
+      return { ...toPrincipal(claims), issuer: payload.iss };
     },
   };
 }

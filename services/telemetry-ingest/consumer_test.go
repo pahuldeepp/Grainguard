@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	common "greenguard.local/go-common"
 )
 
 type bindingSourceFunc func(context.Context) (BindingMessage, error)
@@ -105,6 +106,36 @@ func TestBindingConsumerEveryQuarantineReason(t *testing.T) {
 	}
 	if !strings.Contains(c.metrics(), "binding_consumer_retries_total 0") {
 		t.Fatal(c.metrics())
+	}
+}
+
+func TestBindingConsumerNeverCommitsUnresolvedPlacementOrOutage(t *testing.T) {
+	for name, failure := range map[string]error{
+		"authority not found":   common.ErrTenantPlacementNotFound,
+		"authority unavailable": common.ErrPlacementUnavailable,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, m := consumerFixture(t)
+			applied, published, committed := 0, 0, 0
+			c.Apply = func(context.Context, []byte) (BindingOutcome, error) {
+				applied++
+				return "", failure
+			}
+			c.Sink = bindingSinkFunc(func(context.Context, BindingRecord) error {
+				published++
+				return nil
+			})
+			m.Commit = func(context.Context) error {
+				committed++
+				return nil
+			}
+			if err := c.process(context.Background(), m); !errors.Is(err, failure) {
+				t.Fatalf("placement failure = %v", err)
+			}
+			if applied != 1 || published != 0 || committed != 0 || c.Quarantined.Load() != 0 {
+				t.Fatalf("unsafe placement disposition: applied=%d published=%d committed=%d quarantined=%d", applied, published, committed, c.Quarantined.Load())
+			}
+		})
 	}
 }
 

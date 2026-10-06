@@ -1,12 +1,18 @@
 import { SHARDED_MOVE_OWNERS } from "../domain/placement.js";
 
 /**
- * Protocol gaps for owners which do not yet have an owner-local move receipt
- * adapter. This is an acceptance guard/diagnostic inventory, not proof that a
- * global move coordinator exists. Keep each entry concrete so adding an owner
- * to the sharded roster cannot silently imply it is migratable.
+ * Protocol gaps for every sharded owner. Some owners have useful local copy,
+ * drain, and receipt primitives, but none has a complete adapter participating
+ * in an all-owner cutover. This is an acceptance guard/diagnostic inventory,
+ * not proof that a global move coordinator exists. Keep each entry concrete so
+ * adding an owner cannot silently imply that it is migratable.
  */
 export const UNSUPPORTED_OWNER_MOVE_EFFECTS = {
+  telemetry: [
+    "owner-local copy and placement receipts do not prove target read-replica freshness or promotion readiness",
+    "CDC history is rejected rather than transferred with a deduplicated source/target frontier receipt",
+    "no all-owner coordinator binds telemetry receipts to the same operation and control-plane cutover",
+  ],
   projection: [
     "daily reading_history partitions and retention drops have no partition-aware copy or Cassandra reconciliation receipt",
     "Kafka topic-partition offsets are shared across tenants; no pause/drain/frontier handoff proves this tenant complete",
@@ -30,6 +36,11 @@ export const UNSUPPORTED_OWNER_MOVE_EFFECTS = {
     "Kafka result publication and saga command consumer frontiers are shared and lack per-tenant handoff receipts",
     "no target prepare, activate, abort, source reactivation, or crash-recovery adapter exists",
   ],
+  inventory: [
+    "owner-local copy and placement receipts do not prove target read-replica freshness or promotion readiness",
+    "CDC history is rejected rather than transferred with a deduplicated source/target frontier receipt",
+    "no all-owner coordinator binds inventory receipts to the same operation and control-plane cutover",
+  ],
   alerts: [
     "alert_episodes, rules, transitions, command_receipts, consumer_inbox, risk_stream_positions and outbox_events have no copy/verification/activation receipt adapter",
     "historical Debezium CDC outbox effects are not acknowledged/deduplicated with Jobs and Notifications during cutover",
@@ -41,6 +52,11 @@ export const UNSUPPORTED_OWNER_MOVE_EFFECTS = {
     "in-flight provider requests and provider-side delivery idempotency cannot be transferred or reconciled by the current read-only drain probe",
     "delivery task broker acknowledgements/retries and tenant-specific consumer progress have no cutover frontier receipt",
     "the current probe checks for zero live deliveries only; no target prepare, activate, abort, or recovery adapter exists",
+  ],
+  risk: [
+    "owner-local copy and placement receipts do not prove target read-replica freshness or promotion readiness",
+    "CDC history is rejected rather than transferred with a deduplicated source/target frontier receipt",
+    "no all-owner coordinator binds risk receipts to the same operation and control-plane cutover",
   ],
 } as const satisfies Partial<
   Record<(typeof SHARDED_MOVE_OWNERS)[number], readonly string[]>
@@ -59,6 +75,9 @@ export function assertOwnerMoveProtocolAvailable(
   const effects = UNSUPPORTED_OWNER_MOVE_EFFECTS[
     owner as UnsupportedMoveOwner
   ] as readonly string[] | undefined;
-  if (effects)
-    throw new Error(`${owner} tenant move unsupported: ${effects.join("; ")}`);
+  if (!effects)
+    throw new Error(
+      `${owner} tenant move unsupported: no reviewed move protocol is registered`,
+    );
+  throw new Error(`${owner} tenant move unsupported: ${effects.join("; ")}`);
 }

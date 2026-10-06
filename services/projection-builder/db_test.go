@@ -82,7 +82,7 @@ func TestDatabaseMigrations(t *testing.T) {
 	}
 	defer conn.Close(ctx)
 	var count int
-	if err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p') AND NOT relispartition AND relrowsecurity AND relforcerowsecurity`).Scan(&count); err != nil || count != 21 {
+	if err = conn.QueryRow(ctx, `SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p') AND NOT relispartition AND relrowsecurity AND relforcerowsecurity`).Scan(&count); err != nil || count != 22 {
 		t.Fatal(count, err)
 	}
 }

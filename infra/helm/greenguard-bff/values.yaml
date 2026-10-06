@@ -4,6 +4,8 @@ image: ""
 nameOverride: ""
 fullnameOverride: ""
 replicaCount: 2
+# Application total deadline; pod adds 10s for termination delivery overhead.
+terminationGraceMilliseconds: 340000
 autoscaling:
   enabled: true
   minReplicas: 2
@@ -21,6 +23,16 @@ volumeMounts: []
 volumes: []
 kafka:
   caSecretName: ""
+modelGatewayTokens:
+  enabled: false
+  secretName: greenguard-bff-model-gateway
+  secretKey: gateway-tokens.json
+  filePath: /private-model-gateway/gateway-tokens.json
+delegationKey:
+  secretName: greenguard-bff-delegation
+  privateKeySecretKey: private-key.pem
+  keyIdSecretKey: kid
+  filePath: /private-model-gateway/private-key.pem
 resources:
   requests:
     cpu: 250m
@@ -47,6 +59,23 @@ networkPolicy:
         app.kubernetes.io/name: gateway
         app.kubernetes.io/instance: gateway
   egressServices:
+    - name: billing-service
+      namespace: greenguard
+      release: billing-service
+      port: 3021
+    - name: jobs-worker
+      namespace: greenguard
+      release: jobs-worker
+      port: 8095
+    - name: notification-service
+      namespace: greenguard
+      release: notification-service
+      port: 8096
+    # Must match the separately provisioned knowledge API pods and target port.
+    - name: knowledge-service
+      namespace: greenguard-knowledge
+      release: knowledge-api
+      port: 8080
     - name: read-api
       namespace: greenguard
       release: read-api
@@ -63,13 +92,19 @@ networkPolicy:
       namespace: greenguard
       release: tenant-control-plane
       port: 3010
-    - name: ml-scoring
-      namespace: greenguard
-      release: ml-scoring
+    - name: ml-scoring-synthetic
+      namespace: ml-synthetic
+      release: ml-scoring-synthetic
       port: 8080
   egressPods:
     - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
     - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    # AI runtime pods use stable app-name labels rather than Helm release
+    # labels; allow only the BFF's direct, tenant-delegated tool/API hops.
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: knowledge-service }, port: 8080 }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: grain-advisor }, port: 8088 }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: model-gateway }, port: 8080 }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: mcp-gateway }, port: 8090 }
 mesh:
   enabled: false
   revision: ""

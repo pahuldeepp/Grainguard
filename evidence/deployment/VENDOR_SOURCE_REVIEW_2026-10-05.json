@@ -1,0 +1,196 @@
+{
+  "captured_at": "2026-10-06T02:07:04.610684+00:00",
+  "images": [
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "org.opencontainers.image.created": "2025-04-01T14:02:39Z",
+        "org.opencontainers.image.licenses": "Apache-2.0",
+        "org.opencontainers.image.name": "opentelemetry-collector-releases",
+        "org.opencontainers.image.revision": "155b95978690b996680011a1476ad7392e5490df",
+        "org.opencontainers.image.source": "https://github.com/open-telemetry/opentelemetry-collector-releases",
+        "org.opencontainers.image.version": "0.123.0"
+      },
+      "manifest_digest": "sha256:e39311df1f3d941923c00da79ac7ba6269124a870ee87e3c3ad24d60f8aee4d2",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "otel-collector",
+      "signature_verified": false,
+      "source": "otel/opentelemetry-collector-contrib@sha256:e39311df1f3d941923c00da79ac7ba6269124a870ee87e3c3ad24d60f8aee4d2",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "maintainer": "The Prometheus Authors <prometheus-developers@googlegroups.com>",
+        "org.opencontainers.image.source": "https://github.com/prometheus/prometheus"
+      },
+      "manifest_digest": "sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "prometheus",
+      "signature_verified": false,
+      "source": "prom/prometheus@sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "maintainer": "Grafana Labs <hello@grafana.com>"
+      },
+      "manifest_digest": "sha256:8b37a2f028f164ce7b9889e1765b9d6ee23fec80f871d156fbf436d6198d32b7",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "grafana",
+      "signature_verified": false,
+      "source": "grafana/grafana@sha256:8b37a2f028f164ce7b9889e1765b9d6ee23fec80f871d156fbf436d6198d32b7",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "org.opencontainers.image.created": "2025-03-25T17:45:46Z",
+        "org.opencontainers.image.revision": "b33945abd3e99ddeb05e5d8e71155df7800a615a",
+        "org.opencontainers.image.source": "https://github.com/grafana/tempo.git",
+        "org.opencontainers.image.url": "https://github.com/grafana/tempo"
+      },
+      "manifest_digest": "sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "tempo",
+      "signature_verified": false,
+      "source": "grafana/tempo@sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {},
+      "manifest_digest": "sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "loki",
+      "signature_verified": false,
+      "source": "grafana/loki@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "name": "kafka-topics",
+      "signature_verified": false,
+      "source": "apache/kafka@sha256:4ceccc4dca21c33692de00f27b317cce16ac09a785e1eff2c39695b91d79e2f6",
+      "status": "inspection_failed"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "DOCKERFILE": "https://github.com/opensearch-project/opensearch-build/blob/main/docker/release/dockerfiles/opensearch.al2.dockerfile",
+        "org.label-schema.build-date": "2025-10-15T19:15:23Z",
+        "org.label-schema.description": "11238",
+        "org.label-schema.license": "Apache-2.0",
+        "org.label-schema.name": "opensearch",
+        "org.label-schema.schema-version": "1.0",
+        "org.label-schema.url": "https://opensearch.org",
+        "org.label-schema.vcs-url": "https://github.com/opensearch-project/OpenSearch",
+        "org.label-schema.vendor": "OpenSearch",
+        "org.label-schema.version": "2.19.3"
+      },
+      "manifest_digest": "sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd",
+      "manifest_media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "name": "opensearch",
+      "signature_verified": false,
+      "source": "opensearchproject/opensearch@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "org.opencontainers.image.ref.name": "ubuntu",
+        "org.opencontainers.image.version": "22.04"
+      },
+      "manifest_digest": "sha256:8b55dd41d5d1220e11eb8cf80f26ab655c21f7cf271ca4a7577c1da7d9221624",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "name": "cassandra",
+      "signature_verified": false,
+      "source": "cassandra@sha256:8b55dd41d5d1220e11eb8cf80f26ab655c21f7cf271ca4a7577c1da7d9221624",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "org.opencontainers.image.authors": "Roger Light <roger@atchoo.org>",
+        "org.opencontainers.image.description": "Eclipse Mosquitto MQTT Broker",
+        "org.opencontainers.image.documentation": "https://mosquitto.org/documentation/",
+        "org.opencontainers.image.licenses": "EPL-2.0 OR BSD-3-Clause",
+        "org.opencontainers.image.source": "https://github.com/eclipse-mosquitto/mosquitto",
+        "org.opencontainers.image.title": "eclipse-mosquitto",
+        "org.opencontainers.image.url": "https://mosquitto.org/",
+        "org.opencontainers.image.version": "2.0.22"
+      },
+      "manifest_digest": "sha256:199ea8ef2e35ec2b1b37e59cfd1dbae538ed4dfa4a2251a121a52215a6248a21",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "name": "mqtt",
+      "signature_verified": false,
+      "source": "eclipse-mosquitto@sha256:199ea8ef2e35ec2b1b37e59cfd1dbae538ed4dfa4a2251a121a52215a6248a21",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "com.clickhouse.build.version": "25.3.6.56-alpine"
+      },
+      "manifest_digest": "sha256:157423fca52f596b62a1bf301b037b9f74bfca38089aa57d1bd36c9025f7ecef",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "name": "clickhouse",
+      "signature_verified": false,
+      "source": "clickhouse/clickhouse-server@sha256:157423fca52f596b62a1bf301b037b9f74bfca38089aa57d1bd36c9025f7ecef",
+      "status": "digest_verified_signature_unproven"
+    },
+    {
+      "digest_matches": true,
+      "inspected_platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "labels": {
+        "maintainer": "ClamAV bugs <clamav-bugs@external.cisco.com>"
+      },
+      "manifest_digest": "sha256:629a3050df6a706aedb31859fbb8139e9aaf8f56b0ffefbf251b8358a7c9e76c",
+      "manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "name": "clamav",
+      "signature_verified": false,
+      "source": "clamav/clamav@sha256:629a3050df6a706aedb31859fbb8139e9aaf8f56b0ffefbf251b8358a7c9e76c",
+      "status": "digest_verified_signature_unproven"
+    }
+  ],
+  "scope": "Read-only canonical Docker Hub manifest checks; does not prove upstream signatures, runtime behavior or EKS pulls."
+}

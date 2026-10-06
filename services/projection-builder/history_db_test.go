@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,9 +90,25 @@ func scalar(t *testing.T, db interface {
 }
 func maintainHistory(t *testing.T, db historyDatabase) {
 	t.Helper()
-	if err := history.Maintain(context.Background(), db.owner, history.DefaultWindow, 3); err != nil {
+	if err := history.Maintain(context.Background(), historyMaintenancePool(t, db.migrationURL), history.DefaultWindow, 3); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func historyMaintenancePool(t *testing.T, databaseURL string) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.User = "projection_history_maintainer"
+	cfg.ConnConfig.Password = envOrSkip(t, "PROJECTION_HISTORY_MAINTAINER_PASSWORD")
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 func TestVersionedHistoryMaintenanceTargetsOnlyRequestedSchema(t *testing.T) {
@@ -115,7 +132,8 @@ func TestVersionedHistoryMaintenanceTargetsOnlyRequestedSchema(t *testing.T) {
 		t.Fatal("partition not removed")
 	}
 	publicBefore := scalar(t, owner, `SELECT count(*) FROM pg_inherits WHERE inhparent='public.reading_history'::regclass`)
-	if err := history.Maintain(ctx, owner, history.DefaultWindow, 3, "read_v1"); err != nil {
+	maintainer := historyMaintenancePool(t, url)
+	if err := history.Maintain(ctx, maintainer, history.DefaultWindow, 3, "read_v1"); err != nil {
 		t.Fatal(err)
 	}
 	if n := scalar(t, owner, `SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)`, partition); n != 1 {
@@ -124,7 +142,7 @@ func TestVersionedHistoryMaintenanceTargetsOnlyRequestedSchema(t *testing.T) {
 	if n := scalar(t, owner, `SELECT count(*) FROM pg_inherits WHERE inhparent='public.reading_history'::regclass`); n != publicBefore {
 		t.Fatal("public partitions changed")
 	}
-	if err := history.Maintain(ctx, owner, history.DefaultWindow, 3, "read_v1;DROP SCHEMA public"); err == nil {
+	if err := history.Maintain(ctx, maintainer, history.DefaultWindow, 3, "read_v1;DROP SCHEMA public"); err == nil {
 		t.Fatal("invalid schema accepted")
 	}
 }
@@ -153,8 +171,11 @@ func TestDatabaseHistoryPartitionMaintenance(t *testing.T) {
 	}
 	before := scalar(t, db.admin, countPartitions)
 	maintainHistory(t, db)
-	if after := scalar(t, db.admin, countPartitions); after != before-1 {
-		t.Fatal("only expired partition should drop", before, after)
+	if after := scalar(t, db.admin, countPartitions); after != before {
+		t.Fatal("age-only maintenance must retain expired partitions until cold-store coverage is verified", before, after)
+	}
+	if scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", "reading_history_"+now.AddDate(0, 0, -10).UTC().Format("20060102")) != 1 {
+		t.Fatal("expired partition was dropped without a Cassandra coverage proof")
 	}
 	stable := scalar(t, db.admin, countPartitions)
 	maintainHistory(t, db)
@@ -187,6 +208,186 @@ func TestDatabaseHistoryPartitionMaintenance(t *testing.T) {
 	}
 	err := history.Maintain(ctx, db.runtime, history.DefaultWindow, 3)
 	assertSQLState(t, err, "42501")
+}
+
+func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
+	db := scratchHistoryDB(t, true)
+	ctx := context.Background()
+	maintainHistory(t, db)
+	var now time.Time
+	if err := db.admin.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	oldDay := now.Add(-10 * 24 * time.Hour).UTC()
+	partition := "reading_history_" + oldDay.Format("20060102")
+	if _, err := db.owner.Exec(ctx, "SELECT projection_history_partition($1::date)", oldDay.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	maintainer := historyMaintenancePool(t, db.migrationURL)
+	var directCount int64
+	if err := maintainer.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{partition}.Sanitize()).Scan(&directCount); !postgresCode(err, "42501") {
+		t.Fatal("maintenance login acquired direct cross-tenant table access", err)
+	}
+	tenant, device := randomUUID(), randomUUID()
+	event := historyAt(t, tenant, device, 1, oldDay.Add(time.Hour))
+	if err := (&Store{DB: db.runtime, HistoryWindow: 3650 * 24 * time.Hour}).Apply(ctx, message(event), event); err != nil {
+		t.Fatal(err)
+	}
+	var reads, sensors int64
+	if err := maintainer.QueryRow(ctx, "SELECT reading_rows,sensor_rows FROM projection_history_partition_counts($1)", partition).Scan(&reads, &sensors); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 || sensors != 0 {
+		t.Fatalf("fixture counts reading=%d sensor=%d", reads, sensors)
+	}
+	// The verifier hashes UTC JSONB rows in manifest order. The SQL helper
+	// must produce the same bytes and ignore the caller's session timezone.
+	manifestTx, err := maintainer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manifestTx.Rollback(ctx)
+	if _, err := manifestTx.Exec(ctx, "SET LOCAL timezone='UTC'"); err != nil {
+		t.Fatal(err)
+	}
+	var manifestJSON string
+	if err := manifestTx.QueryRow(ctx, "SELECT to_jsonb(m)::text FROM projection_history_cassandra_manifest($1) m", partition).Scan(&manifestJSON); err != nil {
+		t.Fatal(err)
+	}
+	seed := sha256.Sum256([]byte("greenguard-history-manifest-v2\n"))
+	wantHash := fmt.Sprintf("%x", sha256.Sum256(append(seed[:], []byte(manifestJSON+"\n")...)))
+	if _, err := manifestTx.Exec(ctx, "SET LOCAL timezone='America/Winnipeg'"); err != nil {
+		t.Fatal(err)
+	}
+	var actualHash string
+	if err := manifestTx.QueryRow(ctx, "SELECT projection_history_partition_sha256($1)", partition).Scan(&actualHash); err != nil {
+		t.Fatal(err)
+	}
+	if actualHash != wantHash {
+		t.Fatal("manifest hash changed with session timezone or differs from verifier bytes")
+	}
+	if err := manifestTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy-format hashes are syntactically valid but must fail closed and
+	// remain candidates for the updated verifier even when counts match.
+	if _, err := maintainer.Exec(ctx, "SELECT projection_history_record_cassandra_coverage($1,$2,$3,$4,$5::double precision)", partition, reads, sensors, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", history.DefaultWindow.Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	maintainHistory(t, db)
+	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", partition); n != 1 {
+		t.Fatal("legacy-format receipt allowed pruning")
+	}
+	if n := scalar(t, maintainer, "SELECT count(*) FROM projection_history_cassandra_candidates($1::double precision) WHERE partition_name=$2", history.DefaultWindow.Seconds(), partition); n != 1 {
+		t.Fatal("legacy receipt was not selected for reverification")
+	}
+	// Unreceipted old partitions must not consume the bounded prune scan.
+	if _, err := db.owner.Exec(ctx, "SELECT projection_history_partition($1::date - offset_days) FROM generate_series(2,34) offset_days", oldDay.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := maintainer.Exec(ctx, "SELECT projection_history_record_cassandra_coverage($1,$2,$3,$4,$5::double precision)", partition, reads, sensors, partitionHash(t, maintainer, partition), history.DefaultWindow.Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	// A busy older partition must not starve the next eligible partition.
+	nextDay := oldDay.Add(24 * time.Hour)
+	nextPartition := "reading_history_" + nextDay.Format("20060102")
+	if _, err := db.owner.Exec(ctx, "SELECT projection_history_partition($1::date)", nextDay.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := maintainer.Exec(ctx, "SELECT projection_history_record_cassandra_coverage($1,0,0,$2,$3::double precision)", nextPartition, partitionHash(t, maintainer, nextPartition), history.DefaultWindow.Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	readerTx, err := db.admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readerTx.Rollback(ctx)
+	if _, err := readerTx.Exec(ctx, "LOCK TABLE "+pgx.Identifier{partition}.Sanitize()+" IN ACCESS SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	maintainHistory(t, db)
+	if n := scalar(t, db.owner, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", partition); n != 1 {
+		t.Fatal("partition with an active reader was not retained on lock timeout")
+	}
+	if n := scalar(t, db.owner, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", nextPartition); n != 0 {
+		t.Fatal("busy partition prevented pruning the next matching receipt")
+	}
+	if err := readerTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	maintainHistory(t, db)
+	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", partition); n != 0 {
+		t.Fatal("maintenance did not prune a currently certified read-model partition")
+	}
+
+	// A new delayed projection row invalidates the prior receipt by changing
+	// the partition count. Maintenance must retain it until verification reruns.
+	secondDay := oldDay.Add(-24 * time.Hour)
+	stalePartition := "reading_history_" + secondDay.Format("20060102")
+	if _, err := db.owner.Exec(ctx, "SELECT projection_history_partition($1::date)", secondDay.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	late := historyAt(t, tenant, device, 2, secondDay.Add(time.Hour))
+	if err := (&Store{DB: db.runtime, HistoryWindow: 3650 * 24 * time.Hour}).Apply(ctx, message(late), late); err != nil {
+		t.Fatal(err)
+	}
+	if err := maintainer.QueryRow(ctx, "SELECT reading_rows,sensor_rows FROM projection_history_partition_counts($1)", stalePartition).Scan(&reads, &sensors); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := maintainer.Exec(ctx, "SELECT projection_history_record_cassandra_coverage($1,$2,$3,$4,$5::double precision)", stalePartition, reads, sensors, partitionHash(t, maintainer, stalePartition), history.DefaultWindow.Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	// Updating event identity preserves counts but invalidates the content proof.
+	if err := WithTenant(ctx, db.owner, tenant, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE "+pgx.Identifier{stalePartition}.Sanitize()+" SET event_id=$1", randomUUID())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	maintainHistory(t, db)
+	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", stalePartition); n != 1 {
+		t.Fatal("same-count content mutation allowed pruning")
+	}
+
+	if n := scalar(t, maintainer, "SELECT count(*) FROM projection_history_cassandra_candidates($1::double precision) WHERE partition_name=$2", history.DefaultWindow.Seconds(), stalePartition); n != 1 {
+		t.Fatal("same-count mutation was not selected for reverification")
+	}
+	// A maintenance transaction retains its relation locks until commit or
+	// rollback, including when it keeps a partition after a hash mismatch.
+	maintenanceTx, err := maintainer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer maintenanceTx.Rollback(ctx)
+	if _, err := maintenanceTx.Exec(ctx, "SELECT projection_history_maintain($1::double precision,3)", history.DefaultWindow.Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalar(t, db.admin, "SELECT count(*) FROM "+pgx.Identifier{stalePartition}.Sanitize()); n != 1 {
+		t.Fatal("maintenance SHARE lock did not preserve reads")
+	}
+	err = WithTenant(ctx, db.owner, tenant, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout='100ms'"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "UPDATE "+pgx.Identifier{stalePartition}.Sanitize()+" SET event_id=$1", randomUUID())
+		return err
+	})
+	if !postgresCode(err, "55P03") {
+		t.Fatal("ordinary writer was not fenced by maintenance relation lock", err)
+	}
+	if err := maintenanceTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	late = historyAt(t, tenant, device, 3, secondDay.Add(2*time.Hour))
+	if err := (&Store{DB: db.runtime, HistoryWindow: 3650 * 24 * time.Hour}).Apply(ctx, message(late), late); err != nil {
+		t.Fatal(err)
+	}
+	maintainHistory(t, db)
+	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", stalePartition); n != 1 {
+		t.Fatal("stale Cassandra coverage receipt allowed read-history pruning")
+	}
 }
 func assertHistoryPartitions(t *testing.T, db historyDatabase, now time.Time) {
 	t.Helper()
@@ -294,7 +495,7 @@ func assertHistoryForeignKeys(t *testing.T, db historyDatabase, tenant string, e
 	})
 	assertSQLState(t, err, "23503")
 }
-func TestDatabaseHistoryMigrationPreservesDataThenPrunes(t *testing.T) {
+func TestDatabaseHistoryMigrationPreservesDataUntilCassandraCoverage(t *testing.T) {
 	db := scratchHistoryDB(t, false)
 	ctx := context.Background()
 	sql, err := os.ReadFile("migrations/000001_projection.up.sql")
@@ -317,8 +518,8 @@ func TestDatabaseHistoryMigrationPreservesDataThenPrunes(t *testing.T) {
 		t.Fatal("migration lost existing data")
 	}
 	maintainHistory(t, db)
-	if dbCount(t, db.runtime, tenant, countHistory, tenant) != 0 {
-		t.Fatal("expired data retained")
+	if dbCount(t, db.runtime, tenant, countHistory, tenant) != 1 {
+		t.Fatal("migration or maintenance removed expired history without Cassandra coverage")
 	}
 	for _, table := range []string{"consumer_inbox", "device_latest", "projection_notifications"} {
 		if dbCount(t, db.runtime, tenant, "SELECT count(*) FROM "+table+" WHERE tenant_id=$1", tenant) != 1 {
@@ -329,8 +530,8 @@ func TestDatabaseHistoryMigrationPreservesDataThenPrunes(t *testing.T) {
 	if err = store.Apply(ctx, message(event), event); !errors.Is(err, ErrDuplicate) {
 		t.Fatal(err)
 	}
-	if dbCount(t, db.runtime, tenant, countHistory, tenant) != 0 {
-		t.Fatal("replay resurrected history")
+	if dbCount(t, db.runtime, tenant, countHistory, tenant) != 1 {
+		t.Fatal("replay changed retained expired history")
 	}
 }
 func seedUnpartitionedHistory(t *testing.T, db historyDatabase, event map[string]any) {
@@ -387,4 +588,13 @@ func TestDatabaseHistoryInboxIdentityAfterExpiry(t *testing.T) {
 	if dbCount(t, db.runtime, tenant, countHistory, tenant) != 0 {
 		t.Fatal("identity conflict resurrected history")
 	}
+}
+
+func partitionHash(t *testing.T, db *pgxpool.Pool, partition string) string {
+	t.Helper()
+	var hash string
+	if err := db.QueryRow(context.Background(), "SELECT projection_history_partition_sha256($1)", partition).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	return hash
 }

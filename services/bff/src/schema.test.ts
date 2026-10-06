@@ -96,7 +96,7 @@ test("GraphQL rejects oversized history and search before the Read API", async (
   };
   for (const [query, variables] of [
     [
-      'query($limit: Int!) { readingHistory(deviceId: "d1", from: "2026-09-01", to: "2026-09-02", limit: $limit) { readingId } }',
+      'query($limit: Int!) { readingHistory(deviceId: "d1", from: "2026-09-01", to: "2026-09-02", limit: $limit) { items { readingId } nextCursor sources { postgres cassandra } } }',
       { limit: 501 },
     ],
     [
@@ -123,7 +123,10 @@ test("ML operations are operator-only and preserve the verified tenant", async (
   const seen: string[] = [];
   const server = createApolloServer();
   const result = await server.executeOperation(
-    { query: "{ mlOperations { model { version } scorerReady } }" },
+    {
+      query:
+        "{ mlOperations { model { version } scorerReady analytics { status rows bins averageTemperatureC averageHumidityPercent } } }",
+    },
     {
       contextValue: {
         principal,
@@ -138,14 +141,49 @@ test("ML operations are operator-only and preserve the verified tenant", async (
               predictionsTotal: 1,
               inferenceP95Ms: 2,
               canaryPercentage: 0,
-              model: { name: "model", version: "v1", mode: "shadow", dataOrigin: "synthetic_grain_sim", productionEligible: false, status: "healthy" },
-              models: [{ name: "model", version: "v1", mode: "shadow", dataOrigin: "synthetic_grain_sim", productionEligible: false, status: "healthy", createdAt: "" }],
+              model: {
+                name: "model",
+                version: "v1",
+                mode: "shadow",
+                dataOrigin: "synthetic_grain_sim",
+                productionEligible: false,
+                status: "healthy",
+              },
+              models: [
+                {
+                  name: "model",
+                  version: "v1",
+                  mode: "shadow",
+                  dataOrigin: "synthetic_grain_sim",
+                  productionEligible: false,
+                  status: "healthy",
+                  createdAt: "",
+                },
+              ],
               drift: [],
-              performance: { status: "unavailable", brierScore: null, sampleCount: 0, evaluatedAt: null },
+              performance: {
+                status: "unavailable",
+                brierScore: null,
+                sampleCount: 0,
+                evaluatedAt: null,
+              },
               retraining: { status: "idle", runId: null, completedAt: null },
+              analytics: {
+                status: "unavailable",
+                reason: "not_configured",
+                rows: 0,
+                bins: 0,
+                averageTemperatureC: null,
+                averageHumidityPercent: null,
+                hourly: [],
+              },
             };
           },
-          action: async () => ({ action: "retrain", accepted: false, message: "synthetic_model_not_promotable" }),
+          action: async () => ({
+            action: "retrain",
+            accepted: false,
+            message: "synthetic_model_not_promotable",
+          }),
         },
       },
     },
@@ -153,7 +191,22 @@ test("ML operations are operator-only and preserve the verified tenant", async (
   assert.equal(result.body.kind, "single");
   if (result.body.kind === "single") {
     assert.equal(result.body.singleResult.errors, undefined);
-    assert.deepEqual(JSON.parse(JSON.stringify(result.body.singleResult.data)), { mlOperations: { model: { version: "v1" }, scorerReady: true } });
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(result.body.singleResult.data)),
+      {
+        mlOperations: {
+          model: { version: "v1" },
+          scorerReady: true,
+          analytics: {
+            status: "unavailable",
+            rows: 0,
+            bins: 0,
+            averageTemperatureC: null,
+            averageHumidityPercent: null,
+          },
+        },
+      },
+    );
   }
   assert.deepEqual(seen, [principal.tenantId]);
   await server.stop();
@@ -299,6 +352,7 @@ test("GraphQL mutations call the owning command API", async () => {
 
 test("GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch search through Read API", async () => {
   const paths: string[] = [];
+  let historyAfter: string | null = null;
   const read = new ReadClient("http://127.0.0.1:4001", async (url, init) => {
     assert.equal(
       new Headers(init?.headers).get("Authorization"),
@@ -306,6 +360,8 @@ test("GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch 
     );
     const path = new URL(url.toString()).pathname;
     paths.push(path);
+    if (path.endsWith("/readings"))
+      historyAfter = new URL(url.toString()).searchParams.get("after");
     if (path.endsWith("/latest"))
       return Response.json({
         data: {
@@ -326,7 +382,8 @@ test("GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch 
             received_at: "2026-08-24T00:00:01Z",
           },
         ],
-        source: "cassandra",
+        nextCursor: "cursor-next",
+        sources: { postgres: true, cassandra: true },
       });
     if (path.endsWith("/search"))
       return Response.json({
@@ -361,7 +418,7 @@ test("GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch 
   const history = await server.executeOperation(
     {
       query:
-        'query { readingHistory(deviceId:"d1",from:"2026-08-01T00:00:00Z",to:"2026-09-01T00:00:00Z",limit:10) { readingId } }',
+        'query { readingHistory(deviceId:"d1",from:"2026-08-01T00:00:00Z",to:"2026-09-01T00:00:00Z",limit:10,after:"cursor-prev") { items { readingId } nextCursor sources { postgres cassandra } } }',
     },
     { contextValue },
   );
@@ -377,12 +434,24 @@ test("GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch 
     if (response.body.kind === "single")
       assert.equal(response.body.singleResult.errors, undefined);
   }
+  if (history.body.kind === "single")
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(history.body.singleResult.data)),
+      {
+        readingHistory: {
+          items: [{ readingId: "r2" }],
+          nextCursor: "cursor-next",
+          sources: { postgres: true, cassandra: true },
+        },
+      },
+    );
   assert.deepEqual(paths, [
     "/api/v1/read/devices/d1",
     "/api/v1/read/devices/d1/latest",
     "/api/v1/read/devices/d1/readings",
     "/api/v1/read/search",
   ]);
+  assert.equal(historyAfter, "cursor-prev");
   await server.stop();
 });
 

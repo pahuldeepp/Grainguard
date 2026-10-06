@@ -228,6 +228,8 @@ export function bulkheadBackends(
       reads.run(tenant, () => backends.latest(tenant, device)),
     hotReadings: (query) =>
       reads.run(query.tenantId, () => backends.hotReadings(query)),
+    deviceRisk: (query) =>
+      reads.run(query.tenantId, () => backends.deviceRisk(query)),
     rollup: (query, bucket) =>
       reads.run(query.tenantId, () => backends.rollup(query, bucket)),
     deviceCurrent: (tenant, device) =>

@@ -77,8 +77,13 @@ const (
 	selectDay            = `SELECT tenant_id, device_id, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent, co2_ppm, grain_moisture_percent, measurement_units, sensor_observations, schema_version FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ? AND observed_at >= ? AND observed_at <= ?`
 	upsertMark           = `INSERT INTO history_watermark (tenant_id, device_id, source_topic, source_partition, last_confirmed_offset, last_confirmed_observed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	selectMark           = `SELECT last_confirmed_offset, last_confirmed_observed_at FROM history_watermark WHERE tenant_id = ? AND device_id = ? AND source_topic = ? AND source_partition = ?`
+	selectDayIdentities  = `SELECT reading_id, event_id, sensor_observations FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ?`
 	day                  = 24 * time.Hour
 )
+
+// Identity is the durable source identity needed to prove a read-model copy
+// exists in Cassandra before PostgreSQL expires that projected row.
+type Identity struct{ ReadingID, EventID, SensorObservations string }
 
 // Store writes and reads history through a Session.
 type Store struct {
@@ -129,6 +134,29 @@ func (s *Store) ReadWatermark(ctx context.Context, tenant, device, topic string,
 	rows := s.Session.Iter(ctx, LocalQuorum, selectMark, tenant, device, topic, int(partition))
 	found := rows.Scan(&w.Offset, &w.ObservedAt)
 	return w, found, rows.Close()
+}
+
+// DayIdentities returns Cassandra's confirmed row identities for one tenant,
+// device, and UTC day. The partition key is always fully specified.
+func (s *Store) DayIdentities(ctx context.Context, tenant, device string, bucket time.Time) ([]Identity, error) {
+	if !ValidID(tenant) {
+		return nil, ErrInvalidTenant
+	}
+	if !ValidID(device) {
+		return nil, ErrInvalidDevice
+	}
+	rows := s.Session.Iter(ctx, LocalQuorum, selectDayIdentities, tenant, device, Day(bucket))
+	identities := make([]Identity, 0)
+	for {
+		var id Identity
+		if !rows.Scan(&id.ReadingID, &id.EventID, &id.SensorObservations) {
+			if err := rows.Close(); err != nil {
+				return nil, err
+			}
+			return identities, nil
+		}
+		identities = append(identities, id)
+	}
 }
 
 // Query returns one tenant's device history in [from, to], newest first. The

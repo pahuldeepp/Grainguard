@@ -10,15 +10,16 @@ values = {
   'repositoryUrl' => 'https://example.test/greenguard.git',
   'revision' => 'b' * 40,
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, digest] },
+  'cassandraPlane' => {'enabled' => true, 'image' => digest, 'migratorImage' => digest, 'authSecret' => 'greenguard-cassandra-auth', 'tlsSecret' => 'greenguard-cassandra-tls', 'apiServerCIDR' => '10.100.0.1/32', 'storageClassName' => 'gp3', 'storageSize' => '20Gi'},
   'dataPlane' => {
     'enabled' => true,
     'rdsHost' => 'db.example.us-east-1.rds.amazonaws.com',
     'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name, digest] },
     'shards' => {
-      's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s1-projection-history-maintenance-config'},
-      's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s2-projection-history-maintenance-config'},
-      's3' => {'rdsHost' => 'shard3.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard3-cdc', 'bootstrapSecret' => 'greenguard-s3-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s3-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s3-projection-history-maintenance-config'},
-      's4' => {'rdsHost' => 'shard4.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard4-cdc', 'bootstrapSecret' => 'greenguard-s4-rds-bootstrap', 'pgbouncerAuthSecret' => 'greenguard-s4-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s4-projection-history-maintenance-config'}
+      's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s1-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s1', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s1-projection-history-maintenance-config'},
+      's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s2-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s2', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s2-projection-history-maintenance-config'},
+      's3' => {'rdsHost' => 'shard3.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard3-cdc', 'bootstrapSecret' => 'greenguard-s3-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s3-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s3', 'pgbouncerAuthSecret' => 'greenguard-s3-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s3-projection-history-maintenance-config'},
+      's4' => {'rdsHost' => 'shard4.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard4-cdc', 'bootstrapSecret' => 'greenguard-s4-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s4-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s4', 'pgbouncerAuthSecret' => 'greenguard-s4-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s4-projection-history-maintenance-config'}
     },
     'projectionMaintenance' => {'image' => digest, 'rdsCIDRs' => ['10.60.128.0/20']},
     'secrets' => {
@@ -66,6 +67,15 @@ expected.each do |name, (wave, chart)|
     app.dig('spec', 'source', 'path') == "infra/gitops/disposable/#{chart}" &&
     app.dig('spec', 'source', 'targetRevision') == values['revision']
   abort "#{name} lifecycle ownership missing" unless app.dig('metadata', 'finalizers') == ['resources-finalizer.argocd.argoproj.io']
+end
+%w[s1 s2 s3 s4].each do |shard|
+  shard_bootstrap = apps.find { |item| item.dig('metadata', 'name') == "greenguard-#{shard}-rds-bootstrap" }
+  shard_values = shard_bootstrap&.dig('spec', 'source', 'helm', 'valuesObject')
+  expected_shard = values.dig('dataPlane', 'shards', shard)
+  abort "#{shard} tenant-bootstrap Secret/role/version drifted" unless shard_values &&
+    shard_values['tenantBootstrapSecret'] == expected_shard['tenantBootstrapSecret'] &&
+    shard_values['tenantBootstrapRole'] == expected_shard['tenantBootstrapRole'] &&
+    shard_values['tenantBootstrapVersion'] == expected_shard['tenantBootstrapVersion']
 end
 abort 'PgBouncer source values drifted' unless apps.find { |item| item.dig('metadata', 'name') == 'greenguard-pgbouncer' }
   .dig('spec', 'source', 'helm', 'valuesObject') == {

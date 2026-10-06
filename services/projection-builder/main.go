@@ -44,6 +44,25 @@ func writerTarget(schema, database, role string) (string, string, error) {
 	return schema, "greenguard.projection-builder." + schema, nil
 }
 
+// Public writers may use a separate deployment group without changing the
+// durable projection identity. Versioned writers retain their promotion group.
+func configuredWriterTarget(getenv func(string) string, database, role string) (string, string, error) {
+	schema, group, err := writerTarget(getenv("PROJECTION_WRITE_SCHEMA"), database, role)
+	if err != nil {
+		return "", "", err
+	}
+	override := getenv("KAFKA_GROUP_ID")
+	if override == "" {
+		return schema, group, nil
+	}
+	if schema != "public" || len(override) > 249 || strings.IndexFunc(override, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+	}) >= 0 {
+		return "", "", errors.New("KAFKA_GROUP_ID requires a public writer and a valid Kafka group identifier")
+	}
+	return schema, override, nil
+}
+
 func buildApp(getenv func(string) string) (*app, error) {
 	if err := common.RequireShardRegistry(getenv); err != nil {
 		return nil, err
@@ -68,7 +87,7 @@ func buildApp(getenv func(string) string) (*app, error) {
 	if err != nil {
 		return nil, errors.New("invalid projection database configuration")
 	}
-	targetSchema, group, err := writerTarget(getenv("PROJECTION_WRITE_SCHEMA"), cfg.ConnConfig.Database, cfg.ConnConfig.User)
+	targetSchema, group, err := configuredWriterTarget(getenv, cfg.ConnConfig.Database, cfg.ConnConfig.User)
 	if err != nil {
 		return nil, err
 	}
@@ -87,13 +106,13 @@ func buildApp(getenv func(string) string) (*app, error) {
 		pool.Close()
 		return nil, err
 	}
-	kafka, err := newKafka(strings.Split(brokers, ","), group)
+	kafka, err := newKafkaWithPrefix(strings.Split(brokers, ","), group, getenv("KAFKA_TOPIC_PREFIX"))
 	if err != nil {
 		pool.Close()
 		shutdownTracing(provider)
 		return nil, err
 	}
-	store := &Store{DB: pool, Schema: targetSchema, HistoryWindow: window, Lease: lease}
+	store := &Store{DB: pool, TopicPrefix: getenv("KAFKA_TOPIC_PREFIX"), Schema: targetSchema, HistoryWindow: window, Lease: lease}
 	p := &Processor{Tracer: provider.Tracer(consumerName), Source: kafka, Sink: kafka, Schemas: schemas, Apply: store.Apply, Heartbeat: store.Heartbeat, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 20 * time.Second}
 	return &app{lease: lease, dbPool: pool, historyOutOfWindow: store.HistoryOutOfWindow.Load, processor: p, ping: func(ctx context.Context) error {
 		var leaseErr error

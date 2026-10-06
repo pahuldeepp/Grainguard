@@ -19,16 +19,11 @@ const input = () => ({
   role: "admin" as const,
 });
 
-test("initial OIDC admin enrollment accepts opaque external sub and replays exactly", async () => {
+test("initial OIDC admin enrollment remains pending and replays without granting access before owner bootstrap", async () => {
   const entry = { ...input(), subject: `auth0|operator-${randomUUID()}` };
-  assert.equal(await enrollFirstAdmin(db, entry), "created");
-  assert.equal(await enrollFirstAdmin(db, entry), "existing");
-  assert.deepEqual(await lookupMembership(db, entry.issuer, entry.subject), {
-    tenantId: entry.tenantId,
-    roles: ["admin"],
-    version: "1",
-    state: "active",
-  });
+  assert.equal(await enrollFirstAdmin(db, entry), "provisioning");
+  assert.equal(await enrollFirstAdmin(db, entry), "provisioning");
+  assert.equal(await lookupMembership(db, entry.issuer, entry.subject), null);
   await assert.rejects(
     enrollFirstAdmin(db, { ...entry, subject: "another-user" }),
     /tenant already exists/,

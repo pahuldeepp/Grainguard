@@ -103,6 +103,22 @@ def main(argv):
             "cluster_name": cluster, "account_id": account,
             "master_secret_arn": master, "shard_master_secret_arns": secrets,
         })
+    elif action == "save-env" and len(argv) == 3:
+        # Persist the same exact, private inventory for native Terraform
+        # destroys. `pre-destroy.sh` calls this before deleting anything.
+        try:
+            secrets = json.loads(os.environ.get("GG_SHARD_MASTER_SECRET_ARNS", "[]"))
+        except json.JSONDecodeError as error:
+            raise ValueError("shard secret inventory is not valid JSON") from error
+        save(path, {
+            "schema": 1,
+            "region": os.environ.get("GG_REGION", ""),
+            "environment": os.environ.get("GG_ENVIRONMENT", ""),
+            "cluster_name": os.environ.get("GG_CLUSTER", ""),
+            "account_id": os.environ.get("GG_ACCOUNT", ""),
+            "master_secret_arn": os.environ.get("GG_MASTER_SECRET_ARN", ""),
+            "shard_master_secret_arns": secrets,
+        })
     elif action == "read" and len(argv) == 3:
         print(json.dumps(read_manifest(path), sort_keys=True, separators=(",", ":")))
     elif action == "remove" and len(argv) == 3:

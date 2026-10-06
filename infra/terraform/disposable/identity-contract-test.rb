@@ -6,7 +6,7 @@ class IdentityContractTest < Minitest::Test
 
   def test_existing_identity_is_default_and_requires_public_configuration
     assert_match(/variable "identity_mode".*?default = "existing-oidc"/m, SOURCE)
-    assert_includes SOURCE, 'var.identity_mode == "cognito" || var.existing_oidc != null'
+    assert_includes SOURCE, 'contains(["cognito", "managed-dex"], var.identity_mode) || var.existing_oidc != null'
     %w[issuer jwks_url authorization_endpoint token_endpoint web_client_id mobile_client_id audience scopes token_mode mobile_audience_mode].each do |field|
       assert_match(/^\s+#{field}\s+=/, SOURCE)
     end
@@ -27,7 +27,7 @@ class IdentityContractTest < Minitest::Test
     assert_includes SOURCE, 'contains(["scope", "query-param"], var.existing_oidc.mobile_audience_mode)'
     assert_match(/mobile_audience_mode\s+= string/, SOURCE)
     assert_includes SOURCE, 'var.existing_oidc.mobile_audience_mode != "scope" || can(regex('
-    assert_includes SOURCE, 'audienceMode = var.existing_oidc.mobile_audience_mode'
+    assert_includes SOURCE, 'audienceMode = local.oidc_public.mobile_audience_mode'
     assert_includes SOURCE, 'audience     = local.oidc_public.audience'
     assert_includes SOURCE, 'scope                 = join(" ", local.oidc_public.scopes)'
     assert_includes SOURCE, 'mobile_callback        = "greenguard://auth/callback"'
@@ -36,6 +36,13 @@ class IdentityContractTest < Minitest::Test
     assert_includes auth, 'response_type: "code"'
     assert_includes auth, '"openid profile email offline_access"'
     assert_includes auth, 'user.access_token'
+  end
+
+  def test_web_cognito_client_registers_both_pkce_and_silent_callback_urls
+    assert_includes SOURCE, '/auth/callback'
+    assert_includes SOURCE, '/auth/silent-callback'
+    dex = File.read(File.expand_path('../../gitops/disposable/dex-chart/templates/dex.yaml', __dir__))
+    assert_includes dex, '${DEX_DASHBOARD_ORIGIN}/auth/silent-callback'
   end
 
   def test_dex_scope_mode_is_trusted_and_mobile_pkce_does_not_send_audience_query
@@ -59,6 +66,21 @@ class IdentityContractTest < Minitest::Test
     assert_includes SOURCE, 'value       = local.oidc_mobile_config'
     assert_includes SOURCE, 'value       = local.oidc_dashboard_values'
     refute_match(/variable "[^\"]*(password|secret|token_value)/, SOURCE)
+  end
+
+  def test_managed_dex_preserves_oidc_and_uses_the_public_api_cloudfront_issuer
+    assert_includes SOURCE, '"existing-oidc", "managed-dex", "cognito"'
+    assert_includes SOURCE, 'https://${aws_cloudfront_distribution.api.domain_name}/dex'
+    assert_includes SOURCE, 'mobile_audience_mode   = "scope"'
+    assert_includes SOURCE, 'DEX_FIRST_ADMIN_PASSWORD_HASH'
+    assert_includes SOURCE, 'bcrypt'
+    assert_includes SOURCE, 'var.identity_mode == "managed-dex" ? local.managed_dex_public'
+    chart = File.read(File.expand_path('../../gitops/disposable/dex-chart/templates/dex.yaml', __dir__))
+    assert_includes chart, 'type: postgres'
+    assert_includes chart, 'mode: verify-full'
+    assert_includes chart, 'enforce: true'
+    assert_includes chart, '${DEX_FIRST_ADMIN_PASSWORD_HASH}'
+    refute_match(/alice@greenguard\.test|victor@greenguard\.test|bob@greenguard\.test/, chart)
   end
 
   def test_first_admin_enrollment_is_provider_neutral_and_token_verified

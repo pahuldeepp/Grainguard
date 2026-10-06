@@ -267,6 +267,21 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "migration role"):
             lifecycle.validate_supplemental_profiles(self.scope, expected)
 
+    def test_control_bootstrap_worker_url_uses_separate_central_login_and_tls(self):
+        expected = {
+            "greenguard-rds-bootstrap": {"data": {
+                "PGHOST": "central.example",
+                "CONTROL_BOOTSTRAP_WORKER_PASSWORD": "separate-control-bootstrap-worker-password",
+            }},
+            "tenant-bootstrap-worker-config": {"data": {
+                "CONTROL_BOOTSTRAP_DATABASE_URL": "postgresql://tenant_bootstrap_worker:separate-control-bootstrap-worker-password@central.example:5432/greenguard_control?sslmode=verify-full&sslrootcert=/etc/greenguard/rds/ca.pem"
+            }},
+        }
+        lifecycle.validate_profiles(expected)
+        expected["tenant-bootstrap-worker-config"]["data"]["CONTROL_BOOTSTRAP_DATABASE_URL"] = expected["tenant-bootstrap-worker-config"]["data"]["CONTROL_BOOTSTRAP_DATABASE_URL"].replace("tenant_bootstrap_worker", "control_app")
+        with self.assertRaisesRegex(RuntimeError, "database role profile"):
+            lifecycle.validate_profiles(expected)
+
     def test_shard_cdc_and_pgbouncer_profiles(self):
         owners = {row["name"]: row for row in json.loads(__import__("re").search(r"fromJsonArray `([^`]+)`", (Path(__file__).parent / "applications-chart/templates/_owner-migrations.tpl").read_text()).group(1))}
         roles = {row["role"]: owner.upper() + "_DB_PASSWORD" for owner, row in owners.items() if not row["central"]}
@@ -283,6 +298,53 @@ class LifecycleTests(unittest.TestCase):
         expected["greenguard-s1-cdc-credentials"]["data"]["CDC_DB_PASSWORD"] = "foreign"
         with self.assertRaisesRegex(RuntimeError, "CDC"):
             lifecycle.validate_supplemental_profiles(self.scope, expected)
+
+    def test_tenant_bootstrap_registry_is_exact_shard_owner_only_and_tls_verified(self):
+        import re
+        owner_rows = json.loads(re.search(r"fromJsonArray `([^`]+)`", (Path(__file__).parent / "applications-chart/templates/_owner-migrations.tpl").read_text()).group(1))
+        owners = {row["name"]: row for row in owner_rows if not row["central"]}
+        shard_id = "s2"
+        bootstrap_name = f"greenguard-{shard_id}-rds-bootstrap"
+        login_password = "independent-tenant-bootstrap-password-long"
+        app_password = "application-role-password-long-enough"
+        shard_passwords = {"INVENTORY_DB_PASSWORD": app_password, "INVENTORY_MIGRATOR_PASSWORD": "migrator-pass"}
+        self.scope["shard_bootstraps"] = {bootstrap_name: {
+            "host": "s2.primary.example", "replica_hosts": [], "incarnation": "10000000-0000-5000-8000-000000000002",
+        }}
+        shard_payload = {
+            "version": 1,
+            "shardId": shard_id,
+            "shardIncarnation": self.scope["shard_bootstraps"][bootstrap_name]["incarnation"],
+            "caCertPath": "/var/run/greenguard/tenant-bootstrap/ca/ca.crt",
+            "owners": {
+                owner: {"url": f"postgresql://tenant_bootstrap_s2:{login_password}@s2.primary.example:5432/{profile['database']}?sslmode=verify-full&sslrootcert=/var/run/greenguard/tenant-bootstrap/ca/ca.crt"}
+                for owner, profile in owners.items()
+            },
+        }
+        expected = {
+            bootstrap_name: {"data": shard_passwords},
+            f"greenguard-{shard_id}-tenant-bootstrap": {"data": {
+                "registry.json": json.dumps(shard_payload), "TENANT_BOOTSTRAP_PASSWORD": login_password,
+            }},
+        }
+        lifecycle.validate_supplemental_profiles(self.scope, expected)
+
+        altered = json.loads(json.dumps(expected))
+        payload = json.loads(altered[f"greenguard-{shard_id}-tenant-bootstrap"]["data"]["registry.json"])
+        del payload["owners"]["risk"]
+        altered[f"greenguard-{shard_id}-tenant-bootstrap"]["data"]["registry.json"] = json.dumps(payload)
+        with self.assertRaisesRegex(RuntimeError, "identity/owner contract"):
+            lifecycle.validate_supplemental_profiles(self.scope, altered)
+
+        reused = json.loads(json.dumps(expected))
+        reused_name = f"greenguard-{shard_id}-tenant-bootstrap"
+        reused[reused_name]["data"]["TENANT_BOOTSTRAP_PASSWORD"] = app_password
+        payload = json.loads(reused[reused_name]["data"]["registry.json"])
+        for entry in payload["owners"].values():
+            entry["url"] = entry["url"].replace(login_password, app_password)
+        reused[reused_name]["data"]["registry.json"] = json.dumps(payload)
+        with self.assertRaisesRegex(RuntimeError, "independent"):
+            lifecycle.validate_supplemental_profiles(self.scope, reused)
 
     def test_all_nested_source_classes_cleanup_and_changed_master_guard(self):
         pairs = [("greenguard-shard-routing-device-service", "shard-routing/device-service"),

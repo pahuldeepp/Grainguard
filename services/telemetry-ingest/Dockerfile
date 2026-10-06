@@ -3,6 +3,7 @@ WORKDIR /src/services/telemetry-ingest
 COPY services/telemetry-ingest/go.* ./
 COPY packages/go-migrations/ /src/packages/go-migrations/
 COPY packages/go-common/ /src/packages/go-common/
+COPY packages/kafka-transport/ /src/packages/kafka-transport/
 RUN go mod download
 COPY services/telemetry-ingest/*.go ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /telemetry-ingest .

@@ -43,6 +43,15 @@ stop without committing; repair prerequisites before restarting. Transient DB er
 retry five times within a 20-second deadline. Binding/inbox/stream ownership and the
 stream-before-binding lock order remain unchanged.
 
+An authenticated placement `404` stops the binding consumer without committing.
+The same Kafka topics can contain tenants owned by another local authority cell, so
+a `404` from one cell is not sufficient evidence that the event is poison. Reconcile
+ownership against the trusted tenant-creation source and bootstrap the tenant
+through the control plane before resuming. Never create placement from the event
+payload itself. Placement timeouts, authentication failures, malformed authority
+responses, database errors, version gaps and missing bindings also remain
+uncommitted and fail closed.
+
 `binding_feed.go` and migration 000004 persist infrastructure checkpoints without
 tenant RLS. Their optimistic monotonic offset/source-position conditions fence replay.
 `INGEST_BINDING_FEED_MAX_STALE=5m` gates every new observation after receipt replay;

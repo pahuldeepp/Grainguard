@@ -1,4 +1,5 @@
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
+import { allowedInternalUrl } from "./internal-url.js";
 
 export class NotificationUpstreamError extends Error {
   constructor(
@@ -25,14 +26,14 @@ export class NotificationClient {
     )) {
       const url = new URL(value);
       if (
-        url.protocol !== "https:" &&
-        !(
-          url.protocol === "http:" &&
-          ["localhost", "127.0.0.1"].includes(url.hostname)
-        )
+        !allowedInternalUrl(value) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
       )
         throw new Error(
-          "notification owner URLs must use HTTPS or loopback HTTP",
+          "notification owner URLs must use HTTPS, loopback HTTP, or explicitly enabled mesh HTTP without credentials",
         );
     }
   }

@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greenguard-dex
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, app.kubernetes.io/part-of: greenguard, greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: {app.kubernetes.io/name: greenguard-managed-dex}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: greenguard-managed-dex, app.kubernetes.io/part-of: greenguard, greenguard.io/cell: {{ .Values.cell | quote }}}
+      annotations: {sidecar.istio.io/inject: "true"}
+    spec:
+      serviceAccountName: greenguard-dex
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app.kubernetes.io/name: greenguard-managed-dex}}
+      containers:
+        - name: dex
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - {name: http, containerPort: 5556, protocol: TCP}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secret | quote }}
+          env:
+            - {name: DEX_EXPAND_ENV, value: "true"}
+          readinessProbe:
+            httpGet: {path: /dex/.well-known/openid-configuration, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /dex/.well-known/openid-configuration, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/dex, readOnly: true}
+            - {name: rds-ca, mountPath: /etc/greenguard/rds, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: greenguard-dex-config, items: [{key: config.yaml, path: config.yaml}]}
+        - name: rds-ca
+          secret: {secretName: {{ .Values.caSecret | quote }}, items: [{key: ca.pem, path: ca.pem}]}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: greenguard-dex
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, greenguard.io/cell: {{ .Values.cell | quote }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: greenguard-dex
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: greenguard-managed-dex}
+  ports: [{name: http, port: 5556, targetPort: http, protocol: TCP}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: greenguard-dex
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: greenguard-managed-dex}}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: greenguard-dex
+  labels: {app.kubernetes.io/name: greenguard-managed-dex, greenguard.io/cell: {{ .Values.cell | quote }}}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: greenguard-managed-dex}}
+  mtls: {mode: STRICT}

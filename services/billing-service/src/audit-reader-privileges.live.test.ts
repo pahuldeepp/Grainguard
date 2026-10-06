@@ -5,9 +5,10 @@ import pg from "pg";
 const adminUrl = process.env.POSTGRES_ADMIN_URL;
 
 test("audit reader can only select the forced-RLS billing audit table", async (t) => {
-  if (!adminUrl) return t.skip("POSTGRES_ADMIN_URL is not set");
+  if (!adminUrl || !process.env.BILLING_DATABASE_URL)
+    return t.skip("POSTGRES_ADMIN_URL and BILLING_DATABASE_URL are required");
   const endpoint = new URL(adminUrl);
-  endpoint.pathname = "/greenguard_billing";
+  endpoint.pathname = new URL(process.env.BILLING_DATABASE_URL).pathname;
   const client = new pg.Client({ connectionString: endpoint.toString() });
   await client.connect();
   try {

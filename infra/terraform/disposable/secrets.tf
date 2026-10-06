@@ -1,7 +1,8 @@
 # Terraform owns approved containers and runtime-secret versions. A zero-day
 # recovery window requests immediate deletion for this disposable environment.
 resource "aws_secretsmanager_secret" "runtime" {
-  for_each = var.secret_names
+  depends_on = [terraform_data.destroy_inventory_sentinel]
+  for_each   = var.secret_names
 
   name                    = "greenguard/${var.environment}/${each.value}"
   recovery_window_in_days = 0
@@ -28,7 +29,7 @@ variable "secret_version_counters" {
     error_message = "Secret version counters must be positive integers."
   }
   validation {
-    condition     = alltrue([for key in keys(var.secret_version_counters) : can(regex("^(runtime|shard-routing|shard-bootstrap|shard-data|projector-routing)/[a-z0-9/_-]+$", key))])
+    condition     = alltrue([for key in keys(var.secret_version_counters) : can(regex("^(runtime|shard-routing|shard-bootstrap|shard-data|projector-routing|tenant-bootstrap)/[a-z0-9/_-]+$", key))])
     error_message = "Secret version counters must use a recognized nonsecret scope/name key."
   }
   validation {
@@ -40,6 +41,7 @@ variable "secret_version_counters" {
         "hardware-service", "read-api", "audit-export-worker",
       ], trimprefix(key, "shard-routing/")) :
       startswith(key, "shard-bootstrap/") ? contains(["s1", "s2", "s3", "s4"], trimprefix(key, "shard-bootstrap/")) :
+      startswith(key, "tenant-bootstrap/") ? contains(["s1", "s2", "s3", "s4"], trimprefix(key, "tenant-bootstrap/")) :
       startswith(key, "shard-data/") ? contains(flatten([for shard in ["s1", "s2", "s3", "s4"] : ["${shard}/cdc", "${shard}/pgbouncer"]]), trimprefix(key, "shard-data/")) :
       startswith(key, "projector-routing/") ? contains([
         "read-entitlement-projector", "inventory-projector", "telemetry-entitlement-projector",
@@ -51,13 +53,4 @@ variable "secret_version_counters" {
 
 output "secret_arns" {
   value = { for name, secret in aws_secretsmanager_secret.runtime : name => secret.arn }
-}
-
-variable "target_account_id" {
-  description = "Exact AWS account allowed for this disposable cell. Provider initialization rejects other accounts."
-  type        = string
-  validation {
-    condition     = can(regex("^[0-9]{12}$", var.target_account_id))
-    error_message = "target_account_id must be a 12-digit AWS account ID."
-  }
 }

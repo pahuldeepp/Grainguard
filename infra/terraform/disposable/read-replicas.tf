@@ -19,6 +19,7 @@ locals {
 }
 
 resource "aws_db_instance" "shard" {
+  depends_on                  = [terraform_data.destroy_inventory_sentinel]
   for_each                    = local.postgres_shard_ids
   identifier                  = "gg-${substr(local.data_name_prefix, 0, 36)}-${local.data_name_hash}-shard-${each.key}"
   engine                      = "postgres"
@@ -51,6 +52,7 @@ resource "aws_db_instance" "shard" {
 }
 
 resource "aws_db_instance" "read_replica" {
+  depends_on             = [terraform_data.destroy_inventory_sentinel]
   for_each               = local.postgres_shard_replicas
   identifier             = "${aws_db_instance.shard[each.value.shard_id].identifier}-r${each.value.ordinal}"
   replicate_source_db    = aws_db_instance.shard[each.value.shard_id].identifier
@@ -80,9 +82,10 @@ resource "aws_db_instance" "read_replica" {
 # Secret containers only. Values are generated/synced out of band; Terraform
 # owns deletion without placing runtime passwords in its state.
 resource "aws_secretsmanager_secret" "shard" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   for_each = toset(flatten([for shard_id in local.postgres_shard_ids : [
     "${shard_id}/bootstrap", "${shard_id}/migrators",
-    "${shard_id}/pgbouncer", "${shard_id}/cdc"
+    "${shard_id}/pgbouncer", "${shard_id}/cdc", "${shard_id}/tenant-bootstrap"
   ]]))
   name                    = "greenguard/${var.environment}/shards/${each.key}"
   recovery_window_in_days = 0
@@ -112,6 +115,7 @@ output "postgres_read_replica_endpoints" {
 }
 
 resource "aws_secretsmanager_secret" "shard_routing" {
+  depends_on = [terraform_data.destroy_inventory_sentinel]
   for_each = toset([
     "device-service", "telemetry-ingest", "projection-builder", "risk-engine",
     "workflow-alerts", "jobs-worker", "notification-service", "saga-orchestrator",
