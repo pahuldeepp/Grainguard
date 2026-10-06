@@ -23,7 +23,7 @@ import * as S from "./browser-e2e-stack.mjs";
 import { operations } from "../services/bff/dist/query-policy.js";
 
 process.loadEnvFile(".env");
-const { PORTS, waitFor, scoped } = S;
+const { PORTS, waitFor, scoped, fixtureScoped } = S;
 const OUT_BASE = "evidence/stage08-e2e";
 const RUN_ID = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
 const OUT = path.join(OUT_BASE, "runs", RUN_ID);
@@ -113,24 +113,31 @@ const authEnv = {
 
 async function seed() {
   for (const it of Object.values(items)) {
-    await scoped(process.env.INVENTORY_PROJECTOR_DIRECT_URL, it.tenant, (db) =>
-      db.query(
-        "INSERT INTO tenants(tenant_id,name) VALUES($1,'Browser E2E') ON CONFLICT DO NOTHING",
-        [it.tenant],
-      ),
+    await fixtureScoped(
+      process.env.INVENTORY_PROJECTOR_DIRECT_URL,
+      it.tenant,
+      (db) =>
+        db.query(
+          "INSERT INTO tenants(tenant_id,name) VALUES($1,'Browser E2E') ON CONFLICT DO NOTHING",
+          [it.tenant],
+        ),
     );
-    await scoped(process.env.INVENTORY_DIRECT_URL, it.tenant, async (db) => {
-      await db.query(
-        "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,$3)",
-        [it.tenant, it.site, `Browser E2E ${it.name}`],
-      );
-      await db.query(
-        `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
+    await fixtureScoped(
+      process.env.INVENTORY_DIRECT_URL,
+      it.tenant,
+      async (db) => {
+        await db.query(
+          "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,$3)",
+          [it.tenant, it.site, `Browser E2E ${it.name}`],
+        );
+        await db.query(
+          `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
          VALUES($1,$2,$3,$4,'provisioning',$5)`,
-        [it.tenant, it.device, it.site, it.serial, it.asset],
-      );
-    });
-    await scoped(process.env.HARDWARE_DIRECT_URL, it.tenant, (db) =>
+          [it.tenant, it.device, it.site, it.serial, it.asset],
+        );
+      },
+    );
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, it.tenant, (db) =>
       db.query(
         `INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
          VALUES($1,$2,$3,$4)`,
@@ -138,7 +145,7 @@ async function seed() {
       ),
     );
   }
-  await scoped(process.env.ALERTS_DIRECT_URL, TENANT.a, async (db) => {
+  await fixtureScoped(process.env.ALERTS_DIRECT_URL, TENANT.a, async (db) => {
     await db.query(
       `INSERT INTO alert_rules(tenant_id,rule_id,rule_key,resource_kind,open_score,clear_score,escalation_timeout_seconds)
        VALUES($1,$2,$3,'bin',70,40,300)`,

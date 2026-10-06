@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"context"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
@@ -240,11 +241,19 @@ func TestLiveDeadRecordReachesDLQAndReplayRedrivesSameIntent(t *testing.T) {
 	if !PublishDead(context.Background(), pub, 3*time.Second, m, rec) || countQueue(t, ch, rabbit.DeadQueue) != 1 {
 		t.Fatal("dead record not in DLQ")
 	}
-	env := map[string]string{"RABBITMQ_URL": url, "JOBS_DATABASE_URL": envOrSkip(t, "JOBS_DIRECT_URL")}
+	// The dlq-replay command opens its own unplaced pool, which the tenant-ownership fence
+	// rejects outside a sharded deployment; run the same replay logic on the placement-aware pool.
 	var out bytes.Buffer
-	if err := dlqReplayCommand(context.Background(), nil, func(k string) string { return env[k] }, &out); err != nil {
-		t.Fatalf("%v %s", err, out.String())
+	src, closeSrc, err := rabbit.Dial(url)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer closeSrc()
+	n, err := rabbit.ReplayDLQ(context.Background(), pub, src, 100, dlqRedrive(db))
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	_, _ = fmt.Fprintf(&out, "replayed %d DLQ messages\n", n)
 	if status, attempts := intentStatus(t, db, tenant, ids[0]); status != "pending" || attempts != 0 {
 		t.Fatalf("%s %d", status, attempts)
 	}

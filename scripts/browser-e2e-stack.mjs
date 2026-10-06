@@ -127,11 +127,25 @@ export async function waitFor(predicate, label, timeoutMs = 120_000) {
   throw new Error(`${label} timed out: ${last?.message ?? "no match"}`);
 }
 
-export async function scoped(url, tenant, work) {
-  const db = new pg.Client({ connectionString: url });
+export async function scoped(url, tenant, work, fixture = false) {
+  // Fixture writes run as the PostgreSQL superuser with the tenant-ownership row
+  // fence bypassed for that transaction, then switch back to the service role so
+  // RLS still applies. The services under test keep the fence enabled.
+  const target = new URL(url);
+  let connectionString = url;
+  if (fixture) {
+    const admin = new URL(process.env.POSTGRES_ADMIN_URL);
+    admin.pathname = target.pathname;
+    connectionString = admin.toString();
+  }
+  const db = new pg.Client({ connectionString });
   await db.connect();
   try {
     await db.query("BEGIN");
+    if (fixture) {
+      await db.query("SET LOCAL session_replication_role = replica");
+      await db.query(`SET LOCAL ROLE "${decodeURIComponent(target.username)}"`);
+    }
     await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenant]);
     const result = await work(db);
     await db.query("COMMIT");
@@ -143,6 +157,8 @@ export async function scoped(url, tenant, work) {
     await db.end();
   }
 }
+export const fixtureScoped = (url, tenant, work) =>
+  scoped(url, tenant, work, true);
 
 // Seed each group to the topic end only when it has never committed, so a
 // fresh private group does not replay other runs' backlog. Shared groups that

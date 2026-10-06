@@ -36,6 +36,8 @@ function startDashboard() {
     cwd: "apps/dashboard",
     env: {
       ...process.env,
+      // The dev proxy defaults to the gateway port; point it at this test's BFF.
+      BFF_DEV_URL: process.env.OIDC_BFF_URL,
       VITE_OIDC_AUTHORITY: ISSUER,
       VITE_OIDC_CLIENT_ID: "greenguard-dashboard",
       VITE_OIDC_AUDIENCE: "greenguard-dashboard",

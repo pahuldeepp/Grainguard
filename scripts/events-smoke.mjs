@@ -353,7 +353,7 @@ async function cleanup() {
     try {
       sql(
         fixture.database,
-        `DELETE FROM outbox_events WHERE tenant_id='${fixture.tenant}' AND event_id='${fixture.event}';`,
+        `SET session_replication_role = replica; DELETE FROM outbox_events WHERE tenant_id='${fixture.tenant}' AND event_id='${fixture.event}';`,
       );
     } catch (error) {
       failures.push(error);

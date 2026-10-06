@@ -116,8 +116,10 @@ async function waitHealthy(base) {
 }
 
 const hash = (query) => createHash("sha256").update(query).digest("hex");
-const DEVICE_CURRENT = `query DeviceCurrent($id: ID!) { device(id: $id) { deviceId siteId binId name status projectedAt } latestReading(deviceId: $id) { readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`;
-const START = `mutation StartProvisioning($deviceId: ID!, $assetId: ID!, $idempotencyKey: String!) { startProvisioning(deviceId: $deviceId, assetId: $assetId, idempotencyKey: $idempotencyKey) { tenantId sagaId deviceId assetId state version fencingToken deadlineAt } }`;
+// Use the BFF's own persisted operations so this test cannot drift from the allowlist.
+const { operations } = await import("../services/bff/dist/query-policy.js");
+const DEVICE_CURRENT = operations.deviceCurrent;
+const START = operations.startProvisioning;
 
 async function graphql(token, query, variables) {
   const response = await fetch(`${BFF}/graphql`, {
