@@ -1,0 +1,13 @@
+node scripts/events-faults.mjs
+PASS E03: snapshot repeats, SIGKILL after ack/before commit, restart preserves every ID and duplicate bytes
+PASS E04 healthy quarantine: original bytes/coordinates and later valid delivery
+UNVERIFIED E04 quarantine publish failure: unit tests only; shared plaintext broker has no isolated ACL/topic override, deleting quarantine would disrupt other workers
+PASS E05: idle singleton delivery within 15s, pending singleton survives restart; no batching in current producer
+
+
+
+
+
+
+
+

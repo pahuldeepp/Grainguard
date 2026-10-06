@@ -1,0 +1,190 @@
+npm run build -w @greenguard/device-service -w @greenguard/read-api -w @greenguard/workflow-alerts -w @greenguard/bff -w @greenguard/gateway
+
+> @greenguard/device-service@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/device-service@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 51ms
+
+
+> @greenguard/read-api@0.1.0 build
+> npm run build -w @greenguard/read-model -w @greenguard/membership-client && tsc
+
+
+> @greenguard/read-model@0.1.0 build
+> tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/workflow-alerts@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/workflow-alerts@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 10ms
+
+
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/gateway@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+VITE_OIDC_AUTHORITY=http://127.0.0.1:5556/dex VITE_OIDC_CLIENT_ID=greenguard-dashboard VITE_OIDC_AUDIENCE=greenguard-dashboard npm run build -w @greenguard/dashboard
+
+> @greenguard/dashboard@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 2203 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.36 kB │ gzip:   0.27 kB
+dist/assets/index-CsvRyilZ.css    3.96 kB │ gzip:   1.31 kB
+dist/assets/index-DoAMGf8-.js   771.66 kB │ gzip: 221.28 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 259ms
+node scripts/browser-e2e.mjs
+(node:40343) TimeoutNegativeWarning: -1790384832475 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+FAIL harness :: Error: gateway timed out: no match
+    at waitFor (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/browser-e2e-stack.mjs:127:9)
+    at async stackUp (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/browser-e2e.mjs:1395:3)
+    at async run (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/browser-e2e.mjs:1417:19)
+    at async main (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/browser-e2e.mjs:1491:5)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/browser-e2e.mjs:1537:1
+--- inventory ---
+(node:46256) TimeoutNegativeWarning: -1790384890462 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+--- telemetry ---
+2026/09/25 20:08:11 ERROR service stopped error="CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together"
+
+[exit code=1 signal=null]
+--- read-api ---
+CONNREFUSED 127.0.0.1:59042
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 59042
+}. See innerErrors.
+    at ControlConnection._borrowFirstConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:309:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async ControlConnection._initializeConnection (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:528:7)
+    at async ControlConnection.init (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/control-connection.js:214:5)
+    at async Client._connect (/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/node_modules/cassandra-driver/lib/client.js:515:5) {
+  info: 'Represents an error when a query cannot be performed because no host is available or could be reached by the driver.',
+  innerErrors: {
+    '127.0.0.1:59042': Error: connect ECONNREFUSED 127.0.0.1:59042
+        at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 59042
+    }
+  }
+}
+
+--- gateway ---
+gateway listening on 127.0.0.1:4303
+
+--- gateway-degraded ---
+gateway listening on 127.0.0.1:4304
+
+--- cassandra-writer ---
+ session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 20:08:15 WARN cassandra unavailable; holding offset attempt=2 retry_in=2.682054594s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 20:08:18 WARN cassandra unavailable; holding offset attempt=3 retry_in=7.929403589s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 20:08:25 WARN cassandra unavailable; holding offset attempt=4 retry_in=13.129703538s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 20:08:39 WARN cassandra unavailable; holding offset attempt=5 retry_in=28.089233873s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+2026/09/25 20:09:07 WARN cassandra unavailable; holding offset attempt=6 retry_in=23.266490125s error="cassandra session not connected\nconnect cassandra: gocql: unable to create session: unable to discover protocol version: dial tcp 127.0.0.1:59042: connect: connection refused"
+
+--- saga-worker ---
+2026/09/25 20:08:13 INFO saga shard leases changed holder=browser-e2e-8271c95b held=64
+
+FAILED (1): harness: gateway timed out: no match in 128 s
+make: *** [browser-e2e] Error 1

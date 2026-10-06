@@ -1,0 +1,6 @@
+services/tenant-control-plane exit=0
+services/billing-service exit=0
+packages/audit exit=0
+packages/entitlements exit=1
+packages/feature-flags exit=1
+packages/membership-client exit=0

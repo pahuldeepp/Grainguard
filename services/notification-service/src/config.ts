@@ -48,6 +48,86 @@ function positive(getenv: Getenv, key: string, fallback: number): number {
   return value;
 }
 
+interface SnapshotConfig {
+  url: string;
+  token: string;
+  allowInsecureHttp?: boolean;
+}
+
+function snapshotConfig(
+  getenv: Getenv,
+  provider: Config["provider"],
+): SnapshotConfig | undefined {
+  const url = getenv("CONTROL_PLANE_URL");
+  const token = getenv("CONTROL_LOOKUP_TOKEN");
+  if (Boolean(url) !== Boolean(token))
+    throw new Error(
+      "CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together",
+    );
+  const insecure = getenv("NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP");
+  if (insecure !== undefined && insecure !== "true" && insecure !== "false")
+    throw new Error(
+      "NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP must be true or false",
+    );
+  if (!url || !token) return undefined;
+  if (provider === "live" && !usesHttps(url))
+    throw new Error(
+      "CONTROL_PLANE_URL must use HTTPS for live notification providers",
+    );
+  return {
+    url,
+    token,
+    ...(provider !== "live" && insecure === "true"
+      ? { allowInsecureHttp: true }
+      : {}),
+  };
+}
+
+function usesHttps(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function liveProviderCredentials(getenv: Getenv, snapshot?: SnapshotConfig) {
+  const sendgridApiKey = getenv("SENDGRID_API_KEY");
+  const sendgridFrom = getenv("SENDGRID_FROM_EMAIL");
+  const twilioSid = getenv("TWILIO_ACCOUNT_SID");
+  const twilioToken = getenv("TWILIO_AUTH_TOKEN");
+  const twilioFrom = getenv("TWILIO_FROM_NUMBER");
+  const complete = Boolean(
+    snapshot &&
+    sendgridApiKey &&
+    sendgridFrom &&
+    twilioSid &&
+    twilioToken &&
+    twilioFrom,
+  );
+  return {
+    sendgridApiKey,
+    sendgridFrom,
+    twilioSid,
+    twilioToken,
+    twilioFrom,
+    complete,
+  };
+}
+
+function selectedProvider(getenv: Getenv): Config["provider"] {
+  const provider = getenv("NOTIFICATIONS_PROVIDER") ?? "local";
+  if (
+    provider !== "local" &&
+    provider !== "unconfigured" &&
+    provider !== "live"
+  )
+    throw new Error(
+      "NOTIFICATIONS_PROVIDER must be local, unconfigured, or live",
+    );
+  return provider;
+}
+
 /** Reads configuration from an injected getenv so entry points stay testable. */
 export function loadConfig(getenv: Getenv): Config {
   requireShardRegistry({

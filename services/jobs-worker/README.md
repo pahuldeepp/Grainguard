@@ -74,7 +74,7 @@ make redrive-dead ARGS="-reason 'broker restored' -limit 50 [-tenant UUID] [-act
 `intent_redrives` (actor, reason, time, previous attempts/error/dead_at), resets the attempt
 counter, keeps the same `intent_id` and re-arms the outbox. It works even when the DLQ copy
 was never published. With `-tenant`, every read and write runs under that tenant's RLS;
-without it, the read-only `redrive_scan` policy lists dead intents across tenants.
+without it, the `jobs_dead_intent_refs` selector lists bounded dead-intent IDs across tenants.
 
 ## Concurrency choices (ADR-0002)
 

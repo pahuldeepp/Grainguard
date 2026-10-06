@@ -1,0 +1,14 @@
+cd services/saga-orchestrator && go run ./cmd/migrate
+cd services/hardware-service && go run ./cmd/migrate
+cd services/saga-orchestrator && go test -race ./...
+ok  	greenguard.local/saga-orchestrator/cmd/api	(cached)
+?   	greenguard.local/saga-orchestrator/cmd/migrate	[no test files]
+ok  	greenguard.local/saga-orchestrator/cmd/worker	(cached)
+?   	greenguard.local/saga-orchestrator/migrations	[no test files]
+ok  	greenguard.local/saga-orchestrator/saga	(cached)
+cd services/hardware-service && go test -race ./...
+ok  	greenguard.local/hardware-service/cmd/migrate	(cached)
+?   	greenguard.local/hardware-service/cmd/mqtt-fixture	[no test files]
+ok  	greenguard.local/hardware-service/cmd/worker	(cached)
+ok  	greenguard.local/hardware-service/hardware	(cached)
+ok  	greenguard.local/hardware-service/migrations	(cached)

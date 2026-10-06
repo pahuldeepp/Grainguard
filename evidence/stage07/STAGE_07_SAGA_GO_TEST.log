@@ -1,0 +1,58 @@
+=== RUN   TestVerifierCachesJWKSAndChecksTenantRolesAndSignature
+--- PASS: TestVerifierCachesJWKSAndChecksTenantRolesAndSignature (0.13s)
+=== RUN   TestRoutesRequireAuthentication
+--- PASS: TestRoutesRequireAuthentication (0.00s)
+PASS
+ok  	greenguard.local/saga-orchestrator/cmd/api	1.531s
+=== RUN   TestLoadConfigFailsClosedAndRejectsStaticTenantList
+--- PASS: TestLoadConfigFailsClosedAndRejectsStaticTenantList (0.00s)
+=== RUN   TestVisitStopsShardOnLostLease
+--- PASS: TestVisitStopsShardOnLostLease (0.00s)
+=== RUN   TestRunRejectsInvalidConfigBeforeConnecting
+--- PASS: TestRunRejectsInvalidConfigBeforeConnecting (0.00s)
+=== RUN   TestPoisonResultCommitsOnlyAfterDLQ
+--- PASS: TestPoisonResultCommitsOnlyAfterDLQ (0.00s)
+=== RUN   TestPoisonResultHoldsOffsetWhenDLQFails
+--- PASS: TestPoisonResultHoldsOffsetWhenDLQFails (0.00s)
+PASS
+ok  	greenguard.local/saga-orchestrator/cmd/worker	1.747s
+=== RUN   TestLiveExpiredLeaseCannotPublishAfterNewerToken
+--- PASS: TestLiveExpiredLeaseCannotPublishAfterNewerToken (1.48s)
+=== RUN   TestLiveLeaseTakeoverWaitsForInFlightSideEffect
+--- PASS: TestLiveLeaseTakeoverWaitsForInFlightSideEffect (1.40s)
+=== RUN   TestLiveTimeoutCompensatesAndReconcilesLateSuccess
+--- PASS: TestLiveTimeoutCompensatesAndReconcilesLateSuccess (0.06s)
+=== RUN   TestLiveActivationTimeoutDeactivatesBeforeRelease
+--- PASS: TestLiveActivationTimeoutDeactivatesBeforeRelease (0.05s)
+=== RUN   TestLiveCompensationTimeoutQuarantinesAndOperatorRedrives
+--- PASS: TestLiveCompensationTimeoutQuarantinesAndOperatorRedrives (0.04s)
+=== RUN   TestLiveRejectedCompensationRedriveIssuesNewFencedCommand
+--- PASS: TestLiveRejectedCompensationRedriveIssuesNewFencedCommand (0.04s)
+=== RUN   TestLiveStartIsAtomicIdempotentAndTenantIsolated
+--- PASS: TestLiveStartIsAtomicIdempotentAndTenantIsolated (0.02s)
+=== RUN   TestLiveConcurrentAssetClaimHasOneWinner
+--- PASS: TestLiveConcurrentAssetClaimHasOneWinner (0.02s)
+=== RUN   TestLiveConcurrentSameKeyReturnsOneSaga
+--- PASS: TestLiveConcurrentSameKeyReturnsOneSaga (0.03s)
+=== RUN   TestLiveResultCannotBorrowAnotherSagasCommand
+--- PASS: TestLiveResultCannotBorrowAnotherSagasCommand (0.02s)
+=== RUN   TestLiveReserveResultAdvancesOnceAndQueuesConfigureAtomically
+--- PASS: TestLiveReserveResultAdvancesOnceAndQueuesConfigureAtomically (0.05s)
+=== RUN   TestLiveProvisioningSuccessTransitions
+--- PASS: TestLiveProvisioningSuccessTransitions (0.03s)
+=== RUN   TestLiveConfigureFailureCompensatesAndReleasesClaim
+--- PASS: TestLiveConfigureFailureCompensatesAndReleasesClaim (0.03s)
+=== RUN   TestLiveBindingFailureDeactivatesBeforeRelease
+--- PASS: TestLiveBindingFailureDeactivatesBeforeRelease (0.05s)
+=== RUN   TestLiveFailedCompensationRequiresRepairAndKeepsClaim
+--- PASS: TestLiveFailedCompensationRequiresRepairAndKeepsClaim (0.03s)
+=== RUN   TestLiveLateAndConflictingResultsCannotSkipSteps
+--- PASS: TestLiveLateAndConflictingResultsCannotSkipSteps (0.03s)
+=== RUN   TestLiveKafkaCommandAndDuplicateResult
+--- SKIP: TestLiveKafkaCommandAndDuplicateResult (0.00s)
+=== RUN   TestLiveCommandPublishRetriesAndStaysTenantScoped
+--- PASS: TestLiveCommandPublishRetriesAndStaysTenantScoped (0.03s)
+=== RUN   TestDecodeResultRequiresMatchingTenantKey
+--- PASS: TestDecodeResultRequiresMatchingTenantKey (0.00s)
+PASS
+ok  	greenguard.local/saga-orchestrator/saga	5.505s

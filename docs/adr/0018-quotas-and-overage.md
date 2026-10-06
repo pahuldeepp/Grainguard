@@ -1,0 +1,11 @@
+# ADR-0018: Tenant entitlements and quota admission
+
+Status: Accepted for Stage 09c (2026-09-25)
+
+Billing publishes `entitlements.changed` on `greenguard.billing.lifecycle.v1`. Each enforcing service stores a local projection behind forced tenant RLS. Projectors accept only the matching tenant Kafka key and a strictly higher `source_version`; duplicate or reordered events cannot roll back a plan. Runtime roles can read entitlements but cannot alter them. An absent or older than five-minute projection uses the free plan and denies paid features. Stale lookups alert; billing is never called on a request path.
+
+Device registration and saga pending registration take the tenant row lock through a narrow security-definer function, then count non-deleted devices and insert in one transaction. A downgraded plan blocks new devices without removing existing ones. Invitation accept and API-key issue use their existing organization row lock before checking active seats or unrevoked, unexpired keys. These are hard limits. Responses identify `entitlement_exceeded`, `seat_limit`, or `api_key_limit` and retain plan version in the decision error.
+
+Ingest volume has a 110% grace allowance. The monthly tenant counter is incremented in the same transaction as the accepted reading and after idempotency receipt lookup; no accepted reading is discarded, and retries do not spend another unit. At the grace boundary, ingestion returns `429 entitlement_volume_exceeded` with `Retry-After`, before any row is written. The counter is a local operational guard; billing metering consumes durable accepted usage separately. Paid overage billing remains disabled until Stage 09d reconciliation proves correctness. Per-second abuse controls and cell caps remain independent of plan allowances.
+
+History range is enforced in Read API against its local RLS projection, and BFF preserves the `403 entitlement_exceeded` response in GraphQL. The Read API also caps query range at 31 days until the pagination and Cassandra path support larger ranges. A five-second transaction-local statement timeout is applied in device service; operators may set a tighter per-request bound for sensitive operations. Locks are pessimistic because these mutations contend on one tenant and need an exact count at the admission boundary.

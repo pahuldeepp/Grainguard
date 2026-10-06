@@ -1,0 +1,57 @@
+- button "Sign out"
+- main:
+  - navigation:
+    - link "G GreenGuard":
+      - /url: /
+    - link "Provisioning":
+      - /url: /provisioning
+    - link "Devices":
+      - /url: /devices
+    - text: LOCAL DEVELOPMENT
+  - paragraph: FROM THE GROUND UP
+  - heading "Better grain care. A solid foundation." [level=1]
+  - paragraph: One platform for grain storage, telemetry and intelligent alerts. Your new workspace starts here.
+  - region "Foundation status":
+    - heading "Foundation status" [level=2]
+    - button "Hide technical details" [pressed]
+    - article:
+      - text: ▦
+      - status: Unavailable
+      - heading "Device service" [level=3]
+      - paragraph: TypeScript · NestJS · PostgreSQL
+      - text: Readiness includes a live database query.
+    - article:
+      - text: ↗
+      - status: Unavailable
+      - heading "Telemetry ingestion" [level=3]
+      - paragraph: Go · PostgreSQL
+      - text: Readiness includes a live database query.
+  - region "Sensor provisioning":
+    - heading "Sensor provisioning" [level=2]
+    - text: Stage 08 · live workflow Device ID
+    - textbox "Device ID"
+    - text: Physical sensor asset ID
+    - textbox "Physical sensor asset ID"
+    - button "Start provisioning"
+    - text: Track provisioning ID
+    - textbox "Track provisioning ID": 63c56761-6398-4146-92ba-444762f865e6
+    - paragraph:
+      - strong: "State:"
+      - text: compensated
+    - paragraph:
+      - strong: "Device:"
+      - text: be537201-0d51-43f3-b1dd-c46f3564c4bd ·
+      - strong: "Sensor:"
+      - text: d1bc2259-f7c5-4c3d-a142-ce6f3c146ad6
+    - heading "History" [level=3]
+    - list:
+      - listitem: provisioning.requested · 2026-09-25T02:21:42.869642-05:00
+      - listitem: deadline.compensate · 2026-09-25T02:21:45.531818-05:00 · reserving result not received before deadline
+      - listitem: deadline.expired · 2026-09-25T02:21:50.349503-05:00 · compensation result unconfirmed
+      - listitem: "operator.replay · 2026-09-25T02:21:53.037194-05:00 · browser e2e: hardware worker restored"
+      - listitem: late_result.reconciled · 2026-09-25T02:21:53.131796-05:00 · asset.reserve succeeded after cancellation
+      - listitem: asset.released · 2026-09-25T02:21:53.140609-05:00
+  - paragraph: NEXT MILESTONE · 02 / 14
+  - heading "Give your grain a home." [level=2]
+  - paragraph: Tenant isolation, sites, storage bins and devices — the domain model comes next.
+  - text: Planned Stage 01 · Workspace foundationLocal setup · Capacity targets remain unverified

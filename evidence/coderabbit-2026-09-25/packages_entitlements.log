@@ -1,0 +1,6 @@
+{"type":"review_context","reviewType":"uncommitted","currentBranch":"main","baseBranch":"main","workingDirectory":"/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/packages/entitlements"}
+{"type":"status","phase":"connecting","status":"connecting_to_review_service"}
+{"type":"status","phase":"analyzing","status":"setting_up","message":"pahuldeepp/Grainguard is not connected to a CodeRabbit organization you can access, so this review will use the free CLI allowance.\n\nIf you expected an org plan here, check your signed-in account with coderabbit auth status, or install CodeRabbit for pahuldeepp/Grainguard at https://app.coderabbit.ai"}
+{"type":"status","phase":"setup","status":"setting_up"}
+{"type":"error","errorType":"connection","message":"Connection failed: WebSocket closed","recoverable":true,"details":{"cause":{"name":"TRPCWebSocketClosedError"},"name":"TRPCClientError"}}
+Error: WebSocket closed

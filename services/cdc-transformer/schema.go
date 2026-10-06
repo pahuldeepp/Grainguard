@@ -9,6 +9,7 @@ type SchemaSet interface{ Validate(map[string]any) *failure }
 type schemas map[string]*jsonschema.Schema
 
 const alertLifecycleSchema = "alert-lifecycle.v1.schema.json"
+const servicePrincipalSchema = "service-principal-changed.v1.schema.json"
 
 var schemaFiles = map[string]string{
 	typeSiteChanged + "@1":               "site-changed.v1.schema.json",

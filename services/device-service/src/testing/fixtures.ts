@@ -159,6 +159,15 @@ export async function createTenant(_db: Db, tenantId: string, name: string) {
   }
 }
 
+// Test fixture only: inserts a control-plane-shaped tenant snapshot using the
+// local administrator. Runtime inventory_app has no INSERT privilege on tenants.
+export async function createTenant(_db: Db, tenantId: string, name: string) {
+  await adminQuery(
+    "INSERT INTO tenants (tenant_id,name) VALUES ($1::uuid,$2)",
+    [tenantId, name],
+  );
+}
+
 // inventory_app over a direct session, with no tenant context set.
 export const appQuery = <T>(sql: string, params: unknown[] = []) =>
   query<T>(env("INVENTORY_DIRECT_URL"), sql, params);

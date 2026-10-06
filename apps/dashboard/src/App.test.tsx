@@ -29,7 +29,9 @@ function respondWith(
 }
 
 const statuses = () =>
-  Array.from(container.querySelectorAll("output")).map((o) => o.textContent);
+  Array.from(container.querySelectorAll(".service-status")).map(
+    (status) => status.textContent,
+  );
 
 async function mount() {
   await act(async () => {
@@ -74,7 +76,10 @@ test("shows checking state, then ready for both services", async () => {
   expect(statuses()).toEqual(["Checking…", "Checking…"]);
   await act(async () => release());
   expect(statuses()).toEqual(["Ready", "Ready"]);
-  expect(container.querySelectorAll("output.ready")).toHaveLength(2);
+  expect(container.querySelectorAll(".service-status.ready")).toHaveLength(2);
+  expect(
+    container.querySelector('output[aria-label="Device service: Ready"]'),
+  ).toBeTruthy();
   expect(container.textContent).toContain("Device service");
   expect(container.textContent).toContain("Telemetry ingestion");
 });
@@ -86,7 +91,7 @@ test("marks an unhealthy or mismatched service unavailable", async () => {
   });
   await mount();
   expect(statuses()).toEqual(["Unavailable", "Unavailable"]);
-  expect(container.querySelectorAll("output.offline")).toHaveLength(2);
+  expect(container.querySelectorAll(".service-status.offline")).toHaveLength(2);
 });
 
 test("polls every five seconds and reflects recovery", async () => {

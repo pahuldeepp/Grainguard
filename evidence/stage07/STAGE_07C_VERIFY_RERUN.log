@@ -1,0 +1,6 @@
+### npm run typecheck
+PASS
+### npm test
+PASS
+### make build
+PASS
