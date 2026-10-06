@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { kafka } from "./events-lib.mjs";
 
+// Scripts and charts parse one topic entry per line; keep it that way.
+// prettier-ignore
 const domainTopics = [
   ["greenguard.raw.inventory.outbox", 1],
   ["greenguard.raw.control.outbox", 1],
@@ -36,27 +38,13 @@ const domainTopics = [
   ["greenguard.saga.results.dlq.v1", 6],
   ["greenguard.saga.commands.dlq.v1", 6],
   ["greenguard.quarantine.v1", 1],
-  [
-    "greenguard.knowledge.document.index.requested.v1",
-    6,
-    "delete",
-    "259200000",
-  ],
-  [
-    "greenguard.knowledge.assistant.suggestion.used.v1",
-    6,
-    "delete",
-    "604800000",
-  ],
-  [
-    "greenguard.knowledge.assistant.suggestion.used.v1.quarantine",
-    1,
-    "delete",
-    "1209600000",
-  ],
+  ["greenguard.knowledge.document.index.requested.v1", 6, "delete", "259200000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1", 6, "delete", "604800000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1.quarantine", 1, "delete", "1209600000"],
   ["greenguard.ai-usage-settled.v1", 6, "delete", "604800000"],
 ];
 // Infrastructure storage is separate from the domain topics.
+// prettier-ignore
 const internalTopics = [
   ["greenguard.connect.configs", 1],
   ["greenguard.connect.offsets", 1],
