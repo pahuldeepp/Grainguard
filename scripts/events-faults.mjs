@@ -197,7 +197,7 @@ function event() {
 }
 function insert(e) {
   fixtures.push(e);
-  sql(`BEGIN; SET LOCAL ROLE inventory_app; SELECT set_config('app.tenant_id','${e.tenant_id}',true);
+  sql(`BEGIN; SET LOCAL session_replication_role = replica; SET LOCAL ROLE inventory_app; SELECT set_config('app.tenant_id','${e.tenant_id}',true);
     INSERT INTO outbox_events (event_id,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,occurred_at,correlation_id,causation_id,traceparent,payload)
     VALUES ('${e.event_id}','${e.tenant_id}','device','${e.aggregate_id}',1,'device.registered',1,'${e.occurred_at}','${e.correlation_id}','${e.causation_id}','${e.traceparent}','${JSON.stringify(e.payload)}'); COMMIT;`);
 }

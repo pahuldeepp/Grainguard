@@ -1003,7 +1003,7 @@ jobs:
       - name: Start event, history, search, cache, MQTT, and OIDC services
         run: |
           make events-up
-          docker compose --env-file .env -f infra/compose/compose.yaml up -d --wait mosquitto
+          docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml up -d --wait mosquitto
           make cassandra-up search-up redis-up oidc-up
           python3 -m venv .local/search-venv
           .local/search-venv/bin/pip install -r services/search-indexer/requirements.txt

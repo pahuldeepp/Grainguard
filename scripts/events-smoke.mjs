@@ -54,6 +54,7 @@ function insert(fixture, commit = true) {
   sql(
     database,
     `BEGIN;
+    SET LOCAL session_replication_role = replica;
     SET LOCAL ROLE ${database}_app;
     SELECT set_config('app.tenant_id', '${tenant}', true);
     INSERT INTO outbox_events

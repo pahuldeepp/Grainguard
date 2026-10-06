@@ -151,11 +151,25 @@ async function waitFor(predicate, label, timeoutMs = 120_000) {
     `${label} timed out: ${last?.message ?? "no matching state"}\n${[...logs].map(([name, log]) => `${name}: ${log.slice(-1000)}`).join("\n")}`,
   );
 }
-async function scoped(url, tenant, work) {
-  const db = new pg.Client({ connectionString: url });
+async function scoped(url, tenant, work, fixture = false) {
+  // Fixture writes are seeded as the PostgreSQL superuser with the tenant-ownership
+  // row fence bypassed for that transaction, then switch back to the service role so
+  // RLS still applies. The services under test keep the fence enabled.
+  const target = new URL(url);
+  let connectionString = url;
+  if (fixture) {
+    const admin = new URL(process.env.POSTGRES_ADMIN_URL);
+    admin.pathname = target.pathname;
+    connectionString = admin.toString();
+  }
+  const db = new pg.Client({ connectionString });
   await db.connect();
   try {
     await db.query("BEGIN");
+    if (fixture) {
+      await db.query("SET LOCAL session_replication_role = replica");
+      await db.query(`SET LOCAL ROLE "${decodeURIComponent(target.username)}"`);
+    }
     await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenant]);
     const result = await work(db);
     await db.query("COMMIT");
@@ -167,9 +181,10 @@ async function scoped(url, tenant, work) {
     await db.end();
   }
 }
+const fixtureScoped = (url, tenant, work) => scoped(url, tenant, work, true);
 async function seed() {
   for (const item of items) {
-    await scoped(
+    await fixtureScoped(
       process.env.INVENTORY_PROJECTOR_DIRECT_URL,
       item.tenant,
       (db) =>
@@ -178,18 +193,22 @@ async function seed() {
           [item.tenant],
         ),
     );
-    await scoped(process.env.INVENTORY_DIRECT_URL, item.tenant, async (db) => {
-      await db.query(
-        "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'Stage07 Site')",
-        [item.tenant, item.site],
-      );
-      await db.query(
-        `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
+    await fixtureScoped(
+      process.env.INVENTORY_DIRECT_URL,
+      item.tenant,
+      async (db) => {
+        await db.query(
+          "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'Stage07 Site')",
+          [item.tenant, item.site],
+        );
+        await db.query(
+          `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
         VALUES($1,$2,$3,$4,'provisioning',$5)`,
-        [item.tenant, item.device, item.site, item.serial, item.asset],
-      );
-    });
-    await scoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
+          [item.tenant, item.device, item.site, item.serial, item.asset],
+        );
+      },
+    );
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `
       INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
@@ -198,42 +217,48 @@ async function seed() {
       ),
     );
   }
-  await scoped(process.env.INVENTORY_DIRECT_URL, compensate.tenant, (db) =>
-    db.query(
-      `
+  await fixtureScoped(
+    process.env.INVENTORY_DIRECT_URL,
+    compensate.tenant,
+    (db) =>
+      db.query(
+        `
     INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
     VALUES($1,$2,$3,$4,'provisioning',$5)`,
-      [
-        compensate.tenant,
-        compensate.device,
-        compensate.site,
-        compensate.serial,
-        compensate.inventoryAsset,
-      ],
-    ),
+        [
+          compensate.tenant,
+          compensate.device,
+          compensate.site,
+          compensate.serial,
+          compensate.inventoryAsset,
+        ],
+      ),
   );
-  await scoped(process.env.HARDWARE_DIRECT_URL, compensate.tenant, (db) =>
-    db.query(
-      `
+  await fixtureScoped(
+    process.env.HARDWARE_DIRECT_URL,
+    compensate.tenant,
+    (db) =>
+      db.query(
+        `
     INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
     VALUES($1,$2,$3,$4)`,
-      [
-        compensate.tenant,
-        compensate.asset,
-        compensate.serial,
-        compensate.secret,
-      ],
-    ),
+        [
+          compensate.tenant,
+          compensate.asset,
+          compensate.serial,
+          compensate.secret,
+        ],
+      ),
   );
   for (const item of Object.values(gate)) {
-    await scoped(process.env.INVENTORY_DIRECT_URL, item.tenant, (db) =>
+    await fixtureScoped(process.env.INVENTORY_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
         VALUES($1,$2,$3,$4,'provisioning',$5)`,
         [item.tenant, item.device, item.site, item.serial, item.asset],
       ),
     );
-    await scoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
         VALUES($1,$2,$3,$4)`,

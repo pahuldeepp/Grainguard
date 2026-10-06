@@ -43,7 +43,7 @@ helm template edge infra/gitops/disposable/edge-routing-chart --set-string cell=
 ruby - "$rendered" <<'RUBY'
 require 'yaml'
 objects = YAML.load_stream(File.read(ARGV.fetch(0))).compact
-abort 'missing deployable edge resources' unless objects.map { |o| o['kind'] }.sort == %w[DestinationRule DestinationRule DestinationRule Gateway TargetGroupBinding VirtualService]
+abort 'missing deployable edge resources' unless objects.map { |o| o['kind'] }.sort == %w[DestinationRule DestinationRule DestinationRule DestinationRule Gateway TargetGroupBinding VirtualService]
 binding = objects.find { |o| o['kind'] == 'TargetGroupBinding' }
 abort 'wrong target binding' unless binding.dig('spec', 'serviceRef') == {'name'=>'istio-ingressgateway', 'port'=>80} && binding.dig('spec', 'targetType') == 'ip'
 abort 'unexpected security group management' if binding.dig('spec', 'networking')

@@ -16,7 +16,7 @@ services:
     mem_limit: 512m
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
-      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ../rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 3s

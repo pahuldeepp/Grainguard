@@ -203,7 +203,7 @@ function insert(events) {
   );
   sql(
     "inventory",
-    `BEGIN; SET LOCAL ROLE inventory_app; SELECT set_config('app.tenant_id','${tenant}',true); ${statements.join("\n")} COMMIT;`,
+    `BEGIN; SET LOCAL session_replication_role = replica; SET LOCAL ROLE inventory_app; SELECT set_config('app.tenant_id','${tenant}',true); ${statements.join("\n")} COMMIT;`,
   );
 }
 function count(table) {

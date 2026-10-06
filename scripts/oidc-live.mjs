@@ -65,18 +65,30 @@ function psql(sql) {
   ]);
 }
 
+// The tenant-ownership row fence rejects direct writes without a bootstrapped
+// shard placement. This test seeds and removes fixture rows as the PostgreSQL
+// superuser, so it bypasses row triggers for that one transaction only; the
+// services under test keep the fence enabled.
+function asFixture(statement) {
+  return `SET LOCAL session_replication_role = replica; ${statement}`;
+}
+
 function seed() {
   cleanup();
   psql(
-    "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES " +
-      `('${TENANT.a}','${DEVICE.a}','${SITE}','oidc-a','active',1),` +
-      `('${TENANT.b}','${DEVICE.b}','${SITE}','oidc-b','active',1)`,
+    asFixture(
+      "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES " +
+        `('${TENANT.a}','${DEVICE.a}','${SITE}','oidc-a','active',1),` +
+        `('${TENANT.b}','${DEVICE.b}','${SITE}','oidc-b','active',1)`,
+    ),
   );
 }
 
 function cleanup() {
   psql(
-    `DELETE FROM public.device_views WHERE (tenant_id,device_id) IN (('${TENANT.a}','${DEVICE.a}'),('${TENANT.b}','${DEVICE.b}'))`,
+    asFixture(
+      `DELETE FROM public.device_views WHERE (tenant_id,device_id) IN (('${TENANT.a}','${DEVICE.a}'),('${TENANT.b}','${DEVICE.b}'))`,
+    ),
   );
 }
 
