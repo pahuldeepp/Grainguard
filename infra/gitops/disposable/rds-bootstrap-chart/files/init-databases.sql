@@ -247,7 +247,8 @@ GRANT control_bootstrap_worker_role TO tenant_bootstrap_worker WITH INHERIT FALS
 SELECT 'CREATE DATABASE greenguard_control OWNER control_migrator'
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_control') \gexec
 REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
-GRANT CONNECT ON DATABASE postgres TO greenguard_admin;
+SELECT 'GRANT CONNECT ON DATABASE postgres TO greenguard_admin'
+ WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'greenguard_admin') \gexec
 REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 ALTER DATABASE greenguard_control OWNER TO control_migrator;
 REVOKE ALL ON DATABASE greenguard_control FROM PUBLIC;

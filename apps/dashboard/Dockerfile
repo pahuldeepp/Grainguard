@@ -41,4 +41,5 @@ FROM nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b1
 ENV CSP_CONNECT_EXTRA=""
 COPY apps/dashboard/nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/apps/dashboard/dist /usr/share/nginx/html
+USER 101
 EXPOSE 8080

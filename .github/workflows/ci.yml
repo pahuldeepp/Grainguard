@@ -47,7 +47,10 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
-          skip-dirs: tests/security/fixtures
+          # Vendored upstream controller chart archives (Argo CD, Argo Rollouts, Istio, KEDA) carry
+          # upstream RBAC we cannot edit; they are pinned by digest and verified separately.
+          skip-dirs: tests/security/fixtures,infra/helm/controller-charts,infra/kyverno/tests
+          trivyignores: .trivyignore.yaml
           cache: "false"
       - name: Prove the IaC scanner rejects an intentionally insecure pod
         run: bash scripts/check-trivy-fixture.sh

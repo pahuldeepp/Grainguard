@@ -1,0 +1,15 @@
+title = "GreenGuard gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# CocoaPods "SPEC CHECKSUMS" are public SHA-1 hashes of pod specs, not credentials.
+[[allowlists]]
+description = "CocoaPods spec checksums"
+paths = ['''apps/mobile/shell/ios/Podfile\.lock''']
+
+# A fixed WebSocket handshake nonce in the gateway test is a public protocol value, not a credential.
+[[allowlists]]
+description = "WebSocket handshake nonce in gateway test"
+paths = ['''services/gateway/src/server\.test\.ts''']
+regexes = ['''Sec-WebSocket-Key: [A-Za-z0-9+/=]+''']

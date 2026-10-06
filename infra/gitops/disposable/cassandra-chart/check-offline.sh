@@ -30,7 +30,7 @@ GG_CASSANDRA_RENDER="$rendered" ruby -ryaml -e '
   abort "Cassandra must run non-root" unless state.dig("spec","template","spec","securityContext","runAsNonRoot")==true
   base=find.call("NetworkPolicy","greenguard-cassandra")
   sources=base.dig("spec","ingress").flat_map{|x| x.fetch("from")}
-  expected_jobs=%w[greenguard-cassandra-bootstrap greenguard-cassandra-schema greenguard-cassandra-grants greenguard-cassandra-activator]
+  expected_jobs=%w[greenguard-cassandra-bootstrap greenguard-cassandra-schema greenguard-cassandra-grants greenguard-cassandra-activator greenguard-history-verifier]
   abort "client allowed before admin rotation" unless sources.all?{|x| x.dig("podSelector","matchLabels","greenguard.io/cassandra-job")=="true" && x.dig("podSelector","matchExpressions",0,"values")==expected_jobs}
   jobs=find.call("NetworkPolicy","greenguard-cassandra-jobs")
   abort "job egress selector too broad" unless jobs.dig("spec","podSelector","matchExpressions",0,"values")==expected_jobs
