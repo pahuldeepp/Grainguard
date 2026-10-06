@@ -20,6 +20,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import * as S from "./browser-e2e-stack.mjs";
+import {
+  bootstrapTenantOwnership,
+  controlIncarnations,
+  startPlacementAuthority,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
 import { operations } from "../services/bff/dist/query-policy.js";
 
 process.loadEnvFile(".env");
@@ -38,6 +44,9 @@ const TENANT = {
   b: "0b0b0b0b-0000-4000-8000-00000000000b",
 };
 const id = randomUUID().slice(0, 8);
+// Tenant placement (set in stackUp): every DB-writing service resolves ownership
+// through a private shard registry and a placement authority.
+let placementEnv = () => ({});
 const tmp = mkdtempSync(path.join(tmpdir(), "greenguard-browser-e2e-"));
 const alias = `greenguard-browser-e2e-${id}`;
 const failures = [];
@@ -281,6 +290,8 @@ function startHardware(bins) {
     {
       KAFKA_BROKERS: S.broker,
       MQTT_BROKER_URL: "tcp://127.0.0.1:51883",
+      MQTT_CLIENT_ID: `browser-e2e-${id}-hardware`,
+      ...placementEnv("hardware-service", "hardware", "HARDWARE_DIRECT_URL"),
     },
   );
 }
@@ -299,6 +310,7 @@ function startBackends(bins, fixtureFile) {
     "services/device-service",
     {
       KAFKA_BROKERS: S.broker,
+      ...placementEnv("device-service", "inventory", "INVENTORY_DIRECT_URL"),
     },
   );
   start("telemetry", bins.telemetry, [], "services/telemetry-ingest", {
@@ -310,6 +322,7 @@ function startBackends(bins, fixtureFile) {
     AUTH_AUDIENCE: "greenguard-ingest",
     AUTH_JWKS_URL: `http://127.0.0.1:${PORTS.idp}/keys`,
     INGEST_BINDING_FEED_MAX_STALE: "45s",
+    ...placementEnv("telemetry-ingest", "telemetry", "TELEMETRY_DIRECT_URL"),
   });
   start("cdc", bins.cdc, [], "services/cdc-transformer", {
     KAFKA_BROKERS: S.broker,
@@ -320,6 +333,7 @@ function startBackends(bins, fixtureFile) {
   start("projection", bins.projection, [], "services/projection-builder", {
     KAFKA_BROKERS: S.broker,
     EVENT_SCHEMA_DIR: schemaDir,
+    ...placementEnv("projection-builder", "read", "PROJECTION_DIRECT_URL"),
   });
   start("cassandra-writer", bins.cassandra, [], "services/cassandra-writer", {
     KAFKA_BROKERS: S.broker,
@@ -348,12 +362,14 @@ function startBackends(bins, fixtureFile) {
   start("saga-api", bins.sagaApi, [], "services/saga-orchestrator", {
     ...authEnv,
     SAGA_API_ADDR: `127.0.0.1:${PORTS.sagaApi}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   start("saga-worker", bins.saga, [], "services/saga-orchestrator", {
     KAFKA_BROKERS: S.broker,
     SAGA_RESULT_GROUP: `browser-e2e-saga-${id}`,
     SAGA_LEASE_TTL_SECONDS: "3",
     SAGA_WORKER_ID: `browser-e2e-${id}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   start(
     "read-api",
@@ -371,6 +387,10 @@ function startBackends(bins, fixtureFile) {
       ...authEnv,
       PORT: String(PORTS.alerts),
       KAFKA_BROKERS: "",
+      // Local-only signing keys for this run (the service requires >= 32 bytes).
+      ALERTS_ACTOR_HMAC_KEY: randomBytes(32).toString("hex"),
+      ALERTS_HISTORY_CURSOR_KEY: randomBytes(32).toString("hex"),
+      ...placementEnv("workflow-alerts", "alerts", "ALERTS_DIRECT_URL"),
     },
   );
   start(
@@ -1344,6 +1364,28 @@ async function stackUp() {
     if (!(await portFree(port))) throw new Error(`port ${port} is in use`);
   if (!(await portFree(PORTS.dashboard, "::1")))
     throw new Error("[::1]:5173 is in use");
+  const incarnations = await controlIncarnations();
+  const tenantIds = Object.values(TENANT);
+  await bootstrapTenantOwnership(
+    tenantIds,
+    ["inventory", "telemetry", "read", "sagas", "hardware", "alerts"],
+    incarnations,
+  );
+  const placement = await startPlacementAuthority(incarnations);
+  placement.add(...tenantIds);
+  servers.push({ close: () => placement.close() });
+  placementEnv = (service, database, directUrlEnv) => ({
+    SHARD_REGISTRY_FILE: writeServiceRegistry({
+      dir: path.join(tmp, "registry"),
+      service,
+      database,
+      directUrl: process.env[directUrlEnv],
+      incarnations,
+    }),
+    SHARD_LOCAL_LOOPBACK: "true",
+    CONTROL_PLANE_URL: placement.url,
+    CONTROL_LOOKUP_TOKEN: placement.token,
+  });
   const fixtureFile = await seed();
   await offsets();
   const idp = (await import("node:http")).createServer((_q, s) =>

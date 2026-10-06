@@ -10,12 +10,13 @@ import {
 } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
+import { writeServiceRegistry } from "./placement-fixture.mjs";
 
 process.loadEnvFile(".env");
 const work = mkdtempSync(path.join(tmpdir(), "greenguard-stage06-e2e-"));
@@ -421,16 +422,18 @@ async function bootstrapTenantOwnership(tenant) {
   return { shardId, incarnation };
 }
 function isolatedRegistry(service, databaseUrl, incarnations) {
-  const manifest = JSON.parse(
-    readFileSync(`.local/sharding/${service}.json`, "utf8"),
-  );
-  manifest.shards.s1.primaryUrl = databaseUrl;
-  for (const shard of ["s1", "s2", "s3", "s4"]) {
-    manifest.shards[shard].incarnation = incarnations[shard];
-  }
-  const file = path.join(work, `${service}.json`);
-  writeFileSync(file, JSON.stringify(manifest), { mode: 0o600 });
-  return file;
+  // s1 is the central local database; s2-s4 are distinct never-connected loopback
+  // addresses (no physical shard bundles are required for this slice).
+  const database = new URL(databaseUrl).pathname
+    .slice(1)
+    .replace(/^greenguard_/, "");
+  return writeServiceRegistry({
+    dir: work,
+    service,
+    database,
+    directUrl: databaseUrl,
+    incarnations,
+  });
 }
 function envelope(tenant, type, aggregateType, aggregate, version, payload) {
   return {
@@ -627,9 +630,10 @@ try {
     controlShards.map((row) => row.shard_id),
     ["s1", "s2", "s3", "s4"],
   );
-  assert.ok(
-    controlShards.every((row) => row.state === "active"),
-    "all local shard routes must be active",
+  assert.equal(
+    controlShards.find((row) => row.shard_id === "s1")?.state,
+    "active",
+    "local shard route s1 must be active",
   );
   const incarnations = Object.fromEntries(
     controlShards.map((row) => [row.shard_id, row.incarnation]),

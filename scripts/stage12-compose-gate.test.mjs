@@ -89,7 +89,9 @@ test("recursive make loads the explicitly selected scratch Makefile", () => {
       env: fixtureEnv,
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.stdout.includes(`loaded= ${relativeMakefile}`));
+    // GNU make versions differ on whether MAKEFILE_LIST starts with a space.
+    const escaped = relativeMakefile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(result.stdout, new RegExp(`loaded=\\s*${escaped}`));
     assert.match(result.stdout, /child-from-isolated-makefile/);
     assert.ok(!result.stdout.includes(resolve(root, ".env")));
     assert.ok(!result.stderr.includes(resolve(root, ".env")));

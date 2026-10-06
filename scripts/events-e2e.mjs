@@ -16,12 +16,21 @@ import {
   rawTopic,
   waitRunning,
 } from "./events-lib.mjs";
+import {
+  bootstrapTenantOwnership,
+  controlIncarnations,
+  startPlacementAuthority,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
 
 // Host binaries keep this slice out of the Compose deployment topology. They
 // connect using the same .env URLs as the Go integration tests.
 process.loadEnvFile(".env");
 const work = mkdtempSync(path.join(tmpdir(), "greenguard-events-e2e-"));
 const children = new Set();
+// Tenant placement for the binding consumer (set in the main block below).
+let placementEnv = () => ({});
+let placementAuthority;
 const tenant = randomUUID();
 const site = randomUUID();
 const expected = [];
@@ -154,6 +163,7 @@ function start(binary, port) {
       // .env without CONTROL_PLANE_URL would abort startup.
       CONTROL_PLANE_URL: "",
       CONTROL_LOOKUP_TOKEN: "",
+      ...placementEnv("telemetry-ingest", "telemetry", "TELEMETRY_DIRECT_URL"),
       // Checkpoints arrive every 30s; 45s keeps a live feed fresh and lets a stopped
       // connector turn it stale within about a minute.
       INGEST_BINDING_FEED_MAX_STALE: "45s",
@@ -394,6 +404,22 @@ async function startAtLogEnd() {
 }
 
 try {
+  const incarnations = await controlIncarnations();
+  await bootstrapTenantOwnership([tenant], ["telemetry"], incarnations);
+  placementAuthority = await startPlacementAuthority(incarnations);
+  placementAuthority.add(tenant);
+  placementEnv = (service, database, directUrlEnv) => ({
+    SHARD_REGISTRY_FILE: writeServiceRegistry({
+      dir: path.join(work, "registry"),
+      service,
+      database,
+      directUrl: process.env[directUrlEnv],
+      incarnations,
+    }),
+    SHARD_LOCAL_LOOPBACK: "true",
+    CONTROL_PLANE_URL: placementAuthority.url,
+    CONTROL_LOOKUP_TOKEN: placementAuthority.token,
+  });
   await startAtLogEnd();
   const transformerBinary = build("cdc-transformer");
   const consumerBinary = build("telemetry-ingest");
@@ -600,6 +626,7 @@ try {
   );
 } finally {
   idp.close();
+  placementAuthority?.close();
   await Promise.all([...children].map((p) => stop(p)));
   rmSync(work, { recursive: true, force: true });
 }

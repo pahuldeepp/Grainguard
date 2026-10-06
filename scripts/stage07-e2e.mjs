@@ -16,6 +16,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import kafkaJs from "kafkajs";
 import pg from "pg";
+import {
+  bootstrapTenantOwnership,
+  controlIncarnations,
+  startPlacementAuthority,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
 
 process.loadEnvFile(".env");
 const { Kafka, logLevel } = kafkaJs;
@@ -96,6 +102,10 @@ const kafka = new Kafka({
   logLevel: logLevel.ERROR,
 });
 let admin;
+// Tenant placement: services resolve ownership through a private shard registry and a
+// placement authority, exactly as in a sharded deployment (set in main()).
+let placementEnv = () => ({});
+let placementAuthority;
 
 function buildGo(module, target, name) {
   const output = path.join(tmp, name);
@@ -358,6 +368,27 @@ async function main() {
     "inventory CDC connector must run",
   );
   assert.ok(connector.tasks.every((task) => task.state === "RUNNING"));
+  const incarnations = await controlIncarnations();
+  await bootstrapTenantOwnership(
+    tenants,
+    ["inventory", "telemetry", "sagas", "hardware"],
+    incarnations,
+  );
+  placementAuthority = await startPlacementAuthority(incarnations);
+  placementAuthority.add(...tenants);
+  const registryDir = path.join(tmp, "registry");
+  placementEnv = (service, database, directUrlEnv) => ({
+    SHARD_REGISTRY_FILE: writeServiceRegistry({
+      dir: registryDir,
+      service,
+      database,
+      directUrl: process.env[directUrlEnv],
+      incarnations,
+    }),
+    SHARD_LOCAL_LOOPBACK: "true",
+    CONTROL_PLANE_URL: placementAuthority.url,
+    CONTROL_LOOKUP_TOKEN: placementAuthority.token,
+  });
   const fixtureFile = await seed();
   await seedOffsets();
   await new Promise((resolve) => idp.listen(18192, "127.0.0.1", resolve));
@@ -406,6 +437,7 @@ async function main() {
     AUTH_ISSUER: issuer,
     AUTH_AUDIENCE: audience,
     AUTH_JWKS_URL: "http://127.0.0.1:18192/keys",
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   const orchestrator = startSaga("saga-worker");
   await waitFor(
@@ -564,6 +596,7 @@ function startSaga(name, current = true) {
     SAGA_RESULT_GROUP: sagaGroup,
     SAGA_LEASE_TTL_SECONDS: "3",
     SAGA_WORKER_ID: `stage07-${id}-${name}-${Date.now()}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   if (current) procs.saga = p;
   return p;
@@ -573,13 +606,21 @@ const participantArgs = {
     bins.hardware,
     [],
     "services/hardware-service",
-    { KAFKA_BROKERS: broker, MQTT_BROKER_URL: mqttBroker },
+    {
+      KAFKA_BROKERS: broker,
+      MQTT_BROKER_URL: mqttBroker,
+      MQTT_CLIENT_ID: `stage07-${id}-hardware`,
+      ...placementEnv("hardware-service", "hardware", "HARDWARE_DIRECT_URL"),
+    },
   ],
   inventory: () => [
     process.execPath,
     ["dist/saga/main.js"],
     "services/device-service",
-    { KAFKA_BROKERS: broker },
+    {
+      KAFKA_BROKERS: broker,
+      ...placementEnv("device-service", "inventory", "INVENTORY_DIRECT_URL"),
+    },
   ],
   telemetry: () => [
     bins.telemetry,
@@ -590,10 +631,7 @@ const participantArgs = {
       SAGA_BINDING_ENABLED: "1",
       EVENT_SCHEMA_DIR: path.resolve("contracts/events"),
       HTTP_ADDR: "127.0.0.1:18097",
-      // The saga gate does not exercise machine API keys; a lookup token
-      // inherited from .env without CONTROL_PLANE_URL would abort startup.
-      CONTROL_PLANE_URL: "",
-      CONTROL_LOOKUP_TOKEN: "",
+      ...placementEnv("telemetry-ingest", "telemetry", "TELEMETRY_DIRECT_URL"),
     },
   ],
 };
@@ -621,8 +659,11 @@ async function ensureRunning(report) {
     }
   }
 }
+// Includes a deadline UPDATE that simulates a stalled saga, so it bypasses the row fence.
 const sagaDb = (tenant, sql, args) =>
-  scoped(process.env.SAGA_DIRECT_URL, tenant, (db) => db.query(sql, args));
+  fixtureScoped(process.env.SAGA_DIRECT_URL, tenant, (db) =>
+    db.query(sql, args),
+  );
 async function provision(item, device = item.device) {
   const response = await request(item.tenant, "/v1/provisioning", "POST", {
     device_id: device,
@@ -1100,6 +1141,7 @@ try {
 } finally {
   for (const child of children.reverse()) await stop(child);
   if (idpStarted) await new Promise((resolve) => idp.close(resolve));
+  placementAuthority?.close();
   await admin?.disconnect();
   rmSync(tmp, { recursive: true, force: true });
 }
