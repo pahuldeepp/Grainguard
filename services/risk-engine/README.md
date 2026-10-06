@@ -82,8 +82,10 @@ transactions retain the existing inbox, tenant filters and atomic outbox.
 
 Each database handle has at most one connection per shard; consumer, health and
 optional policy handles therefore reserve at most 12 connections per process.
-Connection access is serialized per handle. The readiness probe checks all four
-configured primaries. The bounded, payload-free `quarantine_samples` transport
+Connection access is serialized per handle. The readiness probe checks every
+active primary (all four by default). A local single-shard fixture may set
+`SHARD_ACTIVE_IDS=s1` only alongside loopback mode; a tenant route to an omitted
+shard fails closed. The bounded, payload-free `quarantine_samples` transport
 ledger is explicitly stored on `s1`; this is independent of customer placement.
 Authority requests expose bounded outcome counters and a latency histogram,
 without tenant labels. Routing does not use stale cache entries during an outage.

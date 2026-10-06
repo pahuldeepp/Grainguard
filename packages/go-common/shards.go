@@ -120,19 +120,24 @@ type TenantTransactionRouter interface {
 }
 
 type ShardedDB struct {
-	registry ShardRegistry
-	resolver PlacementResolver
-	mu       sync.Mutex
-	pools    map[string]*pgxpool.Pool
-	closed   bool
+	registry     ShardRegistry
+	resolver     PlacementResolver
+	activeShards []string
+	mu           sync.Mutex
+	pools        map[string]*pgxpool.Pool
+	closed       bool
 }
 
 func NewShardedDB(registry ShardRegistry, resolver PlacementResolver) *ShardedDB {
-	return &ShardedDB{registry: registry, resolver: resolver, pools: make(map[string]*pgxpool.Pool)}
+	return &ShardedDB{registry: registry, resolver: resolver, activeShards: []string{"s1", "s2", "s3", "s4"}, pools: make(map[string]*pgxpool.Pool)}
 }
 
 func ShardedDBFromEnvironment(getenv func(string) string, service, database, role string) (*ShardedDB, error) {
 	registry, err := LoadShardRegistry(getenv("SHARD_REGISTRY_FILE"), service, database, role)
+	if err != nil {
+		return nil, err
+	}
+	activeShards, err := configuredActiveShards(getenv("SHARD_ACTIVE_IDS"), getenv("SHARD_LOCAL_LOOPBACK") == "true", registry)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +149,39 @@ func ShardedDBFromEnvironment(getenv func(string) string, service, database, rol
 	if err != nil {
 		return nil, err
 	}
-	return NewShardedDB(registry, resolver), nil
+	db := NewShardedDB(registry, resolver)
+	db.activeShards = activeShards
+	return db, nil
+}
+
+func configuredActiveShards(raw string, localLoopback bool, registry ShardRegistry) ([]string, error) {
+	all := []string{"s1", "s2", "s3", "s4"}
+	if raw == "" {
+		return all, nil
+	}
+	if !localLoopback {
+		return nil, ErrShardRegistry
+	}
+	for _, endpoint := range registry.Shards {
+		primary, err := url.Parse(endpoint.PrimaryURL)
+		if err != nil || !loopbackHost(primary.Hostname()) {
+			return nil, ErrShardRegistry
+		}
+	}
+	seen := make(map[string]bool)
+	active := make([]string, 0, 4)
+	for _, id := range strings.Split(raw, ",") {
+		id = strings.TrimSpace(id)
+		if id != "s1" && id != "s2" && id != "s3" && id != "s4" || seen[id] {
+			return nil, ErrShardRegistry
+		}
+		seen[id] = true
+		active = append(active, id)
+	}
+	if len(active) == 0 || !seen["s1"] {
+		return nil, ErrShardRegistry
+	}
+	return active, nil
 }
 
 // RequireShardRegistry prevents a production deployment from falling back to
@@ -207,7 +244,7 @@ func (s *ShardedDB) WithTenantSchema(ctx context.Context, tenant, schema string,
 		return err
 	}
 	endpoint, exists := s.registry.Shards[route.ShardID]
-	if !exists || endpoint.Incarnation != route.Incarnation || route.TenantID != tenant {
+	if !exists || !s.isActiveShard(route.ShardID) || endpoint.Incarnation != route.Incarnation || route.TenantID != tenant {
 		return ErrInvalidTenantPlacement
 	}
 	pool, err := s.Primary(ctx, route.ShardID)
@@ -233,7 +270,7 @@ func (s *ShardedDB) WithTenantSchema(ctx context.Context, tenant, schema string,
 // Four sequential endpoints bound both fanout and aggregate connection budget.
 // Callers use only explicit tenant-free health/ID-selector/infrastructure SQL.
 func (s *ShardedDB) ForEachPrimary(ctx context.Context, fn func(string, *pgxpool.Pool) error) error {
-	for _, id := range []string{"s1", "s2", "s3", "s4"} {
+	for _, id := range s.activeShards {
 		pool, err := s.Primary(ctx, id)
 		if err != nil {
 			return err
@@ -243,6 +280,15 @@ func (s *ShardedDB) ForEachPrimary(ctx context.Context, fn func(string, *pgxpool
 		}
 	}
 	return nil
+}
+
+func (s *ShardedDB) isActiveShard(id string) bool {
+	for _, active := range s.activeShards {
+		if id == active {
+			return true
+		}
+	}
+	return false
 }
 func (s *ShardedDB) Ping(ctx context.Context) error {
 	return s.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {

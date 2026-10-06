@@ -141,6 +141,58 @@ func TestPrivateShardRegistryAndPoolShutdown(t *testing.T) {
 	}
 }
 
+func TestActiveShardSelectionDefaultsToAllAndRestrictsOnlyLocalFixtures(t *testing.T) {
+	registry := testShardRegistry()
+	if got, err := configuredActiveShards("", false, registry); err != nil || fmt.Sprint(got) != "[s1 s2 s3 s4]" {
+		t.Fatalf("default active shards = %v, %v", got, err)
+	}
+	if got, err := configuredActiveShards("s1", true, registry); err != nil || fmt.Sprint(got) != "[s1]" {
+		t.Fatalf("local active shards = %v, %v", got, err)
+	}
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		local    bool
+		registry ShardRegistry
+	}{
+		{name: "production override", raw: "s1", local: false, registry: registry},
+		{name: "unknown shard", raw: "s5", local: true, registry: registry},
+		{name: "duplicate shard", raw: "s1,s1", local: true, registry: registry},
+		{name: "omitted quarantine shard", raw: "s2", local: true, registry: registry},
+		{name: "non-loopback registry", raw: "s1", local: true, registry: publicShardRegistry()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := configuredActiveShards(tc.raw, tc.local, tc.registry); !errors.Is(err, ErrShardRegistry) {
+				t.Fatalf("unsafe active-shard override accepted: %v", err)
+			}
+		})
+	}
+}
+
+func publicShardRegistry() ShardRegistry {
+	registry := testShardRegistry()
+	endpoint := registry.Shards["s1"]
+	endpoint.PrimaryURL = "postgres://test_app:private@postgres.example:5400/greenguard_test?sslmode=verify-full"
+	registry.Shards["s1"] = endpoint
+	return registry
+}
+
+func TestInactiveLocalShardCannotReceiveTenantRoute(t *testing.T) {
+	shards := NewShardedDB(testShardRegistry(), fixedPlacement{TenantPlacement{
+		TenantID: tenantID, ShardID: "s2", Incarnation: tenantID,
+		PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Second),
+	}, nil})
+	shards.activeShards = []string{"s1"}
+	defer shards.Close()
+	err := shards.WithTenantSchema(context.Background(), tenantID, "public", func(context.Context, pgx.Tx) error {
+		t.Fatal("inactive shard route reached SQL")
+		return nil
+	})
+	if !errors.Is(err, ErrInvalidTenantPlacement) {
+		t.Fatalf("inactive shard route error = %v", err)
+	}
+}
+
 func TestRequireShardRegistryPreventsLegacyFallback(t *testing.T) {
 	for _, tc := range []struct {
 		name string

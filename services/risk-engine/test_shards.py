@@ -111,6 +111,31 @@ class ShardTest(unittest.TestCase):
         db.close()
         self.assertTrue(all(d.closed for d in db.databases.values()))
 
+    def test_local_active_shard_override_is_scoped_and_fail_closed(self):
+        db = ShardedDatabase(manifest(), lambda tenant: route("s2"), allow_loopback=True,
+                             active_ids=["s1"], database=FakeDatabase)
+        db.databases["s4"].healthy = False
+        self.assertTrue(db.ping(), "inactive fixture endpoints must not block local readiness")
+        with self.assertRaisesRegex(StoreError, "inactive shard"):
+            with db.transaction(TENANT):
+                self.fail("authority routed to an inactive local shard")
+
+        for active_ids in ([], ["s1", "s1"], ["s5"], ["s2"]):
+            with self.assertRaisesRegex(ValueError, "active shard override"):
+                ShardedDatabase(manifest(), lambda tenant: route(), allow_loopback=True,
+                                active_ids=active_ids, database=FakeDatabase)
+        normalized = ShardedDatabase(manifest(), lambda tenant: route(), allow_loopback=True,
+                                     active_ids=[" s1 "], database=FakeDatabase)
+        self.assertTrue(normalized.ping())
+        remote = manifest()
+        for entry in remote["shards"].values():
+            entry["primaryUrl"] = entry["primaryUrl"].replace(
+                "127.0.0.1", "db.example"
+            ).replace("sslmode=disable", "sslmode=verify-full&sslrootcert=/ca")
+        with self.assertRaisesRegex(ValueError, "active shard override"):
+            ShardedDatabase(remote, lambda tenant: route(), allow_loopback=True,
+                            active_ids=["s1"], database=FakeDatabase)
+
     def test_http_requires_tls_or_explicit_loopback_or_mesh(self):
         for url in ("http://control", "https://user:pass@control", "https://control?override=1", "ftp://control"):
             with self.assertRaises(ValueError):

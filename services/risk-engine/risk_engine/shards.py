@@ -76,6 +76,7 @@ def authority_fetcher(base_url: str, token: str, mesh_mtls: bool = False):
 
 class ShardedDatabase:
     def __init__(self, manifest: Any, fetch: Callable[[str], Any], *, allow_loopback=False,
+                 active_ids: list[str] | None = None,
                  database: Callable[[str], Any] = PgDatabase, clock=time.time, observe=None):
         if (not isinstance(manifest, dict)
                 or set(manifest) != {"formatVersion", "service", "database", "shards"}
@@ -84,6 +85,7 @@ class ShardedDatabase:
                 or not isinstance(manifest["shards"], dict) or set(manifest["shards"]) != SHARDS):
             raise ValueError("invalid risk shard registry")
         identities, urls, endpoints = {}, {}, set()
+        loopback_endpoints = True
         for shard, entry in manifest["shards"].items():
             if (not isinstance(entry, dict) or set(entry) != {"incarnation", "primaryUrl", "replicaUrls"}
                     or not isinstance(entry["incarnation"], str) or not UUID.fullmatch(entry["incarnation"])
@@ -92,6 +94,7 @@ class ShardedDatabase:
             url = urlsplit(entry["primaryUrl"])
             query = parse_qs(url.query, keep_blank_values=True)
             local = allow_loopback and url.hostname in {"localhost", "127.0.0.1", "::1"}
+            loopback_endpoints = loopback_endpoints and local
             if (url.scheme not in {"postgres", "postgresql"} or url.username != "risk_app"
                     or url.path != "/greenguard_risk" or not url.hostname or not url.password or url.fragment
                     or (not local and (query.get("sslmode") != ["verify-full"]
@@ -105,16 +108,31 @@ class ShardedDatabase:
                 raise ValueError("duplicate risk primary")
             endpoints.add(address)
             identities[shard], urls[shard] = entry["incarnation"], entry["primaryUrl"]
+        if active_ids is None:
+            active_ids = sorted(SHARDS)
+        else:
+            if not isinstance(active_ids, list) or any(not isinstance(shard, str) for shard in active_ids):
+                raise ValueError("active shard override must be a list of shard IDs")
+            active_ids = [shard.strip() for shard in active_ids]
+            if (not allow_loopback or not loopback_endpoints or not active_ids
+                    or "s1" not in active_ids
+                    or len(active_ids) != len(set(active_ids))
+                    or any(shard not in SHARDS for shard in active_ids)):
+                raise ValueError("active shard override is allowed only for unique local loopback shards")
         # Validate the entire manifest before constructing even one database.
         self.identities, self.fetch, self.clock, self.observe = identities, fetch, clock, observe
+        self.active_ids = tuple(active_ids)
         self.databases = {shard: database(urls[shard]) for shard in sorted(SHARDS)}
 
     @classmethod
     def from_env(cls, getenv, observe=None):
+        raw_active = getenv("SHARD_ACTIVE_IDS")
         return cls(json.loads(Path(getenv("SHARD_REGISTRY_FILE")).read_text()),
                    authority_fetcher(getenv("CONTROL_PLANE_URL") or "", getenv("CONTROL_LOOKUP_TOKEN") or "",
                                      getenv("CONTROL_PLANE_MESH_MTLS") == "true"),
-                   allow_loopback=getenv("SHARD_LOCAL_LOOPBACK") == "true", observe=observe)
+                   allow_loopback=getenv("SHARD_LOCAL_LOOPBACK") == "true",
+                   active_ids=[shard.strip() for shard in raw_active.split(",")] if raw_active else None,
+                   observe=observe)
 
     @contextmanager
     def transaction(self, tenant_id: str) -> Iterator[PgTx]:
@@ -122,6 +140,8 @@ class ShardedDatabase:
         try:
             value = self.fetch(tenant_id)
             route = validate_route(value, tenant_id, self.clock())
+            if route["shardId"] not in self.active_ids:
+                raise StoreError("42501", "placement references an inactive shard")
             if self.identities[route["shardId"]] != route["shardIncarnation"]:
                 raise StoreError("42501", "placement incarnation mismatch")
             failed = False
@@ -141,7 +161,7 @@ class ShardedDatabase:
         return self.databases["s1"].quarantine(*args)
 
     def ping(self):
-        return all([db.ping() for db in self.databases.values()])
+        return all(self.databases[shard].ping() for shard in self.active_ids)
 
     def close(self):
         for db in self.databases.values():

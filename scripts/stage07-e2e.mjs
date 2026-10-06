@@ -19,6 +19,7 @@ import pg from "pg";
 import {
   bootstrapTenantOwnership,
   controlIncarnations,
+  localShardSelection,
   startPlacementAuthority,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
@@ -385,7 +386,7 @@ async function main() {
       directUrl: process.env[directUrlEnv],
       incarnations,
     }),
-    SHARD_LOCAL_LOOPBACK: "true",
+    ...localShardSelection(),
     CONTROL_PLANE_URL: placementAuthority.url,
     CONTROL_LOOKUP_TOKEN: placementAuthority.token,
   });

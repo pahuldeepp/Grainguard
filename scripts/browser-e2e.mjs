@@ -23,6 +23,7 @@ import * as S from "./browser-e2e-stack.mjs";
 import {
   bootstrapTenantOwnership,
   controlIncarnations,
+  localShardSelection,
   startPlacementAuthority,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
@@ -1382,7 +1383,7 @@ async function stackUp() {
       directUrl: process.env[directUrlEnv],
       incarnations,
     }),
-    SHARD_LOCAL_LOOPBACK: "true",
+    ...localShardSelection(),
     CONTROL_PLANE_URL: placement.url,
     CONTROL_LOOKUP_TOKEN: placement.token,
   });

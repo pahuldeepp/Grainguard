@@ -17,6 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
 import {
+  localShardSelection,
   ownershipSubjects,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
@@ -730,7 +731,7 @@ try {
       RISK_KAFKA_OFFSET_RESET: "error",
       RISK_HEALTH_PORT: "18086",
       SHARD_REGISTRY_FILE: riskRegistryPath,
-      SHARD_LOCAL_LOOPBACK: "true",
+      ...localShardSelection(),
       CONTROL_PLANE_URL: placementUrl,
       CONTROL_LOOKUP_TOKEN: placementToken,
       AUTH_ISSUER: issuer,
@@ -756,7 +757,7 @@ try {
     AUTH_MEMBERSHIP_SOURCE: "file",
     AUTH_MEMBERSHIP_FILE: membershipPath,
     SHARD_REGISTRY_FILE: alertsRegistryPath,
-    SHARD_LOCAL_LOOPBACK: "true",
+    ...localShardSelection(),
     CONTROL_PLANE_URL: placementUrl,
     CONTROL_LOOKUP_TOKEN: placementToken,
     AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP: "true",
@@ -773,6 +774,7 @@ try {
     JOBS_KAFKA_GROUP: groups.jobs,
     JOBS_HTTP_ADDR: "127.0.0.1:18095",
     SHARD_REGISTRY_FILE: jobsRegistryPath,
+    ...localShardSelection(),
     CONTROL_PLANE_URL: placementUrl,
     CONTROL_LOOKUP_TOKEN: placementToken,
   });
@@ -798,7 +800,7 @@ try {
       KAFKA_BROKERS: "",
       SHARD_REGISTRY_FILE: notificationRegistryPath,
       SHARD_ROUTING_REQUIRED: "true",
-      SHARD_LOCAL_LOOPBACK: "true",
+      ...localShardSelection(),
       CONTROL_PLANE_URL: placementUrl,
       CONTROL_LOOKUP_TOKEN: placementToken,
       // The local fixture serves authenticated placement and flag snapshots;

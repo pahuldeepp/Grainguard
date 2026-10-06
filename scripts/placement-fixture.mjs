@@ -19,6 +19,10 @@ export function ownershipSubjects(tenants) {
   return [...new Set([...tenants, INFRASTRUCTURE_TENANT])];
 }
 
+export function localShardSelection() {
+  return { SHARD_ACTIVE_IDS: "s1", SHARD_LOCAL_LOOPBACK: "true" };
+}
+
 function adminClient(database) {
   const url = new URL(process.env.POSTGRES_ADMIN_URL);
   url.pathname = `/greenguard_${database}`;
