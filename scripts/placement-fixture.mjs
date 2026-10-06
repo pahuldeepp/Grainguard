@@ -13,6 +13,11 @@ import path from "node:path";
 import pg from "pg";
 
 const SHARDS = ["s1", "s2", "s3", "s4"];
+export const INFRASTRUCTURE_TENANT = "00000000-0000-4000-8000-000000000001";
+
+export function ownershipSubjects(tenants) {
+  return [...new Set([...tenants, INFRASTRUCTURE_TENANT])];
+}
 
 function adminClient(database) {
   const url = new URL(process.env.POSTGRES_ADMIN_URL);
@@ -58,16 +63,45 @@ export async function bootstrapTenantOwnership(
 ) {
   const shardId = "s1";
   const incarnation = incarnations[shardId];
-  for (const tenant of tenants) {
+  for (const tenant of ownershipSubjects(tenants)) {
     for (const database of databases) {
       await withAdmin(database, async (client) => {
         await client.query("BEGIN");
         try {
+          const existing = await client.query(
+            "SELECT shard_id,shard_incarnation::text AS incarnation,placement_epoch,state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1::uuid",
+            [tenant],
+          );
+          const current = existing.rows[0];
+          if (
+            current &&
+            (current.shard_id !== shardId ||
+              current.incarnation !== incarnation ||
+              Number(current.placement_epoch) !== 1 ||
+              !["prepared", "active"].includes(current.state))
+          ) {
+            throw new Error(
+              "existing ownership conflicts with fixture placement",
+            );
+          }
+          if (current?.state === "active") {
+            await client.query("COMMIT");
+            return;
+          }
           await client.query("SET LOCAL ROLE tenant_ownership_bootstrap");
-          await client.query(
-            "SELECT greenguard_internal.prepare_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
+          if (!current) {
+            await client.query(
+              "SELECT greenguard_internal.prepare_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
+              [tenant, shardId, incarnation],
+            );
+          }
+          const prepared = await client.query(
+            "SELECT state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,1)",
             [tenant, shardId, incarnation],
           );
+          if (prepared.rows[0]?.state !== "prepared") {
+            throw new Error("tenant ownership preparation receipt missing");
+          }
           await client.query(
             "SELECT greenguard_internal.activate_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
             [tenant, shardId, incarnation],

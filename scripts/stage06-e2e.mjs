@@ -16,7 +16,10 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
-import { writeServiceRegistry } from "./placement-fixture.mjs";
+import {
+  ownershipSubjects,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
 
 process.loadEnvFile(".env");
 const work = mkdtempSync(path.join(tmpdir(), "greenguard-stage06-e2e-"));
@@ -385,33 +388,59 @@ async function bootstrapTenantOwnership(tenant) {
     await withAdmin(database, async (client) => {
       await client.query("BEGIN");
       try {
+        const subjects = ownershipSubjects([tenant]);
+        const existingBySubject = new Map();
+        for (const subject of subjects) {
+          const existing = await client.query(
+            "SELECT shard_id,shard_incarnation::text AS incarnation,placement_epoch,state FROM greenguard_internal.tenant_ownership WHERE tenant_id=$1::uuid",
+            [subject],
+          );
+          existingBySubject.set(subject, existing.rows[0]);
+        }
         await client.query("SET LOCAL ROLE tenant_ownership_bootstrap");
-        await client.query(
-          "SELECT greenguard_internal.prepare_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
-          [tenant, shardId, incarnation],
-        );
-        const prepared = await client.query(
-          "SELECT state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,1)",
-          [tenant, shardId, incarnation],
-        );
-        assert.equal(
-          prepared.rows[0]?.state,
-          "prepared",
-          `${database} prepared receipt`,
-        );
-        await client.query(
-          "SELECT greenguard_internal.activate_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
-          [tenant, shardId, incarnation],
-        );
-        const active = await client.query(
-          "SELECT state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,1)",
-          [tenant, shardId, incarnation],
-        );
-        assert.equal(
-          active.rows[0]?.state,
-          "active",
-          `${database} active receipt`,
-        );
+        for (const subject of subjects) {
+          const current = existingBySubject.get(subject);
+          if (
+            current &&
+            (current.shard_id !== shardId ||
+              current.incarnation !== incarnation ||
+              Number(current.placement_epoch) !== 1 ||
+              !["prepared", "active"].includes(current.state))
+          ) {
+            throw new Error(
+              `${database}/${subject} ownership conflicts with fixture placement`,
+            );
+          }
+          if (current?.state === "active") continue;
+          if (!current) {
+            await client.query(
+              "SELECT greenguard_internal.prepare_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
+              [subject, shardId, incarnation],
+            );
+          }
+          const prepared = await client.query(
+            "SELECT state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,1)",
+            [subject, shardId, incarnation],
+          );
+          assert.equal(
+            prepared.rows[0]?.state,
+            "prepared",
+            `${database}/${subject} prepared receipt`,
+          );
+          await client.query(
+            "SELECT greenguard_internal.activate_tenant_ownership($1::uuid,$2::text,$3::uuid,1)",
+            [subject, shardId, incarnation],
+          );
+          const active = await client.query(
+            "SELECT state FROM greenguard_internal.get_tenant_ownership_bootstrap_receipt($1::uuid,$2::text,$3::uuid,1)",
+            [subject, shardId, incarnation],
+          );
+          assert.equal(
+            active.rows[0]?.state,
+            "active",
+            `${database}/${subject} active receipt`,
+          );
+        }
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
