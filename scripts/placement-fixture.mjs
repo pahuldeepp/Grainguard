@@ -87,8 +87,8 @@ export async function bootstrapTenantOwnership(
 
 /**
  * Private registry for one service. Shard s1 is the service's direct database
- * URL; s2-s4 are distinct, never-connected loopback addresses (the loader
- * rejects duplicate endpoints).
+ * URL; s2-s4 are distinct, never-connected loopback ports (the loaders
+ * reject duplicate endpoints and non-loopback hosts without TLS).
  */
 export function writeServiceRegistry({
   dir,
@@ -101,7 +101,7 @@ export function writeServiceRegistry({
   const shards = Object.fromEntries(
     SHARDS.map((id, index) => {
       const url = new URL(primary.toString());
-      if (index > 0) url.hostname = `127.0.0.${index + 1}`;
+      if (index > 0) url.port = String(Number(primary.port || 5432) + index);
       return [
         id,
         {

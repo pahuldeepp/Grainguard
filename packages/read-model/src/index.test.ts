@@ -216,6 +216,9 @@ test(
     const observed = new Date();
     try {
       await client.query("BEGIN");
+      // Fixture rows are seeded as the superuser; bypass the tenant-ownership row fence
+      // for this transaction only. Privilege checks below still apply to read_query.
+      await client.query("SET LOCAL session_replication_role = replica");
       await client.query(
         "SELECT public.projection_history_partition($1::date)",
         [observed.toISOString().slice(0, 10)],
