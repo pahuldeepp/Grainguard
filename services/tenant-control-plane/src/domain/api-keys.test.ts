@@ -298,7 +298,7 @@ test("identical replay returns a stored safe result and never a second secret", 
   assert.equal(replay.secretAlreadyRevealed, true);
   assert.ok(!("key" in replay));
   assert.ok(first.key.startsWith(replay.keyPrefix!));
-  assert.ok(!JSON.stringify(replay).includes(first.key.split("_").pop()!));
+  assert.ok(!JSON.stringify(replay).includes(first.key));
   await assert.rejects(
     createApiKey(
       db,

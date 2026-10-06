@@ -304,17 +304,15 @@ function quarantineFaultBinary() {
     /transport\.SharedOps/,
     "Quarantine adapter seam changed",
   );
-  assert.doesNotMatch(
-    original,
-    /func \(k \*Kafka\) PublishQuarantine/,
-    "Quarantine override already exists",
-  );
+  const method =
+    "func (k *Kafka) PublishQuarantine(ctx context.Context, record Record) error {\n";
+  assert.ok(original.includes(method), "Quarantine adapter method changed");
   writeFileSync(
     file,
-    `${original}\nfunc (k *Kafka) PublishQuarantine(ctx context.Context, record Record) error {
- if err := quarantineFault(record); err != nil { return err }
- return k.SharedOps.PublishQuarantine(ctx, record)
-}\n`,
+    original.replace(
+      method,
+      `${method}\tif err := quarantineFault(record); err != nil { return err }\n`,
+    ),
   );
   writeFileSync(
     path.join(source, "quarantine_fault.go"),

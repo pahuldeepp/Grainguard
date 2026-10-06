@@ -751,6 +751,9 @@ try {
     KAFKA_BROKERS: broker,
     ALERTS_KAFKA_GROUP: groups.alerts,
     PORT: "18084",
+    ALERTS_ACTOR_HMAC_KEY: "stage06-test-actor-hmac-key-at-least-32-bytes",
+    ALERTS_HISTORY_CURSOR_KEY:
+      "stage06-test-history-cursor-key-at-least-32-bytes",
     AUTH_ISSUER: issuer,
     AUTH_AUDIENCE: audience,
     AUTH_JWKS_URL: `http://127.0.0.1:${idp.address().port}/jwks`,

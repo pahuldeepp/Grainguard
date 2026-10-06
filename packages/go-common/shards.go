@@ -132,6 +132,13 @@ func NewShardedDB(registry ShardRegistry, resolver PlacementResolver) *ShardedDB
 	return &ShardedDB{registry: registry, resolver: resolver, activeShards: []string{"s1", "s2", "s3", "s4"}, pools: make(map[string]*pgxpool.Pool)}
 }
 
+// ActiveShardIDs returns the shard set this process is configured to serve.
+// Production defaults to all registered shards; local fixtures can opt into a
+// loopback-only subset when other registry entries are placeholders.
+func (s *ShardedDB) ActiveShardIDs() []string {
+	return append([]string(nil), s.activeShards...)
+}
+
 func ShardedDBFromEnvironment(getenv func(string) string, service, database, role string) (*ShardedDB, error) {
 	registry, err := LoadShardRegistry(getenv("SHARD_REGISTRY_FILE"), service, database, role)
 	if err != nil {

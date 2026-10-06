@@ -23,7 +23,10 @@ export const PORTS = {
   bffDegraded: 4302,
   gateway: 4303,
   gatewayDegraded: 4304,
+  gatewayMetrics: 19464,
+  gatewayDegradedMetrics: 19465,
   alerts: 4305,
+  searchHealth: 18300,
   deadRead: 4309,
   dashboard: 5173,
 };

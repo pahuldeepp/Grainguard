@@ -51,7 +51,8 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	if err := producer.Ping(ctx); err != nil {
 		return fmt.Errorf("saga producer broker ping: %w", err)
 	}
-	health := newWorkerHealth(4, 90*time.Second)
+	activeShards := db.ActiveShardIDs()
+	health := newWorkerHealth(len(activeShards), 90*time.Second)
 	consumerExtra := append([]kgo.Opt{kgo.FetchIsolationLevel(kgo.ReadCommitted())}, health.consumerGroupOptions()...)
 	consumer, err := kgo.NewClient(append(transport.Options(cfg.brokers, cfg.group, []string{saga.ResultTopic}, consumerExtra...), security...)...)
 	if err != nil {
@@ -61,7 +62,9 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	work, cancel := context.WithCancel(ctx)
 	defer cancel()
 	metrics := &saga.Metrics{}
-	results := make(chan error, 6)
+	// One result can arrive from each shard worker, the result consumer, and
+	// either listener. Buffer every sender so shutdown cannot strand a goroutine.
+	results := make(chan error, len(activeShards)+3)
 	if cfg.health != "" {
 		stopHealth := serveWorkerHealth(work, cfg.health, health, results)
 		defer stopHealth()
@@ -75,8 +78,8 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 		stop := serveMetrics(work, cfg.metrics, saga.ShardedHandler(metrics, db), results)
 		defer stop()
 	}
-	workersDone := make(chan struct{}, 4)
-	for _, shard := range []string{"s1", "s2", "s3", "s4"} {
+	workersDone := make(chan struct{}, len(activeShards))
+	for _, shard := range activeShards {
 		w := worker{db: db.InfrastructureDB(shard), store: saga.Store{DB: db, Fence: leases}, leases: leases[shard], metrics: metrics, cursors: map[int]string{}, health: health, healthID: shard, publish: func(ctx context.Context, key, value []byte) error {
 			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
 		}}
@@ -95,7 +98,7 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	case err = <-results:
 	}
 	cancel()
-	for range 4 {
+	for range len(activeShards) {
 		<-workersDone
 	}
 	<-consumerDone

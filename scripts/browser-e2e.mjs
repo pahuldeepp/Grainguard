@@ -274,9 +274,10 @@ const bffEnv = (port, readUrl) => ({
   BFF_RATE_REDIS_CLUSTER_NODES: "",
   BFF_ALLOW_NO_RATE_LIMIT: "true",
 });
-const gatewayEnv = (port, bffPort, readPort) => ({
+const gatewayEnv = (port, bffPort, readPort, metricsPort) => ({
   ...authEnv,
   GATEWAY_PORT: String(port),
+  GATEWAY_METRICS_PORT: String(metricsPort),
   GATEWAY_BFF_URL: `http://127.0.0.1:${bffPort}`,
   GATEWAY_READ_URL: `http://127.0.0.1:${readPort}`,
   GATEWAY_SAGA_URL: `http://127.0.0.1:${PORTS.sagaApi}`,
@@ -358,7 +359,7 @@ function startBackends(bins, fixtureFile) {
       path.join(tmp, "search-quarantine.jsonl"),
     ],
     "services/search-indexer",
-    { SEARCH_ALIAS: alias },
+    { SEARCH_ALIAS: alias, HEALTH_PORT: String(PORTS.searchHealth) },
   );
   start("saga-api", bins.sagaApi, [], "services/saga-orchestrator", {
     ...authEnv,
@@ -413,14 +414,19 @@ function startBackends(bins, fixtureFile) {
     process.execPath,
     ["dist/main.js"],
     "services/gateway",
-    gatewayEnv(PORTS.gateway, PORTS.bff, PORTS.read),
+    gatewayEnv(PORTS.gateway, PORTS.bff, PORTS.read, PORTS.gatewayMetrics),
   );
   start(
     "gateway-degraded",
     process.execPath,
     ["dist/main.js"],
     "services/gateway",
-    gatewayEnv(PORTS.gatewayDegraded, PORTS.bffDegraded, PORTS.deadRead),
+    gatewayEnv(
+      PORTS.gatewayDegraded,
+      PORTS.bffDegraded,
+      PORTS.deadRead,
+      PORTS.gatewayDegradedMetrics,
+    ),
   );
 }
 

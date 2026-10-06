@@ -183,6 +183,14 @@ func TestInactiveLocalShardCannotReceiveTenantRoute(t *testing.T) {
 		PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Second),
 	}, nil})
 	shards.activeShards = []string{"s1"}
+	if got := fmt.Sprint(shards.ActiveShardIDs()); got != "[s1]" {
+		t.Fatalf("active shard IDs = %s, want [s1]", got)
+	}
+	ids := shards.ActiveShardIDs()
+	ids[0] = "s4"
+	if got := fmt.Sprint(shards.ActiveShardIDs()); got != "[s1]" {
+		t.Fatalf("active shard IDs must be copied, got %s", got)
+	}
 	defer shards.Close()
 	err := shards.WithTenantSchema(context.Background(), tenantID, "public", func(context.Context, pgx.Tx) error {
 		t.Fatal("inactive shard route reached SQL")
