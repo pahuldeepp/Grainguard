@@ -4,7 +4,6 @@ import { BaseExceptionFilter } from "@nestjs/core";
 import { AuthError } from "@greenguard/tenant-auth";
 import { ServiceAuthError } from "@greenguard/tenant-auth/service-principals";
 import { LockNotAvailableError } from "../db/errors.js";
-import { EntitlementExceededError } from "../inventory/entitlements.js";
 import {
   EntitlementExceededError,
   TenantProjectionUnavailableError,

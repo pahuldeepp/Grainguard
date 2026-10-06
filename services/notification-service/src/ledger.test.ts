@@ -214,45 +214,6 @@ test("a crash before commit leaves no delivery row", { skip }, async () => {
 });
 
 test(
-  "hold expiry records failure without allocating a provider send attempt",
-  { skip },
-  async () => {
-    const task = makeTask();
-    const expired = await expireDeliveryHold(pool!, task);
-    assert.deepEqual(expired, {
-      action: "receipt",
-      outcome: "failed",
-      park: true,
-    });
-    assert.deepEqual(await delivery(task.tenant_id, task.intent_id), {
-      status: "failed",
-      attempts: 0,
-      reconciles: 0,
-    });
-    const readAttempts = () =>
-      withTenant(pool!, task.tenant_id, async (client) => {
-        const { rows } = await client.query(
-          "SELECT kind, outcome FROM delivery_attempts WHERE intent_id = $1 ORDER BY attempt_no",
-          [task.intent_id],
-        );
-        return rows;
-      });
-    assert.deepEqual(await readAttempts(), [
-      { kind: "hold_expired", outcome: "failed" },
-    ]);
-    assert.deepEqual(await expireDeliveryHold(pool!, task), {
-      action: "receipt",
-      outcome: "failed",
-      park: true,
-    });
-    assert.deepEqual(await readAttempts(), [
-      { kind: "hold_expired", outcome: "failed" },
-    ]);
-    assert.equal((await delivery(task.tenant_id, task.intent_id))?.attempts, 0);
-  },
-);
-
-test(
   "preferences suppress a channel and use optimistic versions",
   { skip },
   async () => {

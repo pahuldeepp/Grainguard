@@ -295,47 +295,15 @@ func semantic(event map[string]any) *failure {
 			return err
 		}
 	}
-	return nil
-}
-
-func identityAndBillingSemantic(event, payload map[string]any) *failure {
-	if isBillingOrFlag(event[fieldType]) {
-		return billingOrFlagSemantic(event, payload)
-	}
-	return identitySemantic(event)
-}
-
-func organizationAndMembershipSemantic(event, payload map[string]any) *failure {
-	if event[fieldType] == typeTenantCreated && event[fieldAggregate] != event[fieldTenant] {
-		return fail(reasonSchema, "organization aggregate must equal tenant")
-	}
-	if event[fieldType] == typeMembershipChanged && (payload["state"] == "revoked") != (payload["action"] == "revoked") {
-		return fail(reasonSchema, "membership revoked state and action disagree")
-	}
-	return nil
-}
-
-func principalSemantic(event, payload map[string]any) *failure {
-	if event[fieldAggregateType] != "service_principal" {
-		return nil
-	}
-	if payload["tenant_id"] != event[fieldTenant] || (event[fieldType] == typeServicePrincipalRevoked) != (payload["state"] == "revoked") {
-		return fail(reasonSchema, "service principal tenant or state mismatch")
-	}
-	return nil
-}
-
-func domainPayloadSemantic(event, payload map[string]any) *failure {
-	switch event[fieldType] {
-	case typeLotChanged:
-		return lotSemantic(payload)
-	case typeRiskAssessed:
-		return riskSemantic(event, payload)
-	case typeProjection:
-		return notificationSemantic(event, payload)
+	if event[fieldType] == typeRiskAssessed {
+		if err := riskSemantic(event, payload); err != nil {
+			return err
+		}
 	}
 	if event[fieldAggregateType] == "alert_episode" {
-		return alertSemantic(event, payload)
+		if err := alertSemantic(event, payload); err != nil {
+			return err
+		}
 	}
 	if event[fieldType] == typeProjection {
 		if err := notificationSemantic(event, payload); err != nil {

@@ -73,21 +73,9 @@ function statusStyle(ready: boolean | null) {
   if (ready === null) return "";
   return ready ? "ready" : "offline";
 }
-
-function ServiceStatus({
-  name,
-  ready,
-}: Readonly<{ name: string; ready: boolean | null }>) {
-  const status = serviceStatus(ready);
-  return (
-    <output
-      className={`service-status status ${status.style}`}
-      aria-label={`${name}: ${status.text}`}
-    >
-      <Glyph name={status.glyph} />
-      {status.text}
-    </output>
-  );
+function statusText(ready: boolean | null) {
+  if (ready === null) return "Checking…";
+  return ready ? "Ready" : "Unavailable";
 }
 const navItems = [
   { to: "/", label: "Overview", icon: "overview", end: true },

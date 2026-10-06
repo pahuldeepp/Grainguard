@@ -50,7 +50,7 @@ topic_source, topic_error, topic_status = Open3.capture3('ruby', File.join(root,
 abort "topic generator failed: #{topic_error}" unless topic_status.success?
 topic_copy = File.read(File.join(root, 'streaming-topics-chart/files/topics.tsv'))
 abort 'Kafka topic inventory drifted from local lifecycle source' unless topic_copy == topic_source
-abort 'expected 39 Kafka topics' unless topic_copy.lines.length == 39
+abort 'expected 43 Kafka topics' unless topic_copy.lines.length == 43
 topics = render.call('streaming-topics-chart', {})
 topic_job = topics.find { |item| item['kind'] == 'Job' && item.dig('metadata', 'name')&.start_with?('greenguard-topics-') }
 abort 'Kafka topic Job must be bounded/non-root' unless topic_job.dig('spec', 'activeDeadlineSeconds').to_i.positive? && topic_job.dig('spec', 'template', 'spec', 'securityContext', 'runAsNonRoot') == true
@@ -78,7 +78,7 @@ abort 'Kafka ACL Job must be bounded, non-root and use the admin Secret/CA' unle
   acl_pod.fetch('volumes').any? { |item| item.dig('secret', 'secretName') == 'greenguard-kafka-ca' } &&
   acl_container.fetch('args').first.include?('--command-config /tmp/kafka-client.properties')
 known_topics = topic_copy.lines.map { |line| line.split('|', 2).first }.to_set
-known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane telemetry-sinks telemetry-replay]
+known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane telemetry-sinks telemetry-replay knowledge-service model-gateway-usage]
 acl_principals = []
 acl_copy.lines.each do |line|
   next if line.start_with?('#') || line.strip.empty?

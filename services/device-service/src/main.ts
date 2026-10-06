@@ -35,19 +35,6 @@ const api = config.auth && {
       ),
     }),
   }),
-  ...(config.importAuth && {
-    importSourceId: config.importAuth.sourceId,
-    importVerifier: createClientCredentialsVerifier({
-      issuer: config.importAuth.issuer,
-      audience: config.importAuth.audience,
-      jwksUrl: config.importAuth.jwksUrl,
-      tenantClaim: config.importAuth.tenantClaim,
-      lookup: controlClientLookup(
-        config.importAuth.controlUrl,
-        config.importAuth.lookupToken,
-      ),
-    }),
-  }),
   versions: loadVersionRegistry(process.env),
   tracing:
     config.otel &&

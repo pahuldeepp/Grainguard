@@ -6,7 +6,6 @@ import {
   beginDelivery,
   expireOptionalHold,
   finishDelivery,
-  expireDeliveryHold,
   isTerminal,
   type Outcome,
   type Plan,
@@ -144,16 +143,6 @@ export async function handleTask(
   incoming: IncomingTask,
 ): Promise<Settlement> {
   deps.metrics.observeLag(incoming.timestamp);
-  const task = parseWarningTask(deps, incoming);
-  if (!task) return "reject";
-  if (await holdIfOptionalSendingDisabled(deps, incoming, task)) return "ack";
-  return deliverTask(deps, incoming, task);
-}
-
-function parseWarningTask(
-  deps: Deps,
-  incoming: IncomingTask,
-): Task | undefined {
   let task: Task;
   try {
     task = parseTask(incoming.body, incoming.messageId);

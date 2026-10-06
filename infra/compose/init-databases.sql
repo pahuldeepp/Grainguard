@@ -191,6 +191,39 @@ GRANT USAGE ON SCHEMA public TO hardware_app;
 -- Operational shard bundles deliberately exclude central control and billing.
 \if :{?GG_OPERATIONAL_ONLY}
 \else
+-- Hosted Dex is an optional OIDC provider for a disposable cell. Its SQL
+-- identity and database are created only when the Argo values explicitly
+-- enable managed Dex; objects with matching names are never adopted.
+\if :{?GG_MANAGED_DEX}
+\getenv dex_db_password DEX_DB_PASSWORD
+\connect postgres
+DO $$
+DECLARE r record; d record; marker constant text := 'greenguard.managed-dex.v1';
+BEGIN
+  SELECT oid, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit,
+         rolbypassrls, rolreplication, shobj_description(oid, 'pg_authid') AS comment
+    INTO r FROM pg_roles WHERE rolname = 'dex_app';
+  IF FOUND AND (r.comment IS DISTINCT FROM marker OR NOT r.rolcanlogin OR r.rolsuper
+    OR r.rolcreatedb OR r.rolcreaterole OR r.rolinherit OR r.rolbypassrls OR r.rolreplication
+    OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid)) THEN
+    RAISE EXCEPTION 'refusing to adopt or alter foreign/elevated Dex role';
+  END IF;
+  SELECT db.datname, owner.rolname AS owner,
+         shobj_description(db.oid, 'pg_database') AS comment
+    INTO d FROM pg_database db JOIN pg_roles owner ON owner.oid = db.datdba
+    WHERE db.datname = 'greenguard_dex';
+  IF FOUND AND (d.comment IS DISTINCT FROM marker OR d.owner <> 'dex_app') THEN
+    RAISE EXCEPTION 'refusing to adopt or take ownership of foreign Dex database';
+  END IF;
+END $$;
+SELECT 'CREATE ROLE dex_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dex_app') \gexec
+COMMENT ON ROLE dex_app IS 'greenguard.managed-dex.v1';
+ALTER ROLE dex_app PASSWORD :'dex_db_password';
+SELECT 'CREATE DATABASE greenguard_dex OWNER dex_app'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_dex') \gexec
+COMMENT ON DATABASE greenguard_dex IS 'greenguard.managed-dex.v1';
+\endif
 -- Stage 09a tenant-control-plane owner (ADR-0017): runtime control_app, schema owner
 -- control_migrator. The control plane is the single writer of organizations/memberships.
 \getenv control_password CONTROL_DB_PASSWORD
@@ -214,8 +247,7 @@ GRANT control_bootstrap_worker_role TO tenant_bootstrap_worker WITH INHERIT FALS
 SELECT 'CREATE DATABASE greenguard_control OWNER control_migrator'
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'greenguard_control') \gexec
 REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
-SELECT 'GRANT CONNECT ON DATABASE postgres TO greenguard_admin'
- WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'greenguard_admin') \gexec
+GRANT CONNECT ON DATABASE postgres TO greenguard_admin;
 REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
 ALTER DATABASE greenguard_control OWNER TO control_migrator;
 REVOKE ALL ON DATABASE greenguard_control FROM PUBLIC;

@@ -151,67 +151,6 @@ function readImportAuth(env: NodeJS.ProcessEnv): ImportAuthConfig | undefined {
     lookupToken: env.CONTROL_LOOKUP_TOKEN!,
   };
 }
-function readImportAuth(env: NodeJS.ProcessEnv): ImportAuthConfig | undefined {
-  const importNames = [
-    "IMPORT_SOURCE_ID",
-    "IMPORT_AUTH_ISSUER",
-    "IMPORT_AUTH_AUDIENCE",
-    "IMPORT_AUTH_JWKS_URL",
-    "IMPORT_AUTH_TENANT_CLAIM",
-  ] as const;
-  const names = [
-    "IMPORT_SOURCE_ID",
-    "IMPORT_AUTH_ISSUER",
-    "IMPORT_AUTH_AUDIENCE",
-    "IMPORT_AUTH_JWKS_URL",
-    "IMPORT_AUTH_TENANT_CLAIM",
-    "CONTROL_LOOKUP_URL",
-    "CONTROL_LOOKUP_TOKEN",
-  ] as const;
-  if (
-    importNames.every((name) => env[name] === undefined) &&
-    env.CONTROL_LOOKUP_URL === undefined
-  )
-    return undefined;
-  if (names.some((name) => !env[name]))
-    throw new Error("import authentication settings must be set together");
-  const jwksUrl = new URL(env.IMPORT_AUTH_JWKS_URL!);
-  const controlUrl = new URL(env.CONTROL_LOOKUP_URL!);
-  for (const url of [jwksUrl, controlUrl])
-    if (
-      url.protocol !== "https:" &&
-      !(url.protocol === "http:" && LOOPBACK.has(url.hostname))
-    )
-      throw new Error(
-        "import JWKS and control lookup must use https (loopback http allowed)",
-      );
-  if (
-    jwksUrl.username ||
-    jwksUrl.password ||
-    controlUrl.username ||
-    controlUrl.password ||
-    controlUrl.search ||
-    controlUrl.hash
-  )
-    throw new Error(
-      "import endpoints cannot contain credentials or query strings",
-    );
-  if (Buffer.byteLength(env.CONTROL_LOOKUP_TOKEN!) < 32)
-    throw new Error("CONTROL_LOOKUP_TOKEN must hold at least 32 bytes");
-  if (!/^[A-Za-z_]\w{0,63}$/.test(env.IMPORT_AUTH_TENANT_CLAIM!))
-    throw new Error("IMPORT_AUTH_TENANT_CLAIM is invalid");
-  if (!/^[A-Za-z\d][\w.:-]{0,127}$/.test(env.IMPORT_SOURCE_ID!))
-    throw new Error("IMPORT_SOURCE_ID is invalid");
-  return {
-    sourceId: env.IMPORT_SOURCE_ID!,
-    issuer: env.IMPORT_AUTH_ISSUER!,
-    audience: env.IMPORT_AUTH_AUDIENCE!,
-    jwksUrl: jwksUrl.toString(),
-    tenantClaim: env.IMPORT_AUTH_TENANT_CLAIM!,
-    controlUrl: controlUrl.toString(),
-    lookupToken: env.CONTROL_LOOKUP_TOKEN!,
-  };
-}
 // Tracing is on only when a collector endpoint is configured.
 function readOtel(env: NodeJS.ProcessEnv): OtelConfig | undefined {
   const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;

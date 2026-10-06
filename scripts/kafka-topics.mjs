@@ -36,6 +36,10 @@ const domainTopics = [
   ["greenguard.saga.results.dlq.v1", 6],
   ["greenguard.saga.commands.dlq.v1", 6],
   ["greenguard.quarantine.v1", 1],
+  ["greenguard.knowledge.document.index.requested.v1", 6, "delete", "259200000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1", 6, "delete", "604800000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1.quarantine", 1, "delete", "1209600000"],
+  ["greenguard.ai-usage-settled.v1", 6, "delete", "604800000"],
 ];
 // Infrastructure storage is separate from the domain topics.
 const internalTopics = [
