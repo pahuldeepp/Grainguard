@@ -1,0 +1,15 @@
+mkdir -p build
+cd services/cdc-transformer && go build -o ../../build/cdc-transformer .
+node scripts/events-faults.mjs
+PASS E03: snapshot repeats, SIGKILL after ack/before commit, restart preserves every ID and duplicate bytes
+PASS E04 quarantine publish failure: retries, degraded readiness, no offset advance or later delivery
+PASS E04 healthy quarantine: original bytes/coordinates and later valid delivery
+PASS E05: idle singleton delivery within 15s, pending singleton survives restart; no batching in current producer
+
+
+
+
+
+
+
+
