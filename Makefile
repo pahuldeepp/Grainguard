@@ -145,6 +145,7 @@ staging:
 	docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wait
 	$(MAKE) staging-check
 staging-check:
+	node --test scripts/staging-check-contract.test.mjs
 	node scripts/staging-check.mjs
 staging-down:
 	docker compose --env-file .env -f infra/staging/compose.yaml down
