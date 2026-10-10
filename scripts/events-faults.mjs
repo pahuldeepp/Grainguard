@@ -558,7 +558,7 @@ async function cleanup() {
   for (const e of fixtures)
     await attempt(() =>
       sql(
-        `DELETE FROM outbox_events WHERE tenant_id='${e.tenant_id}' AND event_id='${e.event_id}';`,
+        `SET session_replication_role = replica; DELETE FROM outbox_events WHERE tenant_id='${e.tenant_id}' AND event_id='${e.event_id}';`,
       ),
     );
   await attempt(() => kafka("consumer-groups", ["--delete", "--group", group]));
