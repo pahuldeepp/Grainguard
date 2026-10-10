@@ -20,7 +20,7 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Error budget remaining (28d, PROPOSED targets)",
+      "title": "Error budget remaining (30d, PROPOSED targets)",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -33,7 +33,7 @@
       },
       "targets": [
         {
-          "expr": "slo:error_budget_remaining:ratio28d",
+          "expr": "slo:error_budget_remaining:ratio30d",
           "legendFormat": "{{sli}}",
           "datasource": {
             "type": "prometheus",
@@ -76,7 +76,7 @@
         "colorMode": "value",
         "graphMode": "area"
       },
-      "description": "1 minus the 28d error ratio divided by the budget. Negative means overspent. Targets are unmeasured proposals; see docs/SLOS.md."
+      "description": "1 minus the 30d error ratio divided by the budget. Negative means overspent. Targets are unmeasured proposals; see docs/SLOS.md."
     },
     {
       "id": 2,

@@ -375,7 +375,7 @@ cache-invalidator-down:
 	docker compose -f infra/cache-invalidator/compose.yaml down
 cache-invalidator-test:
 	cd services/cache-invalidator && go test -race ./...
-.PHONY: redis-up redis-down redis-test redis-load
+.PHONY: redis-up redis-down redis-test redis-load perf-ingest
 redis-up:
 	$(REDIS_COMPOSE) up -d --wait redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6
 	$(REDIS_COMPOSE) up redis-cluster-init
@@ -387,6 +387,12 @@ redis-test: redis-up
 redis-load: redis-up
 	npm run build -w @greenguard/read-api
 	node scripts/redis-load.mjs
+
+# Stage 13 authenticated ingest load scenario. The k6 script enforces loopback
+# for local runs and an exact URL + explicit write acknowledgement for AWS.
+perf-ingest:
+	command -v k6 >/dev/null || { echo "k6 is required; see tests/performance/README.md" >&2; exit 1; }
+	k6 run tests/performance/telemetry-ingest.js
 oidc-browser-test: oidc-up
 	npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
 	set -a; . ./.env; set +a; node scripts/oidc-browser.mjs

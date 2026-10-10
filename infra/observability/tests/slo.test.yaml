@@ -5,6 +5,24 @@ rule_files:
   - ../rules/slo.yaml
 evaluation_interval: 1m
 tests:
+  - name: missing Prometheus retention history withholds 30-day budget and opens a ticket
+    interval: 1m
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: SLOHistoryWindowUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: prometheus
+              severity: ticket
+            exp_annotations:
+              summary: "30-day SLO history is not available"
+              description: "Prometheus does not currently retain 30 days of samples. The 30-day error-budget panel is withheld until the full window is available."
+              runbook_url: "docs/runbooks/slo-history-window.md"
+    promql_expr_test:
+      - expr: slo:error_budget_remaining:ratio30d
+        eval_time: 6m
+        exp_samples: []
+
   - name: healthy ingest series keeps every burn alert silent
     interval: 1m
     input_series:
@@ -39,7 +57,7 @@ tests:
               window: 1h_5m
             exp_annotations:
               summary: "Fast error-budget burn for ingest_availability"
-              description: "ingest_availability is burning its 28d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              description: "ingest_availability is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
               runbook_url: "docs/runbooks/slo-burn-page.md"
 
   - name: a short spike alone does not page because the 1h window disagrees
@@ -94,7 +112,7 @@ tests:
               window: 6h_30m
             exp_annotations:
               summary: "Slow error-budget burn for ingest_availability"
-              description: "ingest_availability is burning its 28d error budget at 6x or more over both 6h and 30m. At this rate the budget is gone in about 5 days."
+              description: "ingest_availability is burning its 30d error budget at 6x or more over both 6h and 30m. At this rate the budget is gone in about 5 days."
               runbook_url: "docs/runbooks/slo-burn-page.md"
 
   - name: sustained 4x burn opens a ticket on 24h and 2h but does not page
@@ -116,7 +134,7 @@ tests:
               window: 24h_2h
             exp_annotations:
               summary: "Moderate error-budget burn for ingest_availability"
-              description: "ingest_availability is burning its 28d error budget at 3x or more over both 24h and 2h. Open a ticket; the budget lasts about 9 days at this rate."
+              description: "ingest_availability is burning its 30d error budget at 3x or more over both 24h and 2h. Open a ticket; the budget lasts about 10 days at this rate."
               runbook_url: "docs/runbooks/slo-burn-ticket.md"
 
   - name: sustained 1.5x burn opens a ticket on 3d and 6h but not the 24h pair
@@ -137,7 +155,7 @@ tests:
               window: 3d_6h
             exp_annotations:
               summary: "Slow error-budget burn for ingest_availability"
-              description: "ingest_availability is burning its 28d error budget at 1x or more over both 3d and 6h. The budget will not last the 28d window."
+              description: "ingest_availability is burning its 30d error budget at 1x or more over both 3d and 6h. The budget will not last the 30d window."
               runbook_url: "docs/runbooks/slo-burn-ticket.md"
 
   - name: notification delivery uses its own 1 percent budget (20 percent failures pages)
@@ -157,7 +175,7 @@ tests:
               window: 1h_5m
             exp_annotations:
               summary: "Fast error-budget burn for notification_delivery"
-              description: "notification_delivery is burning its 28d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              description: "notification_delivery is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
               runbook_url: "docs/runbooks/slo-burn-page.md"
 
   - name: slow projection freshness (80 percent of events over 1s) burns the freshness budget
@@ -179,7 +197,7 @@ tests:
               window: 1h_5m
             exp_annotations:
               summary: "Fast error-budget burn for projection_freshness"
-              description: "projection_freshness is burning its 28d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              description: "projection_freshness is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
               runbook_url: "docs/runbooks/slo-burn-page.md"
 
   - name: integrity alerts fire on any quarantine or failed DLQ publish and stay silent when flat

@@ -53,8 +53,16 @@ spec:
       {{- if .Values.observability.prometheus.enabled }}
       annotations:
         prometheus.io/scrape: "true"
+        {{- if .Values.observability.prometheus.mergeMetrics }}
+        # Istio's injector uses these original application endpoint values to
+        # configure its agent-side scrape before rewriting Prometheus discovery
+        # to the merged :15020/stats/prometheus endpoint.
+        prometheus.io/path: /metrics
+        prometheus.io/port: {{ ternary .Values.appMetrics.port .Values.service.containerPort .Values.appMetrics.enabled | quote }}
+        {{- else }}
         prometheus.io/path: /stats/prometheus
         prometheus.io/port: {{ .Values.observability.prometheus.scrapePort | quote }}
+        {{- end }}
         prometheus.istio.io/merge-metrics: {{ .Values.observability.prometheus.mergeMetrics | quote }}
         {{- if .Values.appMetrics.enabled }}
         greenguard.io/app-metrics-scrape: "true"

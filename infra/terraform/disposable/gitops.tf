@@ -232,6 +232,12 @@ locals {
     "device-service", "workflow-alerts", "tenant-control-plane", "telemetry-ingest",
     "cdc-transformer", "projection-builder", "cassandra-writer"
   ])
+  # Only services with a reachable Prometheus /metrics endpoint use Istio's
+  # merged scrape mode. Other workloads still expose Envoy metrics only.
+  prometheus_application_metric_releases = toset([
+    "device-service", "workflow-alerts", "telemetry-ingest", "projection-builder",
+    "notification-service", "jobs-worker", "cdc-transformer", "cassandra-writer"
+  ])
   otel_http_env = [{
     name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
     value = "http://otel-collector.greenguard.svc.cluster.local:4318"
@@ -376,8 +382,8 @@ locals {
           enabled           = true
           namespace         = "greenguard"
           selector          = { app = "prometheus" }
-          mergeMetrics      = true
-          scrapePort        = 15020
+          mergeMetrics      = contains(local.prometheus_application_metric_releases, release.name)
+          scrapePort        = contains(local.prometheus_application_metric_releases, release.name) ? 15020 : 15090
           allowedPrincipals = []
         }
       } },

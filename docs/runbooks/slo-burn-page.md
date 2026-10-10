@@ -6,7 +6,7 @@
 
 ## Symptom
 
-The named SLI is consuming its 28 day error budget far faster than allowed. The fast alert means about 2% of the budget is spent per hour; the slow alert means the budget is gone in about 5 days.
+The named SLI is consuming its 30 day error budget far faster than allowed. The fast alert means about 2% of the budget is spent per hour; the slow alert means the budget is gone in about 5 days.
 
 ## Diagnosis
 
@@ -25,7 +25,7 @@ Roll back the implicated release or restore dependency capacity. Do not silence 
 
 ## Escalation
 
-Escalate to the service owner if not mitigated in 30 minutes, and to the incident lead if the 28 day budget remaining (`slo:error_budget_remaining:ratio28d`) drops below zero. Record the affected SLI, cause, mitigation and budget spent.
+Escalate to the service owner if not mitigated in 30 minutes, and to the incident lead if the 30 day budget remaining (`slo:error_budget_remaining:ratio30d`) drops below zero. Record the affected SLI, cause, mitigation and budget spent.
 
 ## Verification
 

@@ -2,7 +2,12 @@
 
 **Status: PROPOSED for owner approval. Nothing in this document is approved, and every numeric target is UNMEASURED.** Stage 13 load, soak and fault data must exist before targets are approved. Rules: [`rules/slo.yaml`](../infra/observability/rules/slo.yaml). Tests: [`tests/slo.test.yaml`](../infra/observability/tests/slo.test.yaml). Dashboard: `greenguard-slo-burn`. Runbooks: [page](runbooks/slo-burn-page.md), [ticket](runbooks/slo-burn-ticket.md), [integrity](runbooks/slo-integrity.md).
 
-Targets derive from the Tier 1 goals in `CAPACITY_MODEL.md`: API p95 under 300 ms, commit-to-projection p95 under 1 s, at least 99.9% availability, zero acknowledged-event loss. Window for all SLOs: **28 days rolling**. Error budget = 1 minus target.
+Targets derive from the Tier 1 goals in `CAPACITY_MODEL.md`: API p95 under 300 ms, commit-to-projection p95 under 1 s, at least 99.9% availability, zero acknowledged-event loss. Window for all SLOs: **30 days rolling**. Error budget = 1 minus target.
+
+The 30-day error-budget panel is withheld until Prometheus reports at least 30 days
+of retained samples. `SLOHistoryWindowUnavailable` alerts while that evidence is
+missing or shorter than the window; configured retention flags alone do not prove
+that the TSDB size cap preserved 30 days.
 
 ## Journeys and SLIs
 
@@ -30,7 +35,7 @@ Both windows must exceed the multiple. A long window alone (an incident that rec
 | `SLOBurnRateFastTicket` | 24h and 2h | 3x    | ticket   | 10% in 24h      |
 | `SLOBurnRateSlowTicket` | 3d and 6h  | 1x    | ticket   | 10% in 3d       |
 
-Recorded windows: 5m, 30m, 1h, 2h, 6h, 1d, 3d, 28d. `slo:error_budget_remaining:ratio28d` is 1 minus the 28d ratio over the budget (negative means overspent). Labels are bounded to the fixed `sli` label; no tenant, device, saga or trace identifier appears.
+Recorded windows: 5m, 30m, 1h, 2h, 6h, 1d, 3d, 30d. `slo:error_budget_remaining:ratio30d` is 1 minus the 30d ratio over the budget (negative means overspent). Labels are bounded to the fixed `sli` label; no tenant, device, saga or trace identifier appears.
 
 ## Non-SLO invariants (zero tolerance)
 
@@ -59,4 +64,4 @@ These are not percentages. A single violation is an incident, alerted by `Integr
 - The 0.25 s bucket proxy versus a true 300 ms p95, and the 1 s freshness bucket under load and replay.
 - 4xx/429 exclusion policy, health and load-test traffic exclusion, and the notification provider mix (suppressed, unknown) in the denominator.
 - Alert thresholds and noise levels from soak and fault injection; ticket versus page routing agreed with the owner.
-- 28d rate recording cost on a real series count.
+- 30d rate recording cost on a real series count.

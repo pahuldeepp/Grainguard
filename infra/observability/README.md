@@ -85,9 +85,14 @@ Debezium streaming metrics; `JMXHOST` must be the Compose DNS name `connect`
 because Java RMI advertises that name to the exporter (a wildcard bind address
 such as `0.0.0.0` is not a reachable RMI hostname).
 
-Local storage is bounded for Prometheus (7 days / 2 GB); other backends use local
-volumes and should be reset with `docker compose ... down -v` when a clean lab is
-needed. Do not use this single-node profile for production availability claims.
+Local storage is bounded for Prometheus (7 days / 2 GB), shorter than the
+30-day rolling SLO window. The local profile therefore supports short rule
+rehearsals only; its rolling SLO budget values are not valid 30-day measurements.
+The disposable EKS chart has a separate persistent, 35-day Prometheus config and
+loads the same SLO rules from the shared source file.
+Other local backends use local volumes and should be reset with `docker compose
+... down -v` when a clean lab is needed. Do not use this single-node profile for
+production availability claims.
 
 Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.
 

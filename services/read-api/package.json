@@ -7,7 +7,7 @@
     "build": "npm run build -w @greenguard/read-model -w @greenguard/membership-client -w @greenguard/entitlements && tsc",
     "typecheck": "npm run build -w @greenguard/read-model -w @greenguard/membership-client -w @greenguard/entitlements && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
-    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
+    "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test --test-concurrency=1 \"dist/**/*.test.js\"",
     "entitlements:projector": "npm run build && node dist/entitlements/projector.js"
   },
   "dependencies": {

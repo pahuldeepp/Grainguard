@@ -6,11 +6,11 @@
 
 ## Symptom
 
-A slow, steady loss of error budget that will exhaust the 28 day budget before the window ends (about 9 days at 3x, never lasting the window at 1x).
+A slow, steady loss of error budget that will exhaust the 30 day budget before the window ends (about 10 days at 3x, never lasting the window at 1x).
 
 ## Diagnosis
 
-1. Read `slo:error_budget_remaining:ratio28d{sli="<sli>"}` and the 1h and 6h burn panels; establish whether the burn is constant, periodic (batch jobs, business hours) or growing.
+1. Read `slo:error_budget_remaining:ratio30d{sli="<sli>"}` and the 1h and 6h burn panels; establish whether the burn is constant, periodic (batch jobs, business hours) or growing.
 2. Break the bad events down by the bounded labels available (route, status_code, outcome metric) as in the [page runbook](slo-burn-page.md) step 2.
 3. Look for a chronic cause: a slow query class ([database saturation](database-saturation.md)), a flaky provider ([notification delivery](notification-delivery.md)), a consistently lagging consumer ([streaming backlog](streaming-backlog.md)).
 

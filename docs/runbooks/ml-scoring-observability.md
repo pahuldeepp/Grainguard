@@ -33,3 +33,24 @@
 **First checks:** inspect `greenguard_otel_ml_scoring_model_inference_milliseconds` and `greenguard_otel_ml_scoring_event_processing_milliseconds` on the dashboard; check CPU throttling, model bundle/version changes, and scorer restart history.
 
 **Action:** keep the model in shadow; profile or scale only after checking measured load and resource limits. The threshold is an operational guardrail, not an SLA for real workloads.
+
+## Triage
+
+Record the alert name, model version, data origin, first/last firing time, and
+the relevant dashboard panels before changing anything. Check scorer readiness,
+Kafka/outbox health, PostgreSQL drift-state health, and current pod CPU/memory
+throttling. Compare counters over the same time range; do not infer a failure
+from an empty series or a restarted process without checking its readiness and
+logs. The four alert-specific checks above identify the first dependency to
+inspect.
+
+## Recovery and evidence
+
+Keep scoring in shadow while repairing the dependency. Confirm the underlying
+metric resumes advancing, readiness returns, and the alert resolves after its
+configured pending period. For drift persistence, restart the scorer and verify
+the checkpoint reloads. For outbox failures, verify the backlog drains without
+duplicate effects. For inference latency, record the version, offered rate,
+latency distribution and resource limits before changing capacity. Attach the
+time range and redacted logs/trace IDs to the incident. Never use synthetic
+drift or latency recovery as evidence that a model is production eligible.
