@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -18,7 +19,11 @@ TOPICS = {
     "greenguard.telemetry.recorded.v2": 2,
 }
 TRACEPARENT = re.compile(r"^00-([0-9a-f]{32})-([0-9a-f]{16})-(00|01)$")
-SCHEMA_DIR = Path(__file__).resolve().parents[3] / "contracts/events"
+SCHEMA_DIR = (
+    Path(os.environ["EVENT_SCHEMA_DIR"])
+    if os.environ.get("EVENT_SCHEMA_DIR")
+    else Path(__file__).resolve().parents[3] / "contracts/events"
+)
 MAX_EVENT_BYTES = 1024 * 1024
 
 
@@ -36,6 +41,7 @@ class TelemetryRecord:
     event_sha256: str
     raw_key: bytes
     raw_value: bytes
+    headers: tuple[tuple[str, bytes | None], ...] = ()
 
 
 def _load_validators(schema_dir: Path) -> dict[int, Draft202012Validator]:
@@ -58,6 +64,7 @@ def parse_record(
     partition: int,
     offset: int,
     validators: dict[int, Draft202012Validator],
+    headers: list[tuple[str, bytes | None]] | None = None,
 ) -> TelemetryRecord:
     version = TOPICS.get(topic)
     if version is None or not isinstance(value, bytes) or len(value) == 0 or len(value) > MAX_EVENT_BYTES:
@@ -112,6 +119,7 @@ def parse_record(
         event_sha256=hashlib.sha256(value).hexdigest(),
         raw_key=key,
         raw_value=value,
+        headers=tuple(headers or ()),
     )
 
 

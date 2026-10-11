@@ -44,6 +44,7 @@ verify: check-plan db-migrate
 	npm run typecheck
 	npm test
 	node --test scripts/contacts-schema.test.mjs
+	$(MAKE) telemetry-sinks-test
 	node --test scripts/placement-fixture.test.mjs
 	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
@@ -394,6 +395,23 @@ redis-load: redis-up
 perf-ingest:
 	command -v k6 >/dev/null || { echo "k6 is required; see tests/performance/README.md" >&2; exit 1; }
 	k6 run tests/performance/telemetry-ingest.js
+
+# Seeds a unique local tenant/device fixture, runs the authenticated HTTP baseline,
+# then deletes that tenant's rows. It never targets a non-loopback database/API.
+.PHONY: perf-ingest-local
+perf-ingest-local:
+	command -v k6 >/dev/null || { echo "k6 is required; see tests/performance/README.md" >&2; exit 1; }
+	: "$${GG_PERF_LOCAL_ACK:?Set GG_PERF_LOCAL_ACK=I_ACCEPT_WRITING_LOCAL_SYNTHETIC_READINGS}"
+	node scripts/performance/telemetry-ingest-local.mjs
+
+# Exercise the ClickHouse/S3 Kafka sinks and archive replay contract from the
+# required local verification gate. The environment stays under ignored .local.
+.PHONY: telemetry-sinks-test
+TELEMETRY_SINKS_VENV = .local/telemetry-sinks-venv
+telemetry-sinks-test:
+	python3 -m venv $(TELEMETRY_SINKS_VENV)
+	$(TELEMETRY_SINKS_VENV)/bin/pip install -q -r services/telemetry-sinks/requirements.lock
+	PYTHONPATH=services/telemetry-sinks $(TELEMETRY_SINKS_VENV)/bin/python -m unittest discover -s services/telemetry-sinks/tests -v
 oidc-browser-test: oidc-up
 	npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
 	set -a; . ./.env; set +a; node scripts/oidc-browser.mjs
@@ -484,14 +502,20 @@ ml-local-synthetic-seed:
 	ML_SYNTHETIC_TENANT_ID=0a0a0a0a-0000-4000-8000-00000000000a PYTHONPATH=services/ml-scoring .local/ml-scoring-venv/bin/python services/ml-scoring/seed_local_synthetic.py --allow-local-synthetic
 .PHONY: telemetry-pipeline-e2e
 telemetry-pipeline-e2e:
-	@set -eu; compose='docker compose -f labs/telemetry-pipeline/compose.yaml'; \
-	cleanup() { $$compose down --volumes --remove-orphans >/dev/null 2>&1 || true; }; \
+	@set -eu; compose='docker compose --project-name greenguard-telemetry-pipeline --env-file .local/telemetry-pipeline.env -f labs/telemetry-pipeline/compose.yaml'; \
+	cleanup() { status=$$?; if [ $$status -ne 0 ]; then $$compose logs --no-color telemetry-archive telemetry-clickhouse-sink >&2 || true; fi; if [ "$${KEEP_TELEMETRY_PIPELINE:-0}" = 1 ]; then echo "Preserving disposable telemetry lab for inspection." >&2; return $$status; fi; $$compose down --volumes --remove-orphans >/dev/null 2>&1 || true; rm -rf .local/telemetry-pipeline .local/telemetry-pipeline.env; return $$status; }; \
 	trap cleanup EXIT INT TERM; \
-	$$compose up -d --build --wait kafka clickhouse minio minio-init telemetry-archive telemetry-clickhouse-sink; \
-	$$compose run --rm publisher; \
-	$$compose run --rm acceptance; \
-	$$compose run --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --prefix telemetry/greenguard.telemetry.recorded.v1/ --topic greenguard.telemetry.recorded.v1 --confirm; \
-	replay_check=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --prefix telemetry/greenguard.telemetry.recorded.v1/ --topic greenguard.telemetry.recorded.v1); \
+	python3 labs/telemetry-pipeline/prepare.py; \
+	$$compose up -d --build --wait kafka clickhouse minio; \
+	$$compose --profile init run --rm kafka-init; \
+	$$compose --profile init run --rm minio-init; \
+	$$compose up -d --build --wait telemetry-archive telemetry-clickhouse-sink; \
+	$$compose --profile tools run --rm publisher; \
+	$$compose --profile tools run --rm acceptance; \
+	confirm_replay=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --topic greenguard.telemetry.recorded.v1 --confirm); \
+	printf '%s\n' "$$confirm_replay"; \
+	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["skipped_replayed"] == 0 and result["mode"] == "published", result' "$$confirm_replay"; \
+	$$compose --profile tools run --rm -e EXPECTED_ARCHIVE_OBJECTS=2 acceptance; \
+	replay_check=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --topic greenguard.telemetry.recorded.v1); \
 	printf '%s\n' "$$replay_check"; \
-	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["mode"].startswith("dry-run"), result' "$$replay_check"; \
-	$$compose run --rm -e EXPECTED_ARCHIVE_OBJECTS=2 acceptance
+	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["skipped_replayed"] == 1 and result["skipped_other_topic"] == 0 and result["mode"].startswith("dry-run"), result' "$$replay_check"

@@ -23,7 +23,14 @@ def main() -> int:
     except Exception as error:
         # Never print exception messages from Kafka, ClickHouse or AWS clients:
         # they may include credentials, query text, or telemetry payloads.
-        logging.error("telemetry sink stopped after %s", type(error).__name__)
+        cause = error.__cause__
+        safe_detail = ""
+        if cause is not None:
+            safe_detail = f"; cause={type(cause).__name__}"
+            server_code = getattr(cause, "server_code", None)
+            if type(server_code) is int:
+                safe_detail += f"(server_code={server_code})"
+        logging.error("telemetry sink stopped after %s%s", type(error).__name__, safe_detail)
         return 1
     return 0
 

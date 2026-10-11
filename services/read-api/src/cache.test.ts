@@ -280,22 +280,35 @@ test("oversize and undefined values are served but not cached", async () => {
 
 test("a waiter past its bound loads without the lock; an expired holder fills only an absent key", async () => {
   const redis = new MemoryRedis();
-  const cache = new ReadCache(redis, { lockMs: 20, waitMs: 5 });
+  const cache = new ReadCache(redis, { lockMs: 60_000, waitMs: 5 });
   let loads = 0;
-  const slow = async () => {
+  const release: Array<(value: string) => void> = [];
+  const slow = () => {
     loads++;
-    await new Promise((r) => setTimeout(r, 60));
-    return `v${loads}`;
+    return new Promise<string>((resolve) => {
+      release[loads] = resolve;
+    });
   };
-  const results = await Promise.all([
-    cache.get(TENANT_A, "k", [], slow),
-    cache.get(TENANT_A, "k", [], slow),
-  ]);
+  const first = cache.get(TENANT_A, "k", [], slow);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(cache.metrics.snapshot().lock_acquired, 1);
+  const second = cache.get(TENANT_A, "k", [], slow);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(loads, 2);
+  const locks = [...redis.values.keys()].filter((key) => key.endsWith(":lock"));
+  assert.equal(locks.length, 1);
+  redis.values.delete(locks[0]); // Simulate lease expiry before the original holder returns.
+  const fresh = await cache.get(TENANT_A, "k", [], async () => "fresh");
+  assert.equal(fresh, "fresh");
+  release[1]("v1");
+  release[2]("v2");
+  const results = await Promise.all([first, second]);
   assert.equal(loads, 2);
   assert.equal(results.length, 2);
   const m = cache.metrics.snapshot();
   assert.equal(m.lock_wait_timeout, 1);
   assert.equal(m.fill, 1);
+  assert.equal(m.fill_rejected, 1);
   assert.equal(valueKeys(redis).length, 1);
 });
 

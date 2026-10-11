@@ -137,6 +137,14 @@ def _encode_segment(records: tuple[TelemetryRecord, ...]) -> bytes:
             "source_offset": item.offset,
             "key_base64": base64.b64encode(item.raw_key).decode("ascii"),
             "value_base64": base64.b64encode(item.raw_value).decode("ascii"),
+            "headers": [
+                {
+                    "name": name,
+                    "value_base64": base64.b64encode(value or b"").decode("ascii"),
+                    "value_is_null": value is None,
+                }
+                for name, value in item.headers
+            ],
             "event_sha256": item.event_sha256,
         }
         lines.append(json.dumps(wrapped, sort_keys=True, separators=(",", ":")))

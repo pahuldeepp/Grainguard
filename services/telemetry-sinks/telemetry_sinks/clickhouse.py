@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import hashlib
+from http.client import IncompleteRead
 import json
+import re
 from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -24,6 +27,10 @@ COLUMNS = (
 
 class ClickHouseError(RuntimeError):
     """ClickHouse did not confirm a query."""
+
+    def __init__(self, message: str, *, server_code: int | None = None):
+        super().__init__(message)
+        self.server_code = server_code
 
 
 class ClickHouseSink:
@@ -74,7 +81,15 @@ class ClickHouseSink:
                     raise ClickHouseError("ClickHouse returned an invalid response")
         except HTTPError as error:
             # Do not echo server messages; ClickHouse errors can include query text/data.
-            raise ClickHouseError(f"ClickHouse returned HTTP {error.code}") from None
+            try:
+                body = error.read(64 * 1024) or b""
+            except (IncompleteRead, OSError):
+                # Preserve the known HTTP status even when the peer drops the
+                # connection before its error body is complete.
+                body = b""
+            match = re.search(rb"\bCode:\s*(\d+)\b", body)
+            server_code = int(match.group(1)) if match else None
+            raise ClickHouseError(f"ClickHouse returned HTTP {error.code}", server_code=server_code) from None
         except (URLError, TimeoutError, OSError) as error:
             raise ClickHouseError("ClickHouse request failed") from error
         if expect_body is not None and response_body.strip() != expect_body:
@@ -98,8 +113,8 @@ def _row(record: TelemetryRecord) -> dict:
         "device_id": payload["device_id"],
         "reading_id": payload["reading_id"],
         "schema_version": event["schema_version"],
-        "observed_at": payload["observed_at"],
-        "received_at": payload["received_at"],
+        "observed_at": _clickhouse_datetime(payload["observed_at"]),
+        "received_at": _clickhouse_datetime(payload["received_at"]),
         "temperature_c": measurements.get("temperature_c"),
         "relative_humidity_percent": measurements.get("relative_humidity_percent"),
         "co2_ppm": measurements.get("co2_ppm"),
@@ -110,6 +125,14 @@ def _row(record: TelemetryRecord) -> dict:
         "event_sha256": record.event_sha256,
         "event_json": record.canonical_json,
     }
+
+
+def _clickhouse_datetime(value: str) -> str:
+    """Render validated UTC RFC3339 timestamps in ClickHouse JSONEachRow syntax."""
+    parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    if parsed.tzinfo != timezone.utc:
+        raise ValueError("telemetry timestamp must be UTC")
+    return parsed.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 def _validate_batch(batch: tuple[TelemetryRecord, ...]) -> None:

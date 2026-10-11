@@ -1,7 +1,9 @@
 import base64
 import gzip
 import hashlib
+import io
 import json
+from dataclasses import replace
 import sys
 import threading
 import os
@@ -17,10 +19,20 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services/telemetry-sinks"))
 
 from telemetry_sinks.archive import ArchiveError, S3ArchiveSink
-from telemetry_sinks.clickhouse import ClickHouseSink
+from telemetry_sinks.clickhouse import ClickHouseError, ClickHouseSink
 from telemetry_sinks.contracts import InvalidTelemetryEvent, SCHEMA_DIR, TOPICS, _load_validators, parse_record
 from telemetry_sinks.health import HealthState, start_health_server
 from telemetry_sinks import runtime
+from telemetry_sinks.replay import (
+    MAX_ARCHIVE_DECOMPRESSED_BYTES,
+    MAX_ARCHIVE_OBJECT_BYTES,
+    _has_replay_marker,
+    _decode_headers,
+    decode_segment,
+    object_keys,
+    records,
+    verify_record,
+)
 
 
 TENANT = "11111111-1111-4111-8111-111111111111"
@@ -98,6 +110,51 @@ class ContractTests(unittest.TestCase):
 
 
 class ClickHouseTests(unittest.TestCase):
+    def test_clickhouse_error_keeps_server_code_without_logging_response_body(self):
+        response = HTTPError(
+            "http://clickhouse.invalid", 400, "bad request", None,
+            io.BytesIO(b"Code: 27. DB::Exception: synthetic-secret-payload"),
+        )
+        sink = ClickHouseSink("http://localhost:8123", "reader", "secret")
+        with mock.patch("telemetry_sinks.clickhouse.urlopen", side_effect=response):
+            with self.assertRaises(ClickHouseError) as caught:
+                sink._request("SELECT 1", b"")
+        self.assertEqual(caught.exception.server_code, 27)
+        self.assertNotIn("synthetic-secret-payload", str(caught.exception))
+
+    def test_clickhouse_status_survives_a_broken_error_body(self):
+        class BrokenBodyHTTPError(HTTPError):
+            def read(self, *_args):
+                raise OSError("connection reset")
+
+        response = BrokenBodyHTTPError("http://clickhouse.invalid", 503, "unavailable", None, io.BytesIO())
+        sink = ClickHouseSink("http://localhost:8123", "reader", "secret")
+        with mock.patch("telemetry_sinks.clickhouse.urlopen", side_effect=response):
+            with self.assertRaises(ClickHouseError) as caught:
+                sink._request("SELECT 1", b"")
+        self.assertEqual(str(caught.exception), "ClickHouse returned HTTP 503")
+        self.assertIsNone(caught.exception.server_code)
+
+    def test_replay_marker_requires_one_exact_supported_version(self):
+        self.assertTrue(_has_replay_marker([("greenguard-replay", b"v1")]))
+        self.assertFalse(_has_replay_marker([("event_id", b"event")]))
+        for headers in (
+            [("greenguard-replay", None)],
+            [("greenguard-replay", b"v2")],
+            [("greenguard-replay", b"v1"), ("greenguard-replay", b"v1")],
+        ):
+            with self.subTest(headers=headers), self.assertRaisesRegex(RuntimeError, "replay marker is malformed"):
+                _has_replay_marker(headers)
+
+    def test_replay_rejects_malformed_archive_header_values(self):
+        for header in (
+            {"name": "greenguard-replay"},
+            {"name": "greenguard-replay", "value_is_null": True},
+            {"name": "greenguard-replay", "value_base64": "", "value_is_null": "true"},
+        ):
+            with self.subTest(header=header), self.assertRaises(RuntimeError):
+                _decode_headers([header], b"{}")
+
     def test_inserts_json_rows_with_deterministic_token_and_auth(self):
         seen = []
 
@@ -126,6 +183,8 @@ class ClickHouseTests(unittest.TestCase):
             inserted = json.loads(seen[1][2])
             self.assertEqual(inserted["event_json"], item.canonical_json)
             self.assertEqual(inserted["source_offset"], item.offset)
+            self.assertIn(" ", inserted["observed_at"])
+            self.assertNotIn("T", inserted["observed_at"])
         finally:
             server.shutdown()
             server.server_close()
@@ -173,10 +232,59 @@ class FakeS3Error(Exception):
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_replay_rejects_oversized_s3_object_before_reading_body(self):
+        body = mock.Mock()
+        client = mock.Mock()
+        client.get_object.return_value = {"Body": body, "ContentLength": MAX_ARCHIVE_OBJECT_BYTES + 1}
+        with self.assertRaisesRegex(RuntimeError, "compressed size limit"):
+            list(records(client, "gg-telemetry", ("telemetry/legacy/event.json",)))
+        body.read.assert_not_called()
+
+    def test_segment_decompression_is_bounded(self):
+        raw = b"a" * (MAX_ARCHIVE_DECOMPRESSED_BYTES + 1)
+        buffer = io.BytesIO()
+        with gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0) as zipped:
+            zipped.write(raw)
+        body = buffer.getvalue()
+        key = "telemetry/segments/topic=greenguard.telemetry.recorded.v1/partition=00000/start-offset=00000000000000000007.jsonl.gz"
+        metadata = {
+            "format": "greenguard-telemetry-archive-v1",
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "first-offset": "7",
+            "last-offset": "7",
+            "record-count": "1",
+        }
+        with self.assertRaisesRegex(RuntimeError, "decompressed size limit"):
+            decode_segment(key, body, metadata)
+
+    def test_replay_freezes_key_listing_and_downloads_each_segment_once(self):
+        storage = FakeS3()
+        sink = S3ArchiveSink(storage, "gg-telemetry")
+        sink.write_batch((record(),))
+        key, (body, metadata, checksum) = next(iter(storage.objects.items()))
+
+        client = mock.Mock()
+        client.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Key": key}]},
+        ]
+        client.get_object.return_value = {
+            "Body": io.BytesIO(body), "Metadata": metadata, "ChecksumSHA256": checksum,
+        }
+
+        snapshot = object_keys(client, "gg-telemetry", "telemetry/segments/")
+        replay_rows = list(records(client, "gg-telemetry", snapshot))
+
+        self.assertEqual(snapshot, (key,))
+        self.assertEqual(len(replay_rows), 1)
+        client.get_paginator.assert_called_once_with("list_objects_v2")
+        client.get_object.assert_called_once_with(
+            Bucket="gg-telemetry", Key=key, ChecksumMode="ENABLED",
+        )
+
     def test_archives_exact_source_bytes_and_replays_without_second_object(self):
         client = FakeS3()
         sink = S3ArchiveSink(client, "gg-telemetry")
-        item = record()
+        item = replace(record(), headers=(("duplicate", b"first"), ("duplicate", None), ("empty", b"")))
         first = sink.write_batch((item,))
         self.assertEqual(first.commit_next_offset, item.offset + 1)
         self.assertEqual(client.puts, 1)
@@ -185,9 +293,47 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(decoded["value_base64"]), item.raw_value)
         self.assertEqual(decoded["event_sha256"], item.event_sha256)
         self.assertEqual(checksum, base64.b64encode(hashlib.sha256(body).digest()).decode())
+        key = next(iter(client.objects))
+        segment = decode_segment(key, body, metadata, checksum)
+        topic, partition, offset, archived_key, archived_value, headers = verify_record(segment[0], key, segment=True)
+        self.assertEqual((topic, partition, offset), (item.topic, item.partition, item.offset))
+        self.assertEqual((archived_key, archived_value), (item.raw_key, item.raw_value))
+        self.assertEqual(headers, list(item.headers))
         replay = sink.write_batch((item,))
         self.assertEqual(replay.commit_next_offset, first.commit_next_offset)
         self.assertEqual(client.puts, 1)
+
+    def test_archive_replay_segment_rejects_checksum_and_coordinate_tampering(self):
+        client = FakeS3()
+        sink = S3ArchiveSink(client, "gg-telemetry")
+        item = record()
+        sink.write_batch((item,))
+        key, (body, metadata, checksum) = next(iter(client.objects.items()))
+        with self.assertRaisesRegex(RuntimeError, "checksum"):
+            decode_segment(key, body + b"x", metadata, checksum)
+        tampered = json.loads(gzip.decompress(body).decode())
+        tampered["source_partition"] = 7
+        encoded = (json.dumps(tampered, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        buffer = gzip.compress(encoded, mtime=0)
+        changed_metadata = dict(metadata)
+        digest = hashlib.sha256(buffer).digest()
+        changed_metadata["sha256"] = digest.hex()
+        with self.assertRaisesRegex(RuntimeError, "does not match its key"):
+            decode_segment(key, buffer, changed_metadata, base64.b64encode(digest).decode())
+
+    def test_older_segment_without_headers_reconstructs_required_contract_headers(self):
+        client = FakeS3()
+        sink = S3ArchiveSink(client, "gg-telemetry")
+        sink.write_batch((record(),))
+        key, (body, metadata, _checksum) = next(iter(client.objects.items()))
+        row = json.loads(gzip.decompress(body).decode())
+        row.pop("headers")
+        older_body = gzip.compress((json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode(), mtime=0)
+        digest = hashlib.sha256(older_body).digest()
+        older_metadata = dict(metadata, sha256=digest.hex())
+        segment = decode_segment(key, older_body, older_metadata, base64.b64encode(digest).decode())
+        _topic, _partition, _offset, _key, _value, headers = verify_record(segment[0], key, segment=True)
+        self.assertIn(("event_id", EVENT.encode()), headers)
 
     def test_replay_waits_for_existing_segment_end_then_commits_prefix(self):
         client = FakeS3()
@@ -249,7 +395,7 @@ class RuntimeTests(unittest.TestCase):
     def test_commits_kafka_only_after_durable_sink_success(self):
         actions = []
         stop = threading.Event()
-        item = record(offset=12)
+        item = replace(record(offset=12), headers=(("x-source", b"original"),))
 
         class Message:
             def topic(self): return item.topic
@@ -257,6 +403,7 @@ class RuntimeTests(unittest.TestCase):
             def offset(self): return item.offset
             def key(self): return item.raw_key
             def value(self): return item.raw_value
+            def headers(self): return list(item.headers)
             def error(self): return None
 
         class Consumer:
@@ -284,12 +431,14 @@ class RuntimeTests(unittest.TestCase):
             def check(self):
                 return None
             def write_batch(self, records):
+                self.records = records
                 self.attempts += 1
                 if self.attempts == 1:
                     raise RuntimeError("temporary failure")
                 actions.append("durable")
                 return len(records)
 
+        sink = Sink()
         ca_file = ssl.get_default_verify_paths().cafile
         env = {
             "HEALTH_PORT": "0", "KAFKA_SECURITY_PROTOCOL": "SASL_SSL", "KAFKA_SASL_MECHANISM": "PLAIN",
@@ -303,11 +452,12 @@ class RuntimeTests(unittest.TestCase):
             with mock.patch.dict(os.environ, env, clear=True):
                 runtime.run("clickhouse", consumer_factory=Consumer,
                             topic_partition_factory=lambda topic, partition, offset: (topic, partition, offset),
-                            clickhouse_factory=lambda *_args: Sink(), stop_event=stop)
+                            clickhouse_factory=lambda *_args: sink, stop_event=stop)
         finally:
             runtime.MAX_BATCH_AGE_SECONDS = original_age
         self.assertLess(actions.index("durable"), actions.index("commit"))
         self.assertEqual(actions[-1], "close")
+        self.assertEqual(sink.records[0].headers, item.headers)
 
 
 if __name__ == "__main__":

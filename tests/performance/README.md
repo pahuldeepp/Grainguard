@@ -1,6 +1,6 @@
 # tests/performance
 
-Status: **first executable ingest load scenario added; full Stage 13 certification remains unimplemented**.
+Status: **local authenticated HTTP-to-PostgreSQL rate sweep recorded; full Stage 13 certification remains unimplemented**.
 
 Stages: 13.
 
@@ -29,15 +29,46 @@ have only the required ingest role, and never be committed or placed in command-
 arguments. The test creates unique reading IDs; these are durable test writes and
 must only target a dedicated local/disposable environment.
 
-Local smoke (loopback only):
+Local authenticated baseline (loopback only):
 
 ```sh
-GREENGUARD_LOAD_TARGET=local \
-BASE_URL=http://127.0.0.1:8080 \
-FIXTURES_FILE=/secure/local/path/greenguard-load-fixtures.json \
-RATE=5 DURATION=30s PREALLOCATED_VUS=20 MAX_VUS=100 RUN_ID=local-smoke-001 \
-k6 run tests/performance/telemetry-ingest.js
+GG_PERF_LOCAL_ACK=I_ACCEPT_WRITING_LOCAL_SYNTHETIC_READINGS \
+RATE=10 DURATION=30s PREALLOCATED_VUS=32 MAX_VUS=128 \
+make perf-ingest-local
 ```
+
+`perf-ingest-local` checks that the configured `TELEMETRY_DIRECT_URL` and
+`POSTGRES_ADMIN_URL` point to the same loopback PostgreSQL port, creates a random
+tenant with 256 bound devices, bootstraps tenant placement through the local
+placement fixture, and starts telemetry-ingest with a temporary loopback JWKS
+issuer. The generated operator token and registry files are mode 0600 in a
+temporary directory. It deletes every public telemetry row for that random tenant
+and its ownership row after the run. The database itself must be a disposable local
+GreenGuard environment; the guard prevents non-loopback targets but cannot identify
+whether a local database contains user data.
+
+The harness trusts only the loopback peer and asks k6 to send synthetic client
+addresses from the RFC 2544 benchmarking range, with a hard cap of 65,024 VUs so
+the generated address remains inside `198.18.0.0/15`. This exercises the trusted-proxy
+per-source admission path instead of measuring the default 10 requests/second
+single-peer fallback. This header simulation is local-only and does not test the
+actual gateway's forwarded-header behavior; production must set trusted proxy CIDRs
+to real ingress peers and verify that ingress overwrites or appends the client
+address correctly.
+
+The resulting `evidence/performance/local-telemetry-ingest-*.json` reports accepted
+rate, request rate, HTTP p95 and threshold results. This measures the authenticated
+HTTP-to-PostgreSQL transaction path only. It disables the binding-feed freshness
+gate and does not run Kafka, CDC, projections, Cassandra or alerts, so it cannot
+certify the end-to-end freshness, durability or SLO targets. Keep the rate modest
+for the first baseline, then increase it deliberately; do not treat this single-host
+test as evidence for 20k/s or 50k/s fleet capacity.
+
+The initial 100–500/s local rate sweep and its interpretation are recorded in
+[`evidence/performance/LOCAL_RATE_SWEEP_2026-10-10.md`](../../evidence/performance/LOCAL_RATE_SWEEP_2026-10-10.md).
+The 250/s sample was accepted for 30 seconds; latency degraded at 300/s and the
+500/s sample failed the acceptance thresholds with p95 at 716 ms. These are short measurements,
+not a stable capacity limit or evidence that batching is the right fix.
 
 Disposable HTTPS execution additionally requires `GREENGUARD_LOAD_TARGET=disposable`,
 `EXPECTED_BASE_URL` exactly equal to `BASE_URL`, and

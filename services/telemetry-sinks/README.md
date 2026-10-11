@@ -9,9 +9,10 @@ container argument:
   aggregate columns are populated where the event contract has matching values.
 * `s3-archive` stores immutable, deterministic gzip JSONL segments under the
   dedicated bucket's `telemetry/segments/` prefix. Each line preserves the
-  source topic, partition, offset, original Kafka key/value bytes, and payload
-  digest. Bucket versioning/encryption and workload identity are configured by
-  the deployment infrastructure.
+  source topic, partition, offset, original Kafka key/value bytes, ordered Kafka
+  headers (including duplicate names and null values), and payload digest.
+  Bucket versioning/encryption and workload identity are configured by the
+  deployment infrastructure.
 
 Both modes validate the repository's versioned event schemas, Kafka key,
 traceparent, timestamps, and source coordinates. Invalid events fail closed and
@@ -29,7 +30,11 @@ deduplication; queries requiring immediate logical deduplication should use
 `FINAL`. ClickHouse's deduplication window is finite, so it is not a permanent
 exactly-once guarantee. S3 archive segments are immutable and keyed by their
 first source offset; a restart recovers a segment before advancing the Kafka
-group offset.
+group offset. The replay tool reads this same gzip JSONL segment format,
+validates the S3 and per-event checksums, and republishes to the original topic.
+For segments created before Kafka headers were retained, it reconstructs the
+required canonical headers from the validated event envelope. Replayed records
+carry `greenguard-replay=v1` so a later replay skips them.
 
 Runtime configuration is injected from Kubernetes Secrets and workload
 identity, never baked into the image:
@@ -54,7 +59,7 @@ From the repository root:
 
 ```sh
 python3 -m venv /tmp/greenguard-telemetry-sinks-venv
-/tmp/greenguard-telemetry-sinks-venv/bin/pip install -r services/telemetry-sinks/requirements.txt
+/tmp/greenguard-telemetry-sinks-venv/bin/pip install -r services/telemetry-sinks/requirements.lock
 /tmp/greenguard-telemetry-sinks-venv/bin/python -m unittest discover -s services/telemetry-sinks/tests -v
 ```
 

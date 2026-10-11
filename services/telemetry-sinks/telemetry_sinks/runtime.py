@@ -168,7 +168,8 @@ def run(mode: str, *, consumer_factory: Callable | None = None, topic_partition_
                     continue
                 poll_error_since = None
                 record = parse_record(message.topic(), message.key(), message.value(),
-                                      message.partition(), message.offset(), validators)
+                                      message.partition(), message.offset(), validators,
+                                      getattr(message, "headers", lambda: None)() or [])
                 key = (record.topic, record.partition)
                 if not batches[key]:
                     first_seen[key] = time.monotonic()

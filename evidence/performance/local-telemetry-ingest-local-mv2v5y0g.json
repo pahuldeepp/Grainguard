@@ -1,0 +1,15 @@
+{
+  "runId": "local-mv2v5y0g",
+  "measuredAt": "2026-10-10T20:46:03.577Z",
+  "scope": "authenticated telemetry HTTP endpoint to PostgreSQL transaction; loopback is the only trusted proxy and k6 supplies distinct RFC 2544 client IPs; Kafka, CDC, projections, Cassandra and alerts are not exercised",
+  "offeredRatePerSecond": 200,
+  "duration": "20s",
+  "accepted": 4001,
+  "acceptedRate": 1,
+  "requestRate": 199.9935518199988,
+  "requestFailureRate": 0,
+  "requestP95Ms": 12.714,
+  "droppedIterations": 0,
+  "thresholdsPassed": true,
+  "syntheticFixtureCleaned": true
+}
