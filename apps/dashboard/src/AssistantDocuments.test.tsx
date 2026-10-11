@@ -98,7 +98,8 @@ it("library remains usable when optional storage is unavailable", async () => {
         onDocuments={vi.fn()}
       />,
     );
-    await screen.findByText("Unavailable-storage.pdf");
+    expect(await screen.findByText("Unavailable-storage.pdf")).toBeTruthy();
+    expect(api.listDocuments).toHaveBeenCalledTimes(1);
   } finally {
     get.mockRestore();
   }

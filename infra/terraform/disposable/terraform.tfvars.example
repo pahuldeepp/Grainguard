@@ -1,6 +1,6 @@
 aws_region             = "<aws-region>"
 target_account_id      = "<12-digit-account-id>"
-environment            = "sandbox"
+environment            = "disposable"
 cluster_name           = "greenguard-sandbox-cell-1"
 kubernetes_version     = "<supported-eks-version>"
 ebs_csi_addon_version  = "<supported-vX.Y.Z-eksbuild.N>"
@@ -14,6 +14,7 @@ cluster_admin_role_arn = "arn:aws:iam::<account-id>:role/<operator-role>"
 # cluster_endpoint_public_access       = true
 # cluster_endpoint_public_access_cidrs = ["<operator-public-ip>/32"]
 
-# Optional containers for values supplied outside Terraform. Never put a
-# password, token or secret_string in this file or Terraform state.
+# Optional extra cell-owned secret containers. The application tree's required
+# containers are derived from its contract. Never put a password, token or
+# secret_string in this file or Terraform state.
 secret_names = []

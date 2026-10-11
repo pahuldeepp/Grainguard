@@ -29,7 +29,7 @@ variable "runtime_secret_values" {
     error_message = "Runtime secret values must be nonempty string maps with nonempty keys and values."
   }
   validation {
-    condition     = alltrue([for name in keys(var.runtime_secret_values) : contains(var.secret_names, name)])
+    condition     = var.enable_application_tree || alltrue([for name in keys(var.runtime_secret_values) : contains(var.secret_names, name)])
     error_message = "Every supplied runtime secret payload name must be included in secret_names; generated-secret payload names are rejected by the runtime materialization precondition."
   }
 }
@@ -185,7 +185,7 @@ locals {
   generated_all_runtime_values = merge(local.generated_runtime_values, local.generated_projection_maintenance_values, local.generated_audit_export_values, local.generated_tenant_bootstrap_worker_values, local.generated_telemetry_sink_values)
   # Secret names are public, state-stable resource keys. Never derive instance
   # addresses or triggers from ephemeral payload values.
-  runtime_secret_input_names = var.secret_names
+  runtime_secret_input_names = local.managed_secret_names
   runtime_secret_owned_values = {
     for name, values in merge(var.runtime_secret_values, local.generated_migration_values, local.generated_all_runtime_values) : name => merge(
       { for key, value in values : key => value if !contains([for config, profile in local.runtime_database_profiles : profile.key if !contains(["tenant-control-plane-config", "billing-service-config"], config)], key) },
@@ -243,7 +243,7 @@ resource "aws_secretsmanager_secret_version" "runtime" {
     terraform_data.destroy_inventory_sentinel,
     terraform_data.ml_synthetic_secret_guard,
   ]
-  for_each  = var.secret_names
+  for_each  = local.managed_secret_names
   secret_id = aws_secretsmanager_secret.runtime[each.key].id
   # A name/payload mismatch must reach the explanatory precondition below,
   # rather than fail first with an opaque invalid map index.
@@ -251,12 +251,12 @@ resource "aws_secretsmanager_secret_version" "runtime" {
   secret_string_wo_version = lookup(var.secret_version_counters, "runtime/${each.key}", 1)
   lifecycle {
     precondition {
-      condition     = contains(var.secret_names, each.key) && !contains(["prod", "production"], lower(var.environment))
+      condition     = contains(local.managed_secret_names, each.key) && !contains(["prod", "production"], lower(var.environment))
       error_message = "Runtime values require approved Terraform-owned containers in a non-production disposable environment."
     }
     precondition {
       condition = nonsensitive(toset(keys(var.runtime_secret_values))) == setsubtract(
-        var.secret_names,
+        local.managed_secret_names,
         setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))
         ) && length(setintersection(
           nonsensitive(toset(keys(var.runtime_secret_values))),
@@ -331,8 +331,14 @@ resource "terraform_data" "runtime_secret_sync" {
   ]
   lifecycle {
     precondition {
-      condition     = toset(keys(var.runtime_secret_values)) == setsubtract(var.secret_names, setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))) && length(setintersection(toset(keys(var.runtime_secret_values)), setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values))))) == 0
+      condition     = toset(keys(var.runtime_secret_values)) == setsubtract(local.managed_secret_names, setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values)))) && length(setintersection(toset(keys(var.runtime_secret_values)), setunion(toset(keys(local.generated_migration_values)), toset(keys(local.generated_all_runtime_values))))) == 0
       error_message = "Application bootstrap requires Terraform-owned values for every approved secret container and no extra values."
+    }
+    precondition {
+      condition = alltrue([for key in keys(var.secret_version_counters) :
+        !startswith(key, "runtime/") || contains(local.managed_secret_names, trimprefix(key, "runtime/"))
+      ])
+      error_message = "Runtime secret-version counters must reference a managed Secret container."
     }
   }
   provisioner "local-exec" {

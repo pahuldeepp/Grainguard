@@ -38,9 +38,14 @@ the live service and user-journey acceptance recorded in the runbook.
 
 1. Copy `terraform.tfvars.example` to `terraform.tfvars`. Replace every
    placeholder with the target account ID and region, supported EKS version, two
-   availability zones, and an existing operator role ARN. Set `secret_names`
-   only for secret containers this cell owns. Also select a region that supports
+   availability zones, and an existing operator role ARN. Terraform derives all
+   required Secrets Manager container names from the application contract when
+   the application tree is enabled; use `secret_names` only for additional
+   cell-owned containers. Also select a region that supports
    CloudFront VPC origins and supply a compatible EBS CSI add-on version.
+   Keep `environment = "disposable"`; this root's force-destroy archive
+   resources require that exact label, while `cluster_name` may include a
+   descriptive name such as `greenguard-sandbox-cell-1`.
    Secret payload inputs are ephemeral and are written by AWS provider
    `secret_string_wo` arguments. They are omitted from Terraform plan/state;
    master-secret rotation tracking uses version metadata only. Never put secret

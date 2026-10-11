@@ -71,6 +71,7 @@ export const options = {
   },
   thresholds: {
     http_req_failed: ["rate<0.01"],
+    http_req_duration: ["p(95)<300"],
     greenguard_ingest_accepted_rate: ["rate>0.99"],
     dropped_iterations: ["count==0"],
   },

@@ -35,6 +35,12 @@ is the bottleneck. They justify profiling and longer repeated tests before
 choosing a batching change. The architecture's transformer/projection consumers
 also have separate sequential-processing limits that this test does not measure.
 
+The JSON results were produced before the load script enforced the 300 ms API p95
+SLO. In that older gate, the 300/s run's `thresholdsPassed: true` reflects only
+acceptance/error/drop thresholds; its 367.05 ms p95 violates the API SLO. The
+current k6 gate includes `http_req_duration p(95)<300`, so a repeat of that run
+must fail until latency is below target.
+
 Tier 1 targets remain unproven: 20,000/s sustained, 50,000/s peak, API p95 under
 300 ms, telemetry commit-to-canonical and queryable-projection p95 under 1 second,
 99.9% availability over 30 days, and zero acknowledged-event loss within the

@@ -2,7 +2,7 @@
 # recovery window requests immediate deletion for this disposable environment.
 resource "aws_secretsmanager_secret" "runtime" {
   depends_on = [terraform_data.destroy_inventory_sentinel]
-  for_each   = var.secret_names
+  for_each   = local.managed_secret_names
 
   name                    = "greenguard/${var.environment}/${each.value}"
   recovery_window_in_days = 0
@@ -11,7 +11,7 @@ resource "aws_secretsmanager_secret" "runtime" {
 }
 
 variable "secret_names" {
-  description = "Public names of approved runtime secret containers. Payload values are ephemeral and are not used as Terraform resource keys."
+  description = "Optional additional public names of cell-owned runtime Secret containers. Required application containers are derived from the contract when enabled; payloads never form Terraform resource keys."
   type        = set(string)
   default     = []
   validation {
@@ -34,7 +34,7 @@ variable "secret_version_counters" {
   }
   validation {
     condition = alltrue([for key in keys(var.secret_version_counters) : (
-      startswith(key, "runtime/") ? contains(var.secret_names, trimprefix(key, "runtime/")) :
+      startswith(key, "runtime/") ? (var.enable_application_tree || contains(var.secret_names, trimprefix(key, "runtime/"))) :
       startswith(key, "shard-routing/") ? contains([
         "device-service", "telemetry-ingest", "projection-builder", "risk-engine",
         "workflow-alerts", "jobs-worker", "notification-service", "saga-orchestrator",

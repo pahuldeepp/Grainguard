@@ -10,7 +10,9 @@ Responsibility: Reproducible load/soak and resource budgets.
 
 `telemetry-ingest.js` is an open-arrival-rate HTTP workload for the real authenticated
 `POST /v1/devices/{deviceId}/readings` endpoint. It records offered/completed rate,
-latency, rejected responses, and dropped iterations. It does not itself prove Kafka,
+latency, rejected responses, and dropped iterations. The acceptance thresholds require
+HTTP p95 below 300 ms, fewer than 1% failed requests, over 99% accepted readings, and
+zero dropped iterations. It does not itself prove Kafka,
 CDC, projections, Cassandra, alerts, or the end-to-end freshness/durability SLOs.
 
 The fixture JSON must remain local and contain tenant-scoped operator tokens plus
@@ -19,7 +21,10 @@ bound device IDs, for example:
 ```json
 {
   "tenants": [
-    { "bearer_token": "<short-lived-token>", "device_ids": ["<bound-device-uuid>"] }
+    {
+      "bearer_token": "<short-lived-token>",
+      "device_ids": ["<bound-device-uuid>"]
+    }
   ]
 }
 ```

@@ -194,6 +194,17 @@ locals {
   required_observability_images = toset(["otel-collector", "prometheus", "grafana", "tempo", "loki"])
   required_data_plane_images    = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"])
   required_data_plane_secrets   = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls", "greenguard-mqtt-broker"])
+  required_cell_secret_names = setunion(
+    local.required_runtime_secret_names,
+    local.required_bootstrap_secret_names,
+    local.required_data_plane_secrets,
+    local.required_migration_secret_names,
+    toset(["grafana-admin"]),
+  )
+  managed_secret_names = setunion(
+    var.secret_names,
+    var.enable_application_tree ? local.required_cell_secret_names : toset([]),
+  )
   shard_registry_by_release = {
     "device-service"                  = { service = "device-service", secret = "device-service", env = "SHARD_REGISTRY_FILE" }
     "telemetry-ingest"                = { service = "telemetry-ingest", secret = "telemetry-ingest", env = "SHARD_REGISTRY_FILE" }
@@ -541,8 +552,8 @@ resource "helm_release" "gitops_bootstrap" {
       error_message = "Application tree needs a digest-pinned ClickHouse server image for Kafka-backed telemetry analytics."
     }
     precondition {
-      condition     = length(setsubtract(setunion(local.required_runtime_secret_names, local.required_bootstrap_secret_names, local.required_data_plane_secrets, local.required_migration_secret_names, toset(["grafana-admin"])), var.secret_names)) == 0
-      error_message = "Application tree needs Secrets Manager containers for runtime, bootstrap, migration, data-plane credentials and grafana-admin; Terraform must materialize complete values before deployment."
+      condition     = length(setsubtract(local.required_cell_secret_names, local.managed_secret_names)) == 0
+      error_message = "Application tree secret containers must cover its runtime, bootstrap, migration, data-plane and observability contracts."
     }
     precondition {
       condition     = toset(keys(var.migration_image_digests)) == local.migration_owner_names && var.migration_gate_image_digest != "" && var.migration_sql_image_digest != ""

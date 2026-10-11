@@ -72,7 +72,10 @@ test("says bins are within limits when nothing is open, and offers retry on fail
   const client = renderSummary({ list } as unknown as AlertsApi);
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await screen.findByText("No open alerts. Bins are within limits.");
+  expect(
+    await screen.findByText("No open alerts. Bins are within limits."),
+  ).toBeTruthy();
+  expect(list).toHaveBeenCalledTimes(2);
   client.clear();
 });
 

@@ -57,7 +57,7 @@ resource "terraform_data" "identity_contract" {
     precondition {
       condition = var.identity_mode != "managed-dex" || (
         var.enable_application_tree &&
-        contains(var.secret_names, "greenguard-dex-config") &&
+        contains(local.managed_secret_names, "greenguard-dex-config") &&
         toset(keys(try(var.runtime_secret_values["greenguard-dex-config"], {}))) == toset(["DEX_FIRST_ADMIN_EMAIL", "DEX_FIRST_ADMIN_PASSWORD_HASH"])
       )
       error_message = "managed-dex requires enable_application_tree=true and greenguard-dex-config with an operator-chosen DEX_FIRST_ADMIN_EMAIL and bcrypt DEX_FIRST_ADMIN_PASSWORD_HASH; local demo users are never copied."

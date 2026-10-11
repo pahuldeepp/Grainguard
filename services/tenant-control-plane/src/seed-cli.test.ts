@@ -10,9 +10,18 @@ const file = fileURLToPath(
 
 test("the seed command reports an idempotent run and requires its database URL", async () => {
   await assert.rejects(main({}), /CONTROL_DIRECT_URL/);
-  const output = await main({
+  const explicitOutput = await main({
     CONTROL_DIRECT_URL: env("CONTROL_DIRECT_URL"),
     AUTH_MEMBERSHIP_FILE: file,
   });
-  assert.match(output, /^seeded memberships: created=\d+ existing=\d+$/);
+  assert.match(
+    explicitOutput,
+    /^seeded memberships: created=\d+ existing=\d+$/,
+  );
+
+  const defaultOutput = await main({
+    CONTROL_DIRECT_URL: env("CONTROL_DIRECT_URL"),
+    AUTH_MEMBERSHIP_FILE: "",
+  });
+  assert.match(defaultOutput, /^seeded memberships: created=\d+ existing=\d+$/);
 });

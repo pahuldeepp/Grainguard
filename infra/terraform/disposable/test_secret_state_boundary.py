@@ -89,7 +89,7 @@ class SecretStateBoundaryTests(unittest.TestCase):
     def test_secret_version_counter_names_are_closed_to_real_secret_instances(self):
         secrets = (ROOT / "secrets.tf").read_text()
         counters = variable_block(secrets, "secret_version_counters")
-        self.assertIn("contains(var.secret_names, trimprefix(key, \"runtime/\"))", counters)
+        self.assertIn("var.enable_application_tree || contains(var.secret_names, trimprefix(key, \"runtime/\"))", counters)
         self.assertIn("\"shard-routing/\") ? contains([", counters)
         self.assertIn("\"shard-bootstrap/\") ? contains([\"s1\", \"s2\", \"s3\", \"s4\"]", counters)
         self.assertIn("\"tenant-bootstrap/\") ? contains([\"s1\", \"s2\", \"s3\", \"s4\"]", counters)
@@ -101,7 +101,7 @@ class SecretStateBoundaryTests(unittest.TestCase):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
         resource = next(resource_blocks(runtime, "aws_secretsmanager_secret_version"))
         payload = variable_block(runtime, "runtime_secret_values")
-        self.assertIn("contains(var.secret_names, name)", payload)
+        self.assertIn("var.enable_application_tree || alltrue([for name in keys(var.runtime_secret_values) : contains(var.secret_names, name)])", payload)
         self.assertIn("try(jsonencode(local.runtime_secret_owned_values[each.key]), jsonencode({}))", resource)
         self.assertIn("nonsensitive(toset(keys(var.runtime_secret_values))) == setsubtract(", resource)
         self.assertIn("length(setintersection(", resource)
@@ -140,10 +140,16 @@ class SecretStateBoundaryTests(unittest.TestCase):
 
     def test_secret_resource_addresses_are_derived_from_public_names(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
-        self.assertRegex(runtime, r"runtime_secret_input_names\s*=\s*var\.secret_names")
+        self.assertRegex(runtime, r"runtime_secret_input_names\s*=\s*local\.managed_secret_names")
         version_resource = next(resource_blocks(runtime, "aws_secretsmanager_secret_version"))
-        self.assertRegex(version_resource, r"for_each\s*=\s*var\.secret_names")
+        self.assertRegex(version_resource, r"for_each\s*=\s*local\.managed_secret_names")
         self.assertIn('lookup(var.secret_version_counters, "runtime/${each.key}", 1)', version_resource)
+
+    def test_application_tree_derives_its_required_secret_containers(self):
+        gitops = (ROOT / "gitops.tf").read_text()
+        self.assertIn("required_cell_secret_names = setunion(", gitops)
+        self.assertIn("var.enable_application_tree ? local.required_cell_secret_names : toset([])", gitops)
+        self.assertIn("managed_secret_names = setunion(", gitops)
 
     def test_persisted_secret_sync_and_helm_inputs_contain_only_public_metadata(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()

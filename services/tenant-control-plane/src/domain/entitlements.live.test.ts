@@ -117,8 +117,23 @@ test("ENT-10 a paid plan applied an hour ago is still honored while the feed is 
     scopes: ["read:telemetry"],
     expiresAt: new Date(Date.now() + 86400000).toISOString(),
   });
-  await createApiKey(db, pepper, o.admin, o.tenantId, input(), cmd());
-  await createApiKey(db, pepper, o.admin, o.tenantId, input(), cmd());
+  const first = await createApiKey(
+    db,
+    pepper,
+    o.admin,
+    o.tenantId,
+    input(),
+    cmd(),
+  );
+  const second = await createApiKey(
+    db,
+    pepper,
+    o.admin,
+    o.tenantId,
+    input(),
+    cmd(),
+  );
+  assert.notEqual(first.keyId, second.keyId);
 });
 test("ENT-11 a stale feed fails closed to the free key default and a heartbeat restores the plan", async () => {
   const o = await org();

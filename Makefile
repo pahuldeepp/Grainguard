@@ -44,6 +44,7 @@ verify: check-plan db-migrate
 	npm run typecheck
 	npm test
 	node --test scripts/contacts-schema.test.mjs
+	node --test scripts/telemetry-ingest-performance-contract.test.mjs
 	$(MAKE) telemetry-sinks-test
 	node --test scripts/placement-fixture.test.mjs
 	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
