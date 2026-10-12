@@ -22,14 +22,16 @@ signed publish jobs; the ECR promoter verifies each signature again:
 - `release-coverage.json` with explicit vendor-signature and acceptance-probe
   readiness.
 
-The checked-in AI source inventory currently has model-gateway and its usage
-worker only. Knowledge service, parser, indexer, Grain Advisor, and MCP gateway
-Dockerfiles are absent. CI does not publish placeholder images for them. The
-assembler records those gaps, leaves `ai_runtime_image_digests` empty, and sets
-`ai_runtime_enabled=false`; Terraform rejects AI enablement until every source
-and all eight immutable image references are present. The non-AI application
-can remain separately identifiable as `ready_core_ai_disabled` once other
-release gates pass; this does not claim that AI is deployed.
+The checked-in AI source inventory contains all seven repository-owned runtime
+images: Knowledge API, indexer, parser, Grain Advisor, MCP gateway, model gateway
+and usage worker. Their Dockerfiles are present and the CI publish matrix covers
+them. The eighth AI image is the digest-pinned ClamAV vendor image. Source
+presence does not prove that these images have been published or tested on EKS.
+The assembler sets `ai_runtime_sources_complete` only when the exact source and
+signed image inventory is complete; Terraform still requires all eight immutable
+references, private runtime inputs, reviewed network configuration and live
+acceptance. An artifact with AI disabled does not satisfy the full GreenGuard
+core + AI/ML deployment goal.
 
 No CI job runs `terraform apply`. The artifact does not set
 `enable_application_tree`, supply secrets or enroll users. Those deployment

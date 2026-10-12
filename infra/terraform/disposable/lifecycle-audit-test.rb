@@ -168,7 +168,7 @@ class LifecycleAuditTest < Minitest::Test
   def test_live_root_graph_has_scope_anchor_fanout_and_cleanup_before_it
     assert_empty LifecycleAudit.destroy_anchor_graph_findings(sources)
     resources = sources.reject { |name, _| name == 'scope_override.tf' }.values.sum { |body| body.scan(/^resource\s+"/).length }
-    assert_equal 153, resources - 1
+    assert_equal 155, resources - 1
     assert_includes sources.fetch('main.tf'), 'post-destroy-inventory.sh'
   end
 

@@ -35,7 +35,8 @@ case "$*" in
   *' exec --namespace greenguard --stdin '* )
     printf '%s\n' "$*" >"$STUB_DIR/exec-args"
     cat >"$STUB_DIR/token"
-    printf '%s\n' 'OIDC first-admin enrollment: ACTIVE admin membership read-back verified (queued)' ;;
+    if [[ "$*" == *'ENROLL_OUTPUT_FORMAT=json'* ]]; then cat "$STUB_DIR/receipt"; else
+      printf '%s\n' 'OIDC first-admin enrollment: ACTIVE admin membership read-back verified (queued)'; fi ;;
   *) exit 2 ;;
 esac
 EOF
@@ -80,5 +81,37 @@ if run "${tenant}:https://id.example.test/"; then fail 'production cell should f
 grep -q 'refusing production' "$work/out" && ok 'production cell is refused'
 printf '%s\n' '{"region":"us-east-1","environment":"sandbox","cluster_name":"greenguard-sandbox","account_id":"123456789012"}' >"$work/cell"
 
+printf '%s\n' '{"version":1,"tenant_id":"00000000-0000-4000-8000-000000000002","user_id":"11111111-1111-5111-8111-111111111111","issuer":"https://id.example.test/","role":"admin","state":"active","enrollment":"existing"}' >"$work/receipt"
+GG_ENROLL_OUTPUT_FORMAT=json run "${tenant}:https://id.example.test/" || fail 'verified JSON receipt should pass'
+cmp -s "$work/out" "$work/receipt" || fail 'JSON owner receipt does not match the verified runtime response'
+ok 'JSON owner receipt is bound to exact tenant and issuer'
+cp "$work/receipt" "$work/valid-receipt"
+for field in tenant_id role user_id; do
+  python3 - "$work/valid-receipt" "$work/receipt" "$field" <<'PYJSON'
+import json,sys
+with open(sys.argv[1]) as source: value=json.load(source)
+value[sys.argv[3]]={"tenant_id":"22222222-2222-4222-8222-222222222222","role":"member","user_id":"not-an-identity"}[sys.argv[3]]
+with open(sys.argv[2],"w") as target: json.dump(value,target)
+PYJSON
+  if GG_ENROLL_OUTPUT_FORMAT=json run "${tenant}:https://id.example.test/"; then fail "invalid receipt $field should fail"; fi
+  ok "invalid receipt $field is rejected"
+done
+
+for malformed in null-issuer numeric-user array static-dex-id nil-identity; do
+  python3 - "$work/valid-receipt" "$work/receipt" "$malformed" <<'PYJSON'
+import json,sys
+with open(sys.argv[1]) as source: value=json.load(source)
+if sys.argv[3]=="array": value=[]
+elif sys.argv[3]=="null-issuer": value["issuer"]=None
+elif sys.argv[3]=="static-dex-id": value["user_id"]="11111111-1111-4111-8111-111111111111"
+elif sys.argv[3]=="nil-identity": value["user_id"]="00000000-0000-0000-0000-000000000000"
+else: value["user_id"]=42
+with open(sys.argv[2],"w") as target: json.dump(value,target)
+PYJSON
+  if GG_ENROLL_OUTPUT_FORMAT=json run "${tenant}:https://id.example.test/"; then fail "malformed receipt $malformed should fail"; fi
+  grep -q 'invalid verified owner receipt' "$work/out" && ! grep -q 'Traceback' "$work/out" || fail 'malformed receipt leaked traceback'
+  ok "malformed receipt $malformed fails with a controlled error"
+done
+
 echo "enroll-first-admin tests: $pass passed"
-[ "$pass" -eq 5 ]
+[ "$pass" -eq 14 ]

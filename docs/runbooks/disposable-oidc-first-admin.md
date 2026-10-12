@@ -80,3 +80,51 @@ After running in the disposable cell, verify the resulting active tenant with
 the disposable live acceptance procedure and exercise web/mobile login. Never
 use this workflow against production. Existing tenants use the invitation and
 revocation workflows.
+
+## Verified owner identity for AI configuration
+
+After the live OIDC access token has been verified and the tenant/bootstrap
+workflow has produced an ACTIVE admin membership, the enrollment helper can
+emit a machine-readable receipt instead of the normal status line:
+
+```sh
+umask 077
+GG_ENROLL_OUTPUT_FORMAT=json ./enroll-first-admin.sh \
+  --enroll NEW_TENANT_UUID --token-file /secure/operator/path/access-token.txt \
+  --confirm 'NEW_TENANT_UUID:EXACT_TERRAFORM_ISSUER' \
+  > /secure/operator/path/verified-owner.json
+```
+
+The receipt contains the exact issuer, tenant UUID and stable GreenGuard
+`user_id`, plus ACTIVE/admin confirmation. The helper validates the receipt
+against the requested tenant and issuer before returning it. It contains no
+access token or raw OIDC subject. Use its `tenant_id` / `user_id` pair for
+explicit AI conversation retention and gateway user budgets. Do not substitute
+`DEX_FIRST_ADMIN_USER_ID`, an email address, or an unverified JWT claim.
+
+This receipt does not create an AI budget, gateway token or retention policy;
+those are separate explicit configuration steps. It also does not eliminate
+the initial infrastructure/bootstrap dependency: the issuer and control-plane
+membership must exist and be verified first. A one-command deployment must
+orchestrate that enrollment before preparing identity-dependent AI inputs.
+
+Import that private receipt without copying UUIDs by hand:
+
+```sh
+python3 prepare-ai-runtime-bundle.py \
+  --environment disposable --cluster YOUR_EXACT_CLUSTER \
+  --region YOUR_AWS_REGION --account-id YOUR_AWS_ACCOUNT \
+  --owner-receipt /secure/operator/path/verified-owner.json \
+  --expected-issuer 'EXACT_TERRAFORM_ISSUER' \
+  --budget-caps-file /secure/operator/path/explicit-budget-caps.json \
+  --output /secure/operator/path/ai-ephemeral-inputs.json
+```
+
+The importer checks the receipt shape, canonical control-plane identity,
+ACTIVE/admin state, exact expected issuer, file owner and private permissions.
+It does not independently authenticate a JSON file. Use only the receipt
+produced by the guarded live enrollment helper; do not construct one manually.
+Explicit budget caps are still required by Terraform, and the original token
+verification/membership checks remain authoritative. Existing explicit
+`--tenant-id` and `--retention-scope` options remain available for reviewed
+operator workflows.

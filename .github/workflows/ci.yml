@@ -98,6 +98,8 @@ jobs:
         run: python3 -m unittest infra/terraform/disposable/test_disposable_environment_contract.py infra/terraform/disposable/test_shard_runtime_contract.py infra/terraform/disposable/test_shard_routing_required_contract.py infra/terraform/disposable/test_prepare_shard_runtime_bundle.py -v
       - name: Verify disposable teardown guards offline
         run: bash infra/terraform/disposable/teardown_test.sh
+      - name: Verify runtime secret boundaries and Stripe webhook failure recovery
+        run: python3 -m unittest infra/gitops/disposable/test_stripe_webhook_lifecycle.py infra/gitops/disposable/test_check_secrets_ready.py infra/gitops/disposable/test_runtime_secret_lifecycle.py infra/terraform/disposable/test_secret_state_boundary.py -v
       - name: Audit disposable Terraform lifecycle offline
         run: ruby infra/terraform/disposable/lifecycle-audit-test.rb
       - name: Verify Pod Identity trust scoping

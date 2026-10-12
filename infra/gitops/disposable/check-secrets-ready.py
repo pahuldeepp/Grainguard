@@ -153,7 +153,7 @@ def expected_secrets(args):
     if not role_keys:
         raise RuntimeError("RDS role password contract is empty")
     names.extend([
-        "greenguard-rds-bootstrap", "greenguard-rds-ca", "grafana-admin",
+        "greenguard-rds-bootstrap", "greenguard-rds-ca", "grafana-admin", "greenguard-data-credentials",
         "greenguard-pgbouncer-auth", "greenguard-cdc-credentials",
         "greenguard-opensearch-admin", "greenguard-opensearch-clients",
         "greenguard-opensearch-tls", "greenguard-opensearch-ca",
@@ -258,6 +258,16 @@ def expected_secrets(args):
         elif name == "greenguard-rds-ca":
             if set(source) != {"ca.pem"} or "BEGIN CERTIFICATE" not in source["ca.pem"]:
                 raise ValueError(f"{name}: RDS CA must contain ca.pem with a PEM certificate")
+        elif name == "greenguard-data-credentials":
+            if set(source) != {"REDIS_PASSWORD", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"}:
+                raise ValueError(f"{name}: exact Redis/RabbitMQ keys are required")
+            if source["RABBITMQ_DEFAULT_USER"] != "greenguard" or any(
+                not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", source[key])
+                for key in ("REDIS_PASSWORD", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE")
+            ):
+                raise ValueError(f"{name}: scoped user and strong URL-safe credentials are required")
+            if len({source[key] for key in ("REDIS_PASSWORD", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE")}) != 3:
+                raise ValueError(f"{name}: credentials must be independent")
         elif name == "grafana-admin":
             if set(source) != {"GF_SECURITY_ADMIN_USER", "GF_SECURITY_ADMIN_PASSWORD"}:
                 raise ValueError(f"{name}: Grafana admin keys are missing or unexpected")

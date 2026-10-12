@@ -111,6 +111,35 @@ def _pairs_without_duplicates(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _load_owner_receipt(path: Path, expected_issuer: str) -> tuple[str, str]:
+    """Import an operator-produced enrollment receipt; never verify a raw JWT here."""
+    path = path.expanduser().absolute()
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
+            or info.st_uid != os.getuid() or info.st_size > 16384):
+        raise ValueError("owner receipt must be an owner-only bounded regular file")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_pairs_without_duplicates)
+    except (ValueError, UnicodeDecodeError):
+        raise ValueError("owner receipt is invalid JSON") from None
+    fields = {"version", "tenant_id", "user_id", "issuer", "role", "state", "enrollment"}
+    if (not isinstance(value, dict) or set(value) != fields
+            or type(value["version"]) is not int or value["version"] != 1
+            or any(not isinstance(value[key], str) for key in fields - {"version"})
+            or not expected_issuer.startswith("https://") or value["issuer"] != expected_issuer
+            or value["role"] != "admin" or value["state"] != "active"
+            or value["enrollment"] not in {"provisioning", "existing"}):
+        raise ValueError("owner receipt does not match the expected ACTIVE admin/issuer")
+    try:
+        tenant, user = uuid.UUID(value["tenant_id"]), uuid.UUID(value["user_id"])
+    except ValueError:
+        raise ValueError("owner receipt identity fields are invalid") from None
+    if (str(tenant) != value["tenant_id"] or tenant.version not in range(1, 9)
+            or str(user) != value["user_id"] or user.version != 5):
+        raise ValueError("owner receipt requires canonical tenant and control-plane identity UUIDs")
+    return str(tenant), str(user)
+
+
 def _load_budget_caps(path: Path | None, expected_tenants: set[str]) -> dict | None:
     if path is None:
         return None
@@ -314,12 +343,25 @@ def main() -> int:
                         help="explicitly remove a previously provisioned retention pair")
     parser.add_argument("--budget-caps-file", type=Path,
                         help="owner-only JSON with explicit platform/tenant/user caps; tenant IDs must match --tenant-id")
+    parser.add_argument("--owner-receipt", type=Path,
+                        help="private JSON receipt emitted by verified first-admin enrollment")
+    parser.add_argument("--expected-issuer", default="",
+                        help="exact issuer from this cell's Terraform OIDC output; required with --owner-receipt")
     parser.add_argument("--rotate-signing-key", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     fingerprint = cell_id(args.environment, args.cluster, args.region, args.account_id)
     output = args.output or Path(__file__).parent / ".terraform" / "ai-runtime" / fingerprint / "ephemeral.auto.tfvars.json"
     try:
+        if bool(args.owner_receipt) != bool(args.expected_issuer):
+            raise ValueError("owner receipt and expected issuer must be supplied together")
+        if args.owner_receipt:
+            tenant, user = _load_owner_receipt(args.owner_receipt, args.expected_issuer)
+            if tenant not in args.tenant_id:
+                args.tenant_id.append(tenant)
+            scope = tenant + ":" + user
+            if scope not in args.retention_scope:
+                args.retention_scope.append(scope)
         destination = prepare(environment=args.environment, cluster=args.cluster,
                               region=args.region, account=args.account_id,
                               tenant_ids=args.tenant_id, output=output,

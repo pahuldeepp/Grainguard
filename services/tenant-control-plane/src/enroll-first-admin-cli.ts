@@ -1,5 +1,6 @@
 import { createDb } from "./db/client.js";
 import { lookupMembership } from "./domain/store.js";
+import { identityIdOf } from "./domain/ids.js";
 import {
   enrollFirstAdmin,
   validateFirstAdminEnrollment,
@@ -10,6 +11,9 @@ export async function main(
   env: NodeJS.ProcessEnv,
   accessToken: string,
 ): Promise<string> {
+  const outputFormat = env.ENROLL_OUTPUT_FORMAT || "text";
+  if (outputFormat !== "text" && outputFormat !== "json")
+    throw new Error("ENROLL_OUTPUT_FORMAT must be text or json");
   const tenantId = env.ENROLL_TENANT_ID;
   const issuer = required(env, "AUTH_ISSUER");
   const tokenMode = env.AUTH_TOKEN_MODE || "audience";
@@ -73,10 +77,31 @@ export async function main(
         ),
       },
     );
-    return `OIDC first-admin enrollment: ACTIVE admin membership read-back verified (${status})`;
+    return formatFirstAdminResult(enrollment, status, outputFormat);
   } finally {
     await db.$disconnect();
   }
+}
+
+// Called only after signature verification, enrollment and ACTIVE membership
+// read-back. AI consumers receive the stable control-plane identity, never the
+// Dex static-password UUID, raw subject, access token or database credentials.
+export function formatFirstAdminResult(
+  enrollment: { tenantId: string; issuer: string; subject: string },
+  status: "provisioning" | "existing",
+  outputFormat: "text" | "json",
+): string {
+  if (outputFormat === "text")
+    return `OIDC first-admin enrollment: ACTIVE admin membership read-back verified (${status})`;
+  return JSON.stringify({
+    version: 1,
+    tenant_id: enrollment.tenantId,
+    user_id: identityIdOf(enrollment.issuer, enrollment.subject),
+    issuer: enrollment.issuer,
+    role: "admin",
+    state: "active",
+    enrollment: status,
+  });
 }
 
 export function validateFirstAdminDatabaseUrl(raw: string): string {

@@ -190,6 +190,8 @@ resource "terraform_data" "pre_destroy_cleanup" {
     aws_secretsmanager_secret_version.runtime,
     terraform_data.runtime_secret_sync,
     terraform_data.runtime_secret_cleanup,
+    terraform_data.stripe_webhook_cleanup,
+    terraform_data.stripe_webhook_apply,
     aws_secretsmanager_secret.runtime,
     aws_secretsmanager_secret.argocd_repository,
     aws_secretsmanager_secret_version.argocd_repository,

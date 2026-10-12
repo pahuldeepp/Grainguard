@@ -78,13 +78,14 @@ locals {
   ])
   runtime_shard_bootstrap_role_keys = setsubtract(local.runtime_bootstrap_role_keys, local.runtime_central_only_bootstrap_role_keys)
   runtime_secret_exact_keys = {
-    greenguard-rds-bootstrap  = local.runtime_bootstrap_role_keys
-    greenguard-rds-ca         = toset(["ca.pem"])
-    greenguard-opensearch-ca  = toset(["ca.crt"])
-    greenguard-kafka-ca       = toset(["ca.crt", "registry-ca.crt"])
-    greenguard-opensearch-tls = toset(["ca.crt", "node.crt", "node.key", "admin.crt", "admin.key"])
-    greenguard-cassandra-tls  = toset(["server.p12", "keystore-password", "ca.crt"])
-    greenguard-mqtt-broker    = toset(["tls.crt", "tls.key", "ca.crt", "passwords", "acl"])
+    greenguard-rds-bootstrap    = local.runtime_bootstrap_role_keys
+    greenguard-rds-ca           = toset(["ca.pem"])
+    greenguard-opensearch-ca    = toset(["ca.crt"])
+    greenguard-kafka-ca         = toset(["ca.crt", "registry-ca.crt"])
+    greenguard-opensearch-tls   = toset(["ca.crt", "node.crt", "node.key", "admin.crt", "admin.key"])
+    greenguard-cassandra-tls    = toset(["server.p12", "keystore-password", "ca.crt"])
+    greenguard-mqtt-broker      = toset(["tls.crt", "tls.key", "ca.crt", "passwords", "acl"])
+    greenguard-data-credentials = toset(["REDIS_PASSWORD", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"])
   }
 
   runtime_database_profiles = {
@@ -223,7 +224,12 @@ locals {
       } : {}
     )
   }
-  runtime_secret_version_ids = { for name, version in aws_secretsmanager_secret_version.runtime : name => version.version_id }
+  runtime_secret_version_ids = merge(
+    { for name, version in aws_secretsmanager_secret_version.runtime : name => version.version_id },
+    local.managed_stripe_webhook ? {
+      "billing-service-config" = one([for version in data.aws_secretsmanager_secret_versions.stripe_webhook[0].versions : version.version_id if contains(version.version_stages, "AWSCURRENT")])
+    } : {},
+  )
   runtime_secret_sync_scope = {
     account_id       = var.target_account_id
     region           = var.aws_region
@@ -279,12 +285,14 @@ resource "aws_secretsmanager_secret_version" "runtime" {
     precondition {
       condition = each.key != "billing-service-config" || (
         can(regex("^(sk|rk)_test_[A-Za-z0-9]+$", try(var.runtime_secret_values[each.key]["STRIPE_API_KEY"], ""))) &&
-        length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) >= 1 &&
-        length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) <= 2 &&
-        alltrue([for secret in split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], "")) : can(regex("^whsec_[A-Za-z0-9]+$", trimspace(secret)))]) &&
+        (local.managed_stripe_webhook || (
+          length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) >= 1 &&
+          length(split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], ""))) <= 2 &&
+          alltrue([for secret in split(",", try(var.runtime_secret_values[each.key]["STRIPE_WEBHOOK_SECRETS"], "")) : can(regex("^whsec_[A-Za-z0-9]+$", trimspace(secret)))])
+        )) &&
         can(regex("^[A-Za-z0-9+/]{43}=$", try(var.runtime_secret_values[each.key]["BILLING_INBOX_ENCRYPTION_KEY"], "")))
       )
-      error_message = "billing-service-config requires a Stripe test API key, one or two webhook signing secrets, and a base64 32-byte inbox key; Terraform binds return origins to this cell's dashboard HTTPS endpoint."
+      error_message = "billing-service-config requires a Stripe test API key and base64 32-byte inbox key; unmanaged webhooks also require one or two signing secrets. Managed webhook provisioning supplies the final signer before Kubernetes secret sync."
     }
     precondition {
       condition = each.key != "entitlement-heartbeat-config" || (
@@ -314,6 +322,16 @@ resource "aws_secretsmanager_secret_version" "runtime" {
     precondition {
       condition     = each.key != "tenant-control-plane-config" || try(length(var.runtime_secret_values[each.key]["CONTROL_LOOKUP_TOKEN"]) >= 32, false)
       error_message = "The canonical control-plane lookup token must contain at least 32 characters."
+    }
+    precondition {
+      condition = each.key != "greenguard-data-credentials" || (
+        try(var.runtime_secret_values[each.key]["RABBITMQ_DEFAULT_USER"], "") == "greenguard" &&
+        alltrue([for key in ["REDIS_PASSWORD", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"] :
+          can(regex("^[A-Za-z0-9_-]{32,128}$", try(var.runtime_secret_values[each.key][key], "")))
+        ]) &&
+        length(toset([for key in ["REDIS_PASSWORD", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"] : try(var.runtime_secret_values[each.key][key], "")])) == 3
+      )
+      error_message = "Redis/RabbitMQ require the scoped greenguard user and independent 32-128 character URL-safe credentials."
     }
     precondition {
       condition     = each.key != "audit-export-worker-config" || (toset(keys(var.audit_export_signing_material)) == toset(["AUDIT_EXPORT_PRIVATE_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_PEM", "AUDIT_EXPORT_PUBLIC_KEY_ID", "AUDIT_EXPORT_LINK_SECRET"]) && try(length(var.runtime_secret_values["tenant-control-plane-config"]["CONTROL_LOOKUP_TOKEN"]) >= 32, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["CONTROL_AUDIT_WORKER_PASSWORD"]) > 0, false) && try(length(var.runtime_secret_values["greenguard-rds-bootstrap"]["BILLING_AUDIT_READER_PASSWORD"]) > 0, false))

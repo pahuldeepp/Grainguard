@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import contextlib
+import io
 import importlib.util
 import json
 import os
@@ -6,6 +8,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).with_name("prepare-ai-runtime-bundle.py")
@@ -15,6 +18,62 @@ SPEC.loader.exec_module(prepare_module)
 
 
 class PrepareAiRuntimeBundleTest(unittest.TestCase):
+    def test_owner_receipt_requires_exact_active_admin_identity_and_issuer(self):
+        receipt = {"version": 1, "tenant_id": "11111111-1111-4111-8111-111111111111",
+                   "user_id": "22222222-2222-5222-8222-222222222222", "issuer": "https://id.example.test/dex",
+                   "role": "admin", "state": "active", "enrollment": "existing"}
+        with tempfile.TemporaryDirectory() as work:
+            path = Path(work) / "owner.json"
+            path.write_text(json.dumps(receipt)); path.chmod(0o600)
+            self.assertEqual(prepare_module._load_owner_receipt(path, receipt["issuer"]),
+                             (receipt["tenant_id"], receipt["user_id"]))
+            for change in [{"issuer": "https://other.example.test"}, {"role": "member"}, {"state": "provisioning"},
+                           {"user_id": "22222222-2222-4222-8222-222222222222"}, {"user_id": None},
+                           {"version": True}, {"access_token": "must-not-be-imported"}]:
+                with self.subTest(change=change):
+                    path.write_text(json.dumps({**receipt, **change}))
+                    with self.assertRaises(ValueError):
+                        prepare_module._load_owner_receipt(path, receipt["issuer"])
+            path.write_text(json.dumps(receipt)); path.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "owner-only"):
+                prepare_module._load_owner_receipt(path, receipt["issuer"])
+            path.chmod(0o600)
+            link = Path(work) / "link.json"; link.symlink_to(path)
+            with self.assertRaisesRegex(ValueError, "owner-only"):
+                prepare_module._load_owner_receipt(link, receipt["issuer"])
+            path.write_text('{"version":1,"version":1}')
+            with self.assertRaisesRegex(ValueError, "invalid JSON"):
+                prepare_module._load_owner_receipt(path, receipt["issuer"])
+            path.write_text("x" * 16385)
+            with self.assertRaisesRegex(ValueError, "bounded"):
+                prepare_module._load_owner_receipt(path, receipt["issuer"])
+
+    def test_cli_imports_owner_scope_without_manual_identity_transcription(self):
+        tenant = "11111111-1111-4111-8111-111111111111"
+        user = "22222222-2222-5222-8222-222222222222"
+        issuer = "https://id.example.test/dex"
+        with tempfile.TemporaryDirectory() as work:
+            path = Path(work)
+            receipt = path / "owner.json"
+            receipt.write_text(json.dumps({"version": 1, "tenant_id": tenant, "user_id": user,
+                                          "issuer": issuer, "role": "admin", "state": "active", "enrollment": "existing"}))
+            receipt.chmod(0o600)
+            budget = path / "budget.json"
+            limit = {"limit_micros": 1000000, "limit_tokens": 1000}
+            budget.write_text(json.dumps({"platform": limit, "tenants": [{"tenant_id": tenant, "limit": limit,
+                                         "users": [{"principal_id": user, "limit": limit}]}]}))
+            budget.chmod(0o600)
+            output = path / "bundle.json"
+            args = ["prepare-ai-runtime-bundle.py", "--environment", "disposable", "--cluster", "gg-owner-test",
+                    "--region", "us-east-2", "--account-id", "123456789012", "--owner-receipt", str(receipt),
+                    "--expected-issuer", issuer, "--budget-caps-file", str(budget), "--output", str(output)]
+            with patch("sys.argv", args), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(prepare_module.main(), 0)
+            bundle = json.loads(output.read_text())
+            self.assertEqual(set(bundle["ai_gateway_tenant_tokens"]), {tenant})
+            self.assertEqual(bundle["ai_conversation_retention_scopes"], [{"tenant_id": tenant, "user_id": user}])
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+
     def test_private_cell_bound_reuse_and_explicit_tenant_removal(self):
         tenant_a = "11111111-1111-4111-8111-111111111111"
         tenant_b = "22222222-2222-4222-8222-222222222222"

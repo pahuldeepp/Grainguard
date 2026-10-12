@@ -42,6 +42,7 @@ verify: check-plan db-migrate
 	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
 	node --test scripts/browser-e2e-stack.test.mjs
+	node --test scripts/sonar-token.test.mjs scripts/sonar-gate.test.mjs scripts/sonar-snapshot.test.mjs
 	npm run format:check
 	npm run lint
 	npm run typecheck

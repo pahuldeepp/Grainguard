@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -148,11 +148,47 @@ func parseAddressMap(value string) (map[string]string, error) {
 	return out, nil
 }
 
-func nodeAddress(raw string) string {
-	if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
-		return parsed.Host
+func redisDialer(mapping map[string]string, timeout time.Duration, config *tls.Config) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		target := addr
+		if mapped, ok := mapping[addr]; ok {
+			target = mapped
+		}
+		dialer := &net.Dialer{Timeout: timeout}
+		if config == nil {
+			return dialer.DialContext(ctx, network, target)
+		}
+		verified := config.Clone()
+		verified.ServerName = host
+		return (&tls.Dialer{NetDialer: dialer, Config: verified}).DialContext(ctx, network, target)
 	}
-	return raw
+}
+
+func parseClusterNodes(raw string) ([]string, *redis.Options, error) {
+	var nodes []string
+	var clusterAuth *redis.Options
+	for _, node := range strings.Split(raw, ",") {
+		if node = strings.TrimSpace(node); node != "" {
+			if !strings.Contains(node, "://") {
+				node = "redis://" + node
+			}
+			options, err := redis.ParseURL(node)
+			if err != nil || options.DB != 0 {
+				return nil, nil, errors.New("invalid READ_REDIS_CLUSTER_NODES")
+			}
+			if clusterAuth == nil {
+				clusterAuth = options
+			} else if options.Username != clusterAuth.Username || options.Password != clusterAuth.Password || (options.TLSConfig == nil) != (clusterAuth.TLSConfig == nil) {
+				return nil, nil, errors.New("Redis cluster nodes must use matching credentials and TLS mode")
+			}
+			nodes = append(nodes, options.Addr)
+		}
+	}
+	return nodes, clusterAuth, nil
 }
 
 // newRedis builds a fail-fast client: go-redis retries are off because the worker owns
@@ -162,21 +198,12 @@ func newRedis(getenv func(string) string, timeout time.Duration) (RedisBumper, e
 	if err != nil {
 		return RedisBumper{}, err
 	}
-	dialer := &net.Dialer{Timeout: timeout}
-	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if mapped, ok := mapping[addr]; ok {
-			addr = mapped
-		}
-		return dialer.DialContext(ctx, network, addr)
-	}
-	var nodes []string
-	for _, node := range strings.Split(getenv("READ_REDIS_CLUSTER_NODES"), ",") {
-		if node = strings.TrimSpace(node); node != "" {
-			nodes = append(nodes, nodeAddress(node))
-		}
+	nodes, clusterAuth, err := parseClusterNodes(getenv("READ_REDIS_CLUSTER_NODES"))
+	if err != nil {
+		return RedisBumper{}, err
 	}
 	if len(nodes) > 0 {
-		return RedisBumper{redis.NewClusterClient(&redis.ClusterOptions{Addrs: nodes, Dialer: dial,
+		return RedisBumper{redis.NewClusterClient(&redis.ClusterOptions{Addrs: nodes, Username: clusterAuth.Username, Password: clusterAuth.Password, TLSConfig: clusterAuth.TLSConfig, Dialer: redisDialer(mapping, timeout, clusterAuth.TLSConfig),
 			DialTimeout: timeout, ReadTimeout: timeout, WriteTimeout: timeout, MaxRetries: -1,
 			ContextTimeoutEnabled: true})}, nil
 	}
@@ -188,7 +215,7 @@ func newRedis(getenv func(string) string, timeout time.Duration) (RedisBumper, e
 	if err != nil {
 		return RedisBumper{}, errors.New("invalid READ_REDIS_URL")
 	}
-	options.Dialer, options.DialTimeout, options.ReadTimeout, options.WriteTimeout = dial, timeout, timeout, timeout
+	options.Dialer, options.DialTimeout, options.ReadTimeout, options.WriteTimeout = redisDialer(mapping, timeout, options.TLSConfig), timeout, timeout, timeout
 	options.MaxRetries, options.ContextTimeoutEnabled = -1, true
 	return RedisBumper{redis.NewClient(options)}, nil
 }

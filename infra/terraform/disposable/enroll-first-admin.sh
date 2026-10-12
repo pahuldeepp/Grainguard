@@ -129,8 +129,10 @@ done
 
 wait_timeout="${GG_ENROLL_WAIT_TIMEOUT_SECONDS:-900}"
 [[ "$wait_timeout" =~ ^[0-9]+$ ]] && [ "$wait_timeout" -ge 10 ] && [ "$wait_timeout" -le 3600 ] || { echo "enroll-first-admin: membership wait timeout must be an integer from 10 to 3600 seconds" >&2; exit 1; }
+output_format="${GG_ENROLL_OUTPUT_FORMAT:-text}"
+[[ "$output_format" == "text" || "$output_format" == "json" ]] || { echo "enroll-first-admin: output format must be text or json" >&2; exit 1; }
 env_args=()
-if ! python3 - "$work/config" "$tenant_id" "$operator_confirmation" "$wait_timeout" >"$work/runtime-env" <<'PY'
+if ! python3 - "$work/config" "$tenant_id" "$operator_confirmation" "$wait_timeout" "$output_format" >"$work/runtime-env" <<'PY'
 import json, sys
 c=json.load(open(sys.argv[1]))
 values={
@@ -138,6 +140,7 @@ values={
  'AUTH_ISSUER':c['issuer'], 'AUTH_JWKS_URL':c['jwks'], 'AUTH_AUDIENCE':c['audience'],
  'AUTH_TOKEN_MODE':c['token_mode'], 'AUTH_COGNITO_CLIENT_IDS':','.join(c['clients']),
  'ENROLL_WAIT_TIMEOUT_MS':str(int(sys.argv[4])*1000),
+ 'ENROLL_OUTPUT_FORMAT':sys.argv[5],
 }
 for key,value in values.items():
  if not isinstance(value,str) or any(ord(c) < 32 or ord(c) == 127 for c in value): raise SystemExit('enroll-first-admin: invalid public OIDC configuration')
@@ -148,7 +151,7 @@ then
   exit 1
 fi
 while IFS= read -r line; do env_args+=("$line"); done <"$work/runtime-env"
-[ "${#env_args[@]}" -eq 9 ] || { echo "enroll-first-admin: incomplete runtime enrollment configuration" >&2; exit 1; }
+[ "${#env_args[@]}" -eq 10 ] || { echo "enroll-first-admin: incomplete runtime enrollment configuration" >&2; exit 1; }
 
 # Public OIDC settings may appear in process arguments. The private access
 # token never does: local file -> kubectl stdin -> CLI stdin only.
@@ -156,5 +159,26 @@ if ! "${kubectl[@]}" exec --namespace greenguard --stdin "$pod" --container tena
   echo "enroll-first-admin: token verification, tenant bootstrap or active-membership read-back failed; no admin access is reported" >&2
   exit 1
 fi
-grep -q '^OIDC first-admin enrollment: ACTIVE admin membership read-back verified ' "$work/enrollment.out" || { echo "enroll-first-admin: runtime did not confirm the active admin membership" >&2; exit 1; }
+if [ "$output_format" = "json" ]; then
+  python3 - "$work/enrollment.out" "$tenant_id" "$operator_confirmation" <<'PYJSON'
+import json,sys,uuid
+expected={"version","tenant_id","user_id","issuer","role","state","enrollment"}
+try:
+    with open(sys.argv[1]) as source: receipt=json.load(source)
+    ok=(isinstance(receipt,dict) and set(receipt)==expected
+        and type(receipt["version"]) is int and receipt["version"]==1
+        and all(isinstance(receipt[key],str) for key in expected-{"version"})
+        and receipt["tenant_id"]==sys.argv[2] and receipt["role"]=="admin"
+        and receipt["state"]=="active" and receipt["enrollment"] in {"provisioning","existing"}
+        and sys.argv[3]==receipt["tenant_id"]+":"+receipt["issuer"]
+        and str(uuid.UUID(receipt["user_id"]))==receipt["user_id"]
+        and uuid.UUID(receipt["user_id"]).version==5)
+except (ValueError,TypeError,OSError):
+    ok=False
+if not ok:
+    raise SystemExit("enroll-first-admin: invalid verified owner receipt")
+PYJSON
+else
+  grep -q '^OIDC first-admin enrollment: ACTIVE admin membership read-back verified ' "$work/enrollment.out" || { echo "enroll-first-admin: runtime did not confirm the active admin membership" >&2; exit 1; }
+fi
 cat "$work/enrollment.out"

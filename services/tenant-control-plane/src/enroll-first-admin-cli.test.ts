@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  formatFirstAdminResult,
+  main,
   validateFirstAdminDatabaseUrl,
   waitForFirstAdminMembership,
 } from "./enroll-first-admin-cli.js";
@@ -86,5 +88,50 @@ test("first-admin wait rejects unbounded and invalid polling limits", async () =
       },
     ),
     /wait bounds are invalid/,
+  );
+});
+
+test("verified owner receipt uses issuer-qualified identity and exposes no token or subject", () => {
+  const enrollment = {
+    tenantId: "00000000-0000-4000-8000-000000000002",
+    issuer: "https://example.invalid/dex",
+    subject: "opaque-connector-qualified-subject",
+  };
+  const raw = formatFirstAdminResult(enrollment, "existing", "json");
+  const receipt = JSON.parse(raw);
+  assert.deepEqual(Object.keys(receipt).sort(), [
+    "enrollment",
+    "issuer",
+    "role",
+    "state",
+    "tenant_id",
+    "user_id",
+    "version",
+  ]);
+  assert.equal(receipt.tenant_id, enrollment.tenantId);
+  assert.equal(receipt.state, "active");
+  assert.equal(receipt.role, "admin");
+  assert.match(receipt.user_id, /^[0-9a-f-]{36}$/);
+  assert.ok(!raw.includes(enrollment.subject));
+  assert.notEqual(
+    receipt.user_id,
+    JSON.parse(
+      formatFirstAdminResult(
+        { ...enrollment, issuer: "https://other.invalid/dex" },
+        "existing",
+        "json",
+      ),
+    ).user_id,
+  );
+  assert.match(
+    formatFirstAdminResult(enrollment, "existing", "text"),
+    /^OIDC first-admin enrollment: ACTIVE admin membership read-back verified/,
+  );
+});
+
+test("invalid owner output format fails before token verification or enrollment", async () => {
+  await assert.rejects(
+    main({ ENROLL_OUTPUT_FORMAT: "unrecognized" }, "not-a-token"),
+    /ENROLL_OUTPUT_FORMAT must be text or json/,
   );
 });

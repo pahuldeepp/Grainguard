@@ -43,6 +43,7 @@ class PreflightTests(unittest.TestCase):
         self.sql.write_text("\\getenv role_password ROLE_PASSWORD\n\\getenv other_password OTHER_PASSWORD\n\\getenv cdc_password CDC_DB_PASSWORD\n")
         lookup_token = "c" * 32
         self.values = {
+            "greenguard-data-credentials": {"REDIS_PASSWORD": "r" * 48, "RABBITMQ_DEFAULT_USER": "greenguard", "RABBITMQ_DEFAULT_PASS": "q" * 48, "RABBITMQ_ERLANG_COOKIE": "c" * 48},
             "bff-config": {"BFF_TOKEN": "dummy-token", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "bff", "KAFKA_SASL_PASSWORD": "dummy"},
             "read-api-config": {"READ_HISTORY_CURSOR_SECRET": "h" * 32, "ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
             "search-indexer-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "search-indexer", "KAFKA_SASL_PASSWORD": "dummy"},
@@ -178,7 +179,7 @@ class PreflightTests(unittest.TestCase):
     def test_complete_secrets_pass(self):
         status, output = self.run_preflight()
         self.assertEqual(status, 0)
-        self.assertIn("PASS 27 Secrets", output)
+        self.assertIn("PASS 28 Secrets", output)
 
     def test_billing_requires_a_stripe_test_api_key(self):
         self.values["billing-service-config"]["STRIPE_API_KEY"] = "sk_live_fixture"
@@ -324,6 +325,25 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("broker JAAS does not contain", output)
+
+    def test_redis_rabbitmq_secret_rejects_extra_keys(self):
+        self.values["greenguard-data-credentials"]["UNEXPECTED"] = "extra"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact Redis/RabbitMQ keys", output)
+
+    def test_redis_rabbitmq_secret_rejects_short_credentials(self):
+        self.values["greenguard-data-credentials"]["REDIS_PASSWORD"] = "short"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("strong URL-safe credentials", output)
+
+    def test_redis_rabbitmq_secret_rejects_reused_credentials(self):
+        values = self.values["greenguard-data-credentials"]
+        values["RABBITMQ_DEFAULT_PASS"] = values["REDIS_PASSWORD"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("credentials must be independent", output)
 
     def test_cassandra_pkcs12_binary_is_decoded_once(self):
         raw = b"\x30\x82\x00\xffPKCS12-fixture"

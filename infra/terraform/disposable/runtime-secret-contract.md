@@ -30,19 +30,19 @@ passwords, which are present only in the central `greenguard-rds-bootstrap`
 Secret. `shard_registry_passwords` supplies exactly these eleven service
 keys, each containing exactly s1-s4 passwords matching its bootstrap role:
 
-| Service | Database | Role |
-| --- | --- | --- |
-| device-service | greenguard_inventory | inventory_app |
-| telemetry-ingest | greenguard_telemetry | telemetry_app |
-| projection-builder | greenguard_read | projection_app |
-| risk-engine | greenguard_risk | risk_app |
-| workflow-alerts | greenguard_alerts | alerts_app |
-| jobs-worker | greenguard_jobs | jobs_app |
-| notification-service | greenguard_notifications | notifications_app |
-| saga-orchestrator | greenguard_sagas | saga_app |
-| hardware-service | greenguard_hardware | hardware_app |
-| read-api | greenguard_read | read_query |
-| audit-export-worker | greenguard_inventory | inventory_audit_reader |
+| Service              | Database                 | Role                   |
+| -------------------- | ------------------------ | ---------------------- |
+| device-service       | greenguard_inventory     | inventory_app          |
+| telemetry-ingest     | greenguard_telemetry     | telemetry_app          |
+| projection-builder   | greenguard_read          | projection_app         |
+| risk-engine          | greenguard_risk          | risk_app               |
+| workflow-alerts      | greenguard_alerts        | alerts_app             |
+| jobs-worker          | greenguard_jobs          | jobs_app               |
+| notification-service | greenguard_notifications | notifications_app      |
+| saga-orchestrator    | greenguard_sagas         | saga_app               |
+| hardware-service     | greenguard_hardware      | hardware_app           |
+| read-api             | greenguard_read          | read_query             |
+| audit-export-worker  | greenguard_inventory     | inventory_audit_reader |
 
 `billing-service-config` also requires disposable Stripe test credentials:
 `STRIPE_API_KEY` (`sk_test_` or `rk_test_` only), one or two comma-separated
@@ -51,6 +51,41 @@ and exact deployed HTTPS `BILLING_RETURN_ORIGINS`. The Terraform precondition
 checks the format before writing the payload; the AWS-source readiness check
 decodes the encryption key and rejects loopback, HTTP, or non-origin return
 URLs. Live Stripe keys are rejected by the billing runtime.
+
+With `manage_stripe_webhook = true` (the default), omit the caller-supplied
+`STRIPE_WEBHOOK_SECRETS`. Terraform first writes the ephemeral billing seed,
+then registers a Stripe test endpoint at the cell's API CloudFront hostname
+under `/webhooks/stripe`. The helper stores the resulting signer in a new
+AWS secret version; a metadata-only lookup supplies that final version ID to
+Kubernetes sync. Neither signer nor API key is returned to Terraform.
+Retries reuse Stripe idempotency and retained signing material. A lost signer
+that cannot be recovered fails closed. A separate cleanup ownership record
+survives failed creation and removes only endpoints carrying this cell's exact
+metadata before the billing secret is deleted. Rotating the seed replaces the
+owned endpoint using the old seed's API key for cleanup. Setting
+`manage_stripe_webhook = false` requires an already provisioned signing secret
+and leaves its external endpoint ownership to the operator.
+
+If a create succeeded but its signer was never retained and Stripe's
+idempotency window has expired, recover without destroying the AWS cell:
+
+1. In the Stripe **test** dashboard, find the endpoint at this cell's exact
+   `/webhooks/stripe` URL. Verify every ownership metadata field against the
+   lifecycle scope (`owner(scope)`), including account, region and cluster.
+2. Confirm that no recoverable signer exists in the billing secret's retained
+   versions. Delete only that exact test endpoint; leave foreign/live endpoints.
+3. Rerun the failed Terraform apply with the same protected inputs. The
+   lifecycle creates a replacement and persists its signer before runtime sync.
+4. Verify signed test-event delivery and the billing subscription update.
+
+The webhook lifecycle tests prove mocked retry/ownership/teardown behavior;
+live Stripe delivery and AWS secret synchronization still require acceptance.
+
+The base Redis/RabbitMQ workloads require `greenguard-data-credentials` with
+exactly `REDIS_PASSWORD`, `RABBITMQ_DEFAULT_USER`, `RABBITMQ_DEFAULT_PASS`, and
+`RABBITMQ_ERLANG_COOKIE`. The username is `greenguard`; the three independent
+credentials must each contain 32–128 URL-safe characters. Terraform owns this
+container and synchronizes it before the data-plane Argo application starts.
 
 Terraform generates `entitlement-heartbeat-config` from only the billing
 service's three Kafka connection keys. The heartbeat profile consumes that
