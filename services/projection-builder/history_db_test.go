@@ -218,7 +218,9 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 	if err := db.admin.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); err != nil {
 		t.Fatal(err)
 	}
-	oldDay := now.Add(-10 * 24 * time.Hour).UTC()
+	// Keep the delayed +1h/+2h events within the intended UTC partition,
+	// including when this test runs after 22:00 UTC.
+	oldDay := now.Add(-10 * 24 * time.Hour).UTC().Truncate(24 * time.Hour)
 	partition := "reading_history_" + oldDay.Format("20060102")
 	if _, err := db.owner.Exec(ctx, "SELECT projection_history_partition($1::date)", oldDay.Format("2006-01-02")); err != nil {
 		t.Fatal(err)
