@@ -158,6 +158,38 @@ export function parseOwnerRegistry(
   });
 }
 
+/** Restrict local fixtures to explicitly active loopback shards. Production
+ * processes open every configured shard and cannot use this override. */
+function activeOwnerEntries(
+  raw: string | undefined,
+  localLoopback: boolean,
+  entries: Array<{ shardId: string; incarnation: string; primaryUrl: string }>,
+) {
+  if (raw === undefined || raw === "") return entries;
+  if (!localLoopback) throw new OwnerDatabaseError("invalid_owner_registry");
+
+  const active = raw.split(",").map((id) => id.trim());
+  if (
+    active.length === 0 ||
+    !active.includes("s1") ||
+    new Set(active).size !== active.length ||
+    active.some((id) => !["s1", "s2", "s3", "s4"].includes(id)) ||
+    entries.some((entry) => {
+      try {
+        return !["127.0.0.1", "localhost", "[::1]"].includes(
+          new URL(entry.primaryUrl).hostname,
+        );
+      } catch {
+        return true;
+      }
+    })
+  )
+    throw new OwnerDatabaseError("invalid_owner_registry");
+
+  const selected = new Set(active);
+  return entries.filter((entry) => selected.has(entry.shardId));
+}
+
 /** A logical handle has no default shard. All tenant work must resolve first. */
 export function createOwnerDatabase<T extends object>(
   options: OwnerDatabaseOptions<T>,
@@ -169,16 +201,20 @@ export function createOwnerDatabase<T extends object>(
       throw new OwnerDatabaseError("owner_database_not_configured");
     return options.create(options.legacyUrl);
   }
-  const entries = parseOwnerRegistry(
-    (options.readRegistry ?? ((path) => readFileSync(path, "utf8")))(
-      env.SHARD_REGISTRY_FILE,
+  const entries = activeOwnerEntries(
+    env.SHARD_ACTIVE_IDS,
+    env.SHARD_LOCAL_LOOPBACK === "true",
+    parseOwnerRegistry(
+      (options.readRegistry ?? ((path) => readFileSync(path, "utf8")))(
+        env.SHARD_REGISTRY_FILE,
+      ),
+      {
+        service: options.service,
+        database: options.database,
+        roles: options.roles,
+        allowLoopback: env.SHARD_LOCAL_LOOPBACK === "true",
+      },
     ),
-    {
-      service: options.service,
-      database: options.database,
-      roles: options.roles,
-      allowLoopback: env.SHARD_LOCAL_LOOPBACK === "true",
-    },
   );
   let resolve = options.resolve;
   if (!resolve) {

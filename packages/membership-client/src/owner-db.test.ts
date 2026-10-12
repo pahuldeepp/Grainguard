@@ -153,6 +153,86 @@ test("shard-required runtime rejects a missing registry instead of using the leg
   );
 });
 
+test("local loopback active-shard override filters inactive fixture pools and routes", async () => {
+  const db = createOwnerDatabase({
+    ...config,
+    legacyUrl: "must-not-fallback",
+    env: {
+      SHARD_REGISTRY_FILE: "private",
+      SHARD_LOCAL_LOOPBACK: "true",
+      SHARD_ACTIVE_IDS: " s1 ",
+    },
+    readRegistry: () => JSON.stringify(manifest()),
+    create: (_url, shard) => ({ shard }),
+    resolve: async (tenant) => route(tenant, "s1"),
+    close: async () => {},
+  });
+  assert.equal(ownerDatabases(db).length, 1);
+  assert.equal((await resolveOwnerDatabase(db, a)).database.shard, "s1");
+  await closeOwnerDatabase(db);
+
+  const wrongShard = createOwnerDatabase({
+    ...config,
+    legacyUrl: "must-not-fallback",
+    env: {
+      SHARD_REGISTRY_FILE: "private",
+      SHARD_LOCAL_LOOPBACK: "true",
+      SHARD_ACTIVE_IDS: "s1",
+    },
+    readRegistry: () => JSON.stringify(manifest()),
+    create: (_url, shard) => ({ shard }),
+    resolve: async (tenant) => route(tenant, "s4"),
+    close: async () => {},
+  });
+  await assert.rejects(
+    resolveOwnerDatabase(wrongShard, a),
+    /owner_placement_mismatch/,
+  );
+  await closeOwnerDatabase(wrongShard);
+});
+
+test("active-shard override is rejected outside local loopback fixtures", () => {
+  for (const [raw, localLoopback, mutate] of [
+    ["s1", false, (_m: ReturnType<typeof manifest>) => {}],
+    ["s2", true, (_m: ReturnType<typeof manifest>) => {}],
+    ["s1,s1", true, (_m: ReturnType<typeof manifest>) => {}],
+    ["s1,s5", true, (_m: ReturnType<typeof manifest>) => {}],
+    [
+      "s1",
+      true,
+      (m: ReturnType<typeof manifest>) => {
+        for (const shard of Object.values(m.shards)) {
+          const url = new URL(shard.primaryUrl);
+          url.hostname = "db.example";
+          url.searchParams.set("sslmode", "verify-full");
+          url.searchParams.set("sslrootcert", "/ca.pem");
+          shard.primaryUrl = url.toString();
+        }
+      },
+    ],
+  ] as const) {
+    const data = manifest();
+    mutate(data);
+    assert.throws(
+      () =>
+        createOwnerDatabase({
+          ...config,
+          legacyUrl: "must-not-fallback",
+          env: {
+            SHARD_REGISTRY_FILE: "private",
+            SHARD_LOCAL_LOOPBACK: localLoopback ? "true" : "false",
+            SHARD_ACTIVE_IDS: raw,
+          },
+          readRegistry: () => JSON.stringify(data),
+          create: () => ({}),
+          resolve: async (tenant) => route(tenant),
+          close: async () => {},
+        }),
+      /invalid_owner_(registry|endpoint)/,
+    );
+  }
+});
+
 test("legacy database selection is retained only when shard routing is not required", () => {
   for (const env of [{}, { SHARD_ROUTING_REQUIRED: "false" }]) {
     let selected = "";
