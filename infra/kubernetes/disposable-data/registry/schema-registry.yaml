@@ -77,8 +77,10 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
           volumeMounts:
             - {name: registry-auth, mountPath: /etc/greenguard/registry, readOnly: true}
+            - {name: registry-tmp, mountPath: /tmp}
       volumes:
         - name: registry-auth
           secret:
@@ -89,3 +91,5 @@ spec:
               - {key: kafka.truststore.p12, path: kafka.truststore.p12}
               - {key: registry-jaas.conf, path: registry-jaas.conf}
               - {key: registry-users.properties, path: registry-users.properties}
+        - name: registry-tmp
+          emptyDir: {}

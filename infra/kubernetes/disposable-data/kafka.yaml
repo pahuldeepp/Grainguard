@@ -109,9 +109,11 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
           volumeMounts:
             - {name: kafka-data, mountPath: /var/lib/kafka/data}
             - {name: kafka-tls, mountPath: /etc/greenguard/kafka, readOnly: true}
+            - {name: kafka-tmp, mountPath: /tmp}
       volumes:
         - name: kafka-tls
           secret:
@@ -120,6 +122,8 @@ spec:
             items:
               - {key: broker.keystore.p12, path: broker.keystore.p12}
               - {key: broker.truststore.p12, path: broker.truststore.p12}
+        - name: kafka-tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: kafka-data

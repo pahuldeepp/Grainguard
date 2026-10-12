@@ -77,8 +77,16 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
           volumeMounts:
             - {name: rabbitmq-data, mountPath: /var/lib/rabbitmq}
+            - {name: rabbitmq-tmp, mountPath: /tmp}
+            - {name: rabbitmq-logs, mountPath: /var/log/rabbitmq}
+      volumes:
+        - name: rabbitmq-tmp
+          emptyDir: {}
+        - name: rabbitmq-logs
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: rabbitmq-data
