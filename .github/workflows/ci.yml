@@ -235,6 +235,11 @@ jobs:
           make db-down
           docker image prune -af
           df -h .
+      # sonarsource/sonar-scanner-cli publishes no arm64 image; the arm64 self-hosted
+      # runner needs amd64 emulation or the scanner dies with "exec format error".
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
       - name: Analyze coverage and enforce SonarQube gate
