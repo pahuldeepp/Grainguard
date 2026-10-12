@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { connectionPorts } from "./bootstrap-connection-ports.mjs";
+import { ciComposeProjectName } from "./ci-compose-project.mjs";
 const run = (cmd, args, cwd = process.cwd()) => {
   const r = spawnSync(cmd, args, { cwd, stdio: "inherit" });
   if (r.error || r.status !== 0) process.exit(r.status || 1);
@@ -17,6 +18,8 @@ if (existsSync(".env"))
     const at = line.indexOf("=");
     if (at > 0) env.set(line.slice(0, at), line.slice(at + 1));
   }
+const ciComposeName = ciComposeProjectName(process.env);
+if (ciComposeName) env.set("COMPOSE_PROJECT_NAME", ciComposeName);
 const secret = (key) => {
   if (!env.get(key)) env.set(key, randomBytes(24).toString("hex"));
   return env.get(key);

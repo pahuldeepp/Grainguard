@@ -1,10 +1,12 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed ci-compose-cleanup
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
 COMPOSE = docker compose --env-file .env -f infra/compose/compose.yaml
 bootstrap:
 	node scripts/bootstrap.mjs
+ci-compose-cleanup:
+	node scripts/ci-compose-cleanup.mjs
 db-up:
 	$(COMPOSE) up -d --wait --build
 	$(COMPOSE) exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
@@ -48,6 +50,7 @@ verify: check-plan db-migrate
 	$(MAKE) telemetry-sinks-test
 	node --test scripts/placement-fixture.test.mjs
 	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
+	node --test scripts/ci-compose-project.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...

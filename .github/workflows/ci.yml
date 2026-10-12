@@ -310,6 +310,7 @@ jobs:
           make staging-down
           make db-down
           make sonar-down
+          make ci-compose-cleanup
   publish:
     name: Publish verified images
     needs:
@@ -888,6 +889,7 @@ jobs:
             docker compose --env-file .env --env-file .local/mysql-cdc.env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml -f infra/mysql-cdc/compose.yaml stop mysql-cdc connect schema-registry kafka
           fi
           if test -f .env; then make db-down; fi
+          make ci-compose-cleanup
 
   redis-integration:
     name: Redis cache and failover integration
@@ -916,7 +918,9 @@ jobs:
       - run: make redis-test
       - name: Stop Redis infrastructure
         if: always()
-        run: make redis-down
+        run: |
+          make redis-down
+          make ci-compose-cleanup
 
   oidc-integration:
     name: OIDC authentication integration
@@ -951,6 +955,7 @@ jobs:
           make search-down
           make cassandra-down
           make db-down
+          make ci-compose-cleanup
 
   oidc-browser-integration:
     name: OIDC Chromium browser integration
@@ -987,6 +992,7 @@ jobs:
           make search-down
           make cassandra-down
           make db-down
+          make ci-compose-cleanup
 
   stage08-integration:
     name: Gateway and dashboard end-to-end integration
@@ -1053,6 +1059,7 @@ jobs:
           make cassandra-down || true
           make events-down || true
           make db-down || true
+          make ci-compose-cleanup
 
   events-integration:
     name: Event backbone integration
@@ -1084,7 +1091,9 @@ jobs:
       - run: make events-faults
       - name: Stop event infrastructure
         if: always()
-        run: make events-down
+        run: |
+          make events-down
+          make ci-compose-cleanup
 
   history-integration:
     name: Cassandra history and fault integration
@@ -1115,6 +1124,7 @@ jobs:
         run: |
           make cassandra-down
           make events-down
+          make ci-compose-cleanup
 
   search-integration:
     name: Search index and Kafka integration
@@ -1144,6 +1154,7 @@ jobs:
         run: |
           make search-down
           make events-down
+          make ci-compose-cleanup
 
   stage06-integration:
     name: Risk, alert, and delivery integration
@@ -1182,6 +1193,7 @@ jobs:
         run: |
           make rabbitmq-down
           make events-down
+          make ci-compose-cleanup
 
   stage07-integration:
     name: Saga and physical sensor integration
@@ -1205,6 +1217,9 @@ jobs:
             services/hardware-service/go.sum
             services/telemetry-ingest/go.sum
             services/cdc-transformer/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
       - run: make bootstrap
       - run: make stage07-e2e
       - name: Stop Stage 07 infrastructure
@@ -1213,3 +1228,4 @@ jobs:
           docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml stop mosquitto
           make events-down
           make db-down
+          make ci-compose-cleanup

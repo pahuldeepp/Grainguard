@@ -1,11 +1,10 @@
-name: greenguard-dev
+name: ${COMPOSE_PROJECT_NAME:-greenguard-dev}
 services:
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     # Local per-slot WAL budget; override POSTGRES_MAX_SLOT_WAL_KEEP_SIZE in .env.
     # Checkpoint-enforced, not a hard disk quota: alert before reaching this cap.
-    command:
-      [
+    command: [
         postgres,
         -c,
         wal_level=logical,
