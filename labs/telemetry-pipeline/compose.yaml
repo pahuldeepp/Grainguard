@@ -26,7 +26,11 @@ services:
       KAFKA_SSL_CLIENT_AUTH: none
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      # Keep the single-broker local acceptance cluster small; Kafka's default
+      # 50 offset partitions needlessly delay KRaft/group-coordinator startup.
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_MIN_INSYNC_REPLICAS: "1"
       KAFKA_DEFAULT_REPLICATION_FACTOR: "1"

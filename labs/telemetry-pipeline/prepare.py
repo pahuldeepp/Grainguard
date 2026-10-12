@@ -73,7 +73,8 @@ def main() -> None:
             "ssl.truststore.type=PKCS12\n"
             "ssl.truststore.location=/run/kafka/truststore.p12\n"
             f"ssl.truststore.password={password}\n"
-            "ssl.endpoint.identification.algorithm=HTTPS\n",
+            "ssl.endpoint.identification.algorithm=HTTPS\n"
+            "request.timeout.ms=120000\n",
             encoding="utf-8",
         )
         os.chmod(props, 0o600)
