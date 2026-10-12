@@ -23,6 +23,7 @@ import {
   startPlacementAuthority,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
+import { composeContainerName } from "./ci-compose-project.mjs";
 
 process.loadEnvFile(".env");
 const { Kafka, logLevel } = kafkaJs;
@@ -929,14 +930,15 @@ async function gateOutage() {
 async function gateBroker() {
   const item = gate.broker;
   const sagaID = await provision(item);
-  const paused = spawnSync("docker", ["pause", "greenguard-dev-kafka-1"], {
+  const kafka = composeContainerName("kafka");
+  const paused = spawnSync("docker", ["pause", kafka], {
     encoding: "utf8",
   });
   assert.equal(paused.status, 0, paused.stderr);
   try {
     await delay(8000);
   } finally {
-    spawnSync("docker", ["unpause", "greenguard-dev-kafka-1"]);
+    spawnSync("docker", ["unpause", kafka]);
   }
   const restarted = [];
   for (let i = 0; i < 40; i++) {

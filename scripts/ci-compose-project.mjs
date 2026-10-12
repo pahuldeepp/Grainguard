@@ -10,3 +10,12 @@ export function ciComposeProjectName(env) {
     .slice(0, 12);
   return `greenguard-ci-${suffix}`;
 }
+
+export function composeContainerName(service, env = process.env) {
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(service))
+    throw new Error(`Invalid Compose service name: ${service}`);
+  const project = env.COMPOSE_PROJECT_NAME || "greenguard-dev";
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(project))
+    throw new Error("Invalid COMPOSE_PROJECT_NAME");
+  return `${project}-${service}-1`;
+}

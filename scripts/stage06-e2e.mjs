@@ -21,6 +21,7 @@ import {
   ownershipSubjects,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
+import { composeContainerName } from "./ci-compose-project.mjs";
 
 process.loadEnvFile(".env");
 const work = mkdtempSync(path.join(tmpdir(), "greenguard-stage06-e2e-"));
@@ -147,7 +148,7 @@ function buildGo(directory, name) {
 }
 function rabbitAdmin(...args) {
   const container =
-    process.env.STAGE06_RABBITMQ_CONTAINER ?? "greenguard-dev-rabbitmq-1";
+    process.env.STAGE06_RABBITMQ_CONTAINER ?? composeContainerName("rabbitmq");
   const result = spawnSync(
     "docker",
     ["exec", container, "rabbitmqctl", ...args],

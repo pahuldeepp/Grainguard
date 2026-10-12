@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-container="${GG_POSTGRES_CONTAINER:-greenguard-dev-postgres-1}"
+container="${GG_POSTGRES_CONTAINER:-${COMPOSE_PROJECT_NAME:-greenguard-dev}-postgres-1}"
 database="${GG_TELEMETRY_DATABASE:-greenguard_telemetry}"
 result="$(docker exec "$container" psql -U postgres -d "$database" -Atqc "SELECT bool_and(NOT has_table_privilege('telemetry_app', format('public.%I', table_name), 'DELETE')) FROM unnest(ARRAY['readings','ingest_receipts','outbox_events','audit_events']) AS table_name;")"
 if [[ "$result" != "t" ]]; then

@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { SignJWT, generateKeyPair, importJWK, exportSPKI } from "jose";
 import { createTokenVerifierFromEnv } from "@greenguard/tenant-auth";
 import { ISSUER, decodeJwt, login, refresh } from "./oidc-login.mjs";
+import { composeContainerName } from "./ci-compose-project.mjs";
 
 const TENANT = {
   a: "0a0a0a0a-0000-4000-8000-00000000000a",
@@ -52,7 +53,7 @@ const authEnv = {
 function psql(sql) {
   execFileSync("docker", [
     "exec",
-    "greenguard-dev-postgres-1",
+    composeContainerName("postgres"),
     "psql",
     "-U",
     "postgres",

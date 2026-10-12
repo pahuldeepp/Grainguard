@@ -302,7 +302,9 @@ jobs:
             packages/read-model/coverage/lcov.info
             services/search-indexer/coverage.xml
             services/risk-engine/coverage.xml
-          if-no-files-found: error
+          # The later explicit coverage gate checks every report after `make verify`
+          # succeeds; do not mask an earlier test failure with an artifact error.
+          if-no-files-found: warn
           retention-days: 14
       - name: Stop isolated test environments
         if: always()
