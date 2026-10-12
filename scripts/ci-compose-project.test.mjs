@@ -44,6 +44,12 @@ test("resolves Compose containers from the active project without changing local
     }),
     "greenguard-ci-a1b2c3d4e5f6-kafka-1",
   );
+  assert.equal(
+    composeContainerName("redis-node-1", {
+      COMPOSE_PROJECT_NAME: "greenguard-ci-a1b2c3d4e5f6",
+    }),
+    "greenguard-ci-a1b2c3d4e5f6-redis-node-1-1",
+  );
   assert.throws(
     () => composeContainerName("../postgres", {}),
     /Invalid Compose service name/,

@@ -20,9 +20,6 @@ services:
   redis-node-1:
     <<: *node
     hostname: redis-node-1
-    networks:
-      redis:
-        ipv4_address: 10.250.70.11
     command:
       - redis-server
       - --port
@@ -50,9 +47,6 @@ services:
   redis-node-2:
     <<: *node
     hostname: redis-node-2
-    networks:
-      redis:
-        ipv4_address: 10.250.70.12
     command:
       - redis-server
       - --port
@@ -80,9 +74,6 @@ services:
   redis-node-3:
     <<: *node
     hostname: redis-node-3
-    networks:
-      redis:
-        ipv4_address: 10.250.70.13
     command:
       - redis-server
       - --port
@@ -110,9 +101,6 @@ services:
   redis-node-4:
     <<: *node
     hostname: redis-node-4
-    networks:
-      redis:
-        ipv4_address: 10.250.70.14
     command:
       - redis-server
       - --port
@@ -140,9 +128,6 @@ services:
   redis-node-5:
     <<: *node
     hostname: redis-node-5
-    networks:
-      redis:
-        ipv4_address: 10.250.70.15
     command:
       - redis-server
       - --port
@@ -170,9 +155,6 @@ services:
   redis-node-6:
     <<: *node
     hostname: redis-node-6
-    networks:
-      redis:
-        ipv4_address: 10.250.70.16
     command:
       - redis-server
       - --port
@@ -216,8 +198,7 @@ services:
 
 networks:
   redis:
-    # Static addresses: Redis stores peer IPs in nodes.conf, so a restart that
-    # reassigned IPs would leave the cluster with stale peers.
-    ipam:
-      config:
-        - subnet: 10.250.70.0/24
+    # Docker allocates a non-overlapping subnet. Nodes keep their addresses
+    # through container restarts; `compose down` removes the disposable cluster
+    # and its nodes.conf along with this network.
+    driver: bridge
