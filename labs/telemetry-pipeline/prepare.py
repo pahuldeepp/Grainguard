@@ -81,6 +81,9 @@ def main() -> None:
     for path in OUT.iterdir():
         if path.is_file():
             os.chmod(path, 0o600)
+    # The CA certificate is public. Containers read it as a different non-root user than
+    # the host runner, so it must be world-readable (private keys stay 0600).
+    os.chmod(ca_cert, 0o644)
     print("Prepared temporary local SASL_SSL credentials and certificates in ignored .local/.")
 
 
