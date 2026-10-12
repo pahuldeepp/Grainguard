@@ -337,7 +337,9 @@ async function fullRestart(redis) {
           }
         }, 15_000);
         if (!nodeReady || !(await waitFor(() => healthyTopology(), 20_000))) {
-          throw new Error(`Redis topology did not recover after restarting node ${n}`);
+          throw new Error(
+            `Redis topology did not recover after restarting node ${n}`,
+          );
         }
       }
     } catch (error) {
