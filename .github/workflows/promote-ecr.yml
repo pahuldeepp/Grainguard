@@ -37,7 +37,7 @@ jobs:
   promote:
     name: Verify and promote exact CI image digests
     if: github.repository == 'pahuldeepp/Grainguard' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 45
     environment:
       name: greenguard-ecr-promotion

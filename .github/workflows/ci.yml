@@ -12,7 +12,7 @@ concurrency:
 jobs:
   secret-scan:
     name: Secret scanning
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -30,7 +30,7 @@ jobs:
 
   dependency-and-iac-scan:
     name: Dependency and IaC vulnerability scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -57,7 +57,7 @@ jobs:
 
   terraform-validate:
     name: Terraform format and validation
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 20
     permissions:
       contents: read
@@ -98,7 +98,7 @@ jobs:
 
   image-inventory:
     name: Image and registry inventory
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -125,7 +125,7 @@ jobs:
 
   helm-static:
     name: Helm and GitOps render contracts
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -174,7 +174,7 @@ jobs:
 
   quality:
     name: Required quality gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -318,7 +318,7 @@ jobs:
         mysql-cdc-integration,
       ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -393,7 +393,7 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
-          platforms: arm64
+          platforms: all
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -464,7 +464,7 @@ jobs:
   publish-platform-images:
     name: Publish pinned platform and data-plane images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -539,6 +539,10 @@ jobs:
           if entry["kind"] == "build" and entry.get("dockerfile") != os.environ["DOCKERFILE"]:
               raise SystemExit("repository image Dockerfile differs from committed inventory")
           PY
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        if: matrix.kind == 'build'
+        with:
+          platforms: amd64
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: matrix.kind == 'build'
       - name: Build repository-owned platform image
@@ -646,7 +650,7 @@ jobs:
     name: Assemble immutable deployment inputs
     needs: [publish, publish-migrations, publish-platform-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -692,7 +696,7 @@ jobs:
     name: Publish signed owner migration and tool images
     needs: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -765,6 +769,9 @@ jobs:
           set -euo pipefail
           curl -fsSLo infra/gitops/disposable/migration-gate-image/kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
           echo '6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  infra/gitops/disposable/migration-gate-image/kubectl' | sha256sum -c -
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -837,7 +844,7 @@ jobs:
 
   mysql-cdc-integration:
     name: MySQL snapshot and CDC integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -866,7 +873,7 @@ jobs:
 
   redis-integration:
     name: Redis cache and failover integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -895,7 +902,7 @@ jobs:
 
   oidc-integration:
     name: OIDC authentication integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -929,7 +936,7 @@ jobs:
 
   oidc-browser-integration:
     name: OIDC Chromium browser integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -965,7 +972,7 @@ jobs:
 
   stage08-integration:
     name: Gateway and dashboard end-to-end integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 60
     permissions:
       contents: read
@@ -1031,7 +1038,7 @@ jobs:
 
   events-integration:
     name: Event backbone integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -1060,7 +1067,7 @@ jobs:
 
   history-integration:
     name: Cassandra history and fault integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -1087,7 +1094,7 @@ jobs:
 
   search-integration:
     name: Search index and Kafka integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -1113,7 +1120,7 @@ jobs:
 
   stage06-integration:
     name: Risk, alert, and delivery integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -1151,7 +1158,7 @@ jobs:
 
   stage07-integration:
     name: Saga and physical sensor integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read

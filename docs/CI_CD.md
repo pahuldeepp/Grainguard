@@ -4,11 +4,25 @@ GitHub repository: https://github.com/pahuldeepp/Grainguard (private). The local
 
 ## Pipeline
 
-Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, a live two-tenant read-role test, and a Docker staging check. Separate isolated jobs exercise the event backbone, Cassandra history faults, and Kafka-to-Elasticsearch search. The quality job starts a fresh SonarQube instance, imports TypeScript, Go, and Python coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days. These new jobs have only local validation until this working tree is pushed.
+Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, a live two-tenant read-role test, and a Docker staging check. Separate jobs exercise the event backbone, Cassandra history faults, and Kafka-to-Elasticsearch search. The quality job starts a fresh SonarQube instance, imports TypeScript, Go, and Python coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days.
+
+### No hosted-runner spend
+
+The repository workflows use the `greenguard-ci` self-hosted Linux ARM64 runner
+label so CI does not consume GitHub-hosted runner minutes. The current runner is
+an Ubuntu 24.04 Lima VM with its own Docker daemon, no mounted host directories,
+and no static AWS credentials. Short-lived AWS OIDC access is limited to the
+protected promotion workflow. It is one runner, so jobs queue and execute serially;
+GitHub checks remain queued while this VM is stopped or offline. Start it with
+`limactl start greenguard-gha`, then run
+`limactl shell greenguard-gha sudo -u runner bash -lc 'cd /home/runner/actions-runner && ./run.sh'`.
+Stop the foreground runner with Ctrl-C and the VM with
+`limactl stop greenguard-gha`. This avoids hosted-minute charges; GHCR package storage and
+AWS resources are separately billed and are not made free by self-hosting.
 
 GitHub returned HTTP 403 when querying branch protection: this account needs GitHub Pro (or a public repository) to protect this private branch. The repository remains private. Required merge checks cannot currently be enforced by GitHub branch protection; the workflow still blocks image publication on failed quality checks. No paid upgrade was performed.
 
-Only a successful **main push** can publish dashboard, BFF and runtime service images to private GHCR packages. The image matrix includes gateway, device-service, read-api, workflow-alerts, telemetry-ingest, cdc-transformer, projection-builder, cache-invalidator, risk-engine, hardware-service and eventbridge-bridge. Image tags are the full commit SHA; BuildKit emits SBOM and provenance attestations. The publish job scans each pushed digest for unfixed high/critical OS and library vulnerabilities, signs that exact digest with Cosign keyless identity, and immediately verifies the signature against this workflow's main-branch identity. PR code has read-only GitHub permissions and no production/registry credentials. The separate CI secret-scan job scans history with Gitleaks; Trivy checks dependency manifests and IaC on every workflow run. These new security gates are statically linted locally but have not yet run in GitHub Actions on this uncommitted tree. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
+Only a successful **main push** can publish dashboard, BFF and runtime service images to private GHCR packages. The image matrix includes gateway, device-service, read-api, workflow-alerts, telemetry-ingest, cdc-transformer, projection-builder, cache-invalidator, risk-engine, hardware-service and eventbridge-bridge. Image tags are the full commit SHA; BuildKit emits SBOM and provenance attestations. The publish job scans each pushed digest for unfixed high/critical OS and library vulnerabilities, signs that exact digest with Cosign keyless identity, and immediately verifies the signature against this workflow's main-branch identity. PR code has read-only GitHub permissions and no production/registry credentials. The separate CI secret-scan job scans history with Gitleaks; Trivy checks dependency manifests and IaC on every workflow run. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
 
 The `image-inventory` gate checks that every application/service Dockerfile is
 mapped to exactly the expected published image service and to a Terraform ECR
@@ -22,8 +36,9 @@ The SonarQube scope includes the implemented dashboard, TypeScript services/pack
 ## Stage 08 live integration jobs
 
 `redis-integration`, `oidc-integration`, `oidc-browser-integration`, and
-`stage08-integration` run in separate runners with read-only permissions,
-pinned actions, and unconditional cleanup. Like `events-integration`, they run
+`stage08-integration` run as separate jobs with read-only permissions,
+pinned actions, and unconditional cleanup. They share the single serial
+self-hosted runner. Like `events-integration`, they run
 on each CI trigger and are dependencies of image publication. The full Stage
 08 job builds the gateway, BFF, Read API, and workflow-alerts runtime images,
 starts Kafka, MQTT, PostgreSQL, Cassandra, Elasticsearch, Redis Cluster, Dex,
