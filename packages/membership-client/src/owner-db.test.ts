@@ -193,10 +193,10 @@ test("local loopback active-shard override filters inactive fixture pools and ro
 
 test("active-shard override is rejected outside local loopback fixtures", () => {
   for (const [raw, localLoopback, mutate] of [
-    ["s1", false, (_m: ReturnType<typeof manifest>) => {}],
-    ["s2", true, (_m: ReturnType<typeof manifest>) => {}],
-    ["s1,s1", true, (_m: ReturnType<typeof manifest>) => {}],
-    ["s1,s5", true, (_m: ReturnType<typeof manifest>) => {}],
+    ["s1", false, () => {}],
+    ["s2", true, () => {}],
+    ["s1,s1", true, () => {}],
+    ["s1,s5", true, () => {}],
     [
       "s1",
       true,

@@ -41,6 +41,7 @@ dev: db-migrate build
 verify: check-plan db-migrate
 	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
+	node --test scripts/browser-e2e-stack.test.mjs
 	npm run format:check
 	npm run lint
 	npm run typecheck

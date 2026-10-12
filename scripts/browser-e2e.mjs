@@ -3,6 +3,7 @@
 // and -> Read API (Postgres read DB, Cassandra, Elasticsearch, Redis Cluster).
 // Mandatory Stage 08 CI gate: `make browser-e2e`. Never prints tokens.
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import assert from "node:assert/strict";
 import {
   closeSync,
   copyFileSync,
@@ -1406,7 +1407,7 @@ async function stackUp() {
   const dist = path.join(tmp, "dashboard-dist");
   const built = spawnSync(
     "npx",
-    ["vite", "build", "--outDir", dist, "--emptyOutDir"],
+    ["vite", "build", "--mode", "e2e", "--outDir", dist, "--emptyOutDir"],
     {
       cwd: "apps/dashboard",
       encoding: "utf8",
@@ -1420,9 +1421,18 @@ async function stackUp() {
   );
   if (built.status !== 0)
     throw new Error(`dashboard build: ${built.stderr.slice(-800)}`);
-  const dashboard = S.dashboardServer(dist, PORTS.gateway);
+  const publicOidcConfig = {
+    authority: ISSUER,
+    clientId: "greenguard-dashboard",
+    audience: "greenguard-dashboard",
+    tokenMode: "audience",
+  };
+  const dashboard = S.dashboardServer(dist, PORTS.gateway, publicOidcConfig);
   await S.listen(dashboard.server, PORTS.dashboard, "::1");
   servers.push(dashboard.server);
+  const configResponse = await fetch(`${DASHBOARD}/config.json`);
+  assert.equal(configResponse.status, 200, "public OIDC config is served");
+  assert.deepEqual(await configResponse.json(), publicOidcConfig);
   await waitFor(
     () => healthy(`http://127.0.0.1:${PORTS.sagaApi}/healthz`),
     "saga API",

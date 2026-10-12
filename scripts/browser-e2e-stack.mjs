@@ -221,10 +221,24 @@ const types = {
 // Serves the built dashboard like apps/dashboard/nginx.conf: SPA fallback plus
 // `location = /graphql` proxied to the gateway. The target can be switched to a
 // second gateway/BFF pair to simulate a Read API outage without touching shared services.
-export function dashboardServer(root, target) {
+export function dashboardServer(root, target, publicOidcConfig) {
   const state = { target };
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/config.json" && req.method === "GET") {
+      if (!publicOidcConfig) {
+        res.writeHead(404, { "cache-control": "no-store" }).end();
+        return;
+      }
+      res
+        .writeHead(200, {
+          "cache-control": "no-store",
+          "content-type": "application/json; charset=utf-8",
+          "x-content-type-options": "nosniff",
+        })
+        .end(JSON.stringify(publicOidcConfig));
+      return;
+    }
     if (
       url.pathname === "/graphql" ||
       url.pathname === "/api/v1/subscription-ticket"

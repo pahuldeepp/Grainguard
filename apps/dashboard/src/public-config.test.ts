@@ -33,3 +33,23 @@ test("rejects secret-looking fields, placeholders and incomplete modes", () => {
   ])
     expect(() => validatePublicOidcConfig(bad)).toThrow();
 });
+
+test("allows HTTP only for loopback OIDC in an explicit e2e build", () => {
+  const local = {
+    authority: "http://127.0.0.1:5556/dex",
+    clientId: "greenguard-dashboard",
+    audience: "greenguard-dashboard",
+    tokenMode: "audience",
+  } as const;
+
+  expect(() => validatePublicOidcConfig(local)).toThrow();
+  expect(validatePublicOidcConfig(local, { allowLoopbackHttp: true })).toEqual(
+    local,
+  );
+  expect(() =>
+    validatePublicOidcConfig(
+      { ...local, authority: "http://idp.example.test" },
+      { allowLoopbackHttp: true },
+    ),
+  ).toThrow();
+});

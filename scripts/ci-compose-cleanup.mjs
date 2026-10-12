@@ -23,7 +23,7 @@ function ids(args) {
   return result.stdout.trim().split(/\s+/).filter(Boolean);
 }
 
-function remove(listArgs, removeArgs) {
+function remove(kind, listArgs, removeArgs) {
   const resources = ids(listArgs);
   if (resources.length === 0) return;
   const result = spawnSync("docker", [...removeArgs, ...resources], {
@@ -37,12 +37,18 @@ function remove(listArgs, removeArgs) {
 }
 
 const projectLabel = `label=com.docker.compose.project=${project}`;
-remove(["ps", "--all", "--quiet", "--filter", projectLabel], ["rm", "--force"]);
 remove(
+  "containers",
+  ["ps", "--all", "--quiet", "--filter", projectLabel],
+  ["rm", "--force"],
+);
+remove(
+  "volumes",
   ["volume", "ls", "--quiet", "--filter", projectLabel],
   ["volume", "rm", "--force"],
 );
 remove(
+  "networks",
   ["network", "ls", "--quiet", "--filter", projectLabel],
   ["network", "rm"],
 );
