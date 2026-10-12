@@ -1556,8 +1556,12 @@ async function main() {
   try {
     await run();
   } catch (error) {
-    failures.push(`harness: ${error.message}`);
-    console.log(`FAIL harness :: ${error.stack}`);
+    // Node's fetch hides the real reason (code, address, port) in error.cause.
+    const cause = error.cause
+      ? ` (cause: ${error.cause.code ?? ""} ${error.cause.address ?? ""}:${error.cause.port ?? ""} ${error.cause.message ?? ""})`
+      : "";
+    failures.push(`harness: ${error.message}${cause}`);
+    console.log(`FAIL harness :: ${error.stack}${cause}`);
     for (const [name, log] of S.logs)
       console.log(`--- ${name} ---\n${log.slice(-1500)}`);
   } finally {
