@@ -40,6 +40,10 @@ const ISSUER = "http://127.0.0.1:5556/dex";
 // The dashboard is served on [::1]:5173 as http://localhost:5173 (a Dex-registered
 // redirect URI) so it never collides with a developer's IPv4 vite on 127.0.0.1:5173.
 const DASHBOARD = `http://localhost:${PORTS.dashboard}`;
+// Node-side requests use the bound socket directly. Chromium maps localhost to both
+// loopbacks itself, but Node asks the OS, and a stock Ubuntu /etc/hosts (the CI
+// runner VM) lists localhost only as 127.0.0.1, where this harness does not listen.
+const DASHBOARD_SOCKET = `http://[::1]:${PORTS.dashboard}`;
 const password = process.env.OIDC_DEV_PASSWORD;
 const TENANT = {
   a: "0a0a0a0a-0000-4000-8000-00000000000a",
@@ -1430,7 +1434,7 @@ async function stackUp() {
   const dashboard = S.dashboardServer(dist, PORTS.gateway, publicOidcConfig);
   await S.listen(dashboard.server, PORTS.dashboard, "::1");
   servers.push(dashboard.server);
-  const configResponse = await fetch(`${DASHBOARD}/config.json`);
+  const configResponse = await fetch(`${DASHBOARD_SOCKET}/config.json`);
   assert.equal(configResponse.status, 200, "public OIDC config is served");
   assert.deepEqual(await configResponse.json(), publicOidcConfig);
   await waitFor(
