@@ -15,15 +15,23 @@ import (
 // This disruptive opt-in test owns the local Cassandra node for its duration.
 // It proves a durable broker offset is held across an outage and replayed after
 // a fresh worker starts. It always restarts the container on test cleanup.
+func cassandraTestContainer() string {
+	if container := os.Getenv("CASSANDRA_TEST_CONTAINER"); container != "" {
+		return container
+	}
+	project := os.Getenv("COMPOSE_PROJECT_NAME")
+	if project == "" {
+		project = "greenguard-dev"
+	}
+	return project + "-cassandra-1"
+}
+
 func TestLiveCassandraNodeOutageCatchUp(t *testing.T) {
 	t.Setenv("KAFKA_TOPIC_PREFIX", "") // This acceptance fixture intentionally uses canonical shared topics.
 	if os.Getenv("KAFKA_CASSANDRA_FAULT_LIVE") != "1" {
 		t.Skip("set KAFKA_CASSANDRA_FAULT_LIVE=1 to stop the local Cassandra container")
 	}
-	container := os.Getenv("CASSANDRA_TEST_CONTAINER")
-	if container == "" {
-		container = "greenguard-dev-cassandra-1"
-	}
+	container := cassandraTestContainer()
 	control := func(timeout time.Duration, action string) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -85,6 +93,18 @@ func TestLiveCassandraNodeOutageCatchUp(t *testing.T) {
 	defer session.Close()
 	assertCassandraCatchUp(t, ctx, catchUpArgs{brokers, group, session, admin, record, tenant, device, reading, schema})
 	t.Logf("outage/catch-up passed: group=%s held=%d committed=%d row=%s", group, record.Offset, record.Offset+1, reading.id)
+}
+
+func TestCassandraTestContainerUsesComposeProject(t *testing.T) {
+	t.Setenv("CASSANDRA_TEST_CONTAINER", "")
+	t.Setenv("COMPOSE_PROJECT_NAME", "greenguard-ci-a1b2c3d4e5f6")
+	if got, want := cassandraTestContainer(), "greenguard-ci-a1b2c3d4e5f6-cassandra-1"; got != want {
+		t.Fatalf("cassandraTestContainer() = %q, want %q", got, want)
+	}
+	t.Setenv("CASSANDRA_TEST_CONTAINER", "custom-cassandra")
+	if got, want := cassandraTestContainer(), "custom-cassandra"; got != want {
+		t.Fatalf("explicit CASSANDRA_TEST_CONTAINER = %q, want %q", got, want)
+	}
 }
 
 func waitForCassandraRecovery(t *testing.T, ctx context.Context, cfg history.Config) *history.CQLSession {
