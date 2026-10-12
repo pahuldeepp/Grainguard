@@ -71,7 +71,7 @@ class HealthState:
             "# HELP greenguard_telemetry_sink_backend_ready Downstream ClickHouse or S3 endpoint is ready.",
             "# TYPE greenguard_telemetry_sink_backend_ready gauge",
             f"greenguard_telemetry_sink_backend_ready {int(backend_ready)}",
-            "# HELP greenguard_telemetry_sink_kafka_ready Kafka consumer has an assigned partition.",
+            "# HELP greenguard_telemetry_sink_kafka_ready Kafka broker metadata is reachable and a topic partition is assigned.",
             "# TYPE greenguard_telemetry_sink_kafka_ready gauge",
             f"greenguard_telemetry_sink_kafka_ready {int(kafka_ready)}",
             "# HELP greenguard_telemetry_sink_retries_total Bounded dependency retry attempts.",

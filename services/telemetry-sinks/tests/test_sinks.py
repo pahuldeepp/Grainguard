@@ -392,6 +392,34 @@ class HealthTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_kafka_readiness_requires_reachable_metadata_and_assigned_partition(self):
+        class Consumer:
+            assigned = True
+            topics = {topic: None for topic in TOPICS}
+
+            def list_topics(self, timeout):
+                self.timeout = timeout
+                return type("Metadata", (), {"topics": self.topics})()
+
+            def assignment(self):
+                return [object()] if self.assigned else []
+
+        consumer = Consumer()
+        self.assertTrue(runtime._probe_kafka(consumer))
+        self.assertEqual(consumer.timeout, 5.0)
+        consumer.assigned = False
+        self.assertFalse(runtime._probe_kafka(consumer))
+        with self.assertRaisesRegex(RuntimeError, "topics are missing"):
+            consumer.topics = {}
+            runtime._probe_kafka(consumer)
+
+        class UnreachableConsumer(Consumer):
+            def list_topics(self, timeout):
+                raise TimeoutError("broker unavailable")
+
+        with self.assertRaisesRegex(TimeoutError, "broker unavailable"):
+            runtime._probe_kafka(UnreachableConsumer())
+
     def test_commits_kafka_only_after_durable_sink_success(self):
         actions = []
         stop = threading.Event()

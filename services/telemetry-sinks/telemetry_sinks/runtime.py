@@ -64,11 +64,19 @@ def _create_consumer(mode: str, consumer_factory: Callable | None = None) -> Any
         "enable.ssl.certificate.verification": True,
         "socket.timeout.ms": 5000,
         "socket.connection.setup.timeout.ms": 5000,
-        "request.timeout.ms": 10000,
         "max.poll.interval.ms": 300000,
         "session.timeout.ms": 30000,
     }
     return consumer_factory(config)
+
+
+def _probe_kafka(consumer: Any, *, timeout: float = 5.0, require_assignment: bool = True) -> bool:
+    """Prove broker metadata is reachable and, for readiness, a topic is assigned."""
+    metadata = consumer.list_topics(timeout=timeout)
+    missing = sorted(set(TOPICS) - set(metadata.topics))
+    if missing:
+        raise RuntimeError("Kafka telemetry topics are missing: " + ", ".join(missing))
+    return not require_assignment or bool(consumer.assignment())
 
 
 def run(mode: str, *, consumer_factory: Callable | None = None, topic_partition_factory: Callable | None = None,
@@ -100,15 +108,14 @@ def run(mode: str, *, consumer_factory: Callable | None = None, topic_partition_
         _retry(lambda: sink.check(), "backend readiness check", stop, state)
         state.set_backends(backend_ready=True)
         consumer = _create_consumer(mode, consumer_factory)
-        metadata = _retry(lambda: consumer.list_topics(timeout=10), "Kafka metadata check", stop, state)
-        missing = sorted(set(TOPICS) - set(metadata.topics))
-        if missing:
-            raise RuntimeError("Kafka telemetry topics are missing: " + ", ".join(missing))
+        _retry(lambda: _probe_kafka(consumer, timeout=10, require_assignment=False),
+               "Kafka metadata check", stop, state)
         consumer.subscribe(list(TOPICS))
         batches: dict[tuple[str, int], list] = defaultdict(list)
         batch_bytes: dict[tuple[str, int], int] = defaultdict(int)
         first_seen: dict[tuple[str, int], float] = {}
         last_backend_check = time.monotonic()
+        last_kafka_check = last_backend_check
         poll_error_since = None
 
         def commit(next_offset: int, topic: str, partition: int) -> None:
@@ -167,6 +174,8 @@ def run(mode: str, *, consumer_factory: Callable | None = None, topic_partition_
                             raise RuntimeError("Kafka consumer remained unhealthy past its retry budget")
                     continue
                 poll_error_since = None
+                if consumer.assignment():
+                    state.set_backends(kafka_ready=True)
                 record = parse_record(message.topic(), message.key(), message.value(),
                                       message.partition(), message.offset(), validators,
                                       getattr(message, "headers", lambda: None)() or [])
@@ -177,9 +186,14 @@ def run(mode: str, *, consumer_factory: Callable | None = None, topic_partition_
                 batch_bytes[key] += len(record.raw_key) + len(record.raw_value)
                 if batch_bytes[key] >= MAX_BATCH_BYTES or len(batches[key]) >= MAX_BATCH_RECORDS:
                     flush(key)
-            if consumer.assignment():
-                state.set_backends(kafka_ready=True)
             now = time.monotonic()
+            if now - last_kafka_check >= 15:
+                try:
+                    kafka_ready = _probe_kafka(consumer, timeout=5, require_assignment=True)
+                    state.set_backends(kafka_ready=kafka_ready)
+                except Exception:
+                    state.set_backends(kafka_ready=False)
+                last_kafka_check = now
             if now - last_backend_check >= 15:
                 try:
                     sink.check()
