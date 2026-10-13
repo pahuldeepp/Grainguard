@@ -7,10 +7,13 @@ function parseEndpoint(value, scheme, label) {
   } catch {
     throw new Error(`${label} must be a valid loopback endpoint`);
   }
+  const port = Number(endpoint.port);
   if (
     endpoint.protocol !== `${scheme}:` ||
     !LOOPBACK_HOSTS.has(endpoint.hostname.toLowerCase()) ||
-    !endpoint.port ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535 ||
     endpoint.username ||
     endpoint.password ||
     endpoint.search ||
