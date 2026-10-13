@@ -333,3 +333,21 @@ instruction and by real credentials/acceptance evidence.
   `ead41157…` Cassandra). The AWS runtime inventory targets amd64; these local
   images do not prove the amd64 candidate scan or production provenance. No
   image inventory, release pin, CI policy, or AWS resource was changed.
+
+## Fresh self-hosted CI — run 38433935232
+
+- The pushed commit `ea0df388` passed `make verify`, optional AWS-profile
+  synthesis, PostgreSQL read-role isolation, `npm audit`, coverage generation,
+  smoke, and disposable image staging on the Linux ARM64 runner. Secret
+  scanning, dependency/IaC scanning, and MySQL snapshot/CDC integration passed.
+- Sonar analysis completed but its quality gate failed. The measured report
+  shows **82.7% coverage**, **84.3% branch coverage**, and **0 security
+  hotspots**; overall limits failed at **0.9% duplicated lines** (limit 0%) and
+  **357 violations** (limit 0%). This is a quality-gate failure, not evidence of
+  357 security vulnerabilities. The gate remains enabled.
+- The failed run's artifact contains aggregate metrics but not issue locations.
+  Commit `45afccf` adds a sanitized rule/severity/file/line summary to the same
+  coverage artifact for the next run; it does not alter gate thresholds.
+- At the time of this record, Terraform, web E2E, and remaining integration jobs
+  had not completed. This run is for `ea0df388`, so it does not verify the later
+  diagnostic-only commit.
