@@ -351,3 +351,35 @@ instruction and by real credentials/acceptance evidence.
 - At the time of this record, Terraform, web E2E, and remaining integration jobs
   had not completed. This run is for `ea0df388`, so it does not verify the later
   diagnostic-only commit.
+
+### Final result and follow-up
+
+- Run `38433935232` completed with **12 integration/security jobs passing and 4
+  failing**: required quality gate, Terraform provider-schema validation,
+  RabbitMQ delivery integration, and Gateway/dashboard E2E. Cassandra history
+  and fault integration eventually passed. Image publication and release-input
+  assembly were skipped on this PR; no images were promoted.
+- The local Terraform fix in `a930cde` runs provider-schema inspection from an
+  isolated temporary workspace initialized with the cached provider mirror and
+  a temporary local state path. `python3 -m unittest
+  infra.terraform.disposable.test_secret_state_boundary` passed 12/12 after the
+  change. No AWS provider/backend was initialized.
+- The local RabbitMQ harness fix in `c68d05e` waits for asynchronous consumer
+  ack/nack settlement before closing the live-test channel. The notification
+  service suite passed locally (112 passed, 27 environment-gated skips). The
+  live RabbitMQ CI integration must rerun before this fix is accepted.
+- The gateway reload scenario now models the pinned local Dex's actual behavior:
+  it expects the memory-only dashboard token to require interactive
+  reauthentication after a full page reload, then verifies the original
+  provisioning route and idempotent saga are restored. The browser harness does
+  not claim silent SSO for the current local provider.
+- Silent SSO cannot safely be enabled by merely adding `prompt=none` to this
+  provider. Dex v2.43.1 is pinned locally and the managed-Dex default is older;
+  server-side auth sessions are introduced in the official v2.46.0 release.
+  The v2.46.0 multi-architecture candidate was verified from GHCR and scanned
+  with Trivy 0.75.0: both amd64 and arm64 contain 16 unique HIGH findings (0
+  CRITICAL). It was not pinned or promoted. Revisit Dex session support only
+  after an upstream candidate satisfies the existing image-security gate.
+- The next CI run on the local commits must provide issue-level Sonar diagnostics
+  and rerun Terraform, RabbitMQ, and browser E2E. The 38433935232 failures above
+  are not marked resolved by local-only evidence.

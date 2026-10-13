@@ -713,8 +713,8 @@ async function scenarioReload(browser, alice) {
   );
   const after = await badge(alice.page);
   check(
-    "S2 reload mid-provisioning retains sign-in and restores the tracked saga",
-    !needSignIn && restored && url.includes(it.saga ?? "missing"),
+    "S2 reload mid-provisioning reauthenticates and restores the tracked saga",
+    needSignIn && restored && url.includes(it.saga ?? "missing"),
     `before=${before || "(not yet rendered)"} signInRequired=${needSignIn} url=${url.replace(DASHBOARD, "")} restoredState=${after}`,
   );
   const again = await startInUi(alice.page, it);
