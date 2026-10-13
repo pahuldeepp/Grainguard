@@ -310,3 +310,26 @@ instruction and by real credentials/acceptance evidence.
   removed.` No shared Compose project or volume was targeted.
 - This local run does not cover the opt-in browser E2E, live AWS/EKS, production
   OIDC/Stripe configuration, real-data ML validation, or production capacity.
+
+## Vendor image hardening candidates — 2026-10-13
+
+- `infra/vendor-hardening/build-and-scan.sh
+  .local/vendor-hardening/review-20261013b gg-review-20261013b` built local
+  Kafka and Cassandra candidates. `infra/vendor-hardening/test-tooling.py`
+  passed 10/10 tests.
+- The candidate smoke passed the Kafka authenticated TLS KRaft startup, scoped
+  producer/consumer payload round-trip, ACL and cross-tenant denial, and invalid
+  password checks. Cassandra passed the 5.0.5→5.0.9 persisted SSTable read,
+  scoped writer round-trip, role/password/untrusted-CA/plaintext-CQL denials,
+  and TTL expiry. The harness explicitly reports
+  `SINGLE_NODE_TLS_SMOKE_PASS`; it does not prove multi-node Cassandra, CDC, or
+  the full application.
+- Trivy 0.75.0 with vulnerability DB updated 2026-10-13 reported **Kafka: 21
+  HIGH, 1 CRITICAL** and **Cassandra: 17 HIGH, 1 CRITICAL**, all in Java
+  dependencies. The local rebuild did not resolve the release-blocking findings.
+  Its generated findings report and raw scans are under ignored `.local/` and
+  were not added to Git.
+- Both locally built image digests are **ARM64** (`4260664e…` Kafka and
+  `ead41157…` Cassandra). The AWS runtime inventory targets amd64; these local
+  images do not prove the amd64 candidate scan or production provenance. No
+  image inventory, release pin, CI policy, or AWS resource was changed.
