@@ -108,14 +108,8 @@ class SecretStateBoundaryTests(unittest.TestCase):
         self.assertIn("no missing, extra, or generated-secret payload names", resource)
 
     def test_pinned_aws_provider_marks_secret_string_wo_write_only(self):
-        terraform = _terraform_binary()
-        if not terraform:
-            self.skipTest("Terraform CLI not available")
-        schema = subprocess.run(
-            [terraform, "providers", "schema", "-json"], cwd=ROOT,
-            check=True, capture_output=True, text=True,
-        )
-        resource = json.loads(schema.stdout)["provider_schemas"]["registry.terraform.io/hashicorp/aws"]["resource_schemas"]["aws_secretsmanager_secret_version"]["block"]["attributes"]
+        schema = self.provider_schema()
+        resource = schema["provider_schemas"]["registry.terraform.io/hashicorp/aws"]["resource_schemas"]["aws_secretsmanager_secret_version"]["block"]["attributes"]
         self.assertTrue(resource["secret_string_wo"]["write_only"])
         self.assertFalse(resource["secret_string"].get("write_only", False))
 
@@ -126,17 +120,31 @@ class SecretStateBoundaryTests(unittest.TestCase):
         provider_plugins = list((ROOT / ".terraform/providers").glob("registry.terraform.io/hashicorp/aws/6.60.0/*/terraform-provider-aws_v6.60.0*"))
         if not provider_plugins:
             self.skipTest("AWS provider schema is not initialized")
-        terraform = _terraform_binary()
-        if not terraform:
-            self.skipTest("Terraform CLI not available")
-        schema = subprocess.run(
-            [terraform, "providers", "schema", "-json"], cwd=ROOT,
-            check=True, capture_output=True, text=True,
-        )
-        data_sources = json.loads(schema.stdout)["provider_schemas"]["registry.terraform.io/hashicorp/aws"]["data_source_schemas"]
+        schema = self.provider_schema()
+        data_sources = schema["provider_schemas"]["registry.terraform.io/hashicorp/aws"]["data_source_schemas"]
         versions = data_sources["aws_secretsmanager_secret_versions"]["block"]["attributes"]
         self.assertNotIn("secret_string", versions)
         self.assertIn("versions", versions)
+
+    @classmethod
+    def provider_schema(cls):
+        cached = getattr(cls, "_provider_schema_cache", None)
+        if cached is not None:
+            return cached
+        terraform = _terraform_binary()
+        if not terraform:
+            raise unittest.SkipTest("Terraform CLI not available")
+        result = subprocess.run(
+            [terraform, "providers", "schema", "-json"], cwd=ROOT,
+            check=False, capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+            raise AssertionError(
+                f"terraform providers schema failed ({result.returncode}): {diagnostic[:2000]}"
+            )
+        cls._provider_schema_cache = json.loads(result.stdout)
+        return cls._provider_schema_cache
 
     def test_secret_resource_addresses_are_derived_from_public_names(self):
         runtime = (ROOT / "runtime-secrets.tf").read_text()
