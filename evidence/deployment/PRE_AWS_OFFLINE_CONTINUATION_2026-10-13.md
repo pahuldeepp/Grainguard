@@ -91,7 +91,7 @@ shared GreenGuard Compose/database project was not restarted or modified.
   scoped and are not implied by this gate.
 - On the same current HEAD, `terraform fmt -check -recursive infra/terraform`
   and isolated `terraform init -backend=false -input=false
-  -lockfile=readonly` plus `terraform validate` passed for all three roots:
+-lockfile=readonly` plus `terraform validate` passed for all three roots:
   `bootstrap-state`, `platform`, and `disposable`. This checks configuration
   without initializing a backend, reading AWS state, or contacting AWS.
 - `kyverno test infra/kyverno/tests --require-tests` passed (7/7) using the
@@ -255,7 +255,7 @@ shared GreenGuard Compose/database project was not restarted or modified.
 - `aws sts get-caller-identity` confirmed the active session is in account
   `580360261589`. No infrastructure mutation, Terraform plan, or apply was run.
 - `check-teardown.sh us-east-2 disposable greenguard-sandbox-cell-1
-  580360261589` reported no owned resource; it initially failed closed because
+580360261589` reported no owned resource; it initially failed closed because
   the post-destroy PV inventory file did not exist. A direct
   `ec2 describe-volumes` query returned **0 EBS volumes** in `us-east-2`.
 - Re-running the same scoped inventory with an empty temporary PV receipt
@@ -307,14 +307,14 @@ instruction and by real credentials/acceptance evidence.
   access denial passed.
 - The gate removed its own Compose containers, network, and Postgres volume and
   reported `PASS: isolated Compose verification and smoke; project and volume
-  removed.` No shared Compose project or volume was targeted.
+removed.` No shared Compose project or volume was targeted.
 - This local run does not cover the opt-in browser E2E, live AWS/EKS, production
   OIDC/Stripe configuration, real-data ML validation, or production capacity.
 
 ## Vendor image hardening candidates — 2026-10-13
 
 - `infra/vendor-hardening/build-and-scan.sh
-  .local/vendor-hardening/review-20261013b gg-review-20261013b` built local
+.local/vendor-hardening/review-20261013b gg-review-20261013b` built local
   Kafka and Cassandra candidates. `infra/vendor-hardening/test-tooling.py`
   passed 10/10 tests.
 - The candidate smoke passed the Kafka authenticated TLS KRaft startup, scoped
@@ -362,7 +362,7 @@ instruction and by real credentials/acceptance evidence.
 - The local Terraform fix in `a930cde` runs provider-schema inspection from an
   isolated temporary workspace initialized with the cached provider mirror and
   a temporary local state path. `python3 -m unittest
-  infra.terraform.disposable.test_secret_state_boundary` passed 12/12 after the
+infra.terraform.disposable.test_secret_state_boundary` passed 12/12 after the
   change. No AWS provider/backend was initialized.
 - The local RabbitMQ harness fix in `c68d05e` waits for asynchronous consumer
   ack/nack settlement before closing the live-test channel. The notification
@@ -383,3 +383,26 @@ instruction and by real credentials/acceptance evidence.
 - The next CI run on the local commits must provide issue-level Sonar diagnostics
   and rerun Terraform, RabbitMQ, and browser E2E. The 38433935232 failures above
   are not marked resolved by local-only evidence.
+
+## Fresh self-hosted CI — run 38450679307
+
+- On `d112a01`, Terraform, OIDC, Helm/GitOps rendering, browser OIDC, event
+  backbone, search/Kafka, secret and dependency/IaC scans, MySQL CDC, image
+  inventory, Saga, Redis, Risk/alerts, and Cassandra history/fault gates passed.
+- The required quality gate failed at ESLint: the RabbitMQ live-test consumer
+  declared a single-assignment promise with `let`. This is corrected to `const`
+  locally and the affected files pass ESLint.
+- The Gateway/browser gate reached its reload scenario after successful Dex
+  login, provisioning, and saga completion. It timed out in the reload branch
+  that waited 5 seconds for “Sign in” and then assumed “Sign out” should exist.
+  The CI output does not establish whether a delayed auth render or an actual
+  page failure caused the timeout. The harness now waits for either stable auth
+  state and reports 5xx response paths plus a bounded page snapshot when
+  neither appears. This correction is not yet verified by a subsequent CI run.
+- Local verification for the changes: targeted ESLint, Node syntax check,
+  Prettier, dashboard `AuthGate.test.tsx` (5/5), and `git diff --check` passed.
+  The full Compose gate was not rerun because shared GreenGuard Docker
+  environments were active.
+- No AWS resource was created, and no Terraform apply was run. Cloud deployment
+  remains gated by the user's zero-spend instruction and unresolved capacity,
+  image-security, production identity/owner, Stripe, and live-acceptance inputs.

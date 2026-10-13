@@ -61,8 +61,7 @@ async function consumer(
     TASK_QUEUE,
     (msg) => {
       if (!msg) return;
-      let operation: Promise<void>;
-      operation = settle(c.channel, msg, (t) => handleTask(deps, t))
+      const operation = settle(c.channel, msg, (t) => handleTask(deps, t))
         .catch((error: unknown) => {
           settlementError = error;
         })

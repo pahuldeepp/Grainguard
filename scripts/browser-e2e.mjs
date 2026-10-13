@@ -502,6 +502,13 @@ async function newUser(browser, user) {
   page.on("console", (m) => {
     if (m.type() === "error") console.log(`[browser:${user}] ${m.text()}`);
   });
+  page.on("response", (response) => {
+    if (response.status() < 500) return;
+    const url = new URL(response.url());
+    console.log(
+      `[browser:${user}] HTTP ${response.status()} ${url.origin}${url.pathname}`,
+    );
+  });
   page.on("request", (r) => {
     if (r.url().endsWith("/graphql")) graphql.push(r);
   });
@@ -696,10 +703,36 @@ async function scenarioReload(browser, alice) {
   it.saga = first.saga?.sagaId;
   const before = await badge(alice.page).catch(() => "");
   await alice.page.reload();
-  const needSignIn = await waitVisible(
-    alice.page.getByRole("button", { name: "Sign in" }),
-    5000,
-  );
+  let authState;
+  try {
+    const state = await alice.page.waitForFunction(
+      () => {
+        const labels = [...document.querySelectorAll("button")].map((button) =>
+          button.textContent?.trim(),
+        );
+        if (labels.includes("Sign in")) return "signed-out";
+        if (labels.includes("Sign out")) return "signed-in";
+        return false;
+      },
+      null,
+      { timeout: 15_000 },
+    );
+    authState = await state.jsonValue();
+  } catch (error) {
+    const body = (
+      await alice.page
+        .locator("body")
+        .innerText()
+        .catch(() => "")
+    )
+      .replaceAll(/\s+/g, " ")
+      .slice(0, 400);
+    throw new Error(
+      `reload did not reach a sign-in state (${alice.page.url()}): ${body || error.message}`,
+      { cause: error },
+    );
+  }
+  const needSignIn = authState === "signed-out";
   if (needSignIn) {
     await signIn(alice.page, "alice");
   } else {
