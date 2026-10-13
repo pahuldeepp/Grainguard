@@ -36,7 +36,9 @@ export function validateTenantRoute(
     throw new PlacementError("invalid_placement_response");
   const route = value as Record<string, unknown>;
   if (
-    Object.keys(route).sort().join(",") !==
+    Object.keys(route)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !==
       "expiresAt,placementEpoch,shardId,shardIncarnation,state,tenantId" ||
     !UUID.test(tenantId) ||
     route.tenantId !== tenantId ||

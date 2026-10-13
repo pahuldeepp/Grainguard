@@ -572,11 +572,7 @@ export class KnowledgeClient {
                     ? "pdf_too_large"
                     : response.status === 415
                       ? "invalid_pdf"
-                      : response.status === 503 ||
-                          response.status === 502 ||
-                          response.status === 504
-                        ? "service_unavailable"
-                        : "service_unavailable"));
+                      : "service_unavailable"));
       return {
         status: forwardedStatuses.includes(response.status)
           ? response.status

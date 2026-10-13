@@ -111,7 +111,9 @@ export function validateFirstAdminDatabaseUrl(raw: string): string {
   } catch {
     throw new Error("CONTROL_DATABASE_URL must be a valid PostgreSQL URL");
   }
-  const keys = [...url.searchParams.keys()].sort();
+  const keys = [...url.searchParams.keys()].sort((a, b) =>
+    a < b ? -1 : Number(a > b),
+  );
   if (
     !["postgres:", "postgresql:"].includes(url.protocol) ||
     decodeURIComponent(url.username) !== "control_app" ||

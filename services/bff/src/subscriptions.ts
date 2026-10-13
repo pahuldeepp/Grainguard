@@ -2,6 +2,7 @@ import {
   parseWatermark,
   serializeWatermark,
 } from "@greenguard/membership-client";
+import { randomInt } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import type { Principal } from "@greenguard/tenant-auth";
@@ -372,7 +373,7 @@ export function attachSubscriptions(
               rerun = false;
               void poll();
             },
-            25 + Math.floor(Math.random() * 76),
+            25 + randomInt(76),
           );
         };
         const poll = async () => {
@@ -544,8 +545,7 @@ export function attachSubscriptions(
             ? undefined
             : setInterval(
                 poll,
-                intervalMs +
-                  Math.floor(Math.random() * Math.max(1, intervalMs / 4)),
+                intervalMs + randomInt(Math.max(1, Math.ceil(intervalMs / 4))),
               );
           if (ready && initialPollComplete) void poll();
         };

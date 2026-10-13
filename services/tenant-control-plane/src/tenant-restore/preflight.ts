@@ -31,7 +31,10 @@ function record(value: unknown, keys: string[]): value is RecordValue {
     !!value &&
     typeof value === "object" &&
     !Array.isArray(value) &&
-    Object.keys(value).sort().join(",") === [...keys].sort().join(",")
+    Object.keys(value)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") ===
+      [...keys].sort((a, b) => (a < b ? -1 : Number(a > b))).join(",")
   );
 }
 function text(value: unknown, pattern: RegExp): value is string {
@@ -71,7 +74,7 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object")
     return `{${Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .sort(([a], [b]) => (a < b ? -1 : Number(a > b)))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
       .join(",")}}`;
   return JSON.stringify(value);

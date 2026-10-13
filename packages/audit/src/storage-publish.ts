@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomInt } from "node:crypto";
 import type { AuditManifest } from "./index.js";
 import {
   ExportStorageError,
@@ -66,7 +67,7 @@ async function withRetry<T>(
     } catch (error) {
       if (attempt >= attempts || !isTransientStorageError(error)) throw error;
       await sleep(
-        base * 2 ** (attempt - 1) + Math.floor((Math.random() * base) / 2),
+        base * 2 ** (attempt - 1) + randomInt(Math.max(1, Math.ceil(base / 2))),
       );
     }
   }

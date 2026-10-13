@@ -65,7 +65,10 @@ const SHA256 = /^[0-9a-f]{64}$/;
 
 function exactKeys(value: object, expected: readonly string[]): boolean {
   return (
-    Object.keys(value).sort().join("\0") === [...expected].sort().join("\0")
+    Object.keys(value)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join("\0") ===
+    [...expected].sort((a, b) => (a < b ? -1 : Number(a > b))).join("\0")
   );
 }
 
@@ -162,7 +165,9 @@ export function parseTenantBootstrapShardRegistry(
       );
     }
     const options = url.searchParams.get("options")?.trim() ?? "";
-    const searchKeys = [...url.searchParams.keys()].sort();
+    const searchKeys = [...url.searchParams.keys()].sort((a, b) =>
+      a < b ? -1 : Number(a > b),
+    );
     if (
       !["postgres:", "postgresql:"].includes(url.protocol) ||
       decodeURIComponent(url.username) !==

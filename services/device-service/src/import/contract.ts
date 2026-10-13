@@ -80,7 +80,7 @@ export function stableUuid(
   parts: (string | number | bigint)[],
 ): string {
   const encoded = `[${parts.map((part) => (typeof part === "bigint" ? part.toString() : JSON.stringify(part))).join(",")}]`;
-  const digest = createHash("sha1")
+  const digest = createHash("sha1") // NOSONAR — UUIDv5 mandates SHA-1 for cross-language stable IDs; this is not a security digest.
     .update(Buffer.from(namespace.replaceAll("-", ""), "hex"))
     .update(encoded)
     .digest();

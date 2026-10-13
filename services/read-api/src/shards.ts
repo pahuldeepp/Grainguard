@@ -52,15 +52,18 @@ export function createShardReadRegistry(
   // Match the private registry emitted by scripts/shards-local.mjs and GitOps.
   const envelope = value as Record<string, unknown>;
   if (
-    Object.keys(envelope).sort().join(",") !==
-      "database,formatVersion,service,shards" ||
+    Object.keys(envelope)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !== "database,formatVersion,service,shards" ||
     envelope.formatVersion !== 1 ||
     envelope.service !== "read-api" ||
     envelope.database !== "greenguard_read" ||
     !envelope.shards ||
     typeof envelope.shards !== "object" ||
     Array.isArray(envelope.shards) ||
-    Object.keys(envelope.shards).sort().join(",") !== "s1,s2,s3,s4"
+    Object.keys(envelope.shards)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !== "s1,s2,s3,s4"
   )
     throw new Error("invalid_read_shard_registry");
   // Validate the entire manifest before allocating any pool.
@@ -69,8 +72,9 @@ export function createShardReadRegistry(
       throw new Error("invalid_read_shard_registry");
     const row = config as Record<string, unknown>;
     if (
-      Object.keys(row).sort().join(",") !==
-        "incarnation,primaryUrl,replicaUrls" ||
+      Object.keys(row)
+        .sort((a, b) => (a < b ? -1 : Number(a > b)))
+        .join(",") !== "incarnation,primaryUrl,replicaUrls" ||
       typeof row.primaryUrl !== "string" ||
       typeof row.incarnation !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(

@@ -37,8 +37,9 @@ export function parseWatermark(
     throw new WatermarkError();
   const row = parsed as Record<string, unknown>;
   if (
-    Object.keys(row).sort().join(",") !==
-      "placementEpoch,sequence,shardIncarnation,tenantId,v" ||
+    Object.keys(row)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !== "placementEpoch,sequence,shardIncarnation,tenantId,v" ||
     row.v !== 1 ||
     typeof row.tenantId !== "string" ||
     !UUID.test(row.tenantId) ||

@@ -18,7 +18,7 @@ export function readHistoryHotWindowMs(
 ): number {
   if (raw === undefined) return 24 * 60 * 60_000;
   const value = raw.trim();
-  const part = /(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)/gy;
+  const part = /(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)/y;
   let position = 0;
   let total = 0;
   let match: RegExpExecArray | null;

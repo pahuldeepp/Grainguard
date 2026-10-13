@@ -77,8 +77,9 @@ export function registerAgentRoutes(
           (!scope ||
             typeof scope !== "object" ||
             Array.isArray(scope) ||
-            Object.keys(scope).sort().join() !==
-              "document_id,document_version" ||
+            Object.keys(scope)
+              .sort((a, b) => (a < b ? -1 : Number(a > b)))
+              .join() !== "document_id,document_version" ||
             typeof scope.document_id !== "string" ||
             !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
               scope.document_id,
@@ -286,8 +287,9 @@ export function registerAgentRoutes(
             };
             if (
               !evidence ||
-              Object.keys(evidence).sort().join() !==
-                "answer_sha256,operation,status" ||
+              Object.keys(evidence)
+                .sort((a, b) => (a < b ? -1 : Number(a > b)))
+                .join() !== "answer_sha256,operation,status" ||
               !["count", "list", "pages"].includes(
                 String(evidence.operation),
               ) ||
@@ -605,7 +607,9 @@ export function registerAgentRoutes(
           !b ||
           typeof b !== "object" ||
           Array.isArray(b) ||
-          Object.keys(b).sort().join() !== "action_hash,decision,version" ||
+          Object.keys(b)
+            .sort((a, b) => (a < b ? -1 : Number(a > b)))
+            .join() !== "action_hash,decision,version" ||
           !["approved", "rejected"].includes(b.decision) ||
           typeof b.action_hash !== "string" ||
           !/^[a-f0-9]{64}$/.test(b.action_hash) ||
@@ -743,7 +747,9 @@ export function registerAgentRoutes(
           !body ||
           typeof body !== "object" ||
           Array.isArray(body) ||
-          Object.keys(body).sort().join() !== "action_hash,version" ||
+          Object.keys(body)
+            .sort((a, b) => (a < b ? -1 : Number(a > b)))
+            .join() !== "action_hash,version" ||
           typeof body.action_hash !== "string" ||
           !/^[0-9a-f]{64}$/.test(body.action_hash) ||
           !Number.isSafeInteger(body.version) ||

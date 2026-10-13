@@ -57,7 +57,9 @@ export const TENANT_BOOTSTRAP_OWNER_CONTRACTS = Object.freeze({
   }),
 } as const);
 
-const CONTRACT_OWNERS = Object.keys(TENANT_BOOTSTRAP_OWNER_CONTRACTS).sort();
+const CONTRACT_OWNERS = Object.keys(TENANT_BOOTSTRAP_OWNER_CONTRACTS).sort(
+  (a, b) => (a < b ? -1 : Number(a > b)),
+);
 if (
   CONTRACT_OWNERS.length !== SHARDED_MOVE_OWNERS.length ||
   SHARDED_MOVE_OWNERS.some(
@@ -263,7 +265,7 @@ export function requireCompleteBootstrapProofs(
     "placementEpoch",
     "state",
     "observedAt",
-  ].sort();
+  ].sort((a, b) => (a < b ? -1 : Number(a > b)));
   for (const proof of proofs) {
     if (
       !proof ||
@@ -280,7 +282,9 @@ export function requireCompleteBootstrapProofs(
       proof.receiptVersion !== TENANT_OWNERSHIP_BOOTSTRAP_CONTRACT_VERSION ||
       typeof proof.observedAt !== "string" ||
       Number.isNaN(Date.parse(proof.observedAt)) ||
-      Object.keys(proof).sort().join("\0") !== receiptKeys.join("\0")
+      Object.keys(proof)
+        .sort((a, b) => (a < b ? -1 : Number(a > b)))
+        .join("\0") !== receiptKeys.join("\0")
     )
       throw new TenantBootstrapPreflightError(
         "tenant bootstrap owner read-back proof does not match the placement",

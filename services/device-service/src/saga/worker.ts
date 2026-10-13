@@ -64,7 +64,12 @@ async function discoverResultTenants(
       });
     }
   });
-  return { tenants: [...new Set(tenants)].sort().slice(0, limit), complete };
+  return {
+    tenants: [...new Set(tenants)]
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .slice(0, limit),
+    complete,
+  };
 }
 
 // One bounded, round-robin pass: at most MAX_TENANTS_PER_PASS tenants after the

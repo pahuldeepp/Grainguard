@@ -42,7 +42,14 @@ export function contactsRegistryConfig(
       "Schema Registry requires HTTPS, Basic credentials, and a TLS CA file",
     );
   const ca = readFileSync(caFile, "utf8");
-  new X509Certificate(ca);
+  const certificate = new X509Certificate(ca);
+  const now = Date.now();
+  if (
+    !certificate.ca ||
+    Date.parse(certificate.validFrom) > now ||
+    Date.parse(certificate.validTo) <= now
+  )
+    throw new Error("Schema Registry TLS certificate is not a current CA");
   return {
     host,
     auth: { username, password },

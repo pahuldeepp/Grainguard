@@ -114,7 +114,7 @@ export function notificationReadHandler(
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<boolean> => {
-    const url = new URL(req.url ?? "/", "http://notification-service.local");
+    const url = new URL(req.url ?? "/", "https://notification-service.local");
     if (url.pathname !== "/internal/v1/deliveries/lookup") return false;
     if (req.method !== "POST") {
       send(res, 405, { error: "method_not_allowed" });

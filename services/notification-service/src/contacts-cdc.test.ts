@@ -46,6 +46,11 @@ test("Schema Registry uses verified HTTPS and Basic auth in AWS profile", () => 
       password: "secret",
     });
     assert.ok(config.agent);
+    assert.equal(
+      (config.agent as { options?: { minVersion?: string } }).options
+        ?.minVersion,
+      "TLSv1.2",
+    );
     assert.deepEqual(
       contactsRegistryConfig("http://localhost:8081", () => undefined),
       { host: "http://localhost:8081" },
@@ -57,6 +62,8 @@ test("Schema Registry uses verified HTTPS and Basic auth in AWS profile", () => 
         ),
       /requires HTTPS/,
     );
+    writeFileSync(caFile, "not a certificate");
+    assert.throws(() => contactsRegistryConfig("https://registry:8081", env));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

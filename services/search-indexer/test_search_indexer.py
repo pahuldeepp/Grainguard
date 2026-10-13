@@ -53,11 +53,12 @@ class IndexerTests(unittest.TestCase):
             MODULE.Elastic("http://search.example", "reader", "secret", "/ca.pem")
         with self.assertRaisesRegex(ValueError, "invalid search URL"):
             MODULE.Elastic("https://reader:secret@search.example", "reader", "secret", "/ca.pem")
-        context = object()
+        context = SimpleNamespace()
         with patch.object(MODULE.ssl, "create_default_context", return_value=context) as create_context:
             client = MODULE.Elastic("https://search.example", "reader", "secret", "/ca.pem")
         create_context.assert_called_once_with(cafile="/ca.pem")
         self.assertEqual(client.context, context)
+        self.assertEqual(context.minimum_version, MODULE.ssl.TLSVersion.TLSv1_2)
         self.assertTrue(client.authorization.startswith("Basic "))
 
     def test_binding_feed_checkpoint_is_skipped_but_malformed_marker_holds_offset(self):

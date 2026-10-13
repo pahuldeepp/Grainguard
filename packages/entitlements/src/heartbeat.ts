@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { startProbeHealth } from "./probe-health.js";
 import kafkaJs from "kafkajs";
@@ -60,7 +61,7 @@ export async function startEntitlementHeartbeat(options: {
         () => {
           void beat();
         },
-        interval + Math.floor(Math.random() * jitter),
+        interval + (jitter > 0 ? randomInt(jitter) : 0),
       );
   };
   void beat();

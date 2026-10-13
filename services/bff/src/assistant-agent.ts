@@ -31,14 +31,18 @@ export function validateAgentPlan(value: unknown): AgentPlan {
     throw new Error("invalid agent plan");
   const v = value as Record<string, unknown>;
   if (
-    Object.keys(v).sort().join() !== "args,tool" ||
+    Object.keys(v)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join() !== "args,tool" ||
     !v.args ||
     typeof v.args !== "object" ||
     Array.isArray(v.args)
   )
     throw new Error("invalid agent plan");
   const a = v.args as Record<string, unknown>;
-  const keys = Object.keys(a).sort().join();
+  const keys = Object.keys(a)
+    .sort((a, b) => (a < b ? -1 : Number(a > b)))
+    .join();
   let valid = false;
   switch (v.tool) {
     case "search_knowledge":

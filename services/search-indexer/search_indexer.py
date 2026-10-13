@@ -61,6 +61,12 @@ def transient_bulk_error(error: SearchError | urllib.error.URLError | TimeoutErr
     return not isinstance(error, SearchError) or error.status in (429, 500, 502, 503, 504)
 
 
+def verified_tls_context(ca_file: str | None = None) -> ssl.SSLContext:
+    context = ssl.create_default_context(cafile=ca_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 class Elastic:
     def __init__(self, url: str, username: str | None = None, password: str | None = None,
                  ca_file: str | None = None):
@@ -72,7 +78,7 @@ class Elastic:
             raise ValueError("HTTPS search requires username, password and CA file")
         if parsed.scheme == "http" and (username or password or ca_file):
             raise ValueError("search credentials require HTTPS")
-        self.context = ssl.create_default_context(cafile=ca_file) if ca_file else None
+        self.context = verified_tls_context(ca_file) if ca_file else None
         self.authorization = ("Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()) if username else None
 
     def request(self, method: str, path: str, body: Any = None, ndjson: bool = False) -> Any:
@@ -382,7 +388,7 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
     if any((required, protocol, mechanism, user, password, ca_file)):
         if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
             raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
-        ssl.create_default_context(cafile=ca_file)
+        verified_tls_context(ca_file)
         security = {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
                     "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
                     "enable.ssl.certificate.verification": True}

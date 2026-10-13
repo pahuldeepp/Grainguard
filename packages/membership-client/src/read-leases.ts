@@ -126,7 +126,9 @@ export function httpReadLeaseAuthority(options: {
         throw new PlacementError("invalid_read_lease");
       const row = value as Record<string, unknown>;
       if (
-        Object.keys(row).sort().join(",") !== "expiresAt,leaseId,route" ||
+        Object.keys(row)
+          .sort((a, b) => (a < b ? -1 : Number(a > b)))
+          .join(",") !== "expiresAt,leaseId,route" ||
         typeof row.leaseId !== "string" ||
         !UUID.test(row.leaseId) ||
         typeof row.expiresAt !== "string"

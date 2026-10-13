@@ -73,7 +73,9 @@ export class OwnershipController {
     res.setHeader("Cache-Control", "no-store");
     const { tenantId, userId, alertId, etag: version } = query;
     if (
-      Object.keys(query).sort().join(",") !== "alertId,etag,tenantId,userId" ||
+      Object.keys(query)
+        .sort((a, b) => (a < b ? -1 : Number(a > b)))
+        .join(",") !== "alertId,etag,tenantId,userId" ||
       !isUuid(tenantId) ||
       !isUuid(userId) ||
       !isUuid(alertId) ||

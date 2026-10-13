@@ -71,15 +71,18 @@ export function parseOwnerRegistry(
     throw new OwnerDatabaseError("invalid_owner_registry");
   const manifest = value as Record<string, unknown>;
   if (
-    Object.keys(manifest).sort().join(",") !==
-      "database,formatVersion,service,shards" ||
+    Object.keys(manifest)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !== "database,formatVersion,service,shards" ||
     manifest.formatVersion !== 1 ||
     manifest.service !== options.service ||
     manifest.database !== options.database ||
     !manifest.shards ||
     typeof manifest.shards !== "object" ||
     Array.isArray(manifest.shards) ||
-    Object.keys(manifest.shards).sort().join(",") !== "s1,s2,s3,s4"
+    Object.keys(manifest.shards)
+      .sort((a, b) => (a < b ? -1 : Number(a > b)))
+      .join(",") !== "s1,s2,s3,s4"
   )
     throw new OwnerDatabaseError("invalid_owner_registry");
   const endpoints = new Set<string>();
@@ -88,8 +91,9 @@ export function parseOwnerRegistry(
       throw new OwnerDatabaseError("invalid_owner_registry");
     const row = value as Record<string, unknown>;
     if (
-      Object.keys(row).sort().join(",") !==
-        "incarnation,primaryUrl,replicaUrls" ||
+      Object.keys(row)
+        .sort((a, b) => (a < b ? -1 : Number(a > b)))
+        .join(",") !== "incarnation,primaryUrl,replicaUrls" ||
       typeof row.incarnation !== "string" ||
       !UUID.test(row.incarnation) ||
       typeof row.primaryUrl !== "string" ||
