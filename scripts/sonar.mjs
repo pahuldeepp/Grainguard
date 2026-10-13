@@ -2,6 +2,7 @@ import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { ensureAnalysisToken } from "./sonar-token.mjs";
 import { assertMeasuredQualityGate } from "./sonar-gate.mjs";
 import { prepareSonarSnapshot } from "./sonar-snapshot.mjs";
+import { summarizeSonarIssues } from "./sonar-issues.mjs";
 import { runNativeScanner, scannerProfile } from "./sonar-native.mjs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -229,6 +230,32 @@ const measures = await api(
   undefined,
   "GET",
 );
+const firstIssuePage = await api(
+  "issues/search",
+  { componentKeys: "grainguard", p: "1", ps: "500" },
+  undefined,
+  "GET",
+);
+const allIssues = [...(firstIssuePage.issues ?? [])];
+for (
+  let page = 2;
+  allIssues.length < firstIssuePage.total && page <= 50;
+  page++
+) {
+  const next = await api(
+    "issues/search",
+    { componentKeys: "grainguard", p: String(page), ps: "500" },
+    undefined,
+    "GET",
+  );
+  if (next.total !== firstIssuePage.total || next.issues.length === 0)
+    throw new Error("SonarQube issue pages are inconsistent or incomplete");
+  allIssues.push(...next.issues);
+}
+const issueSummary = summarizeSonarIssues({
+  total: firstIssuePage.total,
+  issues: allIssues,
+});
 mkdirSync("coverage", { recursive: true });
 writeFileSync(
   "coverage/sonar-quality-gate.json",
@@ -237,6 +264,10 @@ writeFileSync(
     null,
     2,
   ) + "\n",
+);
+writeFileSync(
+  "coverage/sonar-issue-summary.json",
+  JSON.stringify(issueSummary, null, 2) + "\n",
 );
 if (scanExit !== 0) process.exit(scanExit);
 assertMeasuredQualityGate({

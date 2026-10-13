@@ -306,6 +306,7 @@ jobs:
             coverage/go-common.out
             coverage/go-migrations.out
             coverage/sonar-quality-gate.json
+            coverage/sonar-issue-summary.json
             apps/dashboard/coverage/lcov.info
             services/bff/coverage/lcov.info
             services/read-api/coverage/lcov.info
