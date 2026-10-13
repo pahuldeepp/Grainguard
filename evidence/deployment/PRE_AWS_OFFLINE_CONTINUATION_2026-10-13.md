@@ -141,6 +141,12 @@ shared GreenGuard Compose/database project was not restarted or modified.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
   checks remain unresolved. The latest candidate scan is still red as detailed
   above. No release eligibility or security thresholds were weakened.
+- A local evaluation of the Apache Kafka 4.3.1 multi-architecture image
+  (`sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837`,
+  with amd64 and arm64 manifests) also failed the fixable HIGH/CRITICAL policy:
+  Trivy reported 26 HIGH and 0 CRITICAL findings on both architectures. This
+  upstream version therefore is not a clean security replacement; no runtime
+  pin was changed. The scan used isolated temporary caches which were removed.
 - Current quota evidence says the safe workload minimum exceeds the reported
   8-vCPU quota. No workload or security control was removed to force admission.
 - The trusted initial production owner payload, deployed user tenant
