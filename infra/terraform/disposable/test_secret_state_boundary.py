@@ -134,16 +134,49 @@ class SecretStateBoundaryTests(unittest.TestCase):
         terraform = _terraform_binary()
         if not terraform:
             raise unittest.SkipTest("Terraform CLI not available")
-        result = subprocess.run(
-            [terraform, "providers", "schema", "-json"], cwd=ROOT,
-            check=False, capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode != 0:
-            diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
-            raise AssertionError(
-                f"terraform providers schema failed ({result.returncode}): {diagnostic[:2000]}"
+        provider_mirror = ROOT / ".terraform/providers"
+        if not provider_mirror.exists():
+            raise unittest.SkipTest("Terraform provider cache is not initialized")
+        with tempfile.TemporaryDirectory(prefix="gg-provider-schema-") as temporary:
+            workspace = Path(temporary)
+            for config in ROOT.glob("*.tf"):
+                shutil.copy2(config, workspace / config.name)
+            shutil.copy2(ROOT / ".terraform.lock.hcl", workspace)
+            isolated_state = workspace / "schema-test.tfstate"
+            init = subprocess.run(
+                [
+                    terraform,
+                    "init",
+                    "-input=false",
+                    "-lockfile=readonly",
+                    f"-plugin-dir={provider_mirror}",
+                    f"-backend-config=path={isolated_state}",
+                ],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
-        cls._provider_schema_cache = json.loads(result.stdout)
+            if init.returncode != 0:
+                diagnostic = init.stderr.strip() or init.stdout.strip() or "no diagnostic output"
+                raise AssertionError(
+                    f"isolated Terraform init failed ({init.returncode}): {diagnostic[:2000]}"
+                )
+            result = subprocess.run(
+                [terraform, "providers", "schema", "-json"],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+                raise AssertionError(
+                    f"terraform providers schema failed ({result.returncode}): {diagnostic[:2000]}"
+                )
+            cls._provider_schema_cache = json.loads(result.stdout)
         return cls._provider_schema_cache
 
     def test_secret_resource_addresses_are_derived_from_public_names(self):
