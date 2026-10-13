@@ -38,6 +38,13 @@ shared GreenGuard Compose/database project was not restarted or modified.
   cases reported as skipped remain unproven. The test containers, network,
   volume, generated credentials, and worktree were removed afterward; the
   shared application database was not used.
+- `make bootstrap && make smoke` — passed in a second isolated detached
+  worktree and database project. Real telemetry-ingest and device-service
+  processes reported ready against the test database, both returned 503 for
+  intentionally unreachable databases, and the smoke check verified that
+  runtime database roles are unprivileged and cannot connect to another
+  service database. That worktree, containers, network, volume, and generated
+  local credentials were removed afterward.
 - `terraform fmt -check -recursive infra/terraform` — passed.
 - `terraform init -backend=false -input=false -lockfile=readonly` and
   `terraform validate` passed for `bootstrap-state`, `platform`, and
