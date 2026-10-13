@@ -223,6 +223,33 @@ shared GreenGuard Compose/database project was not restarted or modified.
   authentication is available; this record does not claim the account is
   currently empty.
 
+## Capacity clarification from independent chart audit
+
+- The earlier `minimum-capacity.rb` result of **8.025 vCPU** is only an
+  optimistic one-pod-per-release floor. It is not the enabled deployment's
+  minimum: it omits chart replica counts and many required platform/data
+  services.
+- Counting the current 33 app releases at their chart replica defaults gives
+  48 application replicas / 5.025 vCPU. Adding the configured 100m Envoy
+  request per injected replica and the baseline Kafka, RabbitMQ, and Redis
+  stateful workloads yields at least **11.175 vCPU**. Adding the statically
+  configured Cassandra, ClickHouse, Kafka Connect, OpenSearch, MQTT,
+  PgBouncer, Dex, Schema Registry, and observability requests yields at least
+  **14.025 vCPU**. With the enabled AI runtime and synthetic ML components,
+  the estimated pod request floor is about **17.7 vCPU**. This still excludes
+  EKS node reservations, DaemonSets/add-ons, controllers, ingress, and
+  migration/acceptance Jobs, so it is a lower bound, not a node-fit result.
+- Therefore the confirmed **8-vCPU account quota cannot fit the enabled
+  service set** without reducing enabled workloads or their replica/resource
+  requirements. The earlier 52/64-vCPU preflight numbers are configured
+  maximum plus upgrade-surge allowances, not steady-state minimums. Karpenter
+  has a configured limit of zero by default, so it does not supply extra
+  capacity today.
+- Do not claim that 20–24 vCPU is sufficient until a rendered scheduling
+  simulation includes allocatable node capacity, DaemonSets, controllers,
+  ingress, jobs, and upgrade policy. No workload/security controls were
+  changed to force a fit.
+
 ## Next actionable work
 
 Resolve image provenance/vulnerability findings with verifiable upstream
