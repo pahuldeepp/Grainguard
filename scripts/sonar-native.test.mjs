@@ -36,7 +36,10 @@ async function fixture(t) {
 
 test("native scanner honors a job-private home while preserving the user-home default", () => {
   assert.equal(
-    scannerHome({ SONAR_SCANNER_HOME: "/runner/temp/sonar-home" }, "/home/runner"),
+    scannerHome(
+      { SONAR_SCANNER_HOME: "/runner/temp/sonar-home" },
+      "/home/runner",
+    ),
     "/runner/temp/sonar-home",
   );
   assert.equal(scannerHome({}, "/home/runner"), "/home/runner");
