@@ -28,6 +28,7 @@ import {
   startPlacementAuthority,
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
+import { isInteractiveAuthorizeRequest } from "./oidc-authorize-request.mjs";
 import { operations } from "../services/bff/dist/query-policy.js";
 
 process.loadEnvFile(".env");
@@ -461,7 +462,7 @@ async function aliasSearchIndex() {
 // ---------- Browser helpers ----------
 async function signIn(page, user) {
   const [authorize] = await Promise.all([
-    page.waitForRequest((r) => r.url().startsWith(`${ISSUER}/auth?`)),
+    page.waitForRequest((r) => isInteractiveAuthorizeRequest(r.url(), ISSUER)),
     page.getByRole("button", { name: "Sign in" }).click(),
   ]);
   const url = new URL(authorize.url());

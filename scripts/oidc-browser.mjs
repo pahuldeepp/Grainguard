@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright";
+import { isInteractiveAuthorizeRequest } from "./oidc-authorize-request.mjs";
 
 process.env.OIDC_BFF_URL = "http://127.0.0.1:4000";
 const live = await import("./oidc-live.mjs");
@@ -51,10 +52,8 @@ async function signIn(page, user) {
   await page.goto(DASHBOARD);
   // Silent session restore also calls /auth (prompt=none) before the user clicks;
   // only the interactive redirect carries the nonce this test checks.
-  const authorizeRequest = page.waitForRequest(
-    (r) =>
-      r.url().startsWith(`${ISSUER}/auth?`) &&
-      !new URL(r.url()).searchParams.has("prompt"),
+  const authorizeRequest = page.waitForRequest((r) =>
+    isInteractiveAuthorizeRequest(r.url(), ISSUER),
   );
   await page.getByRole("button", { name: "Sign in" }).click();
   const authorize = (await authorizeRequest).url();

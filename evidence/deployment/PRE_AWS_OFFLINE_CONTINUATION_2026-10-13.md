@@ -130,12 +130,32 @@ shared GreenGuard Compose/database project was not restarted or modified.
   wrapper captures sanitized state/logs on failure. A full current-commit
   browser and remote CI rerun is still unproven. No new GitHub run was
   dispatched.
+- The old Stage 08 browser failure showed the interactive-login assertion can
+  race the dashboard's silent OIDC session-restore request (`prompt=none`) to
+  the same Dex `/auth` endpoint. `scripts/browser-e2e.mjs` previously selected
+  the first `/auth` request, while the standalone OIDC browser test already
+  intended to select the interactive request. Both now use the shared
+  `scripts/oidc-authorize-request.mjs` matcher, which checks the exact issuer
+  origin/path and excludes only silent `prompt=none` authorization. Its
+  regression suite passed 3/3 cases, including trailing-slash issuer handling
+  and wrong-authority rejection; Prettier check passed.
+- After that browser-request matcher change, the isolated
+  `node scripts/stage12-compose-gate.mjs run` completed with exit code 0 on the
+  current working tree. This reran the complete `make verify` and `make smoke`
+  sequence against a unique scratch Compose/PostgreSQL environment. All
+  service/database tests, builds, formatting/lint/typecheck, Go vet/race
+  suites, and database readiness/privilege/cross-database smoke assertions
+  passed. The isolated gate removed its containers, network, volume, generated
+  local credentials, and scratch workspace. This does not substitute for the
+  browser E2E itself or remote CI; those remain unproven.
 
 ## Still not proven / deployment blockers
 
 - Full current-commit CI has not run. The latest available remote run is on an
   older SHA and is summarized above. It does not establish that current-branch
-  browser E2E or Sonar passes.
+  browser E2E or Sonar passes. The authorization-request selection race has a
+  focused regression test and the full local verify/smoke gate is green, but
+  the opt-in real browser E2E still needs a fresh run.
 - `make verify` ran locally and passed. A full remote CI run for the current
   branch still has not run.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
