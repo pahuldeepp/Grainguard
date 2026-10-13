@@ -250,6 +250,22 @@ shared GreenGuard Compose/database project was not restarted or modified.
   ingress, jobs, and upgrade policy. No workload/security controls were
   changed to force a fit.
 
+## Read-only AWS teardown inventory refresh — 2026-10-13
+
+- `aws sts get-caller-identity` confirmed the active session is in account
+  `580360261589`. No infrastructure mutation, Terraform plan, or apply was run.
+- `check-teardown.sh us-east-2 disposable greenguard-sandbox-cell-1
+  580360261589` reported no owned resource; it initially failed closed because
+  the post-destroy PV inventory file did not exist. A direct
+  `ec2 describe-volumes` query returned **0 EBS volumes** in `us-east-2`.
+- Re-running the same scoped inventory with an empty temporary PV receipt
+  backed by that zero-volume query passed: **no GreenGuard resources found for
+  the disposable cell in us-east-2**. The temporary receipt was removed.
+- This is a scoped, read-only check for the named cell/region plus the global
+  edge resources covered by the script. It is not an account-wide inventory of
+  every region/service, and it is not proof of billing totals or that a future
+  `terraform destroy` has been tested.
+
 ## Next actionable work
 
 Resolve image provenance/vulnerability findings with verifiable upstream
