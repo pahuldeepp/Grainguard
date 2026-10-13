@@ -19,7 +19,8 @@ export const controlConnectors = ["control"];
 export const billingConnectors = ["billing"];
 export const contactConnectors = ["notification-contacts"];
 export const broker = "kafka:29092";
-export const connectURL = "http://127.0.0.1:58083";
+export const connectURL =
+  process.env.KAFKA_CONNECT_URL ?? "http://127.0.0.1:58083";
 export const rawTopic = (database) => `greenguard.raw.${database}.outbox`;
 export const connectorName = (database) =>
   database === "projection-notifications" ||

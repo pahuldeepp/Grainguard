@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
   mosquitto:
     image: eclipse-mosquitto:2.0.22
-    ports: ["127.0.0.1:51883:1883"]
+    ports: ["127.0.0.1:${MQTT_HOST_PORT:-51883}:1883"]
     volumes:
       - ../mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
@@ -28,14 +28,14 @@ services:
   kafka:
     # apache/kafka:3.9.1; index digest, pulled and verified locally.
     image: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
-    ports: ["127.0.0.1:59092:9092"]
+    ports: ["127.0.0.1:${KAFKA_HOST_PORT:-59092}:9092"]
     environment:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_LISTENERS: INTERNAL://:29092,HOST://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://127.0.0.1:59092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://127.0.0.1:${KAFKA_HOST_PORT:-59092}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
@@ -65,7 +65,7 @@ services:
     image: confluentinc/cp-schema-registry@sha256:c02aa3d6409caea9ee707c7dfc98990460f7ee5e9c5535942a3279d8264fe0d1
     depends_on:
       kafka: { condition: service_healthy }
-    ports: ["127.0.0.1:58081:8081"]
+    ports: ["127.0.0.1:${SCHEMA_REGISTRY_HOST_PORT:-58081}:8081"]
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
@@ -87,7 +87,7 @@ services:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }
       schema-registry: { condition: service_healthy }
-    ports: ["127.0.0.1:58083:8083"]
+    ports: ["127.0.0.1:${KAFKA_CONNECT_HOST_PORT:-58083}:8083"]
     environment:
       JMXPORT: 9404
       # RMI advertises this hostname in the stub returned to the exporter.

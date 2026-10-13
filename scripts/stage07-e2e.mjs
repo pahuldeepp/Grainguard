@@ -28,11 +28,13 @@ import {
   createStage07ProcessMonitor,
   Stage07ProcessFailure,
 } from "./stage07-process-health.mjs";
+import { stage07Endpoints } from "./stage07-endpoints.mjs";
 
 process.loadEnvFile(".env");
 const { Kafka, logLevel } = kafkaJs;
-const broker = "127.0.0.1:59092";
-const mqttBroker = "tcp://127.0.0.1:51883";
+const { kafkaBrokers, mqttBrokerUrl: mqttBroker } = stage07Endpoints();
+const broker = kafkaBrokers.join(",");
+const connectURL = process.env.KAFKA_CONNECT_URL ?? "http://127.0.0.1:58083";
 const tmp = mkdtempSync(path.join(tmpdir(), "greenguard-stage07-"));
 const children = [];
 const logs = new Map();
@@ -104,7 +106,7 @@ const idp = createServer((_req, res) =>
 let idpStarted = false;
 const kafka = new Kafka({
   clientId: `stage07-e2e-${id}`,
-  brokers: [broker],
+  brokers: kafkaBrokers,
   logLevel: logLevel.ERROR,
 });
 let admin;
@@ -367,7 +369,7 @@ async function status(item, sagaID) {
 }
 async function main() {
   const connector = await fetch(
-    "http://127.0.0.1:58083/connectors/inventory-outbox/status",
+    `${connectURL}/connectors/inventory-outbox/status`,
     { signal: AbortSignal.timeout(5000) },
   ).then((r) => r.json());
   assert.equal(

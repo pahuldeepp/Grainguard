@@ -52,17 +52,42 @@ shared GreenGuard Compose/database project was not restarted or modified.
 - RabbitMQ started healthy in a uniquely named local Compose project with host
   ports disabled. `rabbitmq-diagnostics -q check_port_connectivity` passed.
   Only that temporary project and its volume were removed afterward.
+- `make stage07-e2e` — passed in an isolated detached worktree at `ed8eb79`,
+  with a new PostgreSQL database/volume, unique Compose project, Kafka,
+  Debezium Connect, Schema Registry, and MQTT host ports. It passed the
+  two-tenant device provisioning and trace checks, duplicate provisioning
+  race, SIGKILL/restart at each saga transition, hardware outage/recovery,
+  timeout compensation, operator redrive and late-result reconciliation,
+  lease takeover with a higher fencing token, and an 8-second Kafka pause with
+  successful saga completion. Every duplicate check observed exactly one
+  command/result per step and one `device.registered` event. All six CDC
+  connectors and the notification Avro schema checks were healthy. The test
+  project, containers, network, database/Kafka/MQTT volumes, and generated
+  credentials were removed after the run; shared development containers and
+  data were not touched.
+- The first isolated Stage 07 attempt exposed host URLs hard-coded to the
+  shared Schema Registry and Kafka Connect ports. Local endpoint configuration
+  is now loopback-validated and host ports are configurable in the Kafka
+  Compose overlay; the full Stage 07 run above exercised non-default ports.
+- `make bootstrap && make verify` — passed on `ed8eb79` plus the Stage 07
+  endpoint changes in a second isolated worktree with a distinct Compose
+  project and fresh PostgreSQL volume. This reran migrations, database-backed
+  JavaScript/Python suites, TypeScript workspace typechecks, format/lint,
+  telemetry sink contract tests, Go vet/race tests, and the production build.
+  Explicit opt-in Kafka integration tests remained skipped by the gate; the
+  Stage 07 Kafka/CDC/MQTT acceptance above supplies its separate live local
+  evidence. The temporary project, volume, credentials, and worktree were
+  removed afterward.
 
 ## Still not proven / deployment blockers
 
 - Full current-commit CI has not run. The available remote CI evidence belongs
   to an older SHA. It reports placement-related E2E failures and a RabbitMQ
   startup exit, but does not preserve enough RabbitMQ diagnostics to identify
-  its CI-only cause. Local RabbitMQ startup passed; this is not a substitute
-  for that CI gate.
-- `make verify` was not rerun in this continuation because its database-backed
-  migrations/tests use the shared local data environment. Previous passing
-  `make verify` evidence predates the latest placement-fixture change.
+  its CI-only cause. Local RabbitMQ startup and Stage 07 acceptance passed;
+  these are not substitutes for that CI gate.
+- `make verify` ran locally and passed. A full remote CI run for the current
+  branch still has not run.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
   checks remain unresolved. No release eligibility or security thresholds
   were weakened.

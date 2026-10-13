@@ -55,7 +55,7 @@ verify: check-plan image-inventory db-migrate
 	$(MAKE) telemetry-sinks-test
 	node --test scripts/placement-fixture.test.mjs
 	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
-	node --test scripts/ci-compose-project.test.mjs scripts/rabbitmq-start.test.mjs scripts/stage07-process-health.test.mjs
+	node --test scripts/ci-compose-project.test.mjs scripts/rabbitmq-start.test.mjs scripts/stage07-process-health.test.mjs scripts/stage07-endpoints.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...
