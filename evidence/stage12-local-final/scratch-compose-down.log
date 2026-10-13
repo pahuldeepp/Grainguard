@@ -1,0 +1,13 @@
+
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Stopping 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Stopped 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Removing 
+ Container gg-stage12-audit-4f66e1-pgbouncer-1 Removed 
+ Container gg-stage12-audit-4f66e1-postgres-1 Stopping 
+ Container gg-stage12-audit-4f66e1-postgres-1 Stopped 
+ Container gg-stage12-audit-4f66e1-postgres-1 Removing 
+ Container gg-stage12-audit-4f66e1-postgres-1 Removed 
+ Network gg-stage12-audit-4f66e1_default Removing 
+ Volume gg-stage12-audit-4f66e1_postgres-data Removing 
+ Volume gg-stage12-audit-4f66e1_postgres-data Removed 
+ Network gg-stage12-audit-4f66e1_default Removed 

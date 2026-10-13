@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 var (
@@ -22,38 +23,58 @@ var (
 )
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return err
+	}
 	url := getenv("TELEMETRY_DATABASE_URL")
-	if url == "" {
+	if url == "" && getenv("SHARD_REGISTRY_FILE") == "" {
 		return errors.New("TELEMETRY_DATABASE_URL is required")
 	}
 	cfg, err := loadIngestConfig(getenv)
 	if err != nil {
 		return err
 	}
-	config, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return errors.New("invalid database configuration")
-	}
-	config.MaxConns = 5
-	config.ConnConfig.ConnectTimeout = time.Second
-	// PgBouncer transaction pooling cannot keep named prepared statements.
-	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
-	pool, err := newPool(context.Background(), config)
-	if err != nil {
-		return errors.New("database pool initialization failed")
-	}
-	defer pool.Close()
-	app, shutdownTracing, err := newApp(pool, cfg)
-	if err != nil {
-		return err
+	var db TxStarter
+	var app App
+	var shutdownTracing func()
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(getenv, "telemetry-ingest", "greenguard_telemetry", "telemetry_app")
+		if err != nil {
+			return err
+		}
+		defer shards.Close()
+		db = shards
+		app, shutdownTracing, err = buildAppWithDB(shards, shards.Ping, nil, cfg)
+		if err != nil {
+			return err
+		}
+	} else {
+		config, err := pgxpool.ParseConfig(url)
+		if err != nil {
+			return errors.New("invalid database configuration")
+		}
+		config.MaxConns = 5
+		config.ConnConfig.ConnectTimeout = time.Second
+		// PgBouncer transaction pooling cannot keep named prepared statements.
+		config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+		pool, err := newPool(context.Background(), config)
+		if err != nil {
+			return errors.New("database pool initialization failed")
+		}
+		defer pool.Close()
+		app, shutdownTracing, err = newApp(pool, cfg)
+		if err != nil {
+			return err
+		}
+		db = pool
 	}
 	defer shutdownTracing()
-	worker, err := newBindingRuntime(ctx, pool, cfg, getenv, &app)
+	worker, err := newBindingRuntime(ctx, db, cfg, getenv, &app)
 	if err != nil {
 		return err
 	}
 	defer worker.close()
-	sagaWorker, err := startSagaBindingRuntime(ctx, pool, getenv)
+	sagaWorker, err := startSagaBindingRuntime(ctx, db, getenv)
 	if err != nil {
 		return err
 	}
@@ -89,7 +110,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 // buildApp assembles the ingest endpoint when authentication is configured; otherwise the
 // service serves only its health probes.
 func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
-	app := App{Ping: pool.Ping}
+	return buildAppWithDB(pool, pool.Ping, pool, cfg)
+}
+
+func buildAppWithDB(db TxStarter, ping func(context.Context) error, pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
+	app := App{Ping: ping, DBPool: pool}
 	shutdown := func() {
 		// Nothing to release: tracing is off.
 	}
@@ -115,8 +140,9 @@ func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
 		return App{}, nil, err
 	}
 	app.Verifier = verifier
+	app.PreAuth = NewPreAuthGuard(cfg.TrustedProxyCIDRs...)
 	if cfg.APIKeyEndpoint != "" {
-		app.APIKeys, err = NewAPIKeyVerifier(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken)
+		app.APIKeys, err = NewAPIKeyVerifierWithMesh(cfg.APIKeyEndpoint, cfg.APIKeyLookupToken, cfg.ControlMeshMTLS)
 		if err != nil {
 			shutdown()
 			return App{}, nil, err
@@ -124,14 +150,23 @@ func buildApp(pool *pgxpool.Pool, cfg ingestConfig) (App, func(), error) {
 	}
 	app.Metrics = NewMetrics()
 	app.Limiter = NewTokenBuckets(cfg.Limits, nil)
-	app.Ingestor = NewIngestor(pool, cfg.Policy, nil)
-	app.Recorder = NewRejectionRecorder(pool, app.Metrics, nil)
+	app.Ingestor = NewIngestor(db, cfg.Policy, nil)
+	app.Ingestor.v2Enabled = cfg.TelemetryV2Enabled
+	app.Ingestor.sensors = resolveLocalSensor
+	app.Recorder = NewRejectionRecorder(db, app.Metrics, nil)
 	return app, shutdown, nil
 }
 
 var exit = os.Exit
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "probe" {
+		if err := runWorkerProbe(os.Args[2], os.Args[3]); err != nil {
+			slog.Error("probe failed", "error", err)
+			exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var err error

@@ -6,28 +6,64 @@ import {
 } from "oidc-client-ts";
 import { dashboardQueryClient } from "./DashboardProviders";
 import { dashboardStore, uiActions } from "./dashboard-state";
+import { deployedOidcConfig } from "./public-config";
 
 export type AuthSession = { user: User; sessionId: string };
 
 export function oidcConfiguration() {
-  const authority = import.meta.env.VITE_OIDC_AUTHORITY?.trim();
-  const clientId = import.meta.env.VITE_OIDC_CLIENT_ID?.trim();
-  const audience = import.meta.env.VITE_OIDC_AUDIENCE?.trim();
-  if (!authority || !clientId || !audience) return null;
+  const deployed = deployedOidcConfig();
+  const authority =
+    deployed?.authority ?? import.meta.env.VITE_OIDC_AUTHORITY?.trim();
+  const clientId =
+    deployed?.clientId ?? import.meta.env.VITE_OIDC_CLIENT_ID?.trim();
+  const audience = deployed
+    ? deployed.audience
+    : import.meta.env.VITE_OIDC_AUDIENCE?.trim();
+  const tokenMode =
+    deployed?.tokenMode ??
+    import.meta.env.VITE_OIDC_TOKEN_MODE?.trim() ??
+    "audience";
+  const resource = deployed
+    ? deployed.resource
+    : import.meta.env.VITE_OIDC_RESOURCE?.trim();
+  if (
+    !authority ||
+    !clientId ||
+    (tokenMode !== "audience" && tokenMode !== "cognito-access") ||
+    (tokenMode === "audience" && !audience) ||
+    (tokenMode === "cognito-access" && audience)
+  )
+    return null;
   const origin = window.location.origin;
+  let extraQueryParams: Record<string, string>;
+  if (tokenMode === "cognito-access") {
+    extraQueryParams = resource ? { resource } : {};
+  } else {
+    extraQueryParams = { audience: audience! };
+  }
   return {
     authority,
     client_id: clientId,
     redirect_uri: `${origin}/auth/callback`,
+    silent_redirect_uri: `${origin}/auth/silent-callback`,
     post_logout_redirect_uri: origin,
     response_type: "code",
-    scope: "openid profile email offline_access",
-    extraQueryParams: { audience },
+    // Cognito issues refresh tokens for the code flow without an
+    // offline_access scope; Dex uses that scope for offline sessions.
+    scope:
+      tokenMode === "cognito-access"
+        ? "openid profile email"
+        : "openid profile email offline_access",
+    extraQueryParams,
     // ADR-0014: tokens live in memory only (no Web Storage), so injected script
     // cannot read them from storage after a reload; a reload asks for sign-in again.
     // PKCE verifier/state/nonce stay in sessionStorage for the redirect round trip.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
     stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
+    // The dashboard uses only signed ID-token claims (issuer/sub/session).
+    // Avoid a separate UserInfo fetch whose provider origin might be omitted
+    // from the constrained disposable CloudFront CSP.
+    loadUserInfo: false,
     automaticSilentRenew: false,
   } as const;
 }

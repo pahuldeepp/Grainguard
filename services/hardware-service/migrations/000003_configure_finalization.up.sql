@@ -17,11 +17,15 @@ CREATE INDEX hardware_configure_dispatch ON hardware_command_receipts
 
 -- Repair receipts orphaned before this fix: pending configure receipts whose
 -- asset is no longer reserved by the same saga.
+-- FORCE RLS applies to the migration role, so grant the scan only around this
+-- one-time repair statement and remove it immediately afterward.
+CREATE POLICY hardware_migrator_scan ON hardware_assets TO hardware_migrator USING (true);
 UPDATE hardware_command_receipts r SET outcome='cancelled'
 WHERE r.step='asset.configure' AND r.outcome='pending' AND NOT EXISTS (
   SELECT 1 FROM hardware_assets a
   WHERE a.tenant_id=r.tenant_id AND a.asset_id::text=r.request_payload->'payload'->>'asset_id'
     AND a.owner_saga_id=r.saga_id AND a.state='reserved');
+DROP POLICY hardware_migrator_scan ON hardware_assets;
 
 DROP FUNCTION hardware_pending_configuration_ids();
 -- ID-only selector: returns tenant and command identifiers, never payloads.

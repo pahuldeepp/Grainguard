@@ -133,7 +133,8 @@ export class CredentialsController {
       tenantId,
       keyId,
       commandFrom(req),
-      { overlapHours: input.overlapHours, environment: this.env },
+      input.overlapHours,
+      this.env,
     );
   }
 }
@@ -196,13 +197,15 @@ export class CredentialLookupController {
         input.requiredScope,
       ]);
     } catch (error) {
-      if (error instanceof ServiceAuthError) {
-        if (error.code === "insufficient_scope")
-          throw new AuthError(error.status, "insufficient_role");
-        if (error.code === "auth_unavailable")
-          throw new AuthError(error.status, "auth_unavailable");
-        throw new AuthError(error.status, "invalid_token");
-      }
+      if (error instanceof ServiceAuthError)
+        throw new AuthError(
+          error.status,
+          error.code === "insufficient_scope"
+            ? "insufficient_role"
+            : error.code === "auth_unavailable"
+              ? "auth_unavailable"
+              : "invalid_token",
+        );
       throw new AuthError(503, "auth_unavailable");
     }
   }

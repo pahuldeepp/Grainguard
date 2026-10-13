@@ -84,26 +84,17 @@ async function bounded<T>(
   }
 }
 
-const WHITESPACE = /\s/;
-const SMS = /^\+[1-9]\d{7,14}$/;
+const EMAIL = /^[^\s@<>;,"]+@[^\s@<>;,"]+\.[^\s@<>;,"]+$/;
+const SMS = /^\+[1-9][0-9]{7,14}$/;
 function validEmail(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 320) return false;
-  const at = value.indexOf("@");
-  if (at < 1 || at !== value.lastIndexOf("@") || at >= value.length - 1)
-    return false;
-  const dot = value.indexOf(".", at + 1);
-  if (dot <= at + 1 || dot === value.length - 1) return false;
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0;
-    if (
-      WHITESPACE.test(character) ||
-      code <= 31 ||
-      code === 127 ||
-      '<>;,"'.includes(character)
-    )
-      return false;
-  }
-  return true;
+  return (
+    typeof value === "string" &&
+    value.length <= 320 &&
+    [...value].every(
+      (char) => char.charCodeAt(0) > 31 && char.charCodeAt(0) !== 127,
+    ) &&
+    EMAIL.test(value)
+  );
 }
 function validSms(value: unknown): value is string {
   return typeof value === "string" && SMS.test(value);
@@ -115,7 +106,7 @@ function contactsOf(value: unknown): NotificationContacts {
     !(contacts.email === null || validEmail(contacts.email)) ||
     !(contacts.sms === null || validSms(contacts.sms)) ||
     typeof contacts.version !== "string" ||
-    !/^\d{1,20}$/.test(contacts.version)
+    !/^[0-9]{1,20}$/.test(contacts.version)
   )
     throw new ContactLookupError();
   return {
@@ -190,54 +181,30 @@ export function plainTextTemplate(task: Task): {
   subject: string;
   body: string;
 } {
-  if (!isValidTemplateTask(task))
+  if (
+    !task ||
+    ![
+      task.intent_id,
+      task.tenant_id,
+      task.alert_id,
+      task.episode_id,
+      task.correlation_id,
+    ].every(isUuid) ||
+    !["email", "sms"].includes(task.channel) ||
+    typeof task.severity !== "string" ||
+    !/^[a-z][a-z0-9_.-]{0,63}$/.test(task.severity) ||
+    typeof task.transition !== "string" ||
+    !/^[a-z][a-z0-9_.-]{0,63}$/.test(task.transition) ||
+    !Number.isSafeInteger(task.transition_version) ||
+    task.transition_version < 1 ||
+    !Number.isSafeInteger(task.delivery_generation) ||
+    task.delivery_generation < 0
+  )
     throw new Error("invalid notification template fields");
   return {
     subject: `GreenGuard ${task.severity} alert`,
     body: `GreenGuard ${task.severity} alert\nAlert: ${task.alert_id}\nTransition: ${task.transition}\nVersion: ${task.transition_version}\nOpen your GreenGuard dashboard to review this alert.`,
   };
-}
-
-function isValidTemplateTask(task: Task): boolean {
-  if (!task || typeof task !== "object") return false;
-  const identifiers = [
-    task.intent_id,
-    task.tenant_id,
-    task.alert_id,
-    task.episode_id,
-    task.correlation_id,
-  ];
-  return (
-    identifiers.every(isUuid) &&
-    (task.channel === "email" || task.channel === "sms") &&
-    isSafeLabel(task.severity) &&
-    isSafeLabel(task.transition) &&
-    Number.isSafeInteger(task.transition_version) &&
-    task.transition_version >= 1 &&
-    Number.isSafeInteger(task.delivery_generation) &&
-    task.delivery_generation >= 0
-  );
-}
-
-function isSafeLabel(value: unknown): value is string {
-  return typeof value === "string" && /^[a-z][a-z\d_.-]{0,63}$/.test(value);
-}
-
-function templateForRequest(
-  request: SendRequest,
-  channel: "email" | "sms",
-): ReturnType<typeof plainTextTemplate> | undefined {
-  try {
-    if (
-      request.idempotencyKey !== request.task.intent_id ||
-      request.task.channel !== channel ||
-      request.task.severity === "critical"
-    )
-      return undefined;
-    return plainTextTemplate(request.task);
-  } catch {
-    return undefined;
-  }
 }
 
 function httpNonAcceptance(
@@ -246,9 +213,7 @@ function httpNonAcceptance(
 ): SendResult | undefined {
   if (status === 429)
     return { kind: "transient", reason: `${provider} throttled` };
-  if (status === 401 || status === 403)
-    return { kind: "transient", reason: `${provider} credentials rejected` };
-  if ([400, 404, 405, 413, 415, 422].includes(status))
+  if ([400, 401, 403, 404, 405, 413, 415, 422].includes(status))
     return { kind: "rejected", reason: `${provider} request rejected` };
   // 408/5xx/redirects/unexpected success may follow acceptance. Never infer failure.
   return undefined;
@@ -269,15 +234,51 @@ class LiveProviderAdapter implements ProviderAdapter {
   ) {}
 
   async send(request: SendRequest, signal: AbortSignal): Promise<SendResult> {
-    const template = templateForRequest(request, this.channel);
-    if (!template)
+    let template: ReturnType<typeof plainTextTemplate>;
+    try {
+      template = plainTextTemplate(request.task);
+      if (
+        request.idempotencyKey !== request.task.intent_id ||
+        request.task.channel !== this.channel ||
+        request.task.severity === "critical"
+      )
+        throw new Error("notification selector mismatch");
+    } catch {
       return { kind: "rejected", reason: "invalid notification task" };
+    }
     let providerStarted = false;
     try {
-      return await bounded(this.config.timeoutMs, signal, (providerSignal) =>
-        this.resolveAndDispatch(request, template, providerSignal, () => {
-          providerStarted = true;
-        }),
+      return await bounded(
+        this.config.timeoutMs,
+        signal,
+        async (providerSignal) => {
+          // Resolve before the worker's overall deadline, so a lookup outage is
+          // known-not-sent and remains retryable rather than entering reconciliation.
+          const contacts = await bounded(
+            Math.max(1, Math.floor(this.config.timeoutMs / 2)),
+            providerSignal,
+            async () =>
+              contactsOf(
+                await this.deps.resolver.lookup(request.task.tenant_id),
+              ),
+          );
+          providerSignal.throwIfAborted();
+          const recipient = contacts[this.channel];
+          if (recipient === null)
+            return {
+              kind: "rejected",
+              reason: `trusted ${this.channel} contact missing`,
+            };
+          return this.dispatch(
+            request,
+            recipient,
+            template,
+            providerSignal,
+            () => {
+              providerStarted = true;
+            },
+          );
+        },
       );
     } catch {
       if (!providerStarted)
@@ -297,36 +298,6 @@ class LiveProviderAdapter implements ProviderAdapter {
     };
   }
 
-  private async resolveAndDispatch(
-    request: SendRequest,
-    template: ReturnType<typeof plainTextTemplate>,
-    signal: AbortSignal,
-    onRequestStarted: () => void,
-  ): Promise<SendResult> {
-    // Resolve before the worker's overall deadline, so a lookup outage is
-    // known-not-sent and remains retryable rather than entering reconciliation.
-    const contacts = await bounded(
-      Math.max(1, Math.floor(this.config.timeoutMs / 2)),
-      signal,
-      async () =>
-        contactsOf(await this.deps.resolver.lookup(request.task.tenant_id)),
-    );
-    signal.throwIfAborted();
-    const recipient = contacts[this.channel];
-    if (recipient === null)
-      return {
-        kind: "rejected",
-        reason: `trusted ${this.channel} contact missing`,
-      };
-    return this.dispatch(
-      request,
-      recipient,
-      template,
-      signal,
-      onRequestStarted,
-    );
-  }
-
   private async dispatch(
     request: SendRequest,
     recipient: string,
@@ -334,19 +305,51 @@ class LiveProviderAdapter implements ProviderAdapter {
     signal: AbortSignal,
     onRequestStarted: () => void,
   ): Promise<SendResult> {
-    if (this.provider === "sendgrid")
-      return this.dispatchSendgrid(
-        request,
-        recipient,
-        template,
-        signal,
-        onRequestStarted,
+    if (this.provider === "sendgrid") {
+      const settings = this.config.sendgrid;
+      if (!settings?.apiKey || !validEmail(settings.fromEmail))
+        return {
+          kind: "transient",
+          reason: "sendgrid provider not configured",
+        };
+      onRequestStarted();
+      const response = await this.deps.fetch(
+        "https://api.sendgrid.com/v3/mail/send",
+        {
+          method: "POST",
+          redirect: "error",
+          signal,
+          headers: {
+            authorization: `Bearer ${settings.apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            personalizations: [{ to: [{ email: recipient }] }],
+            from: { email: settings.fromEmail },
+            subject: template.subject,
+            content: [{ type: "text/plain", value: template.body }],
+            custom_args: { intent_id: request.idempotencyKey },
+          }),
+        },
       );
+      if (response.status === 202) {
+        const ref = response.headers.get("x-message-id");
+        // 202 confirms acceptance even if the optional tracking header is absent.
+        return {
+          kind: "sent",
+          providerRef: safeReference(ref)
+            ? ref
+            : `sendgrid-accepted:${request.task.intent_id}`,
+        };
+      }
+      const known = httpNonAcceptance(response.status, this.provider);
+      if (known) return known;
+      throw new UnknownProviderOutcomeError(this.provider);
+    }
     const settings = this.config.twilio;
     if (
       !settings ||
-      !settings.accountSid.startsWith("AC") ||
-      !/^[\da-f]{32}$/i.test(settings.accountSid.slice(2)) ||
+      !/^AC[0-9a-fA-F]{32}$/.test(settings.accountSid) ||
       !settings.authToken ||
       !validSms(settings.fromNumber)
     )
@@ -354,9 +357,6 @@ class LiveProviderAdapter implements ProviderAdapter {
     // Twilio's Message create API has no arbitrary intent metadata or native dedupe key.
     // The ledger retains the stable intent ID; no unsupported API field is invented.
     onRequestStarted();
-    const credentials = Buffer.from(
-      `${settings.accountSid}:${settings.authToken}`,
-    ).toString("base64");
     const response = await this.deps.fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${settings.accountSid}/Messages.json`,
       {
@@ -364,7 +364,7 @@ class LiveProviderAdapter implements ProviderAdapter {
         redirect: "error",
         signal,
         headers: {
-          authorization: `Basic ${credentials}`,
+          authorization: `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString("base64")}`,
           "content-type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
@@ -385,8 +385,7 @@ class LiveProviderAdapter implements ProviderAdapter {
     if (
       !result ||
       typeof result.sid !== "string" ||
-      !result.sid.startsWith("SM") ||
-      !/^[\da-f]{32}$/i.test(result.sid.slice(2)) ||
+      !/^SM[0-9a-fA-F]{32}$/.test(result.sid) ||
       typeof result.status !== "string"
     )
       throw new UnknownProviderOutcomeError(this.provider);
@@ -399,54 +398,6 @@ class LiveProviderAdapter implements ProviderAdapter {
     )
       throw new UnknownProviderOutcomeError(this.provider);
     return { kind: "sent", providerRef: result.sid };
-  }
-
-  private async dispatchSendgrid(
-    request: SendRequest,
-    recipient: string,
-    template: { subject: string; body: string },
-    signal: AbortSignal,
-    onRequestStarted: () => void,
-  ): Promise<SendResult> {
-    const settings = this.config.sendgrid;
-    if (!settings?.apiKey || !validEmail(settings.fromEmail))
-      return {
-        kind: "transient",
-        reason: "sendgrid provider not configured",
-      };
-    onRequestStarted();
-    const response = await this.deps.fetch(
-      "https://api.sendgrid.com/v3/mail/send",
-      {
-        method: "POST",
-        redirect: "error",
-        signal,
-        headers: {
-          authorization: `Bearer ${settings.apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email: recipient }] }],
-          from: { email: settings.fromEmail },
-          subject: template.subject,
-          content: [{ type: "text/plain", value: template.body }],
-          custom_args: { intent_id: request.idempotencyKey },
-        }),
-      },
-    );
-    if (response.status === 202) {
-      const ref = response.headers.get("x-message-id");
-      // 202 confirms acceptance even if the optional tracking header is absent.
-      return {
-        kind: "sent",
-        providerRef: safeReference(ref)
-          ? ref
-          : `sendgrid-accepted:${request.task.intent_id}`,
-      };
-    }
-    const known = httpNonAcceptance(response.status, this.provider);
-    if (known) return known;
-    throw new UnknownProviderOutcomeError(this.provider);
   }
 }
 

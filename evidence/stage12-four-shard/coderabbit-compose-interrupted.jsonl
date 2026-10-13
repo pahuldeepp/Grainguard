@@ -1,0 +1,9 @@
+{"type":"review_context","reviewType":"uncommitted","currentBranch":"codex/greenguard-domain-product","baseBranch":"main","workingDirectory":"/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/infra/compose"}
+{"type":"status","phase":"connecting","status":"connecting_to_review_service"}
+{"type":"status","phase":"analyzing","status":"setting_up","message":"pahuldeepp/Grainguard is not connected to a CodeRabbit organization you can access, so this review will use the free CLI allowance.\n\nIf you expected an org plan here, check your signed-in account with coderabbit auth status, or install CodeRabbit for pahuldeepp/Grainguard at https://app.coderabbit.ai"}
+{"type":"status","phase":"setup","status":"setting_up"}
+{"type":"status","phase":"analyzing","status":"summarizing"}
+{"type":"status","phase":"analyzing","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"error","errorType":"connection","message":"Connection failed: WebSocket subscription completed unexpectedly","recoverable":true,"details":{}}
+Error: WebSocket subscription completed unexpectedly

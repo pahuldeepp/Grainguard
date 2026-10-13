@@ -1,0 +1,51 @@
+# Local cost and resource governance (Stage 12.14)
+
+This runbook and `scripts/resource-governance-check.rb` provide an offline review gate. They do not establish cloud cost, a deployed budget, alert delivery, node consolidation, or a production billing limit. The proposed caps in `infra/governance/local-resource-policy.json` are configurable review inputs, not approved production capacity. No cloud prices are supplied.
+
+## Run the local gate
+
+Requires existing Helm and Ruby (standard libraries only). Run from the repository root:
+
+```sh
+ruby scripts/resource-governance-check.rb --self-test
+ruby scripts/resource-governance-check.rb --profile gateway --values /path/to/proposed-overrides.yaml --policy /path/to/approved-policy.json
+ruby scripts/resource-governance-check.rb --terraform-inputs /path/to/node-inputs.json --policy /path/to/approved-policy.json
+```
+
+The default command renders the dashboard, BFF, generic service default, and every service/worker values file. It checks every app and init container has positive CPU/memory requests and limits, request <= limit, container limits <= configured caps, integer fixed/HPA/KEDA scale bounds, and one scaler owner per workload. It exits nonzero on violation. Unit formats accepted: CPU cores/millicores, memory bytes/Ki/Mi/Gi/Ti; other valid Kubernetes quantity formats intentionally fail closed until reviewed. Rendering uses a synthetic digest solely to satisfy offline image validation.
+
+Proposed review ceilings: 2,000m CPU and 4,096Mi memory per container, 10 replicas per workload, six general nodes and four compute nodes. Current API/BFF HPA bounds are 2–10; default fixed service/dashboard replicas are two; hardware/saga/EventBridge workers are fixed at one; other fixed workers are two. The self-test also renders a supported KEDA worker override with min=0 and max=min(10, selected replica cap) and rejects a KEDA maximum above the selected policy cap. The worker fixture permits scale-to-zero with its existing PDB disabled; deployed worker semantics still require operational validation. CPU, memory and replica rejection fixtures use the selected cap plus one, so raising valid policy caps does not silently make invalid fixtures valid. Actual Kafka scaler metadata, lag policy, partition count and drain behavior need workload-specific validation. These ceilings require workload benchmarks before approval; they do not establish support for the 10M target.
+
+IaC checks read the four numeric node-size defaults and verify their exact scaling wiring in `infra/terraform/platform`. General defaults are min=2, desired=3, max=6; compute min/desired=0 and max=4. `--terraform-inputs` accepts a JSON object containing only `general_node_min_size`, `general_node_desired_size`, `general_node_max_size`, and `compute_node_max_size`, for example `{"compute_node_max_size": 3}`. Pass the same approved numbers to the eventual Terraform invocation. The source scanner removes HCL comments while preserving strings, identifies active top-level variable blocks, and requires each complete default expression to be an integer literal. Decimal, exponent, arithmetic and multiline default expressions, duplicate/missing active blocks, and commented-only defaults fail closed. `--terraform-variables /path/to/variables.tf` can check a proposed variables source without changing repository IaC. The source scanner fails closed when the expected HCL structure changes; it is a narrow source/input check, not an HCL parser, Terraform validate/plan, or proof of deployed nodes. It rejects fractional, negative, misordered and over-cap sizes.
+
+The local gate must be run against final deployment overrides and node inputs during review. It is not automatically wired into CI or cluster admission. Runtime changes, injected mesh sidecars, other charts, autoscaler settings, and unreviewed Terraform inputs can bypass this local check. Existing Kyverno resource-presence policy provides separate admission work; it does not enforce this policy's numeric caps. Retain final input hashes and output with the release evidence.
+
+## Budget inputs, ownership and escalation
+
+Before any cloud deployment, the environment budget owner must assign a named accountable person, a backup, platform on-call contacts, a finance approver, billing account/cell/environment scope, allocation tags, currency, monthly budget amount `B`, billing period/time zone, review cadence, and alert notification destinations. The repository policy deliberately leaves amount/currency null and contains role placeholders. Null means unconfigured; it does not mean a zero-cost environment. Platform operations owns scale caps and shutdown; service owners own sizing evidence and safe worker drain; finance approves budget increases.
+
+`budget.warningFraction`, `escalationFraction`, and `limitFraction` are configurable proposed ratios, currently 0.70, 0.85, and 1.00. The checker enforces `0 < warning < escalation < limit <= 1` and nonempty ownership/escalation fields. If `monthlyAmount` is configured, a positive finite amount and three-letter currency are required. This validates inputs only, not the existence of named contacts or notifications.
+
+Calculate warning = `B × warningFraction`, escalation = `B × escalationFraction`, and approved spending ceiling = `B × limitFraction`. Alert both actual allocated month-to-date spend and forecast month-end spend at the configured warning/escalation thresholds. A basic review forecast is `month-to-date allocated spend / elapsed billing days × days in billing month`; record sample time and billing lag, and use provider forecasts where available. Alerts must arrive before the ceiling, allowing for billing lag and response time. A budget notification is not a hard spend stop.
+
+At warning: notify the budget owner and platform on-call, identify spend drivers, verify attribution, check idle capacity and forecast, and record the action owner/deadline. At escalation: engage the finance approver, review optional workloads and node bounds, freeze discretionary capacity increases, and schedule safe consolidation or shutdown. At the ceiling: follow the approved environment response plan, disable optional activity safely, and obtain an explicit budget/cap exception with expiry before increasing bounds. Preserve critical ingress, durable queues, data retention and tenant safety; financial alerts alone must not discard data or force production outages. The operator must set response deadlines and exception approvers for the environment before deployment.
+
+## Capacity arithmetic and cost model
+
+The checker prints per-profile steady-state peak **app requests**: sum each app container's CPU/memory request, then multiply by fixed replicas or scaler maximum. These numbers are scheduling reservations, not utilization, node capacity, or money. Profiles are alternative configurations; do not sum `service-default` and its service instances as if both were deployed. For a release inventory, sum only actual deployed instances, and add rolling surge, canary overlap, init-container effective requests, injected sidecars, DaemonSets, system reservations and availability/failure headroom. Compare that total with operator-supplied node allocatable resources per pool/AZ; enforce taints/placement and demonstrate failure headroom separately.
+
+Calculate a proposed monthly envelope using operator-supplied rates and usage assumptions:
+
+`total = sum(node-hours by instance type × regional rate) + control-plane hours × rate + NAT hours/data + load-balancer hours/capacity + disks/snapshots + databases/cache/queues + requests + transfer/egress + logging/metrics/traces + backups + taxes/support/other allocated charges`.
+
+Document rate date/source, region, currency, purchase model, discounts, hours active, actual/max node bounds and uncertainty. Evaluate both expected operation and maximum scale plus surge. Pod resource caps cannot bound all of these charges. No cost estimate is valid until operators supply the rates and inventory; billing evidence must replace assumptions after deployment.
+
+## Shutdown and consolidation expectations
+
+For disposable/local environments, assign a TTL, explicit activity window, cleanup owner and data-retention choice. Stop unused Compose profiles and dedicated test processes after evidence capture; delete only resources belonging to the disposable environment after checking durable data and backup requirements. Record remaining containers, volumes and services and who owns them. Do not stop a shared environment as part of this procedure.
+
+For an approved cloud environment, examine idle nodes, placement fragmentation, PodDisruptionBudgets, topology constraints and worker leases/checkpoints before consolidation. Drain workers, preserve pending work and durable checkpoints, then reduce only reviewed capacity. Compute min/desired=0 permits an empty pool; Terraform defines no autonomous consolidation controller or guarantee that fixed workers can run when that pool is empty. Node autoscaling must be separately installed/configured and tested. Keep the general pool's approved availability floor. Node scale-down does not remove control planes, NAT gateways, storage, load balancers or log retention; review those separately. Schedule nonproduction shutdown with an approved restore/startup procedure and record residual charges.
+
+## Evidence required before cloud completion
+
+Retain approved budget amount/currency, named owners/contacts, scope/tags, final policy/values/node input hashes, local check output and approved exceptions. Capture Terraform validate/plan with the actual variables and installed provider/tool versions; apply and deployed bounds require a separately authorized cloud workflow. Capture billing allocation/inventory with rate assumptions, actual spend/forecast timestamps and scope, configured budget notifications, and delivered warning/escalation test messages to the intended contacts. Record billing lag and response exercises. Capture runtime replica/node maxima, unschedulable pods, quota/admission enforcement if adopted, worker drain/consolidation and restart results, and residual resources/charges after shutdown. Until those artifacts exist, cloud billing, alert delivery and shutdown/consolidation efficacy remain unverified.

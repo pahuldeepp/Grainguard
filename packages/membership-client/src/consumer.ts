@@ -1,3 +1,4 @@
+import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import kafkaJs from "kafkajs";
@@ -75,6 +76,7 @@ export async function startMembershipRuntime(
     clientId: serviceName,
     brokers,
     logLevel: logLevel.ERROR,
+    ...kafkaSecurityFromEnv(getenv),
   });
   const consumer = kafka.consumer({
     groupId: `${serviceName}-membership-${randomUUID()}`,

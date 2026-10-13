@@ -7,8 +7,12 @@ import {
   type StoredObject,
 } from "@greenguard/audit";
 import { seedPlan } from "../testing/entitlements.js";
-import { adminQuery, runtimeDb } from "../testing/fixtures.js";
-import { createOrganization, type Actor } from "../domain/store.js";
+import {
+  adminQuery,
+  createActiveTenantFixture,
+  runtimeDb,
+} from "../testing/fixtures.js";
+import { type Actor } from "../domain/store.js";
 import { requestAuditExport } from "./store.js";
 
 export const command = () => ({
@@ -27,12 +31,7 @@ export async function seedOrg(
     issuer: "https://issuer.test",
     subject: `${label}-${randomUUID()}`,
   };
-  const created = await createOrganization(
-    db,
-    admin,
-    { name: label },
-    command(),
-  );
+  const created = await createActiveTenantFixture(db, admin, label, command());
   const tenantId = created.body.tenantId as string;
   await seedPlan(
     tenantId,

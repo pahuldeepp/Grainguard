@@ -1,7 +1,8 @@
+import { admitOwnerPlacement } from "@greenguard/membership-client/owner-db";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,7 +64,7 @@ test("D01: migrations build an empty database, re-apply cleanly and match the sc
       scratch,
       "SELECT count(*)::int AS n FROM pg_policies WHERE policyname = 'tenant_isolation'",
     );
-    assert.equal(policies[0].n, 13);
+    assert.equal(policies[0].n, 15);
     const versions = await admin(
       scratch,
       `SELECT table_name, data_type, is_nullable, column_default
@@ -105,7 +106,11 @@ test("M11: existing inventory tenants upgrade into version-one control-plane pro
   const oldMigrations = mkdtempSync(join(tmpdir(), "inventory-before-09a-"));
   const source = join(packageDir, "prisma", "migrations");
   for (const entry of readdirSync(source)) {
-    if (entry === "20260925110000_tenant_projection") continue;
+    if (
+      entry !== "migration_lock.toml" &&
+      entry >= "20260925110000_tenant_projection"
+    )
+      continue;
     cpSync(join(source, entry), join(oldMigrations, entry), {
       recursive: true,
     });
@@ -198,12 +203,38 @@ test("R1: CDC can snapshot both tenants' outbox rows and nothing else", async ()
         await client.query(`SELECT relrowsecurity AND relforcerowsecurity AS forced
         FROM pg_class WHERE oid = 'public.outbox_events'::regclass`);
       assert.equal(forced.rows[0].forced, true);
-      const inserted = await client.query(`INSERT INTO outbox_events
-        (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
-         event_type, schema_version, occurred_at, correlation_id, causation_id, traceparent, payload)
-        SELECT gen_random_uuid(), gen_random_uuid(), 'device', gen_random_uuid(), 1,
-          'device.registered', 1, clock_timestamp(), gen_random_uuid(), gen_random_uuid(), '', '{}'
-        FROM generate_series(1,2) RETURNING event_id, tenant_id`);
+      const inserted: { rows: { event_id: string; tenant_id: string }[] } = {
+        rows: [],
+      };
+      for (let i = 0; i < 2; i++) {
+        const tenantId = randomUUID(),
+          incarnation = randomUUID();
+        await client.query(
+          "INSERT INTO greenguard_internal.tenant_ownership(tenant_id,shard_id,shard_incarnation,placement_epoch,state) VALUES($1,'s1',$2,1,'active')",
+          [tenantId, incarnation],
+        );
+        await admitOwnerPlacement(
+          tenantId,
+          {
+            tenantId,
+            shardId: "s1",
+            shardIncarnation: incarnation,
+            placementEpoch: "1",
+            state: "active",
+            expiresAt: new Date(Date.now() + 1900).toISOString(),
+          },
+          (sql, params) => client.query(sql, params),
+        );
+        const result = await client.query(
+          `INSERT INTO outbox_events
+          (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+           event_type, schema_version, occurred_at, correlation_id, causation_id, traceparent, payload)
+          VALUES(gen_random_uuid(), $1, 'device', gen_random_uuid(), 1,
+           'device.registered', 1, clock_timestamp(), gen_random_uuid(), gen_random_uuid(), '', '{}') RETURNING event_id, tenant_id`,
+          [tenantId],
+        );
+        inserted.rows.push(...result.rows);
+      }
       await client.query("SET LOCAL ROLE cdc_reader");
       const rows = await client.query(
         "SELECT event_id, tenant_id FROM outbox_events WHERE event_id = ANY($1::uuid[]) ORDER BY event_id",

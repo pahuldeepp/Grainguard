@@ -1,0 +1,190 @@
+{{- if .Values.enabled }}
+{{- include "ml-synthetic-data.validate" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ml-synthetic-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-synthetic-postgres-config
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+    password_encryption = 'scram-sha-256'
+    ssl = on
+    ssl_cert_file = '/etc/postgresql/tls/server.crt'
+    ssl_key_file = '/etc/postgresql/tls/server.key'
+    hba_file = '/etc/postgresql/config/pg_hba.conf'
+    max_connections = 80
+    shared_buffers = '128MB'
+  pg_hba.conf: |
+    local all all trust
+    hostssl greenguard_ml ml_migrator,ml_app 0.0.0.0/0 scram-sha-256
+    hostssl all all 0.0.0.0/0 reject
+    hostssl greenguard_ml ml_migrator,ml_app ::/0 scram-sha-256
+    hostssl all all ::/0 reject
+    hostnossl all all 0.0.0.0/0 reject
+    hostnossl all all ::/0 reject
+  init-roles.sql: |
+    \getenv migration_password ML_MIGRATION_PASSWORD
+    \getenv runtime_password ML_RUNTIME_PASSWORD
+    CREATE ROLE ml_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD :'migration_password';
+    CREATE ROLE ml_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD :'runtime_password';
+    ALTER DATABASE greenguard_ml OWNER TO ml_migrator;
+    REVOKE ALL ON DATABASE greenguard_ml FROM PUBLIC;
+    GRANT CONNECT ON DATABASE greenguard_ml TO ml_migrator, ml_app;
+    ALTER SCHEMA public OWNER TO ml_migrator;
+    REVOKE ALL ON SCHEMA public FROM PUBLIC;
+    GRANT USAGE ON SCHEMA public TO ml_app;
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ml-synthetic-postgres
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ml-synthetic-postgres
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ml-synthetic-postgres
+        greenguard.io/data-class: synthetic
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.images.postgres | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["postgres", "-c", "config_file=/etc/postgresql/config/postgresql.conf"]
+          env:
+            - {name: POSTGRES_DB, value: greenguard_ml}
+            - {name: POSTGRES_USER, value: postgres}
+            - {name: POSTGRES_INITDB_ARGS, value: "--auth-host=scram-sha-256"}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres | quote }}
+                  key: bootstrap-password
+            - name: ML_MIGRATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres | quote }}
+                  key: migrator-password
+            - name: ML_RUNTIME_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.postgres | quote }}
+                  key: runtime-password
+          ports:
+            - {name: postgres, containerPort: 5432, protocol: TCP}
+          startupProbe:
+            exec:
+              command: ["sh", "-ec", "pg_isready -U postgres -d greenguard_ml"]
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            exec:
+              command: ["sh", "-ec", "pg_isready -U postgres -d greenguard_ml"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-ec", "pg_isready -U postgres -d greenguard_ml"]
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources.postgres | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: config, mountPath: /etc/postgresql/config, readOnly: true}
+            - {name: tls, mountPath: /etc/postgresql/tls, readOnly: true}
+            - {name: init-roles, mountPath: /docker-entrypoint-initdb.d/10-roles.sql, subPath: init-roles.sql, readOnly: true}
+      volumes:
+        - name: config
+          configMap:
+            name: ml-synthetic-postgres-config
+            defaultMode: 0444
+        - name: init-roles
+          configMap:
+            name: ml-synthetic-postgres-config
+            defaultMode: 0444
+        - name: tls
+          secret:
+            secretName: {{ .Values.secrets.postgresTls | quote }}
+            defaultMode: 0440
+            items:
+              - {key: server.crt, path: server.crt}
+              - {key: server.key, path: server.key}
+              - {key: ca.crt, path: root.crt}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ml-synthetic-data.labels" . | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storage.className | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.postgresSize | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ml-synthetic-postgres
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ml-synthetic-postgres
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-synthetic
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-scoring-synthetic
+      ports:
+        - {protocol: TCP, port: 5432}
+  egress: []
+{{- end }}

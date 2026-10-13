@@ -1,0 +1,160 @@
+{{- if .Values.enabled }}
+{{- $tenant := required "syntheticTenantId must be a dedicated synthetic tenant UUID" .Values.syntheticTenantId }}
+{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $tenant) }}
+{{- fail "syntheticTenantId must be a canonical lowercase UUID" }}
+{{- end }}
+{{- if eq $tenant "00000000-0000-4000-8000-000000000001" }}
+{{- fail "syntheticTenantId must not use the reserved infrastructure tenant" }}
+{{- end }}
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "replicaCount must remain 1 until partition-assigned scorer state is implemented" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ml-scoring.name" . }}
+  labels:
+    {{- include "ml-scoring.labels" . | nindent 4 }}
+    greenguard.io/data-class: synthetic
+    greenguard.io/workload-mode: shadow
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ml-scoring.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "ml-scoring.labels" . | nindent 8 }}
+        greenguard.io/data-class: synthetic
+        greenguard.io/workload-mode: shadow
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scorer
+          image: {{ include "ml-scoring.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.health.port }}
+              protocol: TCP
+          env:
+            - name: ML_ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: ML_SHADOW_ENABLED
+              value: "true"
+            - name: ML_SYNTHETIC_TENANT_ID
+              value: {{ .Values.syntheticTenantId | quote }}
+            - name: ML_MODEL_NAME
+              value: {{ .Values.model.name | quote }}
+            - name: ML_MODEL_VERSION
+              value: {{ .Values.model.version | quote }}
+            - name: ML_MODEL_REGISTRY_ROOT
+              value: /models
+            - name: PORT
+              value: {{ .Values.health.port | quote }}
+            - name: ML_HEALTH_BIND
+              value: {{ .Values.health.bind | quote }}
+            - name: ML_ALLOW_REMOTE_HEALTH_BIND
+              value: "true"
+            - name: ML_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.database.name | quote }}
+                  key: {{ .Values.secretRefs.database.key | quote }}
+            - name: ML_OPERATIONS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.operations.name | quote }}
+                  key: {{ .Values.secretRefs.operations.tokenKey | quote }}
+            - name: PGSSLROOTCERT
+              value: /var/run/postgres-tls/root.crt
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .Values.connectivity.kafka.bootstrapServers | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: greenguard-ml-scoring-synthetic-shadow
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: {{ .Values.connectivity.kafka.securityProtocol | quote }}
+            - name: KAFKA_SASL_MECHANISM
+              value: {{ .Values.connectivity.kafka.saslMechanism | quote }}
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.kafka.name | quote }}
+                  key: {{ .Values.secretRefs.kafka.usernameKey | quote }}
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.kafka.name | quote }}
+                  key: {{ .Values.secretRefs.kafka.passwordKey | quote }}
+            - name: KAFKA_SSL_CA_LOCATION
+              value: /var/run/kafka-tls/ca.crt
+            - name: OTEL_SERVICE_NAME
+              value: greenguard-ml-scoring-synthetic
+            {{- if .Values.connectivity.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.connectivity.otel.endpoint | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-ca
+              mountPath: /var/run/kafka-tls
+              readOnly: true
+            - name: postgres-ca
+              mountPath: /var/run/postgres-tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: health
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpSizeLimit | default "64Mi" | quote }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.secretRefs.kafka.caSecretName | quote }}
+            items:
+              - key: {{ .Values.secretRefs.kafka.caKey | quote }}
+                path: ca.crt
+        - name: postgres-ca
+          secret:
+            secretName: {{ .Values.secretRefs.database.caSecretName | quote }}
+            items:
+              - key: {{ .Values.secretRefs.database.caKey | quote }}
+                path: root.crt
+{{- end }}

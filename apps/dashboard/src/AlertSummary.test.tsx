@@ -52,12 +52,12 @@ test("lists the worst open alerts first, at most five, with a link to each", asy
   const client = renderSummary({
     list: async () => ({ items, nextCursor: "more" }),
   } as unknown as AlertsApi);
-  await screen.findByText("Bin bin-2");
+  await screen.findByText("Bin 0002");
   expect(screen.getAllByRole("listitem")).toHaveLength(5);
   expect(
     screen.getByRole("heading", { name: /Open alerts/ }).textContent,
   ).toContain("6+");
-  expect(screen.getByText("Bin bin-2").closest("a")?.getAttribute("href")).toBe(
+  expect(screen.getByText("Bin 0002").closest("a")?.getAttribute("href")).toBe(
     "/alerts?alert=id-2",
   );
   expect(screen.getByRole("link", { name: "All alerts" })).toBeTruthy();
@@ -70,11 +70,25 @@ test("says bins are within limits when nothing is open, and offers retry on fail
     .mockRejectedValueOnce(new Error("down"))
     .mockResolvedValue({ items: [], nextCursor: null });
   const client = renderSummary({ list } as unknown as AlertsApi);
-  expect(await screen.findByRole("alert")).toBeTruthy();
+  await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(
     await screen.findByText("No open alerts. Bins are within limits."),
   ).toBeTruthy();
   expect(list).toHaveBeenCalledTimes(2);
+  client.clear();
+});
+
+test("uses projected bin and site names in the overview summary", async () => {
+  const item = {
+    ...alert(7, "high"),
+    binName: "North Silo",
+    siteName: "Prairie Farm",
+  };
+  const client = renderSummary({
+    list: async () => ({ items: [item], nextCursor: null }),
+  } as unknown as AlertsApi);
+  await screen.findByText("North Silo");
+  expect(screen.getByText("Prairie Farm")).toBeTruthy();
   client.clear();
 });

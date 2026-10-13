@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import { createControlPlaneApp } from "../app.js";
-import { runtimeDb, uniqueSubject } from "../testing/fixtures.js";
+import {
+  activateTenantFixture,
+  runtimeDb,
+  uniqueSubject,
+} from "../testing/fixtures.js";
 
 test("API-key HTTP issuance shows secret once, metadata is safe, and revocation denies lookup", async () => {
   const issuer = await createTestIssuer();
@@ -27,7 +31,8 @@ test("API-key HTTP issuance shows secret once, metadata is safe, and revocation 
   await app.listen(0, "127.0.0.1");
   try {
     const base = await app.getUrl();
-    const token = await issuer.sign({ sub: uniqueSubject("http-api-key") });
+    const subject = uniqueSubject("http-api-key");
+    const token = await issuer.sign({ sub: subject });
     const call = async (
       path: string,
       body: object | undefined,
@@ -53,8 +58,19 @@ test("API-key HTTP issuance shows secret once, metadata is safe, and revocation 
       { name: "HTTP key test" },
       `Bearer ${token}`,
     );
-    assert.equal(org.status, 201, JSON.stringify(org.body));
+    assert.equal(org.status, 202, JSON.stringify(org.body));
+    assert.equal(org.body.state, "provisioning");
     const tenantId = org.body.tenantId as string;
+    await activateTenantFixture(
+      db,
+      { issuer: issuer.issuer, subject },
+      tenantId,
+      {
+        idempotencyKey: randomUUID(),
+        correlationId: randomUUID(),
+        traceparent: "",
+      },
+    );
     const issued = await call(
       `/v1/organizations/${tenantId}/credentials/api-keys`,
       {

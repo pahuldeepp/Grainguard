@@ -19,7 +19,7 @@ CREATE POLICY jobs_migrator_scan ON dead_letter_outbox FOR SELECT TO jobs_migrat
 
 CREATE FUNCTION jobs_due_dispatch_refs(p_limit integer)
 RETURNS TABLE(tenant_id uuid, intent_id uuid, available_at timestamptz)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT o.tenant_id, o.intent_id, o.available_at FROM dispatch_outbox o
   WHERE o.dispatched_at IS NULL AND o.available_at <= now()
   ORDER BY o.available_at
@@ -28,7 +28,7 @@ $$;
 
 CREATE FUNCTION jobs_dead_intent_refs(p_limit integer)
 RETURNS TABLE(tenant_id uuid, intent_id uuid)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT i.tenant_id, i.intent_id FROM notification_intents i
   WHERE i.status = 'dead'
   ORDER BY i.dead_at NULLS FIRST, i.intent_id
@@ -37,7 +37,7 @@ $$;
 
 CREATE FUNCTION jobs_dead_letter_refs(p_limit integer)
 RETURNS TABLE(tenant_id uuid, intent_id uuid, delivery_generation integer)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT d.tenant_id, d.intent_id, d.delivery_generation FROM dead_letter_outbox d
   WHERE d.published_at IS NULL
   ORDER BY d.dead_at

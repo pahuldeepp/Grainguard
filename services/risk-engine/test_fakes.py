@@ -10,11 +10,17 @@ from dataclasses import replace
 from pathlib import Path
 
 from risk_engine.apply import Record
-from risk_engine.events import DEVICE_TOPIC, LOT_TOPIC, TELEMETRY_TOPIC
+from risk_engine.scoring import Policy
+from risk_engine.events import DEVICE_TOPIC, LOT_TOPIC, TELEMETRY_TOPIC, TELEMETRY_V2_TOPIC
 from risk_engine.join import covers
 from risk_engine.store import StoreError
 
 ROOT = Path(__file__).resolve().parents[2]
+# These illustrative values exist only in tests and are explicitly test-approved;
+# production selects persisted, tenant-scoped policies from the database.
+SYNTHETIC_WHEAT_POLICY_V1 = Policy("wheat", 1, 25.0, 35.0, 65.0, 80.0, 50, calibrated=True)
+SYNTHETIC_CANOLA_POLICY_V1 = Policy("canola", 1, 22.0, 30.0, 60.0, 75.0, 50, calibrated=True)
+TEST_POLICIES = {"wheat": SYNTHETIC_WHEAT_POLICY_V1, "canola": SYNTHETIC_CANOLA_POLICY_V1}
 FIXTURES = ROOT / "tests" / "fixtures" / "events"
 TRACE = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
@@ -72,7 +78,8 @@ _offsets = iter(range(1, 10**9))
 
 def record(event, topic=None, offset=None, partition=0) -> Record:
     if topic is None:
-        topic = {"telemetry.recorded": TELEMETRY_TOPIC, "lot.changed": LOT_TOPIC}.get(
+        topic = {"telemetry.recorded": (TELEMETRY_V2_TOPIC if event.get("schema_version") == 2
+                                        else TELEMETRY_TOPIC), "lot.changed": LOT_TOPIC}.get(
             event.get("event_type"), DEVICE_TOPIC)
     value = event if isinstance(event, bytes) else json.dumps(event).encode()
     return Record(topic, partition, next(_offsets) if offset is None else offset, value)
@@ -149,8 +156,11 @@ class FakeTx:
             "source_event_id": source_event_id,
         }
 
-    def assessment(self, source_event_id, lot_id, policy_version):
-        return self.s["assessments"].get((self.tenant, source_event_id, lot_id, policy_version))
+    def assessment(self, source_event_id, lot_id, policy_version, policy_id=None):
+        row = self.s["assessments"].get((self.tenant, source_event_id, lot_id, policy_version))
+        if row is None or (policy_id is not None and row.get("policy_id") != policy_id):
+            return None
+        return row
 
     def next_stream_version(self, device_id):
         key = (self.tenant, device_id)

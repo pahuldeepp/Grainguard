@@ -1,6 +1,9 @@
 import unittest
 
-from risk_engine.scoring import Policy, SYNTHETIC_CANOLA_POLICY_V1, SYNTHETIC_WHEAT_POLICY_V1, assess
+from risk_engine.scoring import Policy, assess
+
+SYNTHETIC_WHEAT_POLICY_V1 = Policy("wheat", 1, 25.0, 35.0, 65.0, 80.0, 50, calibrated=True)
+SYNTHETIC_CANOLA_POLICY_V1 = Policy("canola", 1, 22.0, 30.0, 60.0, 75.0, 50, calibrated=True)
 
 
 class ScoringTest(unittest.TestCase):
@@ -24,6 +27,12 @@ class ScoringTest(unittest.TestCase):
         self.assertFalse(result.alert_eligible)
         self.assertEqual(result.reasons, ("relative_humidity_percent",))
 
+    def test_additive_v2_measurements_are_accepted_without_changing_scoring(self):
+        result = assess({"temperature_c": 24, "relative_humidity_percent": 60,
+                         "co2_ppm": 410, "grain_moisture_percent": 13.5},
+                        "wheat", SYNTHETIC_WHEAT_POLICY_V1)
+        self.assertEqual((result.score, result.severity), (0, "normal"))
+
     def test_invalid_inputs_and_policy_fail_closed(self):
         for value in (float("nan"), float("inf"), True, "40", 121, 10**1000):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -42,7 +51,7 @@ class ScoringTest(unittest.TestCase):
                 Policy(*bad)
 
     def test_highest_allowed_threshold_keeps_critical_alert_eligible(self):
-        policy = Policy("wheat", 2, 25, 35, 65, 80, 75)
+        policy = Policy("wheat", 2, 25, 35, 65, 80, 75, calibrated=True)
         result = assess({"temperature_c": 35, "relative_humidity_percent": 65}, "wheat", policy)
         self.assertEqual(result.severity, "critical")
         self.assertTrue(result.alert_eligible)

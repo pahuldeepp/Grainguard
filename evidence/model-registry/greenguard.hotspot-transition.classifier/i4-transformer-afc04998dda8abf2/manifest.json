@@ -1,0 +1,26 @@
+{
+  "architecture": "greenguard-patch-transformer-classifier-v1",
+  "artifact_file": "weights.pt",
+  "artifact_sha256": "afc04998dda8abf2e7738e620fde5f0e1c14d5105249d7886fa65f5e1642471c",
+  "data_origin": "synthetic_grain_sim",
+  "feature_set_version": "telemetry-sequence-v1-24h-15m",
+  "golden_file": "golden.json",
+  "golden_input_sha256": "cda9ea40cdb85c413ed6da3aa64b7e4f943b56bbc6d4461aefa95be3aeb4c544",
+  "input_shape": [
+    96,
+    48
+  ],
+  "limitations": [
+    "synthetic simulator target, not spoilage ground truth",
+    "classification prototype, not multi-horizon quantile forecast",
+    "not permitted for real tenant input or production decision-making"
+  ],
+  "model_name": "greenguard.hotspot-transition.classifier",
+  "model_version": "i4-transformer-afc04998dda8abf2",
+  "production_eligible": false,
+  "schema_version": "greenguard-model-bundle-v1",
+  "synthetic_only": true,
+  "target": "simulated_hotspot_onset_48h",
+  "target_semantics": "a simulator hotspot false-to-true transition occurs within the following 48 hours; an already-active hotspot is negative",
+  "training_evidence_sha256": "f55935cd6910fd53e0f762ed0cb3b16e6717a9600614bd256353d6d83c2096e2"
+}

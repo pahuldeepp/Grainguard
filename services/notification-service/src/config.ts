@@ -1,9 +1,12 @@
 import type { Policy } from "./worker.js";
 import type { NotificationProviderConfig } from "./providers.js";
+import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
 
 export interface Config {
+  ownerEnvironment?: NodeJS.ProcessEnv;
   kafkaBrokers?: string[];
   flagSnapshot?: { url: string; token: string; allowInsecureHttp?: boolean };
+  controlPlaneMeshHttp?: boolean;
   flagDynamo?: { tableName: string; region?: string; endpoint?: string };
   databaseUrl: string;
   rabbitUrl: string;
@@ -18,6 +21,24 @@ export interface Config {
 
 type Getenv = (key: string) => string | undefined;
 
+// In EKS, application HTTP to a Kubernetes Service enters the local Envoy;
+// strict Istio mTLS protects the pod-to-pod hop. Only this exact in-cluster
+// control-plane endpoint may opt in. Public/plain HTTP remains forbidden for
+// live notification providers.
+function strictMeshControlPlaneHttp(url: URL, getenv: Getenv): boolean {
+  return (
+    getenv("GG_MESH_INTERNAL_HTTP") === "1" &&
+    url.protocol === "http:" &&
+    url.hostname === "tenant-control-plane.greenguard.svc.cluster.local" &&
+    url.port === "3010" &&
+    url.pathname === "/" &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+  );
+}
+
 function positive(getenv: Getenv, key: string, fallback: number): number {
   const raw = getenv(key);
   if (raw === undefined || raw === "") return fallback;
@@ -27,74 +48,18 @@ function positive(getenv: Getenv, key: string, fallback: number): number {
   return value;
 }
 
-interface SnapshotConfig {
-  url: string;
-  token: string;
-  allowInsecureHttp?: boolean;
-}
-
-function snapshotConfig(
-  getenv: Getenv,
-  provider: Config["provider"],
-): SnapshotConfig | undefined {
-  const url = getenv("CONTROL_PLANE_URL");
-  const token = getenv("CONTROL_LOOKUP_TOKEN");
-  if (Boolean(url) !== Boolean(token))
+/** Reads configuration from an injected getenv so entry points stay testable. */
+export function loadConfig(getenv: Getenv): Config {
+  requireShardRegistry({
+    SHARD_ROUTING_REQUIRED: getenv("SHARD_ROUTING_REQUIRED"),
+    SHARD_REGISTRY_FILE: getenv("SHARD_REGISTRY_FILE"),
+  });
+  const databaseUrl = getenv("NOTIFICATIONS_DATABASE_URL") ?? "";
+  const rabbitUrl = getenv("RABBITMQ_URL") ?? "";
+  if ((!databaseUrl && !getenv("SHARD_REGISTRY_FILE")) || !rabbitUrl)
     throw new Error(
-      "CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together",
+      "RABBITMQ_URL and either NOTIFICATIONS_DATABASE_URL or SHARD_REGISTRY_FILE are required",
     );
-  const insecure = getenv("NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP");
-  if (insecure !== undefined && insecure !== "true" && insecure !== "false")
-    throw new Error(
-      "NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP must be true or false",
-    );
-  if (!url || !token) return undefined;
-  if (provider === "live" && !usesHttps(url))
-    throw new Error(
-      "CONTROL_PLANE_URL must use HTTPS for live notification providers",
-    );
-  return {
-    url,
-    token,
-    ...(provider !== "live" && insecure === "true"
-      ? { allowInsecureHttp: true }
-      : {}),
-  };
-}
-
-function usesHttps(value: string): boolean {
-  try {
-    return new URL(value).protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function liveProviderCredentials(getenv: Getenv, snapshot?: SnapshotConfig) {
-  const sendgridApiKey = getenv("SENDGRID_API_KEY");
-  const sendgridFrom = getenv("SENDGRID_FROM_EMAIL");
-  const twilioSid = getenv("TWILIO_ACCOUNT_SID");
-  const twilioToken = getenv("TWILIO_AUTH_TOKEN");
-  const twilioFrom = getenv("TWILIO_FROM_NUMBER");
-  const complete = Boolean(
-    snapshot &&
-    sendgridApiKey &&
-    sendgridFrom &&
-    twilioSid &&
-    twilioToken &&
-    twilioFrom,
-  );
-  return {
-    sendgridApiKey,
-    sendgridFrom,
-    twilioSid,
-    twilioToken,
-    twilioFrom,
-    complete,
-  };
-}
-
-function selectedProvider(getenv: Getenv): Config["provider"] {
   const provider = getenv("NOTIFICATIONS_PROVIDER") ?? "local";
   if (
     provider !== "local" &&
@@ -104,17 +69,41 @@ function selectedProvider(getenv: Getenv): Config["provider"] {
     throw new Error(
       "NOTIFICATIONS_PROVIDER must be local, unconfigured, or live",
     );
-  return provider;
-}
-
-/** Reads configuration from an injected getenv so entry points stay testable. */
-export function loadConfig(getenv: Getenv): Config {
-  const databaseUrl = getenv("NOTIFICATIONS_DATABASE_URL") ?? "";
-  const rabbitUrl = getenv("RABBITMQ_URL") ?? "";
-  if (!databaseUrl || !rabbitUrl)
-    throw new Error("NOTIFICATIONS_DATABASE_URL and RABBITMQ_URL are required");
-  const provider = selectedProvider(getenv);
-  const snapshot = snapshotConfig(getenv, provider);
+  const snapshotUrl = getenv("CONTROL_PLANE_URL");
+  const snapshotToken = getenv("CONTROL_LOOKUP_TOKEN");
+  if (!!snapshotUrl !== !!snapshotToken)
+    throw new Error(
+      "CONTROL_PLANE_URL and CONTROL_LOOKUP_TOKEN must be set together",
+    );
+  const insecureContactLookup = getenv(
+    "NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP",
+  );
+  if (
+    insecureContactLookup !== undefined &&
+    !["true", "false"].includes(insecureContactLookup)
+  )
+    throw new Error(
+      "NOTIFICATIONS_ALLOW_INSECURE_CONTACT_LOOKUP must be true or false",
+    );
+  const meshHttp = getenv("GG_MESH_INTERNAL_HTTP");
+  if (meshHttp !== undefined && meshHttp !== "0" && meshHttp !== "1")
+    throw new Error("GG_MESH_INTERNAL_HTTP must be 0 or 1");
+  let allowedLiveMeshHttp = false;
+  if (provider === "live" && snapshotUrl) {
+    let lookupUrl: URL;
+    try {
+      lookupUrl = new URL(snapshotUrl);
+    } catch {
+      throw new Error(
+        "CONTROL_PLANE_URL must use HTTPS for live notification providers",
+      );
+    }
+    allowedLiveMeshHttp = strictMeshControlPlaneHttp(lookupUrl, getenv);
+    if (lookupUrl.protocol !== "https:" && !allowedLiveMeshHttp)
+      throw new Error(
+        "CONTROL_PLANE_URL must use HTTPS or the exact strict-mesh control-plane URL for live notification providers",
+      );
+  }
   const providerTimeoutMs = positive(
     getenv,
     "NOTIFICATIONS_PROVIDER_TIMEOUT_MS",
@@ -122,17 +111,52 @@ export function loadConfig(getenv: Getenv): Config {
   );
   if (providerTimeoutMs > 120_000)
     throw new Error("NOTIFICATIONS_PROVIDER_TIMEOUT_MS must not exceed 120000");
-  const credentials = liveProviderCredentials(getenv, snapshot);
-  if (provider === "live" && !credentials.complete)
+  const sendgridApiKey = getenv("SENDGRID_API_KEY");
+  const sendgridFrom = getenv("SENDGRID_FROM_EMAIL");
+  const twilioSid = getenv("TWILIO_ACCOUNT_SID");
+  const twilioToken = getenv("TWILIO_AUTH_TOKEN");
+  const twilioFrom = getenv("TWILIO_FROM_NUMBER");
+  if (
+    provider === "live" &&
+    (!snapshotUrl ||
+      !snapshotToken ||
+      !sendgridApiKey ||
+      !sendgridFrom ||
+      !twilioSid ||
+      !twilioToken ||
+      !twilioFrom)
+  )
     throw new Error(
       "live notification providers require CONTROL_PLANE_URL, CONTROL_LOOKUP_TOKEN, SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER",
     );
   return {
+    ownerEnvironment: Object.fromEntries(
+      [
+        "SHARD_REGISTRY_FILE",
+        "SHARD_ROUTING_REQUIRED",
+        "SHARD_LOCAL_LOOPBACK",
+        "CONTROL_PLANE_URL",
+        "CONTROL_LOOKUP_TOKEN",
+        "CONTROL_PLANE_MESH_MTLS",
+        "GG_MESH_INTERNAL_HTTP",
+      ].map((key) => [key, getenv(key)]),
+    ),
     kafkaBrokers: getenv("KAFKA_BROKERS")
       ?.split(",")
       .map((x) => x.trim())
       .filter(Boolean),
-    flagSnapshot: snapshot,
+    flagSnapshot:
+      snapshotUrl && snapshotToken
+        ? {
+            url: snapshotUrl,
+            token: snapshotToken,
+            ...((provider !== "live" && insecureContactLookup === "true") ||
+            allowedLiveMeshHttp
+              ? { allowInsecureHttp: true }
+              : {}),
+          }
+        : undefined,
+    controlPlaneMeshHttp: allowedLiveMeshHttp,
     flagDynamo: getenv("FLAG_DYNAMODB_TABLE")
       ? {
           tableName: getenv("FLAG_DYNAMODB_TABLE")!,
@@ -147,22 +171,27 @@ export function loadConfig(getenv: Getenv): Config {
     provider,
     notificationProviders: {
       timeoutMs: providerTimeoutMs,
-      controlPlane: snapshot,
-      sendgrid:
-        credentials.sendgridApiKey && credentials.sendgridFrom
+      controlPlane:
+        snapshotUrl && snapshotToken
           ? {
-              apiKey: credentials.sendgridApiKey,
-              fromEmail: credentials.sendgridFrom,
+              url: snapshotUrl,
+              token: snapshotToken,
+              ...((provider !== "live" && insecureContactLookup === "true") ||
+              allowedLiveMeshHttp
+                ? { allowInsecureHttp: true }
+                : {}),
             }
           : undefined,
+      sendgrid:
+        sendgridApiKey && sendgridFrom
+          ? { apiKey: sendgridApiKey, fromEmail: sendgridFrom }
+          : undefined,
       twilio:
-        credentials.twilioSid &&
-        credentials.twilioToken &&
-        credentials.twilioFrom
+        twilioSid && twilioToken && twilioFrom
           ? {
-              accountSid: credentials.twilioSid,
-              authToken: credentials.twilioToken,
-              fromNumber: credentials.twilioFrom,
+              accountSid: twilioSid,
+              authToken: twilioToken,
+              fromNumber: twilioFrom,
             }
           : undefined,
     },

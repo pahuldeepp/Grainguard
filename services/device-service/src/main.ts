@@ -1,5 +1,6 @@
 import { initTracing } from "@greenguard/otel";
-import { createTokenVerifier } from "@greenguard/tenant-auth";
+import { readFileSync } from "node:fs";
+import { startMembershipRuntime } from "@greenguard/membership-client";
 import { createClientCredentialsVerifier } from "@greenguard/tenant-auth/service-principals";
 import { loadVersionRegistry } from "./api/versioning/index.js";
 import { createApp, DatabaseProbe } from "./app.js";
@@ -11,13 +12,16 @@ if (config.importAuth && !config.auth)
   throw new Error(
     "import authentication requires the inventory API authentication settings",
   );
+const membership = config.auth
+  ? await startMembershipRuntime(
+      (name) => process.env[name],
+      (path) => readFileSync(path, "utf8"),
+      "device-service",
+    )
+  : undefined;
 const api = config.auth && {
   db: createDb(config.databaseUrl),
-  verifier: createTokenVerifier({
-    issuer: config.auth.issuer,
-    audience: config.auth.audience,
-    keys: { jwksUrl: config.auth.jwksUrl },
-  }),
+  verifier: membership!,
   ...(config.importAuth && {
     importSourceId: config.importAuth.sourceId,
     importVerifier: createClientCredentialsVerifier({

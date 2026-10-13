@@ -1,0 +1,54 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenguard-otel-collector
+spec:
+  podSelector: {matchLabels: {app: otel-collector}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {}}]
+      ports: [{protocol: TCP, port: 4317}, {protocol: TCP, port: 4318}]
+    # The opt-in ML scorer runs in an isolated synthetic namespace. Permit only
+    # its synthetic-only pods to send OTLP into the shared telemetry pipeline.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ml-synthetic
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ml-scoring-synthetic
+              greenguard.io/data-class: synthetic
+      ports: [{protocol: TCP, port: 4317}]
+    - from: [{podSelector: {matchLabels: {app: prometheus}}}]
+      ports: [{protocol: TCP, port: 8890}]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: tempo}}}]
+      ports: [{protocol: TCP, port: 4317}]
+    - to: [{podSelector: {matchLabels: {app: loki}}}]
+      ports: [{protocol: TCP, port: 3100}]
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenguard-tempo
+spec:
+  podSelector: {matchLabels: {app: tempo}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: otel-collector}}}]
+      ports: [{protocol: TCP, port: 4317}]
+    - from: [{podSelector: {matchLabels: {app: grafana}}}]
+      ports: [{protocol: TCP, port: 3200}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenguard-loki
+spec:
+  podSelector: {matchLabels: {app: loki}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: otel-collector}}}, {podSelector: {matchLabels: {app: grafana}}}]
+      ports: [{protocol: TCP, port: 3100}]

@@ -129,6 +129,34 @@ func (w *Worker) pollFor(ctx context.Context, wait time.Duration, max int) ([]Re
 
 func (w *Worker) flush(ctx context.Context, b *batch) error {
 	w.recoverEpoch(ctx)
+	// A global namespace bump does not acknowledge a durable sequence demand.
+	// Leave offsets uncommitted until every coalesced watermark is confirmed.
+	for _, target := range b.watermarks {
+		bumper, ok := w.Bumper.(interface {
+			Advance(context.Context, Target) error
+		})
+		if !ok {
+			return errors.New("watermark invalidation is unsupported")
+		}
+		confirmed := false
+		for attempt := 1; attempt <= w.Settings.Attempts; attempt++ {
+			opCtx, cancel := context.WithTimeout(ctx, w.Settings.OpTimeout)
+			err := bumper.Advance(opCtx, target)
+			cancel()
+			if err == nil {
+				confirmed = true
+				break
+			}
+			w.Metrics.failures.Add(1)
+			if attempt == w.Settings.Attempts || !sleep(ctx, w.Settings.Backoff*time.Duration(attempt)) {
+				break
+			}
+		}
+		if !confirmed {
+			w.queueEpoch()
+			return errInvalidationUnconfirmed
+		}
+	}
 	targets := b.targets()
 	w.bumpAll(ctx, targets)
 	if w.epochPending.Load() {
@@ -190,7 +218,7 @@ func (w *Worker) bumpAll(ctx context.Context, targets []Target) {
 				w.Metrics.skipped.Add(1)
 				return
 			}
-			if w.bumpWithRetry(ctx, t.Key(), w.Settings.VersionTTL) {
+			if w.bumpWithRetry(ctx, t.Key(), w.Settings.VersionTTL, t) {
 				w.Metrics.bumps[t.Scope].Add(1)
 				return
 			}
@@ -200,10 +228,17 @@ func (w *Worker) bumpAll(ctx context.Context, targets []Target) {
 	wg.Wait()
 }
 
-func (w *Worker) bumpWithRetry(ctx context.Context, key string, ttl time.Duration) bool {
+func (w *Worker) bumpWithRetry(ctx context.Context, key string, ttl time.Duration, target ...Target) bool {
 	for attempt := 1; attempt <= w.Settings.Attempts; attempt++ {
 		opCtx, cancel := context.WithTimeout(ctx, w.Settings.OpTimeout)
-		err := w.Bumper.Bump(opCtx, key, w.Now().UnixMilli(), ttl)
+		var err error
+		if bumper, ok := w.Bumper.(interface {
+			BumpTarget(context.Context, Target, int64, time.Duration) error
+		}); ok && len(target) > 0 {
+			err = bumper.BumpTarget(opCtx, target[0], w.Now().UnixMilli(), ttl)
+		} else {
+			err = w.Bumper.Bump(opCtx, key, w.Now().UnixMilli(), ttl)
+		}
 		cancel()
 		if err == nil {
 			return true

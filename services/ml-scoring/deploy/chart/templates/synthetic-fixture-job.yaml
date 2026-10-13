@@ -1,0 +1,80 @@
+{{- if and .Values.enabled .Values.syntheticFixtureSeed.enabled }}
+{{- if ne .Values.environment "cluster-synthetic" }}{{ fail "fixture seeding is limited to cluster-synthetic" }}{{ end }}
+{{- if ne (int .Values.syntheticFixtureSeed.count) 384 }}{{ fail "synthetic fixture count must be exactly 384" }}{{ end }}
+{{- if ne .Values.connectivity.kafka.bootstrapServers "kafka.ml-synthetic.svc.cluster.local:9093" }}{{ fail "fixture seeding requires the dedicated synthetic broker" }}{{ end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ml-scoring.name" . }}-fixture-seed
+  labels:
+    {{- include "ml-scoring.labels" . | nindent 4 }}
+    greenguard.io/data-class: synthetic
+    greenguard.io/workload-mode: shadow
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.syntheticFixtureSeed.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.syntheticFixtureSeed.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "ml-scoring.labels" . | nindent 8 }}
+        greenguard.io/data-class: synthetic
+        greenguard.io/workload-mode: shadow
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fixture-seed
+          image: {{ include "ml-scoring.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "/app/seed_synthetic_fixture.py"]
+          env:
+            - {name: ML_ENVIRONMENT, value: cluster-synthetic}
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: {{ .Values.connectivity.kafka.bootstrapServers | quote }}}
+            - {name: KAFKA_SECURITY_PROTOCOL, value: SASL_SSL}
+            - {name: KAFKA_SASL_MECHANISM, value: SCRAM-SHA-512}
+            - {name: KAFKA_SSL_CA_LOCATION, value: /var/run/kafka-tls/ca.crt}
+            - {name: SYNTHETIC_FIXTURE_COUNT, value: {{ .Values.syntheticFixtureSeed.count | quote }}}
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.fixture.name | quote }}
+                  key: {{ .Values.secretRefs.fixture.usernameKey | quote }}
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.fixture.name | quote }}
+                  key: {{ .Values.secretRefs.fixture.passwordKey | quote }}
+          volumeMounts:
+            - name: kafka-ca
+              mountPath: /var/run/kafka-tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.secretRefs.kafka.caSecretName | quote }}
+            items:
+              - {key: {{ .Values.secretRefs.kafka.caKey | quote }}, path: ca.crt}
+{{- end }}

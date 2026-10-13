@@ -1,0 +1,674 @@
+{
+  "uid": "greenguard-service-health",
+  "title": "GreenGuard \u2014 Service / Dependency Health",
+  "tags": [
+    "greenguard",
+    "stage-11",
+    "dependencies"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "label": "Service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(up, job)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Target availability",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\"$job\"}",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "noValue": "Unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU / memory (exporter required)",
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+          "legendFormat": "{{instance}} CPU"
+        },
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+          "legendFormat": "{{instance}} memory"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown / exporter not configured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Postgres activity, locks, deadlocks",
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 15,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_count",
+          "legendFormat": "{{datname}} {{state}}"
+        },
+        {
+          "expr": "pg_locks_count",
+          "legendFormat": "{{datname}} {{mode}} locks"
+        },
+        {
+          "expr": "rate(pg_stat_database_deadlocks[5m])",
+          "legendFormat": "{{datname}} deadlocks/sec"
+        },
+        {
+          "expr": "rate(pg_stat_database_conflicts[5m])",
+          "legendFormat": "{{datname}} conflicts/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / Postgres exporter cannot connect"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Kafka consumer-group lag and CDC progress",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}} / {{topic}} lag records"
+        },
+        {
+          "expr": "cdc_commit_lag",
+          "legendFormat": "CDC records awaiting commit"
+        },
+        {
+          "expr": "rate(cdc_consumed_total[5m])",
+          "legendFormat": "CDC consumed/sec"
+        },
+        {
+          "expr": "rate(cdc_published_total[5m])",
+          "legendFormat": "CDC published/sec"
+        },
+        {
+          "expr": "rate(cdc_quarantined_total[5m])",
+          "legendFormat": "{{reason}} quarantine/sec"
+        },
+        {
+          "expr": "debezium_postgres_streaming_millisecondsbehindsource",
+          "legendFormat": "{{server}} Debezium source lag ms"
+        },
+        {
+          "expr": "debezium_postgres_streaming_connected",
+          "legendFormat": "{{server}} source connected (1=yes)"
+        },
+        {
+          "expr": "debezium_postgres_streaming_queueremainingcapacity / clamp_min(debezium_postgres_streaming_queuetotalcapacity, 1)",
+          "legendFormat": "{{server}} Debezium queue free ratio"
+        },
+        {
+          "expr": "rate(debezium_postgres_streaming_totalnumberofeventsseen[5m])",
+          "legendFormat": "{{server}} Debezium events/sec"
+        },
+        {
+          "expr": "kafka_connect_worker_task_count",
+          "legendFormat": "Connect tasks"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / Kafka profile not running"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "RabbitMQ backlog (native Prometheus plugin)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rabbitmq_detailed_queue_messages_ready",
+          "legendFormat": "{{queue}} ready"
+        },
+        {
+          "expr": "rabbitmq_detailed_queue_messages_unacked",
+          "legendFormat": "{{queue}} unacked"
+        },
+        {
+          "expr": "rabbitmq_queue_messages",
+          "legendFormat": "{{queue}} total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / RabbitMQ profile is not running"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "DynamoDB throttles / conditional conflicts",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "aws_dynamodb_throttled_requests_sum offset 10m",
+          "legendFormat": "{{table_name}} throttle"
+        },
+        {
+          "expr": "aws_dynamodb_conditional_check_failed_requests_sum offset 10m",
+          "legendFormat": "{{table_name}} conditional failure"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unknown / AWS profile not configured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Lambda errors, throttles, duration, and init phase",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "aws_lambda_errors_sum offset 10m",
+          "legendFormat": "{{function_name}} errors"
+        },
+        {
+          "expr": "aws_lambda_throttles_sum offset 10m",
+          "legendFormat": "{{function_name}} throttles"
+        },
+        {
+          "expr": "aws_lambda_duration_p95 offset 10m",
+          "legendFormat": "{{function_name}} p95"
+        },
+        {
+          "expr": "aws_lambda_insights_init_duration_average offset 10m",
+          "legendFormat": "{{function_name}} init phase average ms (Lambda Insights)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / AWS profile not configured"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Projection event-to-apply latency and lag",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(projection_event_to_projection_seconds_bucket[5m])))",
+          "legendFormat": "event-to-apply p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(projection_event_to_projection_seconds_bucket[5m])))",
+          "legendFormat": "event-to-apply p95"
+        },
+        {
+          "expr": "projection_last_projected_age_seconds",
+          "legendFormat": "last projected age"
+        },
+        {
+          "expr": "projection_pending_records",
+          "legendFormat": "pending records"
+        },
+        {
+          "expr": "projection_binding_feed_age_seconds",
+          "legendFormat": "binding feed age"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / projection target unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Jobs delivery lag, outcomes, and DLQ",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jobs_dispatch_lag_seconds",
+          "legendFormat": "oldest dispatch lag"
+        },
+        {
+          "expr": "rate(jobs_dispatch_published_total[5m])",
+          "legendFormat": "published/sec"
+        },
+        {
+          "expr": "rate(jobs_dispatch_retried_total[5m])",
+          "legendFormat": "retried/sec"
+        },
+        {
+          "expr": "rate(jobs_dispatch_dead_total[5m])",
+          "legendFormat": "dead/sec"
+        },
+        {
+          "expr": "rate(jobs_dlq_publish_failed_total[5m])",
+          "legendFormat": "DLQ publish failures/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / jobs worker unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Postgres client pool saturation and slow queries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "100 * postgres_pool_total_connections / clamp_min(postgres_pool_size, 1)",
+          "legendFormat": "{{pool}} pool use %"
+        },
+        {
+          "expr": "postgres_pool_waiting_requests",
+          "legendFormat": "{{pool}} waiting"
+        },
+        {
+          "expr": "rate(postgres_slow_queries_total[5m])",
+          "legendFormat": "slow queries/sec (>=500ms)"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(postgres_query_duration_seconds_bucket[5m])))",
+          "legendFormat": "query p95"
+        },
+        {
+          "expr": "postgres_pool_acquired_connections",
+          "legendFormat": "{{pool}} acquired (Go)"
+        },
+        {
+          "expr": "rate(postgres_pool_empty_acquire_total[5m])",
+          "legendFormat": "{{pool}} no-idle acquisitions/sec"
+        },
+        {
+          "expr": "rate(postgres_pool_acquire_wait_seconds_total[5m])",
+          "legendFormat": "{{pool}} acquisition wait seconds/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown / instrumented app DB targets unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Postgres longest active transaction (exporter required)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_max_tx_duration",
+          "legendFormat": "{{datname}} / {{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown / Postgres exporter unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Read API cache hits and misses (5m rate)",
+      "description": "Cache lookup outcomes per second. An empty panel means the Read API cache metrics target is unavailable.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"hit\"}[5m]))",
+          "legendFormat": "{{job}} hits/s"
+        },
+        {
+          "expr": "sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"miss\"}[5m]))",
+          "legendFormat": "{{job}} misses/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "noValue": "Unknown / Read API cache target unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Read API cache hit ratio (5m)",
+      "description": "Hits divided by hits plus misses. No lookup traffic produces no ratio.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=\"hit\"}[5m])) / sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=~\"hit|miss\"}[5m]))) and on (job) (sum by (job) (rate(greenguard_read_cache_events_total{job=~\"$job\",event=~\"hit|miss\"}[5m])) > 0)",
+          "legendFormat": "{{job}} hit ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "No cache lookups / target unavailable"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "title": "Platform overview",
+      "url": "/d/greenguard-platform-overview/greenguard-platform-overview",
+      "type": "link"
+    }
+  ]
+}

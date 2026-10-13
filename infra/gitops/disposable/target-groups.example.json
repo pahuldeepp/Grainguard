@@ -1,0 +1,7 @@
+{
+  "target_group_arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/ggmesh-example/0123456789abcdef",
+  "namespace": "istio-system",
+  "service_name": "istio-ingressgateway",
+  "service_port": 80,
+  "pod_target_port": 8080
+}

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @greenguard/membership-client && tsc",
-    "typecheck": "npm run build -w @greenguard/membership-client && tsc --noEmit",
+    "build": "npm run build -w @greenguard/membership-client && npm run build -w @greenguard/otel && tsc",
+    "typecheck": "npm run build -w @greenguard/membership-client && npm run build -w @greenguard/otel && tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
   },
@@ -20,7 +20,9 @@
     "graphql": "16.13.0",
     "redis": "^5.1.1",
     "undici": "7.29.1",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "@greenguard/otel": "0.1.0",
+    "@opentelemetry/api": "1.9.1"
   },
   "devDependencies": {
     "@types/express": "5.0.6"

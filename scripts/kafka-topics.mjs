@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { kafka } from "./events-lib.mjs";
 
+// Scripts and charts parse one topic entry per line; keep it that way.
+// prettier-ignore
 const domainTopics = [
   ["greenguard.raw.inventory.outbox", 1],
   ["greenguard.raw.control.outbox", 1],
@@ -18,7 +20,11 @@ const domainTopics = [
   ["greenguard.inventory.facility.v1", 6],
   ["greenguard.inventory.lot.v1", 6],
   ["greenguard.telemetry.recorded.v1", 6],
+  ["greenguard.telemetry.recorded.v2", 6],
+  ["greenguard.inventory.sensor-layout.v1", 6],
   ["greenguard.risk.assessment.v1", 6],
+  ["greenguard.risk.assessment.v2", 6],
+  ["greenguard.risk.policy.v1", 6],
   ["greenguard.risk.assessment_invalidated.v1", 6],
   ["greenguard.alerts.lifecycle.v1", 6],
   // Contains contact PII; production Kafka ACLs/TLS and encryption at rest are mandatory.
@@ -32,8 +38,17 @@ const domainTopics = [
   ["greenguard.saga.results.dlq.v1", 6],
   ["greenguard.saga.commands.dlq.v1", 6],
   ["greenguard.quarantine.v1", 1],
+  ["greenguard.knowledge.document.index.requested.v1", 6, "delete", "259200000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1", 6, "delete", "604800000"],
+  ["greenguard.knowledge.assistant.suggestion.used.v1.quarantine", 1, "delete", "1209600000"],
+  ["greenguard.ai-usage-settled.v1", 6, "delete", "604800000"],
+  // Live acceptance probe only; never carries tenant data. Ten-minute retention is its cleanup.
+  ["greenguard.acceptance.probe.v1", 1, "delete", "600000"],
+  // Deliberately has no ACL for any principal: the acceptance probe must be denied here.
+  ["greenguard.acceptance.denied.v1", 1, "delete", "600000"],
 ];
 // Infrastructure storage is separate from the domain topics.
+// prettier-ignore
 const internalTopics = [
   ["greenguard.connect.configs", 1],
   ["greenguard.connect.offsets", 1],

@@ -1,0 +1,219 @@
+{{- if or (lt (int .Values.terminationGraceMilliseconds) 330000) (gt (int .Values.terminationGraceMilliseconds) 900000) -}}
+{{- fail "terminationGraceMilliseconds must be between 330000 and 900000" -}}
+{{- end }}
+{{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" .Values.image) -}}
+{{- fail "image must be an immutable OCI reference ending in @sha256:<64 lowercase hex characters>" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled (not .Values.mesh.enabled) -}}
+{{- fail "Prometheus Envoy metrics scraping requires mesh.enabled=true" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled .Values.observability.prometheus.mergeMetrics (ne (int .Values.observability.prometheus.scrapePort) 15020) -}}
+{{- fail "merged Istio metrics require scrapePort=15020" -}}
+{{- end }}
+{{- if and .Values.observability.prometheus.enabled (not .Values.observability.prometheus.mergeMetrics) (ne (int .Values.observability.prometheus.scrapePort) 15090) -}}
+{{- fail "Envoy-only Istio metrics require mergeMetrics=false and scrapePort=15090" -}}
+{{- end }}
+{{- if and .Values.modelGatewayTokens.enabled (or (empty .Values.modelGatewayTokens.secretName) (empty .Values.modelGatewayTokens.secretKey) (empty .Values.modelGatewayTokens.filePath) (empty .Values.delegationKey.secretName) (empty .Values.delegationKey.privateKeySecretKey) (empty .Values.delegationKey.keyIdSecretKey) (empty .Values.delegationKey.filePath)) -}}
+{{- fail "enabled BFF assistant requires tenant tokens and a protected delegated signing key Secret contract" -}}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "greenguard-bff.fullname" . }}
+  labels:
+    {{- include "greenguard-bff.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-bff.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "greenguard-bff.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        sidecar.istio.io/inject: {{ .Values.mesh.enabled | quote }}
+        {{- if .Values.mesh.revision }}
+        istio.io/rev: {{ .Values.mesh.revision | quote }}
+        {{- end }}
+      {{- if .Values.observability.prometheus.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /stats/prometheus
+        prometheus.io/port: {{ .Values.observability.prometheus.scrapePort | quote }}
+        prometheus.istio.io/merge-metrics: {{ .Values.observability.prometheus.mergeMetrics | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "greenguard-bff.fullname" . }}
+      terminationGracePeriodSeconds: {{ add (div (int .Values.terminationGraceMilliseconds) 1000) 11 }}
+      automountServiceAccountToken: false
+      {{- with .Values.scheduling.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.scheduling.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if .Values.modelGatewayTokens.enabled }}
+      initContainers:
+        - name: materialize-model-gateway-tokens
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec", "umask 077; cp /projected-tokens/gateway-tokens.json /private/gateway-tokens.json; cp /projected-signing/private-key.pem /private/private-key.pem; chmod 0600 /private/gateway-tokens.json /private/private-key.pem"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: model-gateway-tokens-projected
+              mountPath: /projected-tokens
+              readOnly: true
+            - name: delegated-signing-key-projected
+              mountPath: /projected-signing
+              readOnly: true
+            - name: model-gateway-tokens-private
+              mountPath: /private
+      {{- end }}
+      containers:
+        - name: bff
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.containerPort }}
+              protocol: TCP
+          env:
+            - name: BFF_TERMINATION_GRACE_MS
+              value: {{ .Values.terminationGraceMilliseconds | quote }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if $.Values.modelGatewayTokens.enabled }}
+            - name: BFF_MODEL_GATEWAY_TOKENS_FILE
+              value: {{ $.Values.modelGatewayTokens.filePath | quote }}
+            - name: BFF_DELEGATED_KEY_FILE
+              value: {{ $.Values.delegationKey.filePath | quote }}
+            - name: BFF_DELEGATED_KID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.delegationKey.secretName | quote }}
+                  key: {{ $.Values.delegationKey.keyIdSecretKey | quote }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.kafka.caSecretName }}
+            - name: kafka-ca
+              mountPath: /etc/greenguard/kafka
+              readOnly: true
+            {{- end }}
+            {{- if .Values.modelGatewayTokens.enabled }}
+            - name: model-gateway-tokens-private
+              mountPath: /private-model-gateway
+              readOnly: true
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.kafka.caSecretName }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.kafka.caSecretName | quote }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+              - {key: registry-ca.crt, path: registry-ca.crt}
+        {{- end }}
+        {{- if .Values.modelGatewayTokens.enabled }}
+        - name: model-gateway-tokens-projected
+          secret:
+            secretName: {{ .Values.modelGatewayTokens.secretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.modelGatewayTokens.secretKey | quote }}
+                path: gateway-tokens.json
+        - name: model-gateway-tokens-private
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: delegated-signing-key-projected
+          secret:
+            secretName: {{ .Values.delegationKey.secretName | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.delegationKey.privateKeySecretKey | quote }}
+                path: private-key.pem
+        {{- end }}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

@@ -14,6 +14,7 @@ type canonicalAccumulator struct {
 	seen      map[string]map[int64]bool
 	inventory map[string][]referenceEvent
 	cutoff    time.Time
+	domainErr error
 }
 
 func newCanonicalAccumulator(cutoff time.Time) *canonicalAccumulator {
@@ -28,6 +29,11 @@ func (a *canonicalAccumulator) add(e map[string]any) error {
 	stream := streamInventory
 	if event.Kind == typeTelemetry {
 		stream = streamTelemetry
+	}
+	if event.Kind != typeTelemetry && event.Kind != typeRegistered && event.Kind != typeBinding && event.Kind != typeStatus {
+		a.state.Notifications[event.Event] = event.Device
+		a.state.domainEvents = append(a.state.domainEvents, event)
+		return nil
 	}
 	if err := a.markSeen(event.Device+"/"+stream, event.Version); err != nil {
 		return err
@@ -115,6 +121,8 @@ func (a *canonicalAccumulator) finish() referenceState {
 		}
 		a.state.Readings[id] = r
 	}
+	a.domainErr = foldReferenceDomains(&a.state, a.state.domainEvents)
+	a.state.domainEvents = nil
 	return a.state
 }
 

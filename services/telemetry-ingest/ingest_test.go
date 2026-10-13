@@ -329,7 +329,7 @@ func TestIngestRefusalsStoreNothing(t *testing.T) {
 	_, err = f.ingestor.Ingest(ctx, notReady, randomUUID(), body, ingMeta())
 	ingMustReject(t, err, ReasonDeviceNotReady, 409)
 
-	if _, err := adminConn(t, ingTelemetryDB).Exec(ctx, "UPDATE device_bindings SET status = 'disabled' WHERE device_id = $1", f.device); err != nil {
+	if _, err := fixtureAdminExec(t, adminConn(t, ingTelemetryDB), f.tenant, "UPDATE device_bindings SET status = 'disabled' WHERE device_id = $1", f.device); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.ingest("off", `,"temperature_c":1`)

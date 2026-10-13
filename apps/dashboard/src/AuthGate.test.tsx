@@ -90,3 +90,18 @@ test("a signed-in user gets the shell with a Sign out button", async () => {
   renderGate();
   expect(await screen.findByRole("button", { name: "Sign out" })).toBeTruthy();
 });
+
+test("a full-page reload restores the IdP session silently", async () => {
+  const auth = fakeManager(async () => null) as ReturnType<
+    typeof fakeManager
+  > & {
+    signinSilent: () => Promise<unknown>;
+  };
+  auth.signinSilent = vi
+    .fn()
+    .mockResolvedValue({ expired: false, state: null });
+  manager = auth;
+  renderGate();
+  expect(await screen.findByRole("button", { name: "Sign out" })).toBeTruthy();
+  expect(auth.signinSilent).toHaveBeenCalledOnce();
+});

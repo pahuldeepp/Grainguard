@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-migration-gate
+description: Fail closed until every schema owner has a pinned migration Job
+type: application
+version: 0.1.0

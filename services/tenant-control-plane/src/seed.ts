@@ -42,6 +42,11 @@ export async function seedFromMembershipFile(db: Db, json: string) {
           SEED_ACTOR,
           cmd,
         );
+        const [organization] = await tx.$queryRaw<{ state: string }[]>`
+          SELECT state FROM organizations WHERE tenant_id=${entry.tenantId}::uuid`;
+        // Static membership import must not activate access for a newly
+        // requested tenant. Existing active tenants retain the legacy seed path.
+        if (organization?.state !== "active") return false;
         return grantFirstMembership(
           tx,
           entry.tenantId,

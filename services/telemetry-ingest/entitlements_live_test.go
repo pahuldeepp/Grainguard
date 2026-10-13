@@ -24,7 +24,7 @@ func TestENT07IngestQuotaThrottleAndNoAcceptedReadingDrop(t *testing.T) {
 	f := ingSetup(t)
 	admin := adminConn(t, ingTelemetryDB)
 	feedAge(t, admin, 0)
-	_, err := admin.Exec(context.Background(), `INSERT INTO tenant_entitlements
+	_, err := fixtureAdminExec(t, admin, f.tenant, `INSERT INTO tenant_entitlements
  (tenant_id,plan_key,plan_version,limits,features,source_version)
  VALUES($1,'standard',2,'{"ingest.readings_per_month":1}'::jsonb,'{}'::jsonb,1)`, f.tenant)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestENT10PaidPlanAppliedAnHourAgoStillHonored(t *testing.T) {
 	f := ingSetup(t)
 	admin := adminConn(t, ingTelemetryDB)
 	feedAge(t, admin, 0)
-	_, err := admin.Exec(context.Background(), `INSERT INTO tenant_entitlements
+	_, err := fixtureAdminExec(t, admin, f.tenant, `INSERT INTO tenant_entitlements
  (tenant_id,plan_key,plan_version,limits,features,source_version,applied_at)
  VALUES($1,'standard',2,'{"ingest.readings_per_month":1}'::jsonb,'{}'::jsonb,1,now()-interval '1 hour')`, f.tenant)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestENT10PaidPlanAppliedAnHourAgoStillHonored(t *testing.T) {
 func TestENT11StaleFeedFailsClosedToFreeDefaultsAndRecoversOnHeartbeat(t *testing.T) {
 	f := ingSetup(t)
 	admin := adminConn(t, ingTelemetryDB)
-	_, err := admin.Exec(context.Background(), `INSERT INTO tenant_entitlements
+	_, err := fixtureAdminExec(t, admin, f.tenant, `INSERT INTO tenant_entitlements
  (tenant_id,plan_key,plan_version,limits,features,source_version)
  VALUES($1,'standard',2,'{"ingest.readings_per_month":1}'::jsonb,'{}'::jsonb,1)`, f.tenant)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestENT11StaleFeedFailsClosedToFreeDefaultsAndRecoversOnHeartbeat(t *testin
 func TestENT12HeartbeatIsMonotonicAndTouchesNoTenantRow(t *testing.T) {
 	f := ingSetup(t)
 	admin := adminConn(t, ingTelemetryDB)
-	_, err := admin.Exec(context.Background(), `INSERT INTO tenant_entitlements
+	_, err := fixtureAdminExec(t, admin, f.tenant, `INSERT INTO tenant_entitlements
  (tenant_id,plan_key,plan_version,limits,features,source_version,applied_at)
  VALUES($1,'standard',2,'{"ingest.readings_per_month":7}'::jsonb,'{}'::jsonb,5,now()-interval '2 hours')`, f.tenant)
 	if err != nil {

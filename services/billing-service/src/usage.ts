@@ -109,8 +109,8 @@ export class BillingUsage {
     return withTenant(this.db, tenantId, async (tx) => {
       let totalAccepted = 0n;
       // Stable order avoids lock cycles if one batch spans a month boundary.
-      for (const startText of [...groups.keys()].sort((left, right) =>
-        left.localeCompare(right, "en"),
+      for (const startText of [...groups.keys()].sort(
+        (a, b) => Number(a > b) - Number(a < b),
       )) {
         const sourceStart = new Date(startText);
         const { start, row, late } = await lockPeriod(
@@ -160,17 +160,15 @@ export class BillingUsage {
           "usage_period",
           periodId(tenantId, "accepted_readings", start),
           version,
+          "usage.accepted",
           {
-            type: "usage.accepted",
-            payload: {
-              tenant_id: tenantId,
-              meter: "accepted_readings",
-              period_start: start.toISOString(),
-              quantity: count.toString(),
-              total: (row.total + count).toString(),
-              version: version.toString(),
-              late,
-            },
+            tenant_id: tenantId,
+            meter: "accepted_readings",
+            period_start: start.toISOString(),
+            quantity: count.toString(),
+            total: (row.total + count).toString(),
+            version: version.toString(),
+            late,
           },
           ctx,
         );
@@ -226,17 +224,15 @@ export class BillingUsage {
         "usage_period",
         periodId(tenantId, "active_devices", start),
         version,
+        "usage.accepted",
         {
-          type: "usage.accepted",
-          payload: {
-            tenant_id: tenantId,
-            meter: "active_devices",
-            period_start: start.toISOString(),
-            quantity: peak.toString(),
-            total: peak.toString(),
-            version: version.toString(),
-            late,
-          },
+          tenant_id: tenantId,
+          meter: "active_devices",
+          period_start: start.toISOString(),
+          quantity: peak.toString(),
+          total: peak.toString(),
+          version: version.toString(),
+          late,
         },
         ctx,
       );
@@ -302,10 +298,8 @@ export class BillingUsage {
         "billing_command",
         commandId,
         1n,
-        {
-          type: "billing.command_requested",
-          payload: { command_id: commandId, kind: "meter_report" },
-        },
+        "billing.command_requested",
+        { command_id: commandId, kind: "meter_report" },
         ctx,
       );
       await audit(

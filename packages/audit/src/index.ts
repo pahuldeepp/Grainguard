@@ -210,29 +210,20 @@ export function verifySignedAuditExport(options: {
     !verifyAuditManifest(manifest, signature, publicKey)
   )
     return false;
-  const lines = exportLines(file, manifest);
-  return lines !== undefined && verifyExportRows(lines, manifest);
-}
-
-function exportLines(
-  file: Buffer,
-  manifest: AuditManifest,
-): string[] | undefined {
   const lines = file.length === 0 ? [] : file.toString("utf8").split("\n");
-  if (lines.length && lines.pop() !== "") return undefined;
+  if (lines.length && lines.pop() !== "") return false;
   if (manifest.fileFormat === "csv") {
-    if (lines.shift() !== CSV_HEADER) return undefined;
+    if (lines.shift() !== CSV_HEADER) return false;
   } else if (manifest.fileFormat && manifest.fileFormat !== "jsonl")
-    return undefined;
-  if (lines.length !== manifest.rowCount) return undefined;
-  return lines;
-}
-
-function verifyExportRows(lines: readonly string[], manifest: AuditManifest) {
+    return false;
+  if (lines.length !== manifest.rowCount) return false;
   let previous = Buffer.alloc(32);
   try {
     for (const line of lines) {
-      const row = parseExportRow(line, manifest.fileFormat);
+      const row =
+        manifest.fileFormat === "csv"
+          ? parseCsvLine(line)
+          : (JSON.parse(line) as ExportRow);
       if (row.tenantId !== manifest.tenantId) return false;
       previous = createHash("sha256")
         .update(previous)
@@ -243,15 +234,6 @@ function verifyExportRows(lines: readonly string[], manifest: AuditManifest) {
     return false;
   }
   return previous.toString("hex") === manifest.rowChainSha256;
-}
-
-function parseExportRow(
-  line: string,
-  format: AuditManifest["fileFormat"],
-): ExportRow {
-  return format === "csv"
-    ? parseCsvLine(line)
-    : (JSON.parse(line) as ExportRow);
 }
 
 export const CSV_COLUMNS = [
@@ -280,17 +262,27 @@ export function encodeCsvRow(row: ExportRow): string {
 function parseCsvLine(line: string): ExportRow {
   const values: string[] = [];
   let position = 0;
-  for (let index = 0; index < CSV_COLUMNS.length; index++) {
-    const field = parseCsvField(line, position);
-    values.push(field.value);
-    position = field.next;
-    if (index < CSV_COLUMNS.length - 1) {
-      if (line[position] !== ",") throw new Error("invalid CSV");
-      position++;
-    } else if (position !== line.length) {
-      throw new Error("invalid CSV");
+  while (position < line.length) {
+    if (line[position++] !== '"') throw new Error("invalid CSV");
+    let value = "";
+    let closed = false;
+    while (position < line.length) {
+      const char = line[position++];
+      if (char === '"') {
+        if (line[position] === '"') {
+          value += '"';
+          position++;
+        } else {
+          closed = true;
+          break;
+        }
+      } else value += char;
     }
+    if (!closed || (position < line.length && line[position++] !== ","))
+      throw new Error("invalid CSV");
+    values.push(value);
   }
+  if (values.length !== CSV_COLUMNS.length) throw new Error("invalid CSV");
   return {
     auditId: values[0]!,
     tenantId: values[1]!,
@@ -302,30 +294,6 @@ function parseCsvLine(line: string): ExportRow {
     outcome: values[7]!,
     email: values[8] || undefined,
   };
-}
-
-function parseCsvField(
-  line: string,
-  start: number,
-): { value: string; next: number } {
-  if (line[start] !== '"') throw new Error("invalid CSV");
-  let position = start + 1;
-  let value = "";
-  while (position < line.length) {
-    const char = line[position]!;
-    if (char === '"') {
-      if (line[position + 1] === '"') {
-        value += '"';
-        position += 2;
-        continue;
-      }
-      return { value, next: position + 1 };
-    }
-    if (char === "\r" || char === "\n") throw new Error("invalid CSV");
-    value += char;
-    position++;
-  }
-  throw new Error("invalid CSV");
 }
 
 export { writeSignedAuditExport } from "./stream.js";

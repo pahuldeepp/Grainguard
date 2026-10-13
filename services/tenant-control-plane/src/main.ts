@@ -20,10 +20,7 @@ export async function start(env: NodeJS.ProcessEnv) {
     audit: config.audit && {
       directory: config.audit.directory,
       publicKey: createPublicKey(
-        config.audit.publicKeyPem.replaceAll(
-          String.raw`\n`,
-          String.fromCodePoint(10),
-        ),
+        config.audit.publicKeyPem.replaceAll("\\n", "\n"),
       ),
       linkSecret: config.audit.linkSecret,
       storage: config.audit.s3 && createS3ExportStorage(config.audit.s3),
@@ -31,6 +28,11 @@ export async function start(env: NodeJS.ProcessEnv) {
       sources: new AuditSources(
         config.audit.inventoryDatabaseUrl,
         config.audit.billingDatabaseUrl,
+        env,
+        {
+          service: "audit-export-worker",
+          roles: ["inventory_audit_reader"],
+        },
       ),
     },
     auth:
@@ -46,6 +48,8 @@ export async function start(env: NodeJS.ProcessEnv) {
         : {
             issuer: config.auth.issuer,
             audience: config.auth.audience,
+            tokenMode: config.auth.tokenMode,
+            cognitoClientIds: config.auth.cognitoClientIds,
             keys: { jwksUrl: config.auth.jwksUrl },
           }),
     tracing:

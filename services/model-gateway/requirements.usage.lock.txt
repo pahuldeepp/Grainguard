@@ -1,0 +1,4 @@
+# Reuses the Knowledge service's tested pinned transport/database versions.
+psycopg==3.3.6
+psycopg-binary==3.3.6
+confluent-kafka==2.13.2

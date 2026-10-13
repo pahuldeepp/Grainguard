@@ -1,0 +1,11 @@
+✔ checked-in Avro contracts match exactly and reject leaked or drifted fields (1.89975ms)
+✔ contract registration sets BACKWARD policy, checks existing schemas, and registers reviewed Avro (9.612625ms)
+✔ registered producer schemas must exactly match checked-in fields and BACKWARD policy (0.738208ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.659875

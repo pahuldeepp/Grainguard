@@ -1,0 +1,109 @@
+{{- $owners := include "ownerMigration.targets" .Values | fromYamlArray -}}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (.Values.sqlImage | default "")) }}{{ fail "migration preflight requires pinned psql image" }}{{ end }}
+{{- range $owner := $owners }}
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" $owner.image) }}{{ fail (printf "%s migration image must be an immutable OCI digest" $owner.name) }}{{ end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $owner.job }}
+  labels:
+    greenguard.io/migration-owner: {{ $owner.name }}
+    greenguard.io/migration-scope: {{ $owner.scope }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        greenguard.io/migration: "true"
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ if $owner.node }}1000{{ else if $owner.python }}10001{{ else }}65532{{ end }}
+        runAsGroup: {{ if $owner.node }}1000{{ else if $owner.python }}10001{{ else }}65532{{ end }}
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: target-identity
+          image: {{ $.Values.sqlImage | quote }}
+          command: [/bin/bash, -ec]
+          args:
+            - |
+{{ include "ownerMigration.uriCheck" $owner | indent 14 }}
+              psql -X --no-password "$MIGRATION_URL" -v ON_ERROR_STOP=1 <<'SQL'
+              DO $identity$
+              BEGIN
+                IF current_database() <> '{{ $owner.database }}' OR current_user <> '{{ $owner.migrator }}' THEN RAISE EXCEPTION 'migration database or role mismatch'; END IF;
+              END;
+              $identity$;
+              SQL
+          env:
+            - name: MIGRATION_URL
+              valueFrom:
+                secretKeyRef: {name: {{ $owner.secret }}, key: {{ $owner.key }}}
+            - {name: PGCONNECT_TIMEOUT, value: "10"}
+            - {name: PGOPTIONS, value: "-c statement_timeout=5000 -c lock_timeout=2000"}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: ca, mountPath: /rds-ca, readOnly: true}
+      containers:
+        - name: migrate
+          image: {{ $owner.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GG_RDS
+              value: "1"
+{{- if $owner.node }}
+            - name: HOME
+              value: /tmp
+{{- end }}
+            - name: {{ $owner.key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $owner.secret }}
+                  key: {{ $owner.key }}
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: ca
+              mountPath: /rds-ca
+              readOnly: true
+{{- if $owner.node }}
+            - name: tmp
+              mountPath: /tmp
+{{- end }}
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ $.Values.caSecret | quote }}
+            items:
+              - key: ca.pem
+                path: ca.pem
+{{- if $owner.node }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+{{- end }}
+{{- end }}

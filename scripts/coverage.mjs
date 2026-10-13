@@ -25,7 +25,7 @@ for (const workspace of [
   "services/tenant-control-plane",
   "services/billing-service",
   "packages/membership-client",
-  "packages/kafka-runtime",
+  "packages/kafka-security",
 ]) {
   const filename = `${workspace}/coverage/lcov.info`;
   const normalized = readFileSync(filename, "utf8").replace(
@@ -183,12 +183,16 @@ writeFileSync(
   ),
 );
 run("python3", ["-m", "venv", ".local/search-venv"]);
-run(".local/search-venv/bin/pip", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "pip",
   "install",
   "-r",
   "services/search-indexer/requirements-dev.txt",
 ]);
-run(".local/search-venv/bin/coverage", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "coverage",
   "run",
   "--source=services/search-indexer",
   "--omit=*/test_*.py,*/live_*.py",
@@ -200,7 +204,9 @@ run(".local/search-venv/bin/coverage", [
   "-p",
   "test_*.py",
 ]);
-run(".local/search-venv/bin/coverage", [
+run(".local/search-venv/bin/python", [
+  "-m",
+  "coverage",
   "xml",
   "-o",
   "services/search-indexer/coverage.xml",
@@ -214,14 +220,18 @@ writeFileSync(
   ),
 );
 run("python3", ["-m", "venv", ".local/risk-venv"]);
-run(".local/risk-venv/bin/pip", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "pip",
   "install",
   "-q",
   "-r",
   "services/risk-engine/requirements-dev.txt",
 ]);
 // Live greenguard_risk tests run here too (make coverage runs db-migrate first).
-run(".local/risk-venv/bin/coverage", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "coverage",
   "run",
   "--branch",
   "--data-file=coverage/risk-engine.coverage",
@@ -236,7 +246,9 @@ run(".local/risk-venv/bin/coverage", [
   "-p",
   "test_*.py",
 ]);
-run(".local/risk-venv/bin/coverage", [
+run(".local/risk-venv/bin/python", [
+  "-m",
+  "coverage",
   "xml",
   "--data-file=coverage/risk-engine.coverage",
   "-o",

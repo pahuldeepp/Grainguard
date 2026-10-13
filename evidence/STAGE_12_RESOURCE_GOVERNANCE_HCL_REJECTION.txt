@@ -1,0 +1,3 @@
+PASS service-default: peak app requests 200.0m CPU / 256.0Mi memory (excludes sidecars injected at admission, surge and init overlap)
+FAIL resource governance: compute_node_max_size: default must be a complete unambiguous integer literal
+exit=1

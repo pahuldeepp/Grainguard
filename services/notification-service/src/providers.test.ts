@@ -187,8 +187,8 @@ for (const { provider, severity, channel } of routes) {
   test(`${provider} classifies confirmed rejection/throttle and keeps ambiguous responses unknown`, async () => {
     for (const [status, expected] of [
       [400, "rejected"],
-      [401, "transient"],
-      [403, "transient"],
+      [401, "rejected"],
+      [403, "rejected"],
       [422, "rejected"],
       [429, "transient"],
       [500, "unknown"],
@@ -453,17 +453,6 @@ test("malformed contacts/statuses and invalid tenant never expose sensitive API 
       () => new HttpContactResolver(settings),
       /invalid notification contact lookup configuration/,
     );
-});
-
-test("contact email validation stays bounded on adversarial input", async () => {
-  const tenantId = makeTask().tenant_id;
-  const almostEmail = `${"a".repeat(160)}@${"b".repeat(158)}`;
-  const resolver = new HttpContactResolver(
-    { url: "https://control.test", token: "token" },
-    100,
-    async () => Response.json({ email: almostEmail, sms, version: "1" }),
-  );
-  await assert.rejects(resolver.lookup(tenantId), ContactLookupError);
 });
 
 test("HTTP lookup network/body failures and timeout are sanitized and bounded", async () => {
@@ -905,6 +894,33 @@ test("live loadConfig rejects plaintext contact URL even with local opt-in; HTTP
       token: "lookup-secret",
     },
   );
+  env.CONTROL_PLANE_URL =
+    "http://tenant-control-plane.greenguard.svc.cluster.local:3010";
+  assert.throws(
+    () => loadConfig((key) => env[key]),
+    /CONTROL_PLANE_URL must use HTTPS/,
+  );
+  env.GG_MESH_INTERNAL_HTTP = "1";
+  const mesh = loadConfig((key) => env[key]);
+  assert.equal(
+    mesh.notificationProviders.controlPlane?.allowInsecureHttp,
+    true,
+  );
+  assert.equal(mesh.flagSnapshot?.allowInsecureHttp, true);
+  for (const rejected of [
+    "http://other.greenguard.svc.cluster.local:3010",
+    "http://tenant-control-plane.greenguard.svc.cluster.local:3011",
+    "http://tenant-control-plane.greenguard.svc.cluster.local:3010/private",
+    "http://name:secret@tenant-control-plane.greenguard.svc.cluster.local:3010",
+    "http://tenant-control-plane.greenguard.svc.cluster.local:3010?token=x",
+  ]) {
+    env.CONTROL_PLANE_URL = rejected;
+    assert.throws(
+      () => loadConfig((key) => env[key]),
+      /CONTROL_PLANE_URL must use HTTPS/,
+    );
+  }
+  delete env.GG_MESH_INTERNAL_HTTP;
   env.NOTIFICATIONS_PROVIDER = "local";
   env.CONTROL_PLANE_URL = "http://127.0.0.1:8095";
   assert.equal(

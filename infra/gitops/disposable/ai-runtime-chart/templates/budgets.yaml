@@ -1,0 +1,71 @@
+{{- define "ai.budgetJobSpec" -}}
+backoffLimit: 2
+activeDeadlineSeconds: 300
+template:
+  metadata:
+    labels: {app.kubernetes.io/name: ai-migration, app.kubernetes.io/part-of: ai-runtime, greenguard.io/cell: {{ .Values.cell | quote }}}
+    annotations: {sidecar.istio.io/inject: "false"}
+  spec:
+    restartPolicy: Never
+    automountServiceAccountToken: false
+    securityContext:
+{{ include "ai.security" . | indent 6 }}
+    initContainers:
+      - name: private-budget
+        image: {{ .Values.images.knowledge | quote }}
+        command: [python, -c, "import os,pathlib; src=pathlib.Path('/source'); dst=pathlib.Path('/private'); [( (dst/k).write_bytes((src/k).read_bytes()),os.chmod(dst/k,0o600)) for k in ('budget-dsn','budget-caps.json')]"]
+        securityContext:
+{{ include "ai.containerSecurity" . | indent 10 }}
+        resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+        volumeMounts:
+          - {name: source, mountPath: /source, readOnly: true}
+          - {name: private, mountPath: /private}
+    containers:
+      - name: budget-bootstrap
+        image: {{ .Values.images.gateway | quote }}
+        command: [/model-gateway-budget-bootstrap]
+        env:
+          - {name: MODEL_GATEWAY_BUDGET_DSN_FILE, value: /private/budget-dsn}
+          - {name: MODEL_GATEWAY_BUDGET_CAPS_FILE, value: /private/budget-caps.json}
+          - {name: AI_RDS_HOST, value: {{ .Values.rdsHost | quote }}}
+        securityContext:
+{{ include "ai.containerSecurity" . | indent 10 }}
+        resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 250m, memory: 128Mi}}
+        volumeMounts:
+          - {name: private, mountPath: /private, readOnly: true}
+          - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+    volumes:
+      - {name: source, secret: {secretName: greenguard-model-gateway-budget-bootstrap, defaultMode: 0440, items: [{key: budget-dsn, path: budget-dsn}, {key: budget-caps.json, path: budget-caps.json}]}}
+      - {name: private, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+      - {name: rds-ca, secret: {secretName: greenguard-rds-ca, defaultMode: 0440, items: [{key: ca.pem, path: ca.pem}]}}
+{{- end }}
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-budget-bootstrap-{{ trunc 8 (sha256sum (printf "%s:%s:%s" .Values.revision .Values.secretSyncEpoch .Values.images.gateway)) }}
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}, greenguard.io/ai-gate: budget-bootstrap}
+  annotations: {argocd.argoproj.io/sync-wave: "12"}
+spec:
+{{ include "ai.budgetJobSpec" . | indent 2 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ai-budget-reconcile
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "12"}
+spec:
+  # The provisioner creates the current UTC month only. Running daily ensures
+  # the new month receives caps even if the cluster missed the month boundary.
+  schedule: "0 0 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 86400
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+{{ include "ai.budgetJobSpec" . | indent 6 }}
+{{- end }}

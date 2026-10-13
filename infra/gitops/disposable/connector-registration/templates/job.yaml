@@ -1,0 +1,139 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "registration image must be an immutable OCI digest" }}{{ end }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.[a-zA-Z0-9.-]+$" .Values.rdsHost) }}{{ fail "rdsHost must be an RDS DNS hostname" }}{{ end }}
+{{- if .Values.centralRetirementReceiptSecret }}
+{{- range $key := list "credentialSecret" "caSecret" }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (index $.Values $key | default "")) }}{{ fail "retirement requires central CDC and CA Secret names" }}{{ end }}
+{{- end }}
+{{- if not (and (kindIs "slice" .Values.rdsCIDRs) (gt (len .Values.rdsCIDRs) 0)) }}{{ fail "retirement requires bounded private RDS CIDRs" }}{{ end }}
+{{- range .Values.rdsCIDRs }}
+{{- if not (regexMatch "^(10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3}|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3})/(1[6-9]|2[0-9]|3[0-2])$" .) }}{{ fail "retirement RDS CIDRs must be bounded private IPv4" }}{{ end }}
+{{- range (splitList "." (index (splitList "/" .) 0)) }}{{ if gt (int .) 255 }}{{ fail "invalid retirement RDS IPv4 octet" }}{{ end }}{{ end }}
+{{- end }}
+{{- end }}
+{{- $script := .Files.Get "files/register.py" }}
+{{- $files := .Files.Glob "files/connectors/*.json" }}
+{{- if ne (len $files) 8 }}{{ fail "exactly eight pinned connector configs are required" }}{{ end }}
+{{- $revision := sha256sum (printf "%s\n%s\n%s\n%s" .Values.image (printf "%s-%s" .Values.rdsHost (toJson .Values.shards)) (printf "%s-%s-%s" $script .Values.centralRetirementReceiptSecret .Values.centralRetirementReceiptRevision) (printf "%s-%s" ($files.AsConfig | toString) (toJson (dict "connectUrl" .Values.connectUrl "credentialSecret" .Values.credentialSecret "caSecret" .Values.caSecret "rdsCIDRs" .Values.rdsCIDRs)))) | trunc 12 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connector-registration-{{ $revision }}
+data:
+  register.py: |
+{{ $script | indent 4 }}
+{{- range $path, $_ := $files }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: connector-registration-{{ $revision }}
+  labels: {greenguard.io/lifecycle: disposable}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {app: connector-registration, greenguard.io/lifecycle: disposable}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: register
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/registration/register.py"]
+          env:
+            - {name: RDS_HOST, value: {{ .Values.rdsHost | quote }}}
+            - {name: CONNECT_URL, value: {{ .Values.connectUrl | quote }}}
+{{- if .Values.shards }}
+            - name: SHARD_HOSTS_JSON
+              value: {{ toJson .Values.shards | quote }}
+{{- end }}
+{{- if .Values.centralRetirementReceiptSecret }}
+{{- if not .Values.shards }}{{ fail "central retirement requires a four-shard registry" }}{{ end }}
+{{- if not (regexMatch "^[a-f0-9]{64}$" .Values.centralRetirementReceiptRevision) }}{{ fail "central retirement requires the exact receipt SHA-256 revision" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.centralRetirementReceiptSecret) }}{{ fail "central retirement receipt must be a Secret name" }}{{ end }}
+            - name: CDC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.credentialSecret | quote }}, key: CDC_DB_PASSWORD}
+            - {name: CENTRAL_RETIREMENT_RECEIPT_FILE, value: /cutover/receipt.json}
+            - {name: CENTRAL_RETIREMENT_RECEIPT_SHA256, value: {{ .Values.centralRetirementReceiptRevision | quote }}}
+{{- end }}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: registration, mountPath: /registration, readOnly: true}
+{{- if .Values.centralRetirementReceiptSecret }}
+            - {name: cutover-receipt, mountPath: /cutover, readOnly: true}
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+{{- end }}
+      volumes:
+        - name: registration
+          configMap:
+            name: connector-registration-{{ $revision }}
+            items:
+              - {key: register.py, path: register.py}
+{{- range $path, $_ := $files }}
+              - {key: {{ base $path }}, path: connectors/{{ base $path }}}
+{{- end }}
+
+{{- if .Values.centralRetirementReceiptSecret }}
+        - name: rds-ca
+          secret:
+            secretName: {{ .Values.caSecret | quote }}
+            items: [{key: ca.pem, path: ca.pem}]
+        - name: cutover-receipt
+          secret:
+            secretName: {{ .Values.centralRetirementReceiptSecret | quote }}
+            items: [{key: receipt.json, path: receipt.json}]
+{{- end }}
+
+{{- if .Values.centralRetirementReceiptSecret }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: connector-retirement-egress
+spec:
+  podSelector:
+    matchLabels: {app: connector-registration}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: connect}
+      ports: [{protocol: TCP, port: 8083}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: istio-system}
+          podSelector:
+            matchLabels: {app: istiod}
+      ports: [{protocol: TCP, port: 15012}, {protocol: TCP, port: 15014}]
+    - to:
+{{- range .Values.rdsCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 5432}]
+{{- end }}

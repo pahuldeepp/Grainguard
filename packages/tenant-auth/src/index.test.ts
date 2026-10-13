@@ -118,6 +118,78 @@ test("wrong issuer and audience are rejected", async () => {
   );
 });
 
+test("opt-in Cognito access mode accepts only mapped user access tokens for allowed clients", async () => {
+  const mapped = createTokenVerifier({
+    issuer: issuer.issuer,
+    tokenMode: "cognito-access",
+    cognitoClientIds: ["web-client", "ios-client"],
+    keys: { getKey: issuer.getKey },
+    mapIdentity: (claims) => ({
+      ...claims,
+      tenant_id: TEST_TENANT_ID,
+      roles: ["viewer"],
+    }),
+  });
+  const user = {
+    aud: undefined,
+    token_use: "access",
+    client_id: "ios-client",
+    username: "member-1",
+    auth_time: Math.floor(Date.now() / 1000),
+    sub: "member-1",
+  };
+  assert.equal(
+    (await mapped.verify(bearer(await issuer.sign(user)))).subject,
+    "member-1",
+  );
+  for (const bad of [
+    { token_use: "id" },
+    { client_id: "unapproved" },
+    { username: undefined },
+    { auth_time: undefined },
+    { grant_type: "client_credentials" },
+    { sub: "ios-client" },
+    { aud: "https://another-api.example" },
+  ])
+    await rejects(
+      mapped.verify(bearer(await issuer.sign({ ...user, ...bad }))),
+      401,
+      "invalid_token",
+    );
+  assert.throws(
+    () =>
+      createTokenVerifier({
+        issuer: issuer.issuer,
+        tokenMode: "cognito-access",
+        cognitoClientIds: ["ios-client"],
+        keys: { getKey: issuer.getKey },
+      }),
+    /mapped identity/,
+  );
+  const bound = createTokenVerifier({
+    issuer: issuer.issuer,
+    tokenMode: "cognito-access",
+    audience: "https://api.greenguard.example",
+    cognitoClientIds: ["ios-client"],
+    keys: { getKey: issuer.getKey },
+    mapIdentity: (claims) => ({
+      ...claims,
+      tenant_id: TEST_TENANT_ID,
+      roles: ["viewer"],
+    }),
+  });
+  await bound.verify(
+    bearer(
+      await issuer.sign({ ...user, aud: "https://api.greenguard.example" }),
+    ),
+  );
+  await rejects(
+    bound.verify(bearer(await issuer.sign(user))),
+    401,
+    "invalid_token",
+  );
+});
+
 test("expired token is expired_token, within tolerance passes", async () => {
   await rejects(
     verifier.verify(bearer(await issuer.sign({}, { expiresInSec: -120 }))),

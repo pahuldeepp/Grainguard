@@ -1,0 +1,42 @@
+{{- if .Values.autoscaling.hpa.enabled }}
+{{- if .Values.autoscaling.keda.enabled }}
+{{- fail "enable only one of autoscaling.hpa or autoscaling.keda" }}
+{{- end }}
+{{- if not .Values.service.enabled }}
+{{- fail "autoscaling.hpa requires service.enabled=true for an HTTP workload" }}
+{{- end }}
+{{- if or (ge (int .Values.autoscaling.hpa.minReplicas) (int .Values.autoscaling.hpa.maxReplicas)) (lt (int .Values.autoscaling.hpa.cpuAverageUtilization) 1) (gt (int .Values.autoscaling.hpa.cpuAverageUtilization) 100) }}
+{{- fail "HPA requires minReplicas < maxReplicas and CPU utilization from 1 to 100" }}
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "greenguard-service.fullname" . }}
+  labels:
+    {{- include "greenguard-service.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "greenguard-service.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.hpa.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.hpa.cpuAverageUtilization }}
+    {{- with .Values.autoscaling.hpa.memoryAverageUtilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}

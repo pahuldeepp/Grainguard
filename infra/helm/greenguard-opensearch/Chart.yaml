@@ -1,0 +1,6 @@
+apiVersion: v2
+name: greenguard-opensearch
+description: Disposable single-node OpenSearch for GreenGuard inventory search
+type: application
+version: 0.1.0
+appVersion: "3.8.0"

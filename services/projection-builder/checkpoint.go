@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	common "greenguard.local/go-common"
 	"io"
 	"strconv"
 	"time"
@@ -52,6 +53,9 @@ func parseCheckpoint(m Message, partitions int) (FeedCheckpoint, error) {
 }
 
 func (s *Store) Heartbeat(ctx context.Context, m Message) error {
+	if _, ok := s.DB.(*common.ShardedDB); ok {
+		return s.forEachInfrastructure(ctx, func(local *Store) error { return local.Heartbeat(ctx, m) })
+	}
 	cp, err := parseCheckpoint(m, 6)
 	if err != nil {
 		return ErrCheckpoint
@@ -67,7 +71,7 @@ func (s *Store) Heartbeat(ctx context.Context, m Message) error {
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset,source_time,source_position,raw_position,partition_count)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,source_time=EXCLUDED.source_time,source_position=EXCLUDED.source_position,raw_position=EXCLUDED.raw_position,partition_count=EXCLUDED.partition_count,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset AND projection_checkpoints.raw_position<EXCLUDED.raw_position AND projection_checkpoints.source_time<=EXCLUDED.source_time AND projection_checkpoints.source_position<=EXCLUDED.source_position`, infrastructureTenant, consumerName, m.Topic, m.Partition, m.Offset, cp.SourceTime, cp.SourcePosition, cp.RawPosition, cp.Partitions)
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset AND projection_checkpoints.raw_position<EXCLUDED.raw_position AND projection_checkpoints.source_time<=EXCLUDED.source_time AND projection_checkpoints.source_position<=EXCLUDED.source_position`, infrastructureTenant, consumerName, m.sourceTopic(), m.Partition, m.Offset, cp.SourceTime, cp.SourcePosition, cp.RawPosition, cp.Partitions)
 		if err != nil {
 			return err
 		}
@@ -81,7 +85,7 @@ func (s *Store) Heartbeat(ctx context.Context, m Message) error {
 func saveVersionHeartbeatFrontier(ctx context.Context, tx pgx.Tx, m Message) error {
 	_, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset) VALUES($1,$2,$3,$4,$5)
  ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.Topic, m.Partition, m.Offset)
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.sourceTopic(), m.Partition, m.Offset)
 	return err
 }
 func minTime(a, b time.Time) time.Time {
@@ -94,6 +98,17 @@ func minTime(a, b time.Time) time.Time {
 // FeedAge requires every canonical inventory partition. Telemetry progress cannot
 // prove inventory freshness. The extra five seconds conservatively bounds clock skew.
 func (s *Store) FeedAge(ctx context.Context) (time.Duration, error) {
+	if _, ok := s.DB.(*common.ShardedDB); ok {
+		var oldest time.Duration
+		err := s.forEachInfrastructure(ctx, func(local *Store) error {
+			age, err := local.FeedAge(ctx)
+			if age > oldest {
+				oldest = age
+			}
+			return err
+		})
+		return oldest, err
+	}
 	var count int
 	var oldest, newest *time.Time
 	schema := s.Schema
@@ -101,7 +116,7 @@ func (s *Store) FeedAge(ctx context.Context) (time.Duration, error) {
 		schema = "public"
 	}
 	err := WithTenantSchema(ctx, s.DB, infrastructureTenant, schema, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*),min(source_time),max(source_time) FROM projection_checkpoints WHERE tenant_id=$1 AND consumer_name=$2 AND topic=$3 AND partition>=0 AND partition<6 AND partition_count=6`, infrastructureTenant, consumerName, topicInventory).Scan(&count, &oldest, &newest)
+		return tx.QueryRow(ctx, `SELECT count(*),min(source_time),max(source_time) FROM projection_checkpoints WHERE tenant_id=$1 AND consumer_name=$2 AND topic=$3 AND partition>=0 AND partition<6 AND partition_count=6`, infrastructureTenant, consumerName, s.TopicPrefix+topicInventory).Scan(&count, &oldest, &newest)
 	})
 	if err != nil {
 		return 0, err

@@ -1,0 +1,28 @@
+nameOverride: tenant-control-plane
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  ingressSources:
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: billing-service, app.kubernetes.io/instance: billing-service } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: jobs-worker, app.kubernetes.io/instance: jobs-worker } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: audit-export-worker, app.kubernetes.io/instance: audit-export-worker } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: read-api, app.kubernetes.io/instance: read-api } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: device-service, app.kubernetes.io/instance: device-service } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: workflow-alerts, app.kubernetes.io/instance: workflow-alerts } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: notification-service, app.kubernetes.io/instance: notification-service } }
+autoscaling:
+  hpa: { enabled: true }
+service:
+  port: 3010
+  containerPort: 3010
+container:
+  name: tenant-control-plane
+  envFrom:
+    - secretRef:
+        name: tenant-control-plane-config
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

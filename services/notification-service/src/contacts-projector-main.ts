@@ -6,16 +6,9 @@ import {
   contactsProjectorReady,
 } from "./contacts-cdc.js";
 
-export class ProjectorConfigurationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProjectorConfigurationError";
-  }
-}
-
 function required(name: string): string {
   const value = process.env[name]?.trim();
-  if (!value) throw new ProjectorConfigurationError(`${name} is required`);
+  if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
@@ -26,31 +19,8 @@ export function positivePort(
   if (value === undefined || value === "") return fallback;
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
-    throw new ProjectorConfigurationError(
-      "CONTACTS_PROJECTOR_HTTP_PORT must be a valid port",
-    );
+    throw new Error("CONTACTS_PROJECTOR_HTTP_PORT must be a valid port");
   return port;
-}
-
-export function projectorStartupFailure(error: unknown): {
-  error_name: string;
-  error_code?: string;
-  message?: string;
-} {
-  const name = error instanceof Error ? error.name : "UnknownError";
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? (error as { code?: unknown }).code
-      : undefined;
-  return {
-    error_name: name,
-    ...(typeof code === "string" && /^[A-Z0-9_]+$/.test(code)
-      ? { error_code: code }
-      : {}),
-    ...(error instanceof ProjectorConfigurationError
-      ? { message: error.message }
-      : {}),
-  };
 }
 
 export async function listenWithCleanup(
@@ -76,9 +46,7 @@ export async function main(): Promise<void> {
     .map((x) => x.trim())
     .filter(Boolean);
   if (brokers.length === 0)
-    throw new ProjectorConfigurationError(
-      "KAFKA_BROKERS must include at least one broker",
-    );
+    throw new Error("KAFKA_BROKERS must include at least one broker");
   const tableName = required("NOTIFICATION_STATE_TABLE");
   const schemaRegistryUrl = required("SCHEMA_REGISTRY_URL");
   const endpoint = process.env.DYNAMODB_ENDPOINT?.trim();
@@ -88,9 +56,6 @@ export async function main(): Promise<void> {
     tableName,
     region,
     ...(endpoint && { endpoint }),
-    ...(process.env.DYNAMODB_LOCAL_CREDENTIALS === "true" && {
-      localCredentials: true,
-    }),
   });
   const metrics = createContactsProjectorMetrics();
   const stopConsumer = startContactsProjector(store, brokers, metrics, {
@@ -137,33 +102,22 @@ export async function main(): Promise<void> {
 
   let stopping: Promise<void> | undefined;
   const stop = () => {
-    stopping ??= stopProjector(server, stopConsumer, store.close.bind(store));
+    stopping ??= (async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+      await stopConsumer();
+      store.close();
+    })();
     return stopping;
   };
   process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
   process.once("SIGINT", () => void stop().then(() => process.exit(0)));
 }
 
-export async function stopProjector(
-  server: Server,
-  stopConsumer: () => Promise<void>,
-  closeStore: () => void,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  await stopConsumer();
-  closeStore();
-}
-
 if (process.argv[1]?.endsWith("contacts-projector-main.js")) {
-  try {
-    await main();
-  } catch (error) {
-    console.error(
-      "notification contacts projector failed to start",
-      projectorStartupFailure(error),
-    );
+  main().catch(() => {
+    console.error("notification contacts projector failed to start");
     process.exitCode = 1;
-  }
+  });
 }

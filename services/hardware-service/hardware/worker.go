@@ -77,7 +77,7 @@ func (w Worker) process(ctx context.Context, m transport.Message) error {
 	if err != nil {
 		return err
 	}
-	if err := transport.Publish(ctx, w.Client, ResultTopic, m.Key, data, resultHeaders(result)); err != nil {
+	if err := w.Store.WithExternalAdmission(ctx, result.TenantID, func() error { return transport.Publish(ctx, w.Client, ResultTopic, m.Key, data, resultHeaders(result)) }); err != nil {
 		return fmt.Errorf("publish result: %w", err)
 	}
 	if err := w.Store.MarkPublished(ctx, result); err != nil {
@@ -88,8 +88,41 @@ func (w Worker) process(ctx context.Context, m transport.Message) error {
 
 // KafkaClient creates a fail-closed consumer with manual offset commits.
 func KafkaClient(brokers []string) (*kgo.Client, error) {
+	return KafkaClientWithReadiness(brokers, nil)
+}
+
+// KafkaClientWithReadiness reports when the consumer group has an assigned
+// partition, and clears that signal while ownership is being revoked or lost.
+// This is a stronger worker-readiness signal than merely reaching a broker.
+func KafkaClientWithReadiness(brokers []string, onAssignment func(bool)) (*kgo.Client, error) {
+	return KafkaClientForGroupWithReadiness(brokers, ConsumerGroup, onAssignment)
+}
+
+// KafkaClientForGroupWithReadiness isolates independent environments sharing a broker.
+func KafkaClientForGroupWithReadiness(brokers []string, group string, onAssignment func(bool)) (*kgo.Client, error) {
+	if strings.TrimSpace(group) == "" {
+		return nil, errors.New("hardware consumer group required")
+	}
 	if len(brokers) == 0 {
 		return nil, errors.New("KAFKA_BROKERS required")
 	}
-	return kgo.NewClient(transport.Options(brokers, ConsumerGroup, []string{CommandTopic})...)
+	extra := []kgo.Opt{}
+	if onAssignment != nil {
+		extra = append(extra,
+			kgo.OnPartitionsAssigned(func(_ context.Context, _ *kgo.Client, assigned map[string][]int32) {
+				count := 0
+				for _, partitions := range assigned {
+					count += len(partitions)
+				}
+				onAssignment(count > 0)
+			}),
+			kgo.OnPartitionsRevoked(func(context.Context, *kgo.Client, map[string][]int32) { onAssignment(false) }),
+			kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) { onAssignment(false) }),
+		)
+	}
+	options, err := transport.SecureOptions(brokers, group, []string{CommandTopic}, extra...)
+	if err != nil {
+		return nil, err
+	}
+	return kgo.NewClient(options...)
 }

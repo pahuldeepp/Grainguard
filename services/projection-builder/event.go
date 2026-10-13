@@ -7,31 +7,44 @@ import (
 )
 
 const (
-	reasonEnvelope     = "bad_envelope"
-	reasonSchema       = "schema_invalid"
-	reasonUnknown      = "unknown_event_type"
-	reasonBigint       = "bad_bigint"
-	fieldPayload       = "payload"
-	fieldTenant        = "tenant_id"
-	fieldType          = "event_type"
-	fieldSchema        = "schema_version"
-	fieldVersion       = "aggregate_version"
-	fieldAggregate     = "aggregate_id"
-	fieldTrace         = "traceparent"
-	fieldBinding       = "binding_version"
-	fieldOccurred      = "occurred_at"
-	fieldEvent         = "event_id"
-	fieldCorrelation   = "correlation_id"
-	fieldCausation     = "causation_id"
-	fieldAggregateType = "aggregate_type"
-	fieldDevice        = "device_id"
-	typeTelemetry      = "telemetry.recorded"
-	typeRegistered     = "device.registered"
-	typeBinding        = "device.binding_changed"
-	typeStatus         = "device.status_changed"
-	topicTelemetry     = "greenguard.telemetry.recorded.v1"
-	topicInventory     = "greenguard.inventory.device.v1"
-	topicQuarantine    = "greenguard.quarantine.v1"
+	reasonEnvelope       = "bad_envelope"
+	reasonSchema         = "schema_invalid"
+	reasonUnknown        = "unknown_event_type"
+	reasonBigint         = "bad_bigint"
+	fieldPayload         = "payload"
+	fieldTenant          = "tenant_id"
+	fieldType            = "event_type"
+	fieldSchema          = "schema_version"
+	fieldVersion         = "aggregate_version"
+	fieldAggregate       = "aggregate_id"
+	fieldTrace           = "traceparent"
+	fieldBinding         = "binding_version"
+	fieldOccurred        = "occurred_at"
+	fieldEvent           = "event_id"
+	fieldCorrelation     = "correlation_id"
+	fieldCausation       = "causation_id"
+	fieldAggregateType   = "aggregate_type"
+	fieldDevice          = "device_id"
+	typeTelemetry        = "telemetry.recorded"
+	typeSiteChanged      = "site.changed"
+	typeBinChanged       = "bin.changed"
+	typeCableLayout      = "cable.layout_changed"
+	typeRiskAssessed     = "risk.assessed"
+	typeRiskInvalidated  = "risk.assessment_invalidated"
+	typeRiskPolicy       = "risk.policy_changed"
+	typeRegistered       = "device.registered"
+	typeBinding          = "device.binding_changed"
+	typeStatus           = "device.status_changed"
+	topicTelemetry       = "greenguard.telemetry.recorded.v1"
+	topicTelemetryV2     = "greenguard.telemetry.recorded.v2"
+	topicInventory       = "greenguard.inventory.device.v1"
+	topicFacility        = "greenguard.inventory.facility.v1"
+	topicSensorLayout    = "greenguard.inventory.sensor-layout.v1"
+	topicRiskV1          = "greenguard.risk.assessment.v1"
+	topicRiskV2          = "greenguard.risk.assessment.v2"
+	topicRiskInvalidated = "greenguard.risk.assessment_invalidated.v1"
+	topicRiskPolicy      = "greenguard.risk.policy.v1"
+	topicQuarantine      = "greenguard.quarantine.v1"
 )
 
 type failure struct{ Reason, Detail string }
@@ -52,11 +65,28 @@ func bigint(value any) (string, *failure) {
 	return text, nil
 }
 
-var eventTopics = map[string]string{typeTelemetry: topicTelemetry, typeRegistered: topicInventory, typeBinding: topicInventory, typeStatus: topicInventory}
+var eventTopics = map[string]string{
+	typeTelemetry + "@1":       topicTelemetry,
+	typeTelemetry + "@2":       topicTelemetryV2,
+	typeRegistered + "@1":      topicInventory,
+	typeBinding + "@1":         topicInventory,
+	typeStatus + "@1":          topicInventory,
+	typeSiteChanged + "@1":     topicFacility,
+	typeBinChanged + "@1":      topicFacility,
+	typeCableLayout + "@1":     topicSensorLayout,
+	typeRiskAssessed + "@1":    topicRiskV1,
+	typeRiskAssessed + "@2":    topicRiskV2,
+	typeRiskPolicy + "@1":      topicRiskPolicy,
+	typeRiskInvalidated + "@1": topicRiskInvalidated,
+}
+
+var projectionTopics = []string{
+	topicInventory, topicTelemetry, topicTelemetryV2, topicFacility,
+	topicSensorLayout, topicRiskV1, topicRiskV2, topicRiskPolicy, topicRiskInvalidated,
+}
 
 func route(event map[string]any) string {
-	kind, _ := event[fieldType].(string)
-	return eventTopics[kind]
+	return eventTopics[routingKey(event)]
 }
 
 func routingKey(event map[string]any) string {
@@ -74,20 +104,88 @@ func semantic(event map[string]any) *failure {
 		return fail(reasonSchema, "reserved infrastructure tenant")
 	}
 	payload := event[fieldPayload].(map[string]any) // schema validated before semantics
-	if err := payloadIdentities(payload); err != nil {
+	version, err := bigint(event[fieldVersion])
+	if err != nil {
 		return err
-	}
-	for _, value := range []any{event[fieldVersion], payload[fieldBinding]} {
-		if _, err := bigint(value); err != nil {
-			return err
-		}
-	}
-	if payload[fieldDevice] != event[fieldAggregate] || (event[fieldAggregateType] == "device" && payload[fieldBinding] != event[fieldVersion]) {
-		return fail(reasonSchema, "device identity and binding version must match aggregate")
 	}
 	parent := event[fieldTrace].(string)
 	if strings.HasPrefix(parent, "00-"+strings.Repeat("0", 32)+"-") || strings.Split(parent, "-")[2] == strings.Repeat("0", 16) {
 		return fail(reasonSchema, "trace and parent IDs must not be zero")
+	}
+	switch event[fieldType] {
+	case typeTelemetry, typeRegistered, typeBinding, typeStatus:
+		if err := payloadIdentities(payload); err != nil {
+			return err
+		}
+		binding, bad := bigint(payload[fieldBinding])
+		if bad != nil {
+			return bad
+		}
+		if payload[fieldDevice] != event[fieldAggregate] || (event[fieldAggregateType] == "device" && binding != version) {
+			return fail(reasonSchema, "device identity and binding version must match aggregate")
+		}
+		if event[fieldType] == typeTelemetry && fmt.Sprint(event[fieldSchema]) == "2" {
+			if err := common.ValidateTelemetryV2(payload); err != nil {
+				return fail(reasonSchema, err.Error())
+			}
+		}
+	case typeSiteChanged:
+		if payload["site_id"] != event[fieldAggregate] || payload["site_version"] != version {
+			return fail(reasonSchema, "site identity and version must match aggregate")
+		}
+	case typeBinChanged:
+		if payload["bin_id"] != event[fieldAggregate] || payload["bin_version"] != version {
+			return fail(reasonSchema, "bin identity and version must match aggregate")
+		}
+	case typeCableLayout:
+		if payload["cable_id"] != event[fieldAggregate] || payload["cable_version"] != version {
+			return fail(reasonSchema, "cable identity and version must match aggregate")
+		}
+		if failure := uniqueCableSensors(payload["sensors"]); failure != nil {
+			return failure
+		}
+	case typeRiskPolicy:
+		policyVersion, bad := bigint(payload["version"])
+		if bad != nil {
+			return bad
+		}
+		if payload["policy_id"] != event[fieldAggregate] || policyVersion != version {
+			return fail(reasonSchema, "policy identity and version must match aggregate")
+		}
+	case typeRiskInvalidated:
+		for _, key := range []string{"assessment_version", "replacement_occupancy_version"} {
+			if _, bad := bigint(payload[key]); bad != nil {
+				return bad
+			}
+		}
+		if payload[fieldDevice] != event[fieldAggregate] {
+			return fail(reasonSchema, "invalidation device must match aggregate")
+		}
+	case typeRiskAssessed:
+		if payload[fieldDevice] != event[fieldAggregate] {
+			return fail(reasonSchema, "assessment device must match aggregate")
+		}
+	}
+	return nil
+}
+
+func uniqueCableSensors(value any) *failure {
+	sensors, ok := value.([]any)
+	if !ok {
+		return fail(reasonSchema, "cable sensors must be an array")
+	}
+	ids, positions := map[string]bool{}, map[any]bool{}
+	for _, item := range sensors {
+		sensor, ok := item.(map[string]any)
+		if !ok {
+			return fail(reasonSchema, "cable sensor must be an object")
+		}
+		id := fmt.Sprint(sensor["sensor_id"])
+		position := sensor["position"]
+		if ids[id] || positions[position] {
+			return fail(reasonSchema, "cable sensor identities and positions must be unique")
+		}
+		ids[id], positions[position] = true, true
 	}
 	return nil
 }

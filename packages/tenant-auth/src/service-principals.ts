@@ -3,7 +3,6 @@ import {
   errors,
   jwtVerify,
   type JWTVerifyGetKey,
-  type JWTPayload,
 } from "jose";
 
 export interface ServicePrincipalContext {
@@ -58,76 +57,6 @@ function tenantHintOf(
     throw new ServiceAuthError(401, "invalid_token");
   return value;
 }
-
-function assertValidTokenClaims(
-  payload: JWTPayload,
-  now: number,
-  maxAge: number,
-): asserts payload is JWTPayload & { exp: number; iat: number; sub: string } {
-  if (
-    typeof payload.iat !== "number" ||
-    typeof payload.exp !== "number" ||
-    payload.iat > now + 30 ||
-    payload.exp - payload.iat > maxAge ||
-    payload.exp <= now ||
-    typeof payload.sub !== "string" ||
-    !payload.sub
-  )
-    throw new ServiceAuthError(401, "invalid_token");
-}
-
-function clientIdOf(payload: JWTPayload & { sub: string }): string {
-  const clientId =
-    typeof payload.azp === "string" && payload.azp ? payload.azp : payload.sub;
-  const grant = payload.gty ?? payload.grant_type;
-  if (
-    (grant !== "client-credentials" && grant !== "client_credentials") ||
-    (payload.sub !== clientId && payload.sub !== `${clientId}@clients`)
-  )
-    throw new ServiceAuthError(401, "invalid_token");
-  return clientId;
-}
-
-function tokenScopesOf(payload: JWTPayload): string[] {
-  const tokenScopes =
-    typeof payload.scope === "string"
-      ? payload.scope.split(" ").filter(Boolean)
-      : [];
-  if (
-    !tokenScopes.length ||
-    tokenScopes.some((scope) => !SCOPE.test(scope)) ||
-    new Set(tokenScopes).size !== tokenScopes.length
-  )
-    throw new ServiceAuthError(401, "invalid_token");
-  return tokenScopes;
-}
-
-function assertBinding(
-  binding: ClientBinding | undefined,
-  tenantClaim: string | undefined,
-  tenantHint: string | undefined,
-): asserts binding is ClientBinding {
-  if (
-    !binding ||
-    !UUID.test(binding.tenant_id) ||
-    !UUID.test(binding.principal_id) ||
-    !Array.isArray(binding.scopes) ||
-    (tenantClaim && binding.tenant_id !== tenantHint)
-  )
-    throw new ServiceAuthError(401, "invalid_token");
-}
-
-function assertAuthorizedScopes(
-  tokenScopes: string[],
-  binding: ClientBinding,
-  requiredScopes: readonly string[],
-): void {
-  if (tokenScopes.some((scope) => !binding.scopes.includes(scope)))
-    throw new ServiceAuthError(403, "insufficient_scope");
-  if (requiredScopes.some((scope) => !tokenScopes.includes(scope)))
-    throw new ServiceAuthError(403, "insufficient_scope");
-}
-
 export function createClientCredentialsVerifier(
   options: ClientCredentialsOptions,
 ) {
@@ -154,7 +83,7 @@ export function createClientCredentialsVerifier(
     ): Promise<ServicePrincipalContext> {
       const token = /^Bearer (\S+)$/i.exec(authorization ?? "")?.[1];
       if (!token) throw new ServiceAuthError(401, "invalid_token");
-      let payload: JWTPayload;
+      let payload;
       try {
         ({ payload } = await jwtVerify(token, key, {
           issuer: options.issuer,
@@ -173,11 +102,37 @@ export function createClientCredentialsVerifier(
         throw new ServiceAuthError(401, "invalid_token");
       }
       const now = Math.floor((options.now?.() ?? new Date()).getTime() / 1000);
-      assertValidTokenClaims(payload, now, maxAge);
+      if (
+        typeof payload.iat !== "number" ||
+        typeof payload.exp !== "number" ||
+        payload.iat > now + 30 ||
+        payload.exp - payload.iat > maxAge ||
+        payload.exp <= now ||
+        typeof payload.sub !== "string" ||
+        !payload.sub
+      )
+        throw new ServiceAuthError(401, "invalid_token");
       // Auth0 client credentials uses sub=client_id@clients; azp is client_id.
       // A configured IdP may omit azp, in which case the exact subject is mapped.
-      const clientId = clientIdOf(payload);
-      const tokenScopes = tokenScopesOf(payload);
+      const clientId =
+        typeof payload.azp === "string" && payload.azp
+          ? payload.azp
+          : payload.sub;
+      const grant = payload.gty ?? payload.grant_type;
+      if (grant !== "client-credentials" && grant !== "client_credentials")
+        throw new ServiceAuthError(401, "invalid_token");
+      if (payload.sub !== clientId && payload.sub !== `${clientId}@clients`)
+        throw new ServiceAuthError(401, "invalid_token");
+      const tokenScopes: string[] =
+        typeof payload.scope === "string"
+          ? payload.scope.split(" ").filter(Boolean)
+          : [];
+      if (
+        !tokenScopes.length ||
+        tokenScopes.some((s) => !SCOPE.test(s)) ||
+        new Set(tokenScopes).size !== tokenScopes.length
+      )
+        throw new ServiceAuthError(401, "invalid_token");
       const tenantHint = tenantHintOf(payload, options.tenantClaim);
       let binding;
       try {
@@ -185,8 +140,18 @@ export function createClientCredentialsVerifier(
       } catch {
         throw new ServiceAuthError(503, "auth_unavailable");
       }
-      assertBinding(binding, options.tenantClaim, tenantHint);
-      assertAuthorizedScopes(tokenScopes, binding, requiredScopes);
+      if (
+        !binding ||
+        !UUID.test(binding.tenant_id) ||
+        !UUID.test(binding.principal_id) ||
+        !Array.isArray(binding.scopes) ||
+        (options.tenantClaim && binding.tenant_id !== tenantHint)
+      )
+        throw new ServiceAuthError(401, "invalid_token");
+      if (tokenScopes.some((s) => !binding.scopes.includes(s)))
+        throw new ServiceAuthError(403, "insufficient_scope");
+      if (requiredScopes.some((s) => !tokenScopes.includes(s)))
+        throw new ServiceAuthError(403, "insufficient_scope");
       return {
         tenant_id: binding.tenant_id,
         principal_id: binding.principal_id,

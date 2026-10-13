@@ -1,0 +1,234 @@
+# Unit tests for rules/slo.yaml (Stage 11 SLO agent). All targets are PROPOSED.
+# Synthetic series use 1m samples. Window arithmetic assumes the Prometheus
+# rate() extrapolation over fully populated windows.
+rule_files:
+  - ../rules/slo.yaml
+evaluation_interval: 1m
+tests:
+  - name: missing Prometheus retention history withholds 30-day budget and opens a ticket
+    interval: 1m
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: SLOHistoryWindowUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: prometheus
+              severity: ticket
+            exp_annotations:
+              summary: "30-day SLO history is not available"
+              description: "Prometheus does not currently retain 30 days of samples. The 30-day error-budget panel is withheld until the full window is available."
+              runbook_url: "docs/runbooks/slo-history-window.md"
+    promql_expr_test:
+      - expr: slo:error_budget_remaining:ratio30d
+        eval_time: 6m
+        exp_samples: []
+
+  - name: healthy ingest series keeps every burn alert silent
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+100x130"
+    alert_rule_test:
+      - { eval_time: 125m, alertname: SLOBurnRateFastPage, exp_alerts: [] }
+      - { eval_time: 125m, alertname: SLOBurnRateSlowPage, exp_alerts: [] }
+      - { eval_time: 125m, alertname: SLOBurnRateFastTicket, exp_alerts: [] }
+      - { eval_time: 125m, alertname: SLOBurnRateSlowTicket, exp_alerts: [] }
+    promql_expr_test:
+      - expr: 'slo:error_ratio:rate5m{sli="ingest_availability"}'
+        eval_time: 125m
+        exp_samples:
+          - labels: 'slo:error_ratio:rate5m{sli="ingest_availability"}'
+            value: 0
+
+  - name: sustained 20x burn pages on the fast window pair (1h and 5m)
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+98x130"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="500"}'
+        values: "0+2x130"
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: SLOBurnRateFastPage
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sli: ingest_availability
+              window: 1h_5m
+            exp_annotations:
+              summary: "Fast error-budget burn for ingest_availability"
+              description: "ingest_availability is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              runbook_url: "docs/runbooks/slo-burn-page.md"
+
+  - name: a short spike alone does not page because the 1h window disagrees
+    interval: 1m
+    input_series:
+      # 10% errors for 3 minutes at the end (5m ratio 6% = 60x budget), 1h ratio ~0.5% = 5x
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+100x57 5700+90x3"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="500"}'
+        values: "0x57 0+10x3"
+    alert_rule_test:
+      - { eval_time: 60m, alertname: SLOBurnRateFastPage, exp_alerts: [] }
+      - { eval_time: 60m, alertname: SLOBurnRateSlowPage, exp_alerts: [] }
+    promql_expr_test:
+      - expr: 'slo:error_ratio:rate5m{sli="ingest_availability"} > bool 0.02'
+        eval_time: 60m
+        exp_samples:
+          - labels: '{sli="ingest_availability"}'
+            value: 1
+
+  - name: an old incident that has recovered does not page because the 5m window disagrees
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+90x30 2700+100x40"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="500"}'
+        values: "0+10x30 300x40"
+    alert_rule_test:
+      - { eval_time: 70m, alertname: SLOBurnRateFastPage, exp_alerts: [] }
+    promql_expr_test:
+      - expr: 'slo:error_ratio:rate1h{sli="ingest_availability"} > bool 0.0144'
+        eval_time: 70m
+        exp_samples:
+          - labels: '{sli="ingest_availability"}'
+            value: 1
+
+  - name: sustained 8x burn pages on the slow window pair (6h and 30m) but not the fast pair
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+992x400"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="503"}'
+        values: "0+8x400"
+    alert_rule_test:
+      - { eval_time: 395m, alertname: SLOBurnRateFastPage, exp_alerts: [] }
+      - eval_time: 395m
+        alertname: SLOBurnRateSlowPage
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sli: ingest_availability
+              window: 6h_30m
+            exp_annotations:
+              summary: "Slow error-budget burn for ingest_availability"
+              description: "ingest_availability is burning its 30d error budget at 6x or more over both 6h and 30m. At this rate the budget is gone in about 5 days."
+              runbook_url: "docs/runbooks/slo-burn-page.md"
+
+  - name: sustained 4x burn opens a ticket on 24h and 2h but does not page
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+996x1500"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="500"}'
+        values: "0+4x1500"
+    alert_rule_test:
+      - { eval_time: 1450m, alertname: SLOBurnRateFastPage, exp_alerts: [] }
+      - { eval_time: 1450m, alertname: SLOBurnRateSlowPage, exp_alerts: [] }
+      - eval_time: 1450m
+        alertname: SLOBurnRateFastTicket
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              sli: ingest_availability
+              window: 24h_2h
+            exp_annotations:
+              summary: "Moderate error-budget burn for ingest_availability"
+              description: "ingest_availability is burning its 30d error budget at 3x or more over both 24h and 2h. Open a ticket; the budget lasts about 10 days at this rate."
+              runbook_url: "docs/runbooks/slo-burn-ticket.md"
+
+  - name: sustained 1.5x burn opens a ticket on 3d and 6h but not the 24h pair
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="202"}'
+        values: "0+998.5x4400"
+      - series: 'http_server_requests_total{job="telemetry-ingest",method="POST",route="POST /v1/devices/{deviceId}/readings",status_code="500"}'
+        values: "0+1.5x4400"
+    alert_rule_test:
+      - { eval_time: 4340m, alertname: SLOBurnRateFastTicket, exp_alerts: [] }
+      - eval_time: 4340m
+        alertname: SLOBurnRateSlowTicket
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              sli: ingest_availability
+              window: 3d_6h
+            exp_annotations:
+              summary: "Slow error-budget burn for ingest_availability"
+              description: "ingest_availability is burning its 30d error budget at 1x or more over both 3d and 6h. The budget will not last the 30d window."
+              runbook_url: "docs/runbooks/slo-burn-ticket.md"
+
+  - name: notification delivery uses its own 1 percent budget (20 percent failures pages)
+    interval: 1m
+    input_series:
+      - series: "notifications_outcome_sent_total"
+        values: "0+80x70"
+      - series: "notifications_outcome_failed_total"
+        values: "0+20x70"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SLOBurnRateFastPage
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sli: notification_delivery
+              window: 1h_5m
+            exp_annotations:
+              summary: "Fast error-budget burn for notification_delivery"
+              description: "notification_delivery is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              runbook_url: "docs/runbooks/slo-burn-page.md"
+
+  - name: slow projection freshness (80 percent of events over 1s) burns the freshness budget
+    interval: 1m
+    input_series:
+      - series: 'projection_event_to_projection_seconds_bucket{le="1"}'
+        values: "0+20x70"
+      - series: 'projection_event_to_projection_seconds_bucket{le="+Inf"}'
+        values: "0+100x70"
+      - series: "projection_event_to_projection_seconds_count"
+        values: "0+100x70"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: SLOBurnRateFastPage
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sli: projection_freshness
+              window: 1h_5m
+            exp_annotations:
+              summary: "Fast error-budget burn for projection_freshness"
+              description: "projection_freshness is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+              runbook_url: "docs/runbooks/slo-burn-page.md"
+
+  - name: integrity alerts fire on any quarantine or failed DLQ publish and stay silent when flat
+    interval: 1m
+    input_series:
+      - series: 'cdc_quarantined_total{reason="schema"}'
+        values: "0 0 0 1 1 1 1 1"
+      - series: 'cdc_quarantined_total{reason="other"}'
+        values: "0x7"
+      - series: "jobs_dlq_publish_failed_total"
+        values: "0+0x7"
+      - series: "projection_quarantined_total"
+        values: "0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: IntegrityCDCQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo_class: integrity
+            exp_annotations:
+              summary: "CDC transformer quarantined an event"
+              description: "cdc_quarantined_total increased in the last 10 minutes. A quarantined event is not delivered downstream until an operator resolves it; the integrity invariant allows zero unexplained quarantines."
+              runbook_url: "docs/runbooks/slo-integrity.md"
+      - {
+          eval_time: 5m,
+          alertname: IntegrityJobsDLQPublishFailed,
+          exp_alerts: [],
+        }
+      - {
+          eval_time: 5m,
+          alertname: IntegrityProjectionQuarantined,
+          exp_alerts: [],
+        }

@@ -1,0 +1,26 @@
+{{- if .Values.pdb.enabled }}
+{{- $minimumReplicas := int .Values.replicaCount }}
+{{- if .Values.autoscaling.hpa.enabled }}
+{{- $minimumReplicas = int .Values.autoscaling.hpa.minReplicas }}
+{{- else if .Values.autoscaling.keda.enabled }}
+{{- $minimumReplicas = int .Values.autoscaling.keda.minReplicaCount }}
+{{- if lt $minimumReplicas 2 }}
+{{- fail "pdb.enabled must be false when KEDA minReplicaCount is below 2" }}
+{{- end }}
+{{- end }}
+{{- if ge (int .Values.pdb.minAvailable) $minimumReplicas }}
+{{- fail "pdb.minAvailable must be less than the workload minimum replica count so voluntary disruption can make progress" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "greenguard-service.fullname" . }}
+  labels:
+    {{- include "greenguard-service.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-service.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

@@ -6,6 +6,7 @@ import { identityIdOf } from "../domain/ids.js";
 import { LOOKUP_TOKEN, startApi } from "../testing/api.js";
 import {
   adminQuery,
+  createActiveTenantFixture,
   asRuntime,
   outboxEvents,
   runtimeDb,
@@ -19,12 +20,23 @@ after(async () => api?.close());
 
 async function org(label: string) {
   const person = await api.person(label);
+  const idempotencyKey = randomUUID();
   const result = await api.call("POST", "/v1/organizations", {
     token: person.token,
     body: { name: label },
-    headers: { "idempotency-key": randomUUID() },
+    headers: { "idempotency-key": idempotencyKey },
   });
-  assert.equal(result.status, 201, JSON.stringify(result.json));
+  assert.equal(result.status, 202, JSON.stringify(result.json));
+  await createActiveTenantFixture(
+    api.db,
+    { issuer: api.issuer.issuer, subject: person.subject },
+    label,
+    {
+      idempotencyKey,
+      correlationId: randomUUID(),
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    },
+  );
   return { tenantId: result.json.tenantId as string, ...person };
 }
 const path = (tenantId: string) =>

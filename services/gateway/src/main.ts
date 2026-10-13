@@ -62,12 +62,20 @@ const server = createGateway({
 });
 const host = process.env.GATEWAY_HOST || "127.0.0.1";
 const port = positiveInteger("GATEWAY_PORT", 4002);
+const metricsPort = positiveInteger("GATEWAY_METRICS_PORT", 9464);
+const metricsHost = process.env.GATEWAY_METRICS_HOST || "127.0.0.1";
+if (metricsPort === port)
+  throw new Error("GATEWAY_METRICS_PORT must differ from GATEWAY_PORT");
+server.metricsServer.listen(metricsPort, metricsHost, () =>
+  console.log(`gateway metrics listening on ${metricsHost}:${metricsPort}`),
+);
 server.listen(port, host, () =>
   console.log(`gateway listening on ${host}:${port}`),
 );
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     server.closeUpgradedConnections();
+    server.metricsServer.close();
     server.close(async () => {
       await verifier.close();
       process.exit(0);

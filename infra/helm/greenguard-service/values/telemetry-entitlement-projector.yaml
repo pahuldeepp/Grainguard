@@ -1,0 +1,45 @@
+nameOverride: telemetry-entitlement-projector
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+autoscaling:
+  hpa: { enabled: false }
+service:
+  enabled: false
+  port: 8090
+  containerPort: 8090
+container:
+  name: telemetry-entitlement-projector
+  command: ["/telemetry-ingest", "entitlement-projector"]
+  envFrom:
+    - secretRef: { name: telemetry-ingest-config }
+  env:
+    - { name: TELEMETRY_ENTITLEMENT_PROJECTOR_HEALTH_ADDR, value: "127.0.0.1:8090" }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  egressServices:
+    - {
+        name: tenant-control-plane,
+        namespace: greenguard,
+        release: tenant-control-plane,
+        port: 3010,
+      }
+  ingressSources: []
+probes:
+  startup:
+    enabled: true
+    type: exec
+    command: ["/telemetry-ingest", "probe", "/healthz", "127.0.0.1:8090"]
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    command: ["/telemetry-ingest", "probe", "/readyz", "127.0.0.1:8090"]
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    command: ["/telemetry-ingest", "probe", "/healthz", "127.0.0.1:8090"]
+    periodSeconds: 10

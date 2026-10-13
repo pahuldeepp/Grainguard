@@ -6,7 +6,13 @@ export interface ControlPlaneConfig {
   host: string;
   port: number;
   auth?:
-    | { issuer: string; audience: string; jwksUrl: string }
+    | {
+        issuer: string;
+        audience?: string;
+        jwksUrl: string;
+        tokenMode?: "cognito-access";
+        cognitoClientIds?: string[];
+      }
     | { issuers: { issuer: string; audience: string; jwksUrl: string }[] };
   otlpEndpoint?: string;
   apiKeyPepper?: string;
@@ -42,7 +48,14 @@ function need(env: NodeJS.ProcessEnv, name: string): string {
 }
 
 function readAuth(env: NodeJS.ProcessEnv): ControlPlaneConfig["auth"] {
+  const tokenMode = env.AUTH_TOKEN_MODE || "audience";
+  if (tokenMode !== "audience" && tokenMode !== "cognito-access")
+    throw new Error("AUTH_TOKEN_MODE must be audience or cognito-access");
   if (env.AUTH_ISSUERS_JSON) {
+    if (tokenMode !== "audience" || env.AUTH_COGNITO_CLIENT_IDS)
+      throw new Error(
+        "Cognito token mode requires single-issuer AUTH_* settings",
+      );
     if (env.AUTH_ISSUER || env.AUTH_AUDIENCE || env.AUTH_JWKS_URL)
       throw new Error(
         "AUTH_ISSUERS_JSON cannot be combined with single-issuer AUTH_* settings",
@@ -100,12 +113,24 @@ function readAuth(env: NodeJS.ProcessEnv): ControlPlaneConfig["auth"] {
     AUTH_AUDIENCE: audience,
     AUTH_JWKS_URL: jwks,
   } = env;
-  const set = [issuer, audience, jwks].filter(Boolean).length;
-  if (set === 0) return undefined;
-  if (set !== 3)
+  const set = [issuer, jwks].filter(Boolean).length;
+  if (set === 0 && !audience && tokenMode === "audience") {
+    if (env.AUTH_COGNITO_CLIENT_IDS)
+      throw new Error("AUTH_COGNITO_CLIENT_IDS requires cognito-access mode");
+    return undefined;
+  }
+  if (set !== 2 || (tokenMode === "audience" && !audience))
     throw new Error(
       "AUTH_ISSUER, AUTH_AUDIENCE and AUTH_JWKS_URL must be set together",
     );
+  const clientIds = (env.AUTH_COGNITO_CLIENT_IDS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (tokenMode === "cognito-access" && !clientIds.length)
+    throw new Error("AUTH_COGNITO_CLIENT_IDS is required for cognito-access");
+  if (tokenMode === "audience" && clientIds.length)
+    throw new Error("AUTH_COGNITO_CLIENT_IDS requires cognito-access mode");
   const url = new URL(jwks as string);
   if (url.protocol !== "https:" && !LOOPBACK.has(url.hostname))
     throw new Error(
@@ -113,8 +138,11 @@ function readAuth(env: NodeJS.ProcessEnv): ControlPlaneConfig["auth"] {
     );
   return {
     issuer: issuer as string,
-    audience: audience as string,
+    ...(audience ? { audience } : {}),
     jwksUrl: url.toString(),
+    ...(tokenMode === "cognito-access"
+      ? { tokenMode, cognitoClientIds: clientIds }
+      : {}),
   };
 }
 
@@ -130,10 +158,7 @@ function readMachineIssuers(
     throw new Error(
       "MACHINE_ISSUER_ALLOWLIST entries must be https:// issuers",
     );
-  let issuers: string[];
-  if (listed.length) issuers = listed;
-  else if (m2m) issuers = [m2m.issuer];
-  else issuers = [];
+  const issuers = listed.length ? listed : m2m ? [m2m.issuer] : [];
   return issuers.length ? issuers : undefined;
 }
 
@@ -183,7 +208,10 @@ function readAuditConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig["audit"] {
       "AUDIT_EXPORT_DIRECTORY, AUDIT_EXPORT_PUBLIC_KEY_PEM and AUDIT_EXPORT_LINK_SECRET must be set together",
     );
   const enabled = Boolean(s3) || set === 3;
-  if (enabled && (!inventoryUrl || !billingUrl))
+  if (
+    enabled &&
+    ((!inventoryUrl && !env.INVENTORY_SHARD_REGISTRY_FILE) || !billingUrl)
+  )
     throw new Error(
       "INVENTORY_DATABASE_URL and BILLING_DATABASE_URL are required when audit export is enabled",
     );
@@ -192,7 +220,7 @@ function readAuditConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig["audit"] {
   if (!enabled) return undefined;
   const owners = {
     publicKeyPem: publicKey!,
-    inventoryDatabaseUrl: inventoryUrl!,
+    inventoryDatabaseUrl: inventoryUrl ?? "",
     billingDatabaseUrl: billingUrl!,
   };
   return s3
@@ -200,56 +228,38 @@ function readAuditConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig["audit"] {
     : { directory: directory!, linkSecret: linkSecret!, ...owners };
 }
 
-function readPort(env: NodeJS.ProcessEnv): number {
+export function readConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig {
   const port = Number(env.PORT ?? 3010);
+  const m2m = readM2M(env);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new Error("PORT must be an integer from 0 to 65535");
-  return port;
-}
-
-function readFlagAdmin(env: NodeJS.ProcessEnv) {
-  const token = env.CONTROL_FLAG_ADMIN_TOKEN;
-  const actorId = env.CONTROL_FLAG_ADMIN_ACTOR_ID;
-  if (Boolean(token) !== Boolean(actorId))
-    throw new Error(
-      "CONTROL_FLAG_ADMIN_TOKEN and CONTROL_FLAG_ADMIN_ACTOR_ID must be set together",
-    );
-  if (token && Buffer.byteLength(token) < 32)
-    throw new Error("CONTROL_FLAG_ADMIN_TOKEN must contain at least 32 bytes");
-  if (
-    actorId &&
-    !/^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(
-      actorId,
-    )
-  )
-    throw new Error("CONTROL_FLAG_ADMIN_ACTOR_ID must be a UUID");
-  return token && actorId ? { token, actorId } : undefined;
-}
-
-function readApiKeySettings(env: NodeJS.ProcessEnv) {
   if (
     env.CONTROL_API_KEY_PEPPER &&
     Buffer.byteLength(env.CONTROL_API_KEY_PEPPER) < 32
   )
     throw new Error("CONTROL_API_KEY_PEPPER must contain at least 32 bytes");
-  const environment = env.CONTROL_API_KEY_ENV;
-  if (environment && !/^[a-z0-9]{2,12}$/.test(environment))
+  if (
+    env.CONTROL_API_KEY_ENV &&
+    !/^[a-z0-9]{2,12}$/.test(env.CONTROL_API_KEY_ENV)
+  )
     throw new Error(
       "CONTROL_API_KEY_ENV must be 2-12 lowercase letters or digits",
     );
-  return {
-    ...(env.CONTROL_API_KEY_PEPPER && {
-      apiKeyPepper: env.CONTROL_API_KEY_PEPPER,
-    }),
-    ...(environment && { apiKeyEnvironment: environment }),
-  };
-}
-
-export function readConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig {
-  const port = readPort(env);
-  const m2m = readM2M(env);
-  const flagAdmin = readFlagAdmin(env);
-  const apiKeySettings = readApiKeySettings(env);
+  const flagAdminToken = env.CONTROL_FLAG_ADMIN_TOKEN;
+  const flagAdminActorId = env.CONTROL_FLAG_ADMIN_ACTOR_ID;
+  if (Boolean(flagAdminToken) !== Boolean(flagAdminActorId))
+    throw new Error(
+      "CONTROL_FLAG_ADMIN_TOKEN and CONTROL_FLAG_ADMIN_ACTOR_ID must be set together",
+    );
+  if (flagAdminToken && Buffer.byteLength(flagAdminToken) < 32)
+    throw new Error("CONTROL_FLAG_ADMIN_TOKEN must contain at least 32 bytes");
+  if (
+    flagAdminActorId &&
+    !/^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(
+      flagAdminActorId,
+    )
+  )
+    throw new Error("CONTROL_FLAG_ADMIN_ACTOR_ID must be a UUID");
   const audit = readAuditConfig(env);
   const machineIssuers = readMachineIssuers(env, m2m);
   const databaseUrl = need(env, "CONTROL_DATABASE_URL");
@@ -264,9 +274,17 @@ export function readConfig(env: NodeJS.ProcessEnv): ControlPlaneConfig {
     auth: readAuth(env),
     ...(m2m && { m2m }),
     ...(machineIssuers && { machineIssuers }),
-    ...(flagAdmin && { flagAdmin }),
+    ...(flagAdminToken &&
+      flagAdminActorId && {
+        flagAdmin: { token: flagAdminToken, actorId: flagAdminActorId },
+      }),
     ...(audit && { audit }),
     otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT || undefined,
-    ...apiKeySettings,
+    ...(env.CONTROL_API_KEY_PEPPER && {
+      apiKeyPepper: env.CONTROL_API_KEY_PEPPER,
+    }),
+    ...(env.CONTROL_API_KEY_ENV && {
+      apiKeyEnvironment: env.CONTROL_API_KEY_ENV,
+    }),
   };
 }

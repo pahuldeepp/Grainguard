@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 )
 
@@ -48,8 +51,12 @@ func startSagaBindingRuntime(parent context.Context, db TxStarter, getenv func(s
 	if group == "" {
 		group = "telemetry-saga-binding-v1"
 	}
-	client, err := kgo.NewClient(transport.Options(brokers, group,
-		[]string{sagaCommandTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted()))...)
+	options, err := transport.SecureOptions(brokers, group,
+		[]string{sagaCommandTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted()))
+	if err != nil {
+		return nil, err
+	}
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +74,25 @@ const (
 // bindingResultTenants asks the ID-only SECURITY DEFINER selector which tenants
 // have unpublished results after the cursor. It never reads row data.
 func bindingResultTenants(ctx context.Context, db TxStarter, after string) ([]string, error) {
+	if shards, ok := db.(*common.ShardedDB); ok {
+		unique := map[string]bool{}
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			page, err := bindingResultTenants(ctx, shards.InfrastructureDB(shard), after)
+			for _, id := range page {
+				unique[id] = true
+			}
+			return err
+		})
+		ids := make([]string, 0, len(unique))
+		for id := range unique {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		if len(ids) > maxBindingTenantsPerPass {
+			ids = ids[:maxBindingTenantsPerPass]
+		}
+		return ids, err
+	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -192,7 +218,7 @@ func handleSagaBindingCommand(ctx context.Context, db TxStarter, client transpor
 		return nil
 	}
 	if !errors.Is(err, ErrSagaBindingCommandConflict) && !errors.Is(err, ErrInvalidEvent) {
-		return err
+		return fmt.Errorf("binding await tenant %s: %w", command.TenantID, err)
 	}
 	return quarantineSagaBindingCommand(ctx, client, message, reasonConflict)
 }

@@ -1,3 +1,4 @@
+import { allowedInternalUrl } from "./internal-url.js";
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
 
 export interface SagaSnapshot {
@@ -38,19 +39,18 @@ export class UpstreamError extends Error {
   }
 }
 
+function sagaIdSegment(id: string): string {
+  if (id === "." || id === "..")
+    throw new UpstreamError(400, "invalid_saga_id");
+  return encodeURIComponent(id);
+}
+
 export class ProvisioningClient {
   constructor(
     private readonly baseURL: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {
-    const url = new URL(baseURL);
-    if (
-      url.protocol !== "https:" &&
-      !(
-        url.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(url.hostname)
-      )
-    ) {
+    if (!allowedInternalUrl(baseURL)) {
       throw new Error("SAGA_API_URL must use HTTPS or loopback HTTP");
     }
   }
@@ -94,7 +94,7 @@ export class ProvisioningClient {
   ): Promise<SagaStatus> {
     requireRole(principal, "viewer", "operator", "admin");
     return this.request(
-      `/v1/provisioning/${encodeURIComponent(id)}`,
+      `/v1/provisioning/${sagaIdSegment(id)}`,
       token,
       "GET",
       undefined,
@@ -112,6 +112,8 @@ export class ProvisioningClient {
     traceparent?: string,
   ): Promise<SagaSnapshot> {
     requireRole(principal, "operator", "admin");
+    if (!/^[\x21-\x7e]{1,200}$/.test(key))
+      throw new UpstreamError(400, "invalid_idempotency_key");
     return this.request(
       "/v1/provisioning",
       token,
@@ -131,7 +133,7 @@ export class ProvisioningClient {
   ): Promise<SagaSnapshot> {
     requireRole(principal, "admin");
     return this.request(
-      `/v1/provisioning/${encodeURIComponent(id)}/redrive`,
+      `/v1/provisioning/${sagaIdSegment(id)}/redrive`,
       token,
       "POST",
       { reason },

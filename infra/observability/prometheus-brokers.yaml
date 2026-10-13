@@ -1,0 +1,27 @@
+# Reference scrape_configs fragment for the streaming backbone. The jobs are already
+# present in prometheus.yaml; keep this file aligned for standalone review/use.
+#
+# The broker rule file is loaded by `rule_files: /etc/prometheus/rules/*.yaml`.
+# Do not re-add `kafka-exporter` or `rabbitmq`: prometheus.yaml already scrapes them
+# (kafka-exporter at host.docker.internal:19308; rabbitmq /metrics/detailed with
+# family=queue_coarse_metrics,queue_consumer_count and vhost=/, which yields the
+# rabbitmq_detailed_queue_* series the alerts use).
+#
+# Exporters: `docker compose -f infra/observability/compose.yaml --profile brokers up -d`
+# starts streaming-state-exporter (19309) and postgres-exporter-slots (19188).
+# Kafka exporter (danielqsj/kafka-exporter) comes from infra/kafka/compose.yaml.
+# RabbitMQ metrics port 15692 is published by infra/rabbitmq/compose.yaml.
+scrape_configs:
+  # Connect connector/task state and Schema Registry reachability.
+  - job_name: kafka-connect-state
+    static_configs:
+      - targets: [host.docker.internal:19309]
+  # Logical replication slot activity, retained WAL bytes and cap.
+  - job_name: postgres-wal-slots
+    static_configs:
+      - targets: [host.docker.internal:19188]
+  # Node-level RabbitMQ metrics: alarms, memory, disk, unconfirmed publishes.
+  - job_name: rabbitmq-node
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:15692]

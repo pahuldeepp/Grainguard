@@ -1,0 +1,32 @@
+rule_files:
+  - ../rules/ml-scoring.yaml
+evaluation_interval: 1m
+tests:
+  - name: synthetic PSI below threshold does not fire
+    interval: 1m
+    input_series:
+      - series: 'greenguard_otel_ml_scoring_input_feature_psi{feature="temperature_c",model_name="synthetic-model",model_version="test-v1",mode="shadow"}'
+        values: '0.2+0x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: MLScoringFeatureDriftHigh
+        exp_alerts: []
+  - name: synthetic PSI above threshold fires after 30 minutes
+    interval: 1m
+    input_series:
+      - series: 'greenguard_otel_ml_scoring_input_feature_psi{feature="temperature_c",model_name="synthetic-model",model_version="test-v1",mode="shadow"}'
+        values: '0.3+0x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: MLScoringFeatureDriftHigh
+        exp_alerts:
+          - exp_labels:
+              feature: temperature_c
+              model_name: synthetic-model
+              model_version: test-v1
+              mode: shadow
+              severity: ticket
+            exp_annotations:
+              summary: ML scoring input feature drift is elevated
+              description: PSI for temperature_c is above 0.25 for model synthetic-model (test-v1). Treat this as a synthetic/shadow signal until real-data validation is complete.
+              runbook_url: docs/runbooks/ml-scoring-observability.md

@@ -22,6 +22,7 @@ import {
   inviteMember,
   listMembersPage,
   lookupMembership,
+  lookupDelegatedMembership,
   revokeMember,
   type Actor,
   type HumanRole,
@@ -171,6 +172,23 @@ export class OrganizationsController {
 @UseGuards(LookupGuard)
 export class LookupController {
   constructor(@Inject(CONTROL_DB) private readonly db: Db) {}
+
+  @Get("delegated-memberships")
+  @HttpCode(200)
+  async delegatedLookup(
+    @Query("tenantId") tenantId?: string,
+    @Query("identityId") identityId?: string,
+  ) {
+    if (!tenantId || !identityId)
+      throw new InvalidInputError("tenant and identity required");
+    const membership = await lookupDelegatedMembership(
+      this.db,
+      tenantId,
+      identityId,
+    );
+    if (!membership) throw new NotFoundError("membership");
+    return membership;
+  }
 
   @Get("memberships")
   @HttpCode(200)

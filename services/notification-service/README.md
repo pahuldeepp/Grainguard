@@ -1,14 +1,21 @@
 # services/notification-service
 
 Status: **Stage 06d implemented locally** (RabbitMQ task consumer, provider adapter
-interface, delivery ledger, tenant preferences). It serves only `/healthz` and `/metrics`;
-critical alerts are delivered by the separate AWS Lambda path and never enter this service.
+interface, delivery ledger, tenant preferences). It serves `/healthz`, `/metrics`, and an
+authenticated owner lookup for warning delivery outcomes; critical alerts are delivered by
+the separate AWS Lambda path and never enter this service.
 The warning/non-critical server worker resolves contacts through the authenticated tenant
 control-plane API backed by PostgreSQL. No live provider credentials are required for local tests.
 Stages: 06, 10.
 
 Technology: Node/TypeScript (plain Node, `pg` 8.23.0, `amqplib` 2.0.1). NestJS was not
-needed: the service has no HTTP API beyond `/healthz` and `/metrics`.
+needed: the owner read API is small and uses the existing HTTP server.
+
+## Owner read API
+
+`POST /internal/v1/deliveries/lookup` accepts at most 100 unique `{intentId, deliveryGeneration}` pairs. It verifies the signed principal using `AUTH_ISSUER`, `AUTH_AUDIENCE`, and `AUTH_JWKS_URL`, permits only operator/admin, and derives tenant scope from that principal. Reads run in a transaction-local tenant context, with explicit tenant predicates and the existing forced-RLS policies. The response carries sanitized per-generation state and at most 20 newest attempt events. Provider references, raw errors, correlation IDs, trace IDs, destinations, and message content never leave the service. Access audit logs contain only a purpose-separated HMAC identifier; configure `NOTIFICATIONS_AUDIT_HMAC_KEY` with at least 32 random bytes. `/readyz/notification-history` checks the auth/audit configuration plus effective role, table grants, forced RLS and tenant policy expressions.
+
+Critical Lambda/DynamoDB delivery history remains `not_configured`: no tenant-bound key builder and deployed IAM `LeadingKeys` denial proof are present. This owner does not read critical state or give the BFF DynamoDB access.
 
 ## Delivery flow (`src/worker.ts`)
 
@@ -23,12 +30,12 @@ critical dispatch endpoint and has no fallback responsibility.
    `notifications.dlq`.
 2. **Begin** (short locked tenant transaction, `ledger.ts`): insert the `deliveries` row once
    (`UNIQUE (intent_id)`), lock it `FOR UPDATE`, apply `notification_preferences`, record an
-   `in_progress` attempt and commit **before** the provider call.
-3. **Provider call** outside any transaction, through a separate bounded pool
+   `in_progress` attempt and commit **before** the provider call. A separate ownership admission holds the shard fence through the effect and outcome recording.
+3. **Provider call** under a separate ownership-admitted transaction, through the bounded provider semaphore
    (`NOTIFICATIONS_PROVIDER_CONCURRENCY`) with a hard deadline
    (`NOTIFICATIONS_PROVIDER_TIMEOUT_MS`) that holds even if an adapter ignores its
    AbortSignal. The intent id is the adapter idempotency key.
-4. **Finish** (locked tenant transaction): one guarded update. Terminal results are `sent`,
+4. **Finish** (within the ownership-admitted transaction): one guarded update. Terminal results are `sent`,
    `failed` (permanent rejection) and `suppressed` (preference). Each task carries a
    `delivery_generation` from the jobs-worker redrive count. A higher generation can retry
    an earlier `failed` or `suppressed` result; `sent` remains idempotent and is receipted
@@ -69,3 +76,11 @@ npm test -w services/notification-service      # unit + live Postgres tests
 make rabbitmq-test                             # includes src/testing/rabbit.live.ts
 npm run live -w services/notification-service  # RabbitMQ + root Kafka/DynamoDB/CDC live suites
 ```
+
+## Tenant placement routing
+
+Notification preferences, deliveries and delivery attempts belong to the operational tenant bundle. Billing provider reconciliation stays central. Set `SHARD_REGISTRY_FILE` to the private version 1 `notification-service` / `greenguard_notifications` registry with four primaries, incarnation UUIDs and `notifications_app` credentials; configure authenticated `CONTROL_PLANE_URL` / `CONTROL_LOOKUP_TOKEN`. Production PostgreSQL endpoints require verified TLS and a root certificate; explicit `SHARD_LOCAL_LOOPBACK=true` permits local loopback fixtures. `NOTIFICATIONS_DATABASE_URL` remains required only when no shard registry is supplied.
+
+All ledger and authenticated history transactions resolve the tenant owner, set transaction-local tenant/shard/incarnation/epoch, and admit the exact durable owner before SQL. Readiness checks each private pool's role, grants and forced RLS. No enabled request falls back to a legacy/default shard.
+
+The begin intent transaction still commits before a provider effect. Before send or reconcile, the worker acquires provider capacity, then obtains fresh placement and opens a separate admitted transaction that holds the owner fence until the provider effect and its ledger outcome finish. Tasks waiting for provider capacity hold no database transaction. Quiescing placement prevents the effect; a denied effect after begin leaves the committed intent `in_progress` for reconciliation on redelivery. The provider idempotency key remains the same `intent_id`, and generation handling/receipt keys are unchanged. Broker follow-ups occur after ledger commit. Contacts and flags in shared DynamoDB keep their central feed identity. Existing delivery drain remains bounded to 20 seconds, followed by a five-second bound for closing all owner pools.

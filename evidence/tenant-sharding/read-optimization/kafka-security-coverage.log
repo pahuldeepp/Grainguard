@@ -1,0 +1,24 @@
+
+> @greenguard/kafka-security@0.1.0 coverage
+> npm run build && c8 --all --src dist --extension .js --exclude "**/*.test.js" --reporter lcov --reporter text node --test "dist/**/*.test.js"
+
+
+> @greenguard/kafka-security@0.1.0 build
+> tsc
+
+✔ local broker uses no security options (0.64775ms)
+✔ AWS TLS requirement rejects absent or incomplete SASL settings (0.193ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.676833
+----------|---------|----------|---------|---------|-------------------
+File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+----------|---------|----------|---------|---------|-------------------
+All files |   81.25 |    76.19 |      50 |   81.25 |
+ index.js |   81.25 |    76.19 |      50 |   81.25 | 26-31
+----------|---------|----------|---------|---------|-------------------

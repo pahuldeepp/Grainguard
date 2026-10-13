@@ -15,9 +15,11 @@ import (
 )
 
 type fakeKafka struct {
-	polls     int
-	committed bool
-	closed    bool
+	polls          int
+	committed      bool
+	closed         bool
+	topic          string
+	committedTopic string
 }
 
 func (f *fakeKafka) PollRecords(context.Context, int) kgo.Fetches {
@@ -25,11 +27,44 @@ func (f *fakeKafka) PollRecords(context.Context, int) kgo.Fetches {
 	if f.polls == 1 {
 		return nil
 	}
-	return kgo.Fetches{{Topics: []kgo.FetchTopic{{Topic: topicTelemetry, Partitions: []kgo.FetchPartition{{Records: []*kgo.Record{{Topic: topicTelemetry, Offset: 4, Value: []byte("null")}}}}}}}}
+	topic := f.topic
+	if topic == "" {
+		topic = topicTelemetry
+	}
+	return kgo.Fetches{{Topics: []kgo.FetchTopic{{Topic: topic, Partitions: []kgo.FetchPartition{{Records: []*kgo.Record{{Topic: topic, Offset: 4, Value: []byte("null")}}}}}}}}
 }
-func (f *fakeKafka) CommitRecords(context.Context, ...*kgo.Record) error {
+func (f *fakeKafka) CommitRecords(_ context.Context, records ...*kgo.Record) error {
 	f.committed = true
+	if len(records) > 0 {
+		f.committedTopic = records[0].Topic
+	}
 	return nil
+}
+
+func TestKafkaPrefixPreservesCommitTopic(t *testing.T) {
+	old := makeClient
+	t.Cleanup(func() { makeClient = old })
+	fake := &fakeKafka{topic: "provisioning-demo." + topicTelemetry}
+	makeClient = func(...kgo.Opt) (kafkaClient, error) { return fake, nil }
+	k, err := newKafkaWithPrefix([]string{"localhost:9092"}, "isolated", "provisioning-demo.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := k.Next(context.Background())
+	if err != nil || m.Topic != topicTelemetry || m.sourceTopic() != fake.topic {
+		t.Fatalf("message=%+v err=%v", m, err)
+	}
+	if err = m.Commit(context.Background()); err != nil || fake.committedTopic != fake.topic {
+		t.Fatalf("commit topic=%s err=%v", fake.committedTopic, err)
+	}
+	if _, err = newKafkaWithPrefix(nil, "isolated", "bad prefix"); err == nil {
+		t.Fatal("invalid prefix accepted")
+	}
+	fake.topic = topicTelemetry
+	fake.polls = 0
+	if _, err = k.Next(context.Background()); err == nil {
+		t.Fatal("foreign transport topic accepted")
+	}
 }
 func (f *fakeKafka) ProduceSync(_ context.Context, rs ...*kgo.Record) kgo.ProduceResults {
 	return kgo.ProduceResults{{Record: rs[0], Err: errTest}}
@@ -78,7 +113,7 @@ type testCluster struct {
 func cluster(t *testing.T) *testCluster {
 	t.Helper()
 	network := new(kfake.VirtualNetwork)
-	c, err := kfake.NewCluster(kfake.ListenFn(network.Listen), kfake.NumBrokers(1), kfake.SeedTopics(2, topicTelemetry, topicInventory, topicQuarantine))
+	c, err := kfake.NewCluster(kfake.ListenFn(network.Listen), kfake.NumBrokers(1), kfake.SeedTopics(2, append(projectionTopics, topicQuarantine)...))
 	if err != nil {
 		t.Fatal(err)
 	}

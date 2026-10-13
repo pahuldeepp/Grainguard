@@ -1,3 +1,4 @@
+import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { createRequire } from "node:module";
 import kafkaJs, { type Consumer, type Producer } from "kafkajs";
 import {
@@ -7,14 +8,10 @@ import {
   createDynamoFlagSnapshotStore,
   type DynamoFlagSnapshotStore,
 } from "@greenguard/feature-flags";
-import {
-  classifyFlagMessage,
-  flagHeaderTenant,
-  quarantineFlagMessage,
-  type FlagFeedMessage,
-} from "./flag-feed-message.js";
 
 const RETRY_MS = 5_000;
+const QUARANTINE_TOPIC = "greenguard.quarantine.v1";
+const MAX_RAW_BYTES = 65_536;
 const { Kafka, CompressionCodecs, CompressionTypes } = kafkaJs;
 CompressionCodecs[CompressionTypes.Snappy] = createRequire(import.meta.url)(
   "kafkajs-snappy",
@@ -24,38 +21,66 @@ type FeedConsumer = Pick<
   "connect" | "subscribe" | "run" | "disconnect" | "on" | "events"
 >;
 type FeedProducer = Pick<Producer, "connect" | "disconnect" | "send">;
+type FeedMessage = {
+  topic: string;
+  partition: number;
+  message: { offset: string; value: Buffer | null };
+};
+
+async function quarantine(
+  producer: FeedProducer,
+  source: FeedMessage,
+  raw: string,
+  reason: string,
+  tenantId: string,
+): Promise<void> {
+  const bytes = Buffer.from(raw, "utf8");
+  await producer.send({
+    topic: QUARANTINE_TOPIC,
+    messages: [
+      {
+        key: `${source.topic}:${source.partition}:${source.message.offset}`,
+        headers: { reason_code: reason, tenant_id: tenantId },
+        value: JSON.stringify({
+          reason,
+          source_topic: source.topic,
+          source_partition: source.partition,
+          source_offset: source.message.offset,
+          raw_base64: bytes.subarray(0, MAX_RAW_BYTES).toString("base64"),
+          truncated: bytes.length > MAX_RAW_BYTES,
+        }),
+      },
+    ],
+  });
+}
+
 async function handleMessage(
   store: Pick<DynamoFlagSnapshotStore, "apply">,
   producer: FeedProducer,
-  source: FlagFeedMessage,
+  source: FeedMessage,
 ): Promise<void> {
   const { value } = source.message;
   if (!value) return;
   const raw = value.toString("utf8");
-  const checked = classifyFlagMessage(raw, flagHeaderTenant(source.message));
-  if (checked.reason) {
-    await quarantineFlagMessage(
-      producer,
-      source,
-      raw,
-      checked.reason,
-      checked.tenant,
-    );
+  let input: unknown;
+  try {
+    input = JSON.parse(raw) as unknown;
+  } catch {
+    await quarantine(producer, source, raw, "bad_envelope", "unknown");
     return;
   }
 
   let change;
   try {
-    change = parseFlagEvent(checked.event, FLAG_REGISTRY);
+    change = parseFlagEvent(input, FLAG_REGISTRY);
   } catch (error) {
     if (!(error instanceof PoisonFlagEventError)) throw error;
-    await quarantineFlagMessage(
-      producer,
-      source,
-      raw,
-      error.reason,
-      checked.tenant,
-    );
+    const candidate = (input as { tenant_id?: unknown } | null)?.tenant_id;
+    const tenantId =
+      typeof candidate === "string" && candidate.length <= 64
+        ? candidate
+        : "unknown";
+    await quarantine(producer, source, raw, error.reason, tenantId);
     return;
   }
   // Unrelated events sharing the topic are ignored. Persistence errors propagate
@@ -75,7 +100,11 @@ export function startDynamoFlagFeed(
     createProducer?: () => FeedProducer;
   } = {},
 ): () => Promise<void> {
-  const kafka = new Kafka({ clientId: "greenguard-dynamodb-flags", brokers });
+  const kafka = new Kafka({
+    clientId: "greenguard-dynamodb-flags",
+    brokers,
+    ...kafkaSecurityFromEnv(),
+  });
   const groupId = options.groupId ?? "greenguard-platform-flag-dynamodb-v1";
   let consumer: FeedConsumer | undefined;
   let producerReady: Promise<void> | undefined;
@@ -105,10 +134,12 @@ export function startDynamoFlagFeed(
     const next =
       options.createConsumer?.(groupId) ?? kafka.consumer({ groupId });
     try {
-      producerReady ??= producer.connect().catch((error: unknown) => {
-        producerReady = undefined;
-        throw error;
-      });
+      if (!producerReady) {
+        producerReady = producer.connect().catch((error: unknown) => {
+          producerReady = undefined;
+          throw error;
+        });
+      }
       await producerReady;
       await next.connect();
       if (closed) {
@@ -126,7 +157,7 @@ export function startDynamoFlagFeed(
       });
       await next.run({
         eachMessage: (payload) =>
-          handleMessage(store, producer, payload as FlagFeedMessage),
+          handleMessage(store, producer, payload as FeedMessage),
       });
     } catch {
       const restartAlreadyScheduled = pendingFailedConsumer === next;

@@ -1,6 +1,7 @@
 """Live Elasticsearch acceptance checks; run with the search Compose overlay."""
 
 import json
+import atexit
 import os
 import tempfile
 import time
@@ -54,6 +55,19 @@ def run():
     elastic = Elastic(os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:19200"))
     suffix = int(os.getenv("SEARCH_TEST_VERSION", str(uuid.uuid4().int % 1000000000 + 900000000)))
     first, second = index_name(suffix), index_name(suffix + 1)
+    def cleanup_test_indices():
+        failure = None
+        for index in (first, second):
+            try:
+                elastic.request("DELETE", f"/{index}")
+            except SearchError as exc:
+                if exc.status != 404:
+                    failure = failure or exc
+        if failure:
+            raise failure
+    # This is a disposable acceptance run. Never leave random test indices or
+    # aliases accumulating in the developer's Elasticsearch volume.
+    atexit.register(cleanup_test_indices)
     tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
     resource_a, resource_b = str(uuid.uuid4()), str(uuid.uuid4())
     events = [event("site-changed.v1.valid.json", tenant_a, resource_a, 1),

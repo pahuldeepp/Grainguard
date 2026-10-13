@@ -220,6 +220,12 @@ func TestRunReportsInvalidIngestConfigurationBeforeConnecting(t *testing.T) {
 }
 
 func TestRunServesTheIngestEndpointEndToEnd(t *testing.T) {
+	originalPool := newPool
+	newPool = func(ctx context.Context, cfg *pgxpool.Config) (*pgxpool.Pool, error) {
+		configureFixturePlacement(t, cfg)
+		return pgxpool.NewWithConfig(ctx, cfg)
+	}
+	defer func() { newPool = originalPool }()
 	issuer := newTestIssuer(t)
 	tenant, device := randomUUID(), randomUUID()
 	mustApply(t, pooled(t, 2), eventSpec{kind: "device.registered", tenant: tenant, device: device, version: 1}, BindingApplied)

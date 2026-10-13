@@ -26,10 +26,12 @@ const (
 
 // Ingestor stores validated readings durably and idempotently.
 type Ingestor struct {
-	feed   *BindingFeed
-	db     TxStarter
-	policy QualityPolicy
-	now    func() time.Time
+	v2Enabled bool
+	sensors   SensorResolver
+	feed      *BindingFeed
+	db        TxStarter
+	policy    QualityPolicy
+	now       func() time.Time
 }
 
 func NewIngestor(db TxStarter, policy QualityPolicy, now func() time.Time) *Ingestor {
@@ -42,15 +44,20 @@ func NewIngestor(db TxStarter, policy QualityPolicy, now func() time.Time) *Inge
 type measurementsJSON struct {
 	TemperatureC            *float64 `json:"temperature_c,omitempty"`
 	RelativeHumidityPercent *float64 `json:"relative_humidity_percent,omitempty"`
+	CO2PPM                  *float64 `json:"co2_ppm,omitempty"`
+	GrainMoisturePercent    *float64 `json:"grain_moisture_percent,omitempty"`
 }
 
 // normalizedRequest holds only what the caller supplied, so a retry compares equal even
 // though its arrival time, trace and the server-derived binding data differ.
 type normalizedRequest struct {
-	SourceMessageID string           `json:"source_message_id"`
-	DeviceID        string           `json:"device_id"`
-	ObservedAt      string           `json:"observed_at"`
-	Measurements    measurementsJSON `json:"measurements"`
+	SourceMessageID    string              `json:"source_message_id"`
+	DeviceID           string              `json:"device_id"`
+	ObservedAt         string              `json:"observed_at"`
+	Measurements       measurementsJSON    `json:"measurements"`
+	SchemaVersion      int                 `json:"schema_version,omitempty"`
+	MeasurementUnits   map[string]string   `json:"measurement_units,omitempty"`
+	SensorObservations []SensorObservation `json:"sensor_observations,omitempty"`
 }
 
 type telemetryPayload struct {
@@ -82,6 +89,8 @@ type attempt struct {
 	request   string
 	feed      *BindingFeed
 	policy    QualityPolicy
+	v2Enabled bool
+	sensors   SensorResolver
 }
 
 // record is the set of identifiers and values written by one accepted reading.
@@ -118,10 +127,10 @@ func (g *Ingestor) Ingest(ctx context.Context, p Principal, deviceID string, bod
 	if rej != nil {
 		return IngestResult{}, rej
 	}
-	a := attempt{principal: p, deviceID: deviceID, req: req, meta: meta, now: now, policy: g.policy, feed: g.feed}
+	a := attempt{principal: p, deviceID: deviceID, req: req, meta: meta, now: now, policy: g.policy, feed: g.feed, v2Enabled: g.v2Enabled, sensors: g.sensors}
 	normalized, _ := json.Marshal(normalizedRequest{
 		SourceMessageID: req.SourceMessageID, DeviceID: deviceID, ObservedAt: formatTimestamp(req.ObservedAt),
-		Measurements: measurementsJSON{TemperatureC: req.TemperatureC, RelativeHumidityPercent: req.RelativeHumidityPercent},
+		Measurements: req.measurements(), SchemaVersion: req.SchemaVersion, MeasurementUnits: req.MeasurementUnits, SensorObservations: req.SensorObservations,
 	})
 	a.request = string(normalized)
 
@@ -161,11 +170,17 @@ func storeReading(ctx context.Context, tx pgx.Tx, a attempt) (IngestResult, erro
 	if prior != nil {
 		return *prior, nil
 	}
+	if a.req.SchemaVersion == 2 && !a.v2Enabled {
+		return IngestResult{}, newRejection(ReasonTelemetryV2Disabled, 503, "telemetry v2 production emission is disabled")
+	}
 	if rej := checkTimestamp(a.req.ObservedAt, a.now, a.policy); rej != nil {
 		return IngestResult{}, rej
 	}
 	binding, err := lockBinding(ctx, tx, a)
 	if err != nil {
+		return IngestResult{}, err
+	}
+	if err := resolveSensorObservations(ctx, tx, &a, binding); err != nil {
 		return IngestResult{}, err
 	}
 	if a.feed != nil {
@@ -236,8 +251,17 @@ func (r record) payloadJSON() string {
 		ReadingID: r.readingID, DeviceID: r.deviceID, SiteID: r.binding.siteID, BinID: r.binding.binID,
 		BindingVersion: fmt.Sprint(r.binding.version), SourceMessageID: r.req.SourceMessageID,
 		ObservedAt: formatTimestamp(r.req.ObservedAt), ReceivedAt: formatTimestamp(r.now),
-		Measurements: measurementsJSON{TemperatureC: r.req.TemperatureC, RelativeHumidityPercent: r.req.RelativeHumidityPercent},
+		Measurements: r.req.measurements(),
 	})
+	if r.req.SchemaVersion == 2 {
+		var payload map[string]any
+		_ = json.Unmarshal(data, &payload)
+		payload["measurement_units"] = r.req.MeasurementUnits
+		if len(r.req.SensorObservations) > 0 {
+			payload["sensor_observations"] = r.req.SensorObservations
+		}
+		data, _ = json.Marshal(payload)
+	}
 	return string(data)
 }
 
@@ -277,6 +301,9 @@ func advanceStream(ctx context.Context, tx pgx.Tx, r record) error {
 }
 
 func insertReading(ctx context.Context, tx pgx.Tx, r record) error {
+	if r.req.SchemaVersion == 2 {
+		return insertReadingV2(ctx, tx, r)
+	}
 	_, err := tx.Exec(ctx,
 		`INSERT INTO readings (tenant_id, reading_id, device_id, stream_version, source_message_id, site_id, bin_id,
 		   binding_version, observed_at, received_at, temperature_c, relative_humidity_percent)
@@ -287,6 +314,9 @@ func insertReading(ctx context.Context, tx pgx.Tx, r record) error {
 }
 
 func insertOutbox(ctx context.Context, tx pgx.Tx, r record) error {
+	if r.req.SchemaVersion == 2 {
+		return insertOutboxV2(ctx, tx, r)
+	}
 	_, err := tx.Exec(ctx,
 		`INSERT INTO outbox_events (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type,
 		   schema_version, occurred_at, correlation_id, causation_id, traceparent, payload)

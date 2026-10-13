@@ -18,8 +18,3 @@ export function nameId(...names: string[]): string {
 // greenguard_control; consumers hash the issuer|subject they hold to find the entry.
 export const identityKey = (issuer: string, subject: string) =>
   nameId("identity", issuer, subject);
-
-export const identityIdOf = identityKey;
-
-export const sha256Hex = (value: string) =>
-  createHash("sha256").update(value).digest("hex");

@@ -9,6 +9,7 @@ import (
 	"io"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	common "greenguard.local/go-common"
 	"greenguard.local/jobs-worker/rabbit"
 )
 
@@ -27,16 +28,12 @@ func redriveCommand(ctx context.Context, args []string, getenv func(string) stri
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	url := getenv("JOBS_DATABASE_URL")
-	if url == "" {
-		return errors.New("JOBS_DATABASE_URL is required")
-	}
-	pool, err := openPool(ctx, url)
+	db, closeDB, err := operationalDB(ctx, getenv)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-	done, err := RedriveDead(ctx, pool, opts)
+	defer closeDB()
+	done, err := RedriveDead(ctx, db, opts)
 	for _, ref := range done {
 		_, _ = fmt.Fprintf(out, "redriven tenant=%s intent=%s\n", ref.TenantID, ref.IntentID)
 	}
@@ -59,13 +56,13 @@ func dlqReplayCommand(ctx context.Context, args []string, getenv func(string) st
 		return errors.New("RABBITMQ_URL and a positive -limit are required")
 	}
 	var redrive rabbit.DeadHandler
-	if dbURL := getenv("JOBS_DATABASE_URL"); dbURL != "" {
-		pool, err := openPool(ctx, dbURL)
+	if getenv("JOBS_DATABASE_URL") != "" || getenv("SHARD_REGISTRY_FILE") != "" {
+		db, closeDB, err := operationalDB(ctx, getenv)
 		if err != nil {
 			return err
 		}
-		defer pool.Close()
-		redrive = dlqRedrive(pool)
+		defer closeDB()
+		redrive = dlqRedrive(db)
 	}
 	ch, closer, err := dialBroker(url)
 	if err != nil {
@@ -77,6 +74,27 @@ func dlqReplayCommand(ctx context.Context, args []string, getenv func(string) st
 	n, err := rabbit.ReplayDLQ(ctx, pub, ch, *limit, redrive)
 	_, _ = fmt.Fprintf(out, "replayed %d DLQ messages\n", n)
 	return err
+}
+
+func operationalDB(ctx context.Context, getenv func(string) string) (TxStarter, func(), error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, nil, err
+	}
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		db, err := common.ShardedDBFromEnvironment(getenv, "jobs-worker", "greenguard_jobs", "jobs_app")
+		if err != nil {
+			return nil, nil, err
+		}
+		return db, db.Close, nil
+	}
+	if getenv("JOBS_DATABASE_URL") == "" {
+		return nil, nil, errors.New("JOBS_DATABASE_URL or SHARD_REGISTRY_FILE is required")
+	}
+	db, err := openPool(ctx, getenv("JOBS_DATABASE_URL"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return db, db.Close, nil
 }
 
 // dlqRedrive redrives the intent named by a dispatch-dead DLQ record (same intent_id).

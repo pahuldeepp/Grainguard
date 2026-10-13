@@ -1,0 +1,278 @@
+{
+  "uid": "greenguard-slo",
+  "title": "GreenGuard \u2014 Candidate SLO and Error Budget (approval required)",
+  "tags": [
+    "greenguard",
+    "stage-11",
+    "slo"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Candidate API availability (99.95% target; not approved)",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "1 - candidate_slo:api:error_ratio:rate5m",
+          "legendFormat": "API availability"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "Not measured / target not approved"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "SLI numerator and denominator",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "candidate_slo:api:valid_requests:rate5m",
+          "legendFormat": "candidate valid request rate (includes 4xx)"
+        },
+        {
+          "expr": "candidate_slo:api:bad_requests:rate5m",
+          "legendFormat": "5xx requests/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "No SLI events recorded"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error budget remaining (only after objective approval)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "candidate_slo:api:error_budget_remaining:ratio30d",
+          "legendFormat": "candidate API budget remaining"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "Objective not approved or instrumented"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Fast / slow burn rate",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "candidate_slo:api:burn_rate:1h",
+          "legendFormat": "candidate API burn rate (1h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Objective not approved or instrumented"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP request latency percentiles (route templates)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (job, route, le) (rate(http_server_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{job}} {{route}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (job, route, le) (rate(http_server_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{job}} {{route}} p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (job, route, le) (rate(http_server_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{job}} {{route}} p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (job, route, le) (rate(http_server_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{job}} {{route}} p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Journey histograms are not yet instrumented"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Projection freshness candidate (2s objective; not approved)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "candidate_slo:projection:freshness_p95_5m",
+          "legendFormat": "event-to-projection p95 seconds"
+        },
+        {
+          "expr": "projection_last_projected_age_seconds",
+          "legendFormat": "last applied event age"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown: projection pipeline not running"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "title": "Platform overview",
+      "url": "/d/greenguard-platform-overview/greenguard-platform-overview",
+      "type": "link"
+    }
+  ]
+}

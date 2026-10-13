@@ -29,7 +29,24 @@ const (
 var ErrConflict = errors.New("event identity collision")
 var ErrDuplicate = errors.New("semantic duplicate")
 
-type Message = transport.Message
+type Message struct {
+	EndOffset      int64
+	Topic          string
+	TransportTopic string
+	Partition      int32
+	Offset         int64
+	Key, Value     []byte
+	Headers        []kgo.RecordHeader
+	Commit         func(context.Context) error
+}
+
+func (m Message) sourceTopic() string {
+	if m.TransportTopic != "" {
+		return m.TransportTopic
+	}
+	return m.Topic
+}
+
 type Record = transport.Record
 type Source interface {
 	Next(context.Context) (Message, error)
@@ -240,7 +257,7 @@ func quarantine(m Message, reason string) Record {
 		Offset    int64  `json:"source_offset"`
 		Raw       []byte `json:"raw_base64"`
 		Truncated bool   `json:"truncated"`
-	}{reason, m.Topic, m.Partition, m.Offset, raw, truncated})
+	}{reason, m.sourceTopic(), m.Partition, m.Offset, raw, truncated})
 	tenant := "unknown"
 	var e map[string]any
 	if json.Unmarshal(m.Value, &e) == nil {
@@ -248,5 +265,5 @@ func quarantine(m Message, reason string) Record {
 			tenant = id
 		}
 	}
-	return Record{Topic: topicQuarantine, Key: []byte(fmt.Sprintf("%s:%d:%d", m.Topic, m.Partition, m.Offset)), Value: body, Headers: map[string]string{fieldTenant: tenant}}
+	return Record{Topic: topicQuarantine, Key: []byte(fmt.Sprintf("%s:%d:%d", m.sourceTopic(), m.Partition, m.Offset)), Value: body, Headers: map[string]string{fieldTenant: tenant}}
 }

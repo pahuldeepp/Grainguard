@@ -1,3 +1,4 @@
+import { allowedInternalUrl } from "./internal-url.js";
 import { requireRole, type Principal } from "@greenguard/tenant-auth";
 
 export class AlertUpstreamError extends Error {
@@ -29,6 +30,13 @@ export interface AlertPage {
   items: AlertView[];
   nextCursor: string | null;
 }
+export interface AlertHistoryPage {
+  alertId: string;
+  items: Array<Record<string, unknown>>;
+  nextCursor: string | null;
+  complete: boolean;
+  source: { status: string; reasonCode: string | null };
+}
 
 export interface AlertAcknowledgement {
   episodeId: string;
@@ -45,14 +53,7 @@ export class AlertClient {
     private readonly baseURL: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {
-    const url = new URL(baseURL);
-    if (
-      url.protocol !== "https:" &&
-      !(
-        url.protocol === "http:" &&
-        ["localhost", "127.0.0.1"].includes(url.hostname)
-      )
-    ) {
+    if (!allowedInternalUrl(baseURL)) {
       throw new Error("ALERT_API_URL must use HTTPS or loopback HTTP");
     }
   }
@@ -111,6 +112,28 @@ export class AlertClient {
     requireRole(principal, "viewer", "operator", "admin");
     if (!UUID.test(id)) throw new AlertUpstreamError(400, "invalid_alert_id");
     return this.request(`/v1/alerts/${id}`, token);
+  }
+
+  history(
+    principal: Principal,
+    token: string,
+    id: string,
+    limit: number,
+    after?: string,
+  ): Promise<AlertHistoryPage> {
+    requireRole(principal, "viewer", "operator", "admin");
+    if (
+      !UUID.test(id) ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 100 ||
+      (after !== undefined &&
+        (after.length > 2048 || !/^[A-Za-z0-9_.-]+$/.test(after)))
+    )
+      throw new AlertUpstreamError(400, "invalid_alert_history");
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (after) params.set("after", after);
+    return this.request(`/v1/alerts/${id}/transitions?${params}`, token);
   }
 
   acknowledge(

@@ -1,6 +1,10 @@
 import json
+import os
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import bridge as MODULE
 from bridge import forward_record, validate_event
 
 TENANT = "11111111-1111-4111-8111-111111111111"
@@ -43,6 +47,48 @@ class FakeQueue:
 
 
 class BridgeTests(unittest.TestCase):
+    def test_readiness_requires_kafka_assignment_and_stays_unready_after_shutdown(self):
+        calls = []
+        handlers = {}
+
+        class Consumer:
+            def __init__(self, config):
+                calls.append("consumer")
+
+            def subscribe(self, topics):
+                calls.append("subscribe")
+
+            def assignment(self):
+                return [SimpleNamespace(topic="alerts", partition=0)]
+
+            def poll(self, _timeout):
+                if calls.count("poll") == 0:
+                    calls.append("poll")
+                    return None
+                calls.append((MODULE.HEALTH.status("/readyz"), list(clients)))
+                handlers["SIGTERM"](None, None)
+                return None
+
+            def close(self):
+                calls.append("close")
+
+        kafka_error = SimpleNamespace(_PARTITION_EOF=-191)
+        clients = []
+        def client(name):
+            clients.append(name)
+            return object()
+
+        env = {"KAFKA_BROKERS": "broker:9092", "EVENT_BUS_NAME": "alerts", "BRIDGE_QUARANTINE_QUEUE_URL": "https://sqs.example/q", "HEALTH_PORT": "0"}
+        with patch.dict(os.environ, env, clear=False), \
+             patch.object(MODULE.signal, "getsignal", return_value=None), \
+             patch.object(MODULE.signal, "signal", side_effect=lambda sig, handler: handlers.__setitem__("SIGTERM", handler)):
+            self.assertFalse(MODULE.run(Consumer, kafka_error, client))
+
+        self.assertEqual(clients, ["events", "sqs"])
+        self.assertIn((200, ["events", "sqs"]), calls)
+        self.assertEqual(calls[-1], "close")
+        self.assertEqual(MODULE.HEALTH.status("/readyz"), 503)
+
     def test_routes_critical_escalation_to_serverless_marker_unconditionally(self):
         events, queue = FakeEvents(), FakeQueue()
         forward_record(events, queue, bus_name="bus", quarantine_url="dlq",

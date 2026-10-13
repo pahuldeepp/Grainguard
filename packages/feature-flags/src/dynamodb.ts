@@ -115,12 +115,6 @@ export function createDynamoFlagSnapshotStore(options: {
 }
 
 function validateChange(change: FlagChange): void {
-  validateScope(change);
-  validateSnapshotVersion(change.version);
-  validateFlags(change.flags);
-}
-
-function validateScope(change: FlagChange): void {
   if (!change || !["tenant", "global"].includes(change.scope))
     throw new Error("invalid flag scope");
   if (
@@ -134,36 +128,32 @@ function validateScope(change: FlagChange): void {
     throw new Error(
       "reserved infrastructure tenant cannot be used as a customer tenant",
     );
-}
-
-function validateSnapshotVersion(version: number): void {
-  if (!Number.isSafeInteger(version) || version < 0)
+  if (!Number.isSafeInteger(change.version) || change.version < 0)
     throw new Error("invalid flag snapshot version");
-}
-
-function validateFlags(flags: FlagChange["flags"]): void {
-  if (!flags || typeof flags !== "object" || Array.isArray(flags))
+  if (
+    !change.flags ||
+    typeof change.flags !== "object" ||
+    Array.isArray(change.flags)
+  )
     throw new Error("invalid flag snapshot values");
-  for (const [key, rule] of Object.entries(flags)) validateFlagRule(key, rule);
-}
-
-function validateFlagRule(key: string, rule: FlagRule): void {
-  if (
-    !key ||
-    !rule ||
-    !["boolean", "string", "number"].includes(typeof rule.value)
-  )
-    throw new Error("invalid flag rule");
-  if (typeof rule.value === "number" && !Number.isFinite(rule.value))
-    throw new Error("invalid numeric flag");
-  if (
-    rule.rolloutPercent !== undefined &&
-    (typeof rule.value !== "boolean" ||
-      !Number.isFinite(rule.rolloutPercent) ||
-      rule.rolloutPercent < 0 ||
-      rule.rolloutPercent > 100)
-  )
-    throw new Error("invalid flag rollout percentage");
+  for (const [key, rule] of Object.entries(change.flags)) {
+    if (
+      !key ||
+      !rule ||
+      !["boolean", "string", "number"].includes(typeof rule.value)
+    )
+      throw new Error("invalid flag rule");
+    if (typeof rule.value === "number" && !Number.isFinite(rule.value))
+      throw new Error("invalid numeric flag");
+    if (
+      rule.rolloutPercent !== undefined &&
+      (typeof rule.value !== "boolean" ||
+        !Number.isFinite(rule.rolloutPercent) ||
+        rule.rolloutPercent < 0 ||
+        rule.rolloutPercent > 100)
+    )
+      throw new Error("invalid flag rollout percentage");
+  }
 }
 
 function keyFor(change: FlagChange): string {

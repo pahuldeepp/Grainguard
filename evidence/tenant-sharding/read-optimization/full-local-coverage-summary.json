@@ -1,0 +1,329 @@
+{
+  "coveredInstrumentationUnits": 40114,
+  "totalInstrumentationUnits": 47013,
+  "weightedPercent": 85.33,
+  "reaches80Percent": true,
+  "method": "Sum covered executable lines (JS/TS/Python) plus Go statements divided by total instrumented units; local aggregate, not Sonar new-code coverage or an every-workspace threshold.",
+  "scopes": [
+    {
+      "scope": "apps/dashboard",
+      "instrument": "LCOV executable lines",
+      "covered": 714,
+      "total": 833,
+      "linePercent": 85.71,
+      "functionsCovered": 215,
+      "functionsTotal": 268,
+      "branchesCovered": 738,
+      "branchesTotal": 930
+    },
+    {
+      "scope": "apps/mobile",
+      "instrument": "LCOV executable lines",
+      "covered": 1252,
+      "total": 1308,
+      "linePercent": 95.72,
+      "functionsCovered": 79,
+      "functionsTotal": 86,
+      "branchesCovered": 312,
+      "branchesTotal": 334
+    },
+    {
+      "scope": "packages/otel",
+      "instrument": "LCOV executable lines",
+      "covered": 264,
+      "total": 264,
+      "linePercent": 100.0,
+      "functionsCovered": 14,
+      "functionsTotal": 14,
+      "branchesCovered": 55,
+      "branchesTotal": 58
+    },
+    {
+      "scope": "packages/tenant-auth",
+      "instrument": "LCOV executable lines",
+      "covered": 772,
+      "total": 784,
+      "linePercent": 98.47,
+      "functionsCovered": 30,
+      "functionsTotal": 30,
+      "branchesCovered": 241,
+      "branchesTotal": 284
+    },
+    {
+      "scope": "packages/contracts",
+      "instrument": "LCOV executable lines",
+      "covered": 498,
+      "total": 529,
+      "linePercent": 94.14,
+      "functionsCovered": 14,
+      "functionsTotal": 14,
+      "branchesCovered": 146,
+      "branchesTotal": 161
+    },
+    {
+      "scope": "packages/read-model",
+      "instrument": "LCOV executable lines",
+      "covered": 450,
+      "total": 518,
+      "linePercent": 86.87,
+      "functionsCovered": 14,
+      "functionsTotal": 17,
+      "branchesCovered": 33,
+      "branchesTotal": 49
+    },
+    {
+      "scope": "packages/membership-client",
+      "instrument": "LCOV executable lines",
+      "covered": 1298,
+      "total": 1468,
+      "linePercent": 88.42,
+      "functionsCovered": 59,
+      "functionsTotal": 65,
+      "branchesCovered": 386,
+      "branchesTotal": 437
+    },
+    {
+      "scope": "packages/feature-flags",
+      "instrument": "LCOV executable lines",
+      "covered": 565,
+      "total": 706,
+      "linePercent": 80.03,
+      "functionsCovered": 31,
+      "functionsTotal": 42,
+      "branchesCovered": 121,
+      "branchesTotal": 158
+    },
+    {
+      "scope": "packages/entitlements",
+      "instrument": "LCOV executable lines",
+      "covered": 246,
+      "total": 403,
+      "linePercent": 61.04,
+      "functionsCovered": 10,
+      "functionsTotal": 15,
+      "branchesCovered": 48,
+      "branchesTotal": 60
+    },
+    {
+      "scope": "packages/kafka-security",
+      "instrument": "LCOV executable lines",
+      "covered": 26,
+      "total": 32,
+      "linePercent": 81.25,
+      "functionsCovered": 1,
+      "functionsTotal": 2,
+      "branchesCovered": 16,
+      "branchesTotal": 21
+    },
+    {
+      "scope": "packages/audit",
+      "instrument": "LCOV executable lines",
+      "covered": 1265,
+      "total": 1306,
+      "linePercent": 96.86,
+      "functionsCovered": 45,
+      "functionsTotal": 45,
+      "branchesCovered": 259,
+      "branchesTotal": 308
+    },
+    {
+      "scope": "services/tenant-control-plane",
+      "instrument": "LCOV executable lines",
+      "covered": 5881,
+      "total": 6282,
+      "linePercent": 93.62,
+      "functionsCovered": 281,
+      "functionsTotal": 301,
+      "branchesCovered": 1133,
+      "branchesTotal": 1329
+    },
+    {
+      "scope": "services/billing-service",
+      "instrument": "LCOV executable lines",
+      "covered": 1627,
+      "total": 2240,
+      "linePercent": 72.63,
+      "functionsCovered": 84,
+      "functionsTotal": 117,
+      "branchesCovered": 257,
+      "branchesTotal": 367
+    },
+    {
+      "scope": "services/bff",
+      "instrument": "LCOV executable lines",
+      "covered": 2928,
+      "total": 3371,
+      "linePercent": 86.86,
+      "functionsCovered": 134,
+      "functionsTotal": 152,
+      "branchesCovered": 657,
+      "branchesTotal": 788
+    },
+    {
+      "scope": "services/gateway",
+      "instrument": "LCOV executable lines",
+      "covered": 631,
+      "total": 765,
+      "linePercent": 82.48,
+      "functionsCovered": 19,
+      "functionsTotal": 22,
+      "branchesCovered": 144,
+      "branchesTotal": 185
+    },
+    {
+      "scope": "services/device-service",
+      "instrument": "LCOV executable lines",
+      "covered": 4267,
+      "total": 4693,
+      "linePercent": 90.92,
+      "functionsCovered": 187,
+      "functionsTotal": 203,
+      "branchesCovered": 904,
+      "branchesTotal": 985
+    },
+    {
+      "scope": "services/workflow-alerts",
+      "instrument": "LCOV executable lines",
+      "covered": 2304,
+      "total": 2440,
+      "linePercent": 94.43,
+      "functionsCovered": 112,
+      "functionsTotal": 116,
+      "branchesCovered": 499,
+      "branchesTotal": 518
+    },
+    {
+      "scope": "services/notification-service",
+      "instrument": "LCOV executable lines",
+      "covered": 3376,
+      "total": 4012,
+      "linePercent": 84.15,
+      "functionsCovered": 153,
+      "functionsTotal": 169,
+      "branchesCovered": 818,
+      "branchesTotal": 930
+    },
+    {
+      "scope": "services/read-api",
+      "instrument": "LCOV executable lines",
+      "covered": 3268,
+      "total": 3755,
+      "linePercent": 87.03,
+      "functionsCovered": 154,
+      "functionsTotal": 191,
+      "branchesCovered": 854,
+      "branchesTotal": 981
+    },
+    {
+      "scope": "coverage/cache-invalidator.out",
+      "instrument": "Go statements",
+      "covered": 168,
+      "total": 409,
+      "linePercent": 41.08
+    },
+    {
+      "scope": "coverage/cassandra-writer.out",
+      "instrument": "Go statements",
+      "covered": 351,
+      "total": 580,
+      "linePercent": 60.52
+    },
+    {
+      "scope": "coverage/cdc-transformer.out",
+      "instrument": "Go statements",
+      "covered": 416,
+      "total": 439,
+      "linePercent": 94.76
+    },
+    {
+      "scope": "coverage/go-common.out",
+      "instrument": "Go statements",
+      "covered": 313,
+      "total": 555,
+      "linePercent": 56.4
+    },
+    {
+      "scope": "coverage/go-migrations.out",
+      "instrument": "Go statements",
+      "covered": 28,
+      "total": 36,
+      "linePercent": 77.78
+    },
+    {
+      "scope": "coverage/go.out",
+      "instrument": "Go statements",
+      "covered": 1629,
+      "total": 1915,
+      "linePercent": 85.07
+    },
+    {
+      "scope": "coverage/hardware-service.out",
+      "instrument": "Go statements",
+      "covered": 411,
+      "total": 720,
+      "linePercent": 57.08
+    },
+    {
+      "scope": "coverage/jobs-worker.out",
+      "instrument": "Go statements",
+      "covered": 883,
+      "total": 1065,
+      "linePercent": 82.91
+    },
+    {
+      "scope": "coverage/kafka-transport.out",
+      "instrument": "Go statements",
+      "covered": 29,
+      "total": 63,
+      "linePercent": 46.03
+    },
+    {
+      "scope": "coverage/projection-builder.out",
+      "instrument": "Go statements",
+      "covered": 1690,
+      "total": 2275,
+      "linePercent": 74.29
+    },
+    {
+      "scope": "coverage/saga-orchestrator.out",
+      "instrument": "Go statements",
+      "covered": 795,
+      "total": 1289,
+      "linePercent": 61.68
+    },
+    {
+      "scope": "services/search-indexer/coverage.xml",
+      "instrument": "Python executable lines",
+      "covered": 295,
+      "total": 335,
+      "linePercent": 88.06
+    },
+    {
+      "scope": "services/risk-engine/coverage.xml",
+      "instrument": "Python executable lines",
+      "covered": 1474,
+      "total": 1623,
+      "linePercent": 90.82
+    }
+  ],
+  "languageGroups": [
+    {
+      "instrument": "Go statements",
+      "covered": 6713,
+      "total": 9346,
+      "percent": 71.83
+    },
+    {
+      "instrument": "LCOV executable lines",
+      "covered": 31632,
+      "total": 35709,
+      "percent": 88.58
+    },
+    {
+      "instrument": "Python executable lines",
+      "covered": 1769,
+      "total": 1958,
+      "percent": 90.35
+    }
+  ]
+}

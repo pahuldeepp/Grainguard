@@ -10,11 +10,194 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  secret-scan:
+    name: Secret scanning
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan current tree and history for secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  dependency-and-iac-scan:
+    name: Dependency and IaC vulnerability scan
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Scan dependency manifests for high and critical findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
+          cache: "false"
+      - name: Scan IaC and Kubernetes manifests for high and critical findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          # Rendered Helm profiles are validated separately because charts require deployment-time
+          # immutable image digests. Vendor archives and the negative fixture are also checked elsewhere.
+          skip-dirs: tests/security/fixtures,infra/helm,infra/gitops/disposable,infra/kyverno/tests
+          skip-files: services/ml-scoring/deploy/Dockerfile.dockerignore
+          trivyignores: .trivyignore.yaml
+          cache: "false"
+      - name: Prove the IaC scanner rejects an intentionally insecure pod
+        run: bash scripts/check-trivy-fixture.sh
+
+  terraform-validate:
+    name: Terraform format and validation
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install pinned Terraform CLI
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Validate state bootstrap root
+        run: |
+          terraform -chdir=infra/terraform/bootstrap-state init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/bootstrap-state validate
+      - name: Validate AWS platform root
+        run: |
+          terraform -chdir=infra/terraform/platform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/platform validate
+      - name: Validate disposable AWS root
+        run: |
+          terraform -chdir=infra/terraform/disposable init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/terraform/disposable validate
+      - name: Verify disposable configuration and four-shard runtime contracts
+        run: python3 -m unittest infra/terraform/disposable/test_disposable_environment_contract.py infra/terraform/disposable/test_shard_runtime_contract.py infra/terraform/disposable/test_shard_routing_required_contract.py infra/terraform/disposable/test_prepare_shard_runtime_bundle.py -v
+      - name: Verify disposable teardown guards offline
+        run: bash infra/terraform/disposable/teardown_test.sh
+      - name: Verify capacity admission and destroy behavior with mocked AWS metadata
+        run: |
+          python3 -m unittest infra/terraform/disposable/test_capacity_preflight.py -v
+          ruby infra/terraform/disposable/test-minimum-capacity.rb
+      - name: Verify runtime secret boundaries and Stripe webhook failure recovery
+        run: python3 -m unittest infra/gitops/disposable/test_stripe_webhook_lifecycle.py infra/gitops/disposable/test_check_secrets_ready.py infra/gitops/disposable/test_runtime_secret_lifecycle.py infra/terraform/disposable/test_secret_state_boundary.py -v
+      - name: Audit disposable Terraform lifecycle offline
+        run: ruby infra/terraform/disposable/lifecycle-audit-test.rb
+      - name: Verify Pod Identity trust scoping
+        run: ruby infra/gitops/disposable/check-pod-identity-trust.rb
+      - name: Verify disposable data contracts
+        run: |
+          ruby infra/kubernetes/disposable-data/check-contract.rb
+
+  image-inventory:
+    name: Image and registry inventory
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify GitHub Actions use immutable commit pins
+        run: python3 scripts/test_workflow_action_pins.py
+      - name: Verify Dockerfile, CI matrix and ECR repository inventory
+        run: bash scripts/check-image-inventory.sh
+      - name: Verify disposable runtime contract structure
+        run: ruby infra/gitops/disposable/check-contract.rb
+      - name: Verify immutable release image resolution
+        run: ruby infra/gitops/disposable/test-resolve-images.rb
+      - name: Verify verified-digest CI artifact assembly
+        run: ruby infra/gitops/disposable/test-assemble-ci-digests.rb
+      - name: Verify anonymous digest-pull preflight offline
+        run: python3 -m unittest infra/gitops/disposable/test_check_public_release_images.py -v
+      - name: Verify signed-image ECR promotion contract offline
+        run: ruby infra/gitops/disposable/test-promote-images-to-ecr.rb
+      - name: Verify protected GitHub OIDC ECR promotion workflow offline
+        run: ruby infra/gitops/disposable/test-ecr-promotion-workflow.rb
+
+  helm-static:
+    name: Helm and GitOps render contracts
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned Helm 4.3.0
+        run: |
+          tool_dir="${RUNNER_TEMP}/greenguard-tools"
+          mkdir -p "${tool_dir}"
+          curl -fsSLo "${tool_dir}/helm-v4.3.0-linux-arm64.tar.gz" https://get.helm.sh/helm-v4.3.0-linux-arm64.tar.gz
+          echo '31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08  '"${tool_dir}/helm-v4.3.0-linux-arm64.tar.gz" | sha256sum -c -
+          tar -xzf "${tool_dir}/helm-v4.3.0-linux-arm64.tar.gz" -C "${tool_dir}" linux-arm64/helm
+          sudo install -m 0755 "${tool_dir}/linux-arm64/helm" /usr/local/bin/helm
+      - name: Install checksum-pinned kubectl 1.37.0 for Kustomize render
+        run: |
+          tool_dir="${RUNNER_TEMP}/greenguard-tools"
+          mkdir -p "${tool_dir}"
+          curl -fsSLo "${tool_dir}/kubectl-v1.37.0" https://dl.k8s.io/release/v1.37.0/bin/linux/arm64/kubectl
+          echo '922df28df248cc00a9e025f947704f1d1482de64ece54cfe57e61f19eaf1eef3  '"${tool_dir}/kubectl-v1.37.0" | sha256sum -c -
+          sudo install -m 0755 "${tool_dir}/kubectl-v1.37.0" /usr/local/bin/kubectl
+      - name: Validate runtime Helm charts and Kubernetes peers
+        run: bash scripts/helm-validate.sh
+      - name: Validate pinned controller archives and disposable data releases
+        run: |
+          ruby infra/gitops/disposable/check-controllers.rb
+          ruby infra/gitops/disposable/check-observability.rb
+          ruby infra/gitops/disposable/check-rds-bootstrap.rb
+          ruby infra/gitops/disposable/check-owner-migrations.rb
+          ruby infra/gitops/disposable/check-network-peers.rb
+          ruby infra/gitops/disposable/check-kafka-runtime.rb
+          ruby infra/gitops/disposable/check-auxiliary-peers.rb
+          ruby infra/gitops/disposable/check-data-plane.rb
+          ruby infra/gitops/disposable/test-data-plane-applications.rb
+          ruby infra/gitops/disposable/test-ml-synthetic-applications.rb
+          ruby infra/gitops/disposable/test-search-application.rb
+          ruby infra/gitops/disposable/test-cassandra-application.rb
+          bash infra/gitops/disposable/cassandra-chart/check-offline.sh
+          bash infra/gitops/disposable/mqtt-chart/check-chart.sh
+          python3 -m unittest infra/gitops/disposable/mqtt-chart/test_check_secret.py -v
+          python3 -m unittest infra/gitops/disposable/connector-registration/test_register.py -v
+          ruby infra/helm/greenguard-opensearch/check-contract.rb
+      - name: Validate guarded secret sync and live-evidence gates offline
+        run: python3 -m unittest infra/gitops/disposable/test_check_secrets_ready.py infra/gitops/disposable/test_sync_secrets.py infra/gitops/disposable/test_seed_generated_secrets.py infra/gitops/disposable/test_ml_secret_lifecycle.py infra/gitops/disposable/test_check_live_acceptance.py infra/gitops/disposable/test_check_deployed_workloads.py infra/gitops/disposable/test_run_deployed_workloads.py infra/gitops/disposable/test_check_public_edge.py infra/gitops/disposable/test_run_public_edge.py -v
+      - name: Validate disposable Argo tree and edge binding renders
+        run: |
+          ruby infra/gitops/disposable/check-application-tree.rb
+          bash infra/gitops/disposable/check-target-bindings.sh
+
   quality:
     name: Required quality gate
-    runs-on: ubuntu-latest
-    # make verify, coverage, smoke and the staging build alone take about 35 minutes on this
-    # runner; SonarQube analysis after that needs real headroom, not just the minutes left over.
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    # The pinned amd64 scanner runs under emulation on this owned ARM64 runner.
+    # Observed run: tests/coverage took 21m, then scan was killed at the 35m cap.
+    # Allow bounded time for complete analysis; every quality threshold remains.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -42,6 +225,8 @@ jobs:
           cache-dependency-path: |
             infra/cdk/requirements.txt
             services/eventbridge-bridge/requirements.txt
+            services/telemetry-sinks/requirements.txt
+            services/telemetry-sinks/requirements.lock
       - run: make bootstrap
       - run: make verify
       - name: Test and synthesize optional critical-alert AWS profile
@@ -58,19 +243,23 @@ jobs:
           make staging-down
           make db-down
           docker image prune -af
-          # SonarQube's embedded Elasticsearch refuses to allocate shards above the 90 % disk
-          # watermark and then stops itself (run 36303038336 had 6.3 % free). Image pruning alone
-          # leaves the staging build cache and the runner's preinstalled SDKs. Only SDKs outside
-          # the runner-managed toolcache that no step of this job uses are removed (.NET, Android,
-          # GHC); /opt/hostedtoolcache is left untouched, including the setup-* toolcaches the
-          # remaining steps' post actions use.
           df -h .
-          docker builder prune -af
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h .
+      # sonarsource/sonar-scanner-cli publishes no arm64 image; the arm64 self-hosted
+      # runner needs amd64 emulation or the scanner dies with "exec format error".
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
+      - name: Prepare private native scanner home
+        if: runner.arch == 'ARM64'
+        run: |
+          scanner_home="$(mktemp -d "$RUNNER_TEMP/greenguard-sonar.XXXXXXXX")"
+          chmod 700 "$scanner_home"
+          echo "SONAR_SCANNER_HOME=$scanner_home" >> "$GITHUB_ENV"
       - name: Analyze coverage and enforce SonarQube gate
+        env:
+          SONAR_SCANNER_PROFILE: ${{ runner.arch == 'ARM64' && 'native' || 'docker' }}
         run: make sonar-scan
       - name: Verify every coverage artifact exists
         run: |
@@ -117,6 +306,7 @@ jobs:
             coverage/go-common.out
             coverage/go-migrations.out
             coverage/sonar-quality-gate.json
+            coverage/sonar-issue-summary.json
             apps/dashboard/coverage/lcov.info
             services/bff/coverage/lcov.info
             services/read-api/coverage/lcov.info
@@ -135,7 +325,9 @@ jobs:
             packages/read-model/coverage/lcov.info
             services/search-indexer/coverage.xml
             services/risk-engine/coverage.xml
-          if-no-files-found: error
+          # The later explicit coverage gate checks every report after `make verify`
+          # succeeds; do not mask an earlier test failure with an artifact error.
+          if-no-files-found: warn
           retention-days: 14
       - name: Stop isolated test environments
         if: always()
@@ -143,10 +335,24 @@ jobs:
           make staging-down
           make db-down
           make sonar-down
+          make ci-compose-cleanup
+      - name: Remove private native scanner home
+        if: always() && runner.arch == 'ARM64'
+        run: |
+          if [[ -z "${SONAR_SCANNER_HOME:-}" ]]; then exit 0; fi
+          case "$SONAR_SCANNER_HOME" in
+            "$RUNNER_TEMP"/greenguard-sonar.*) rm -rf -- "$SONAR_SCANNER_HOME" ;;
+            *) echo "Refusing to remove unexpected scanner home" >&2; exit 1 ;;
+          esac
   publish:
     name: Publish verified images
     needs:
       [
+        secret-scan,
+        dependency-and-iac-scan,
+        terraform-validate,
+        image-inventory,
+        helm-static,
         quality,
         events-integration,
         redis-integration,
@@ -160,11 +366,12 @@ jobs:
         mysql-cdc-integration,
       ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
       packages: write
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
@@ -185,13 +392,56 @@ jobs:
             dockerfile: services/workflow-alerts/Dockerfile
           - service: cdc-transformer
             dockerfile: services/cdc-transformer/Dockerfile
+          - service: projection-builder
+            dockerfile: services/projection-builder/Dockerfile
+          - service: cache-invalidator
+            dockerfile: services/cache-invalidator/Dockerfile
+          - service: risk-engine
+            dockerfile: services/risk-engine/Dockerfile
+          - service: hardware-service
+            dockerfile: services/hardware-service/Dockerfile
+          - service: eventbridge-bridge
+            dockerfile: services/eventbridge-bridge/Dockerfile
+          - service: saga-orchestrator
+            dockerfile: services/saga-orchestrator/Dockerfile
+          - service: tenant-control-plane
+            dockerfile: services/tenant-control-plane/Dockerfile
+          - service: billing-service
+            dockerfile: services/billing-service/Dockerfile
+          - service: notification-service
+            dockerfile: services/notification-service/Dockerfile
+          - service: jobs-worker
+            dockerfile: services/jobs-worker/Dockerfile
+          - service: cassandra-writer
+            dockerfile: services/cassandra-writer/Dockerfile
+          - service: search-indexer
+            dockerfile: services/search-indexer/Dockerfile
+          - service: telemetry-sinks
+            dockerfile: services/telemetry-sinks/deploy/Dockerfile
+          - service: knowledge-service
+            dockerfile: services/knowledge-service/Dockerfile
+          - service: knowledge-parser
+            dockerfile: services/knowledge-service/Dockerfile.parser
+          - service: knowledge-indexer
+            dockerfile: services/knowledge-service/Dockerfile.indexer
+            platforms: linux/amd64
+          - service: grain-advisor
+            dockerfile: services/grain-advisor/Dockerfile
+          - service: model-gateway
+            dockerfile: services/model-gateway/Dockerfile
+          - service: model-gateway-usage
+            dockerfile: services/model-gateway/Dockerfile.usage
+          - service: mcp-gateway
+            dockerfile: services/mcp-gateway/Dockerfile
+          - service: ml-scoring-synthetic
+            dockerfile: services/ml-scoring/deploy/Dockerfile
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
-          platforms: arm64
+          platforms: all
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -199,11 +449,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build immutable commit images
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms || 'linux/amd64,linux/arm64' }}
           push: true
           tags: ghcr.io/pahuldeepp/grainguard/${{ matrix.service }}:${{ github.sha }}
           labels: |
@@ -211,10 +462,437 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: mode=max
           sbom: true
+      - name: Scan published image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/pahuldeepp/grainguard/${{ matrix.service }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the exact image digest
+        env:
+          IMAGE: ghcr.io/pahuldeepp/grainguard/${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_IDENTITY: https://github.com/pahuldeepp/Grainguard/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign verify \
+            --certificate-identity "${EXPECTED_IDENTITY}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}"
+      - name: Record verified digest for release inputs
+        env:
+          SERVICE: ${{ matrix.service }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          mkdir -p release-digest
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          service = os.environ['SERVICE']
+          image = f'ghcr.io/pahuldeepp/grainguard/{service}@{os.environ["DIGEST"]}'
+          Path(f'release-digest/{service}.json').write_text(json.dumps({
+              'service': service, 'image': image, 'revision': os.environ['REVISION']
+          }) + '\n')
+          PY
+      - name: Upload this verified digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: image-digest-${{ matrix.service }}
+          path: release-digest/${{ matrix.service }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-platform-images:
+    name: Publish pinned platform and data-plane images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: otel-collector
+            kind: vendor
+            source: otel/opentelemetry-collector-contrib@sha256:e39311df1f3d941923c00da79ac7ba6269124a870ee87e3c3ad24d60f8aee4d2
+          - image: prometheus
+            kind: vendor
+            source: prom/prometheus@sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62
+          - image: grafana
+            kind: vendor
+            source: grafana/grafana@sha256:8b37a2f028f164ce7b9889e1765b9d6ee23fec80f871d156fbf436d6198d32b7
+          - image: tempo
+            kind: vendor
+            source: grafana/tempo@sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3
+          - image: loki
+            kind: vendor
+            source: grafana/loki@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08
+          - image: pgbouncer
+            kind: build
+            dockerfile: infra/compose/pgbouncer/Dockerfile
+          - image: kafka-topics
+            kind: vendor
+            source: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
+          - image: kafka-connect
+            kind: build
+            dockerfile: infra/kafka/Dockerfile.connect
+          - image: connector-registration
+            kind: build
+            dockerfile: infra/gitops/disposable/connector-registration/Dockerfile
+          - image: opensearch
+            kind: vendor
+            source: opensearchproject/opensearch@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd
+          - image: cassandra
+            kind: vendor
+            source: cassandra@sha256:8b55dd41d5d1220e11eb8cf80f26ab655c21f7cf271ca4a7577c1da7d9221624
+          - image: mqtt
+            kind: vendor
+            source: eclipse-mosquitto@sha256:199ea8ef2e35ec2b1b37e59cfd1dbae538ed4dfa4a2251a121a52215a6248a21
+          - image: clickhouse
+            kind: vendor
+            source: clickhouse/clickhouse-server@sha256:157423fca52f596b62a1bf301b037b9f74bfca38089aa57d1bd36c9025f7ecef
+          - image: clamav
+            kind: vendor_optional
+            source: clamav/clamav@sha256:629a3050df6a706aedb31859fbb8139e9aaf8f56b0ffefbf251b8358a7c9e76c
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify matrix source against the committed platform inventory
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
+          SOURCE: ${{ matrix.source }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          entries = json.loads(Path("infra/gitops/disposable/platform-image-inventory.json").read_text())["images"]
+          entry = next((item for item in entries if item["name"] == os.environ["IMAGE"]), None)
+          if not entry or entry["kind"] != os.environ["KIND"]:
+              raise SystemExit("platform image matrix differs from committed inventory")
+          if entry["kind"].startswith("vendor") and entry.get("source") != os.environ["SOURCE"]:
+              raise SystemExit("vendor image source differs from committed immutable inventory")
+          if entry["kind"] == "build" and entry.get("dockerfile") != os.environ["DOCKERFILE"]:
+              raise SystemExit("repository image Dockerfile differs from committed inventory")
+          PY
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        if: matrix.kind == 'build'
+        with:
+          platforms: amd64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: matrix.kind == 'build'
+      - name: Build repository-owned platform image
+        id: build
+        if: matrix.kind == 'build'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Install digest-preserving mirror tool
+        if: startsWith(matrix.kind, 'vendor')
+        run: sudo apt-get update && sudo apt-get install --yes skopeo
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy vendor manifest list without changing its digest
+        id: mirror
+        if: startsWith(matrix.kind, 'vendor')
+        env:
+          SOURCE: ${{ matrix.source }}
+          IMAGE: ${{ matrix.image }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          skopeo copy --all --preserve-digests "docker://docker.io/${SOURCE}" \
+            "docker://ghcr.io/pahuldeepp/grainguard/${IMAGE}:${REVISION}"
+          raw="$(skopeo inspect --raw "docker://ghcr.io/pahuldeepp/grainguard/${IMAGE}:${REVISION}")"
+          digest="sha256:$(printf '%s' "$raw" | sha256sum | cut -d' ' -f1)"
+          expected="sha256:${SOURCE##*@sha256:}"
+          test "$digest" = "$expected"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Resolve and scan published platform image
+        id: scan-image
+        env:
+          IMAGE: ${{ matrix.image }}
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+          MIRROR_DIGEST: ${{ steps.mirror.outputs.digest }}
+        run: |
+          set -euo pipefail
+          digest="${BUILD_DIGEST:-$MIRROR_DIGEST}"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "reference=ghcr.io/pahuldeepp/grainguard/${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+      - name: Scan platform image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.scan-image.outputs.reference }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify exact promoted platform digest
+        env:
+          IMAGE: ${{ steps.scan-image.outputs.reference }}
+          EXPECTED_IDENTITY: https://github.com/pahuldeepp/Grainguard/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$IMAGE"
+          cosign verify --certificate-identity "$EXPECTED_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+      - name: Record platform image and upstream verification status
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
+          SOURCE: ${{ matrix.source }}
+          DIGEST_REFERENCE: ${{ steps.scan-image.outputs.reference }}
+          REVISION: ${{ github.sha }}
+        run: |
+          mkdir -p platform-digest
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          value = {
+              "service": os.environ["IMAGE"],
+              "image": os.environ["DIGEST_REFERENCE"],
+              "revision": os.environ["REVISION"],
+              "kind": os.environ["KIND"],
+              "source": os.environ.get("SOURCE") or None,
+              "source_signature_verified": os.environ["KIND"] == "build"
+          }
+          Path(f"platform-digest/{value['service']}.json").write_text(json.dumps(value, sort_keys=True) + "\n")
+          PY
+      - name: Upload this scanned and signed platform digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: platform-digest-${{ matrix.image }}
+          path: platform-digest/${{ matrix.image }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  release-inputs:
+    name: Assemble immutable deployment inputs
+    needs: [publish, publish-migrations, publish-platform-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download only this run's verified runtime image digests
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: image-digest-*
+          path: release-digests
+          merge-multiple: true
+      - name: Download only this run's verified migration and tool image digests
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: migration-digest-*
+          path: migration-digests
+          merge-multiple: true
+      - name: Download this run's scanned and signed platform image digests
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: platform-digest-*
+          path: platform-digests
+          merge-multiple: true
+      - name: Assemble exact-commit Terraform inputs
+        env:
+          REVISION: ${{ github.sha }}
+        run: ruby infra/gitops/disposable/assemble-ci-digests.rb release-digests migration-digests platform-digests "$REVISION" release-inputs
+      - name: Require every runtime, migration and tool digest to be anonymously pullable by EKS
+        env:
+          REVISION: ${{ github.sha }}
+        run: python3 infra/gitops/disposable/check-public-release-images.py release-inputs/release-inputs.tfvars.json "$REVISION"
+      - name: Upload reviewed release inputs
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: greenguard-release-inputs-${{ github.sha }}
+          path: release-inputs/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-migrations:
+    name: Publish signed owner migration and tool images
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - owner: control
+            image: migration-control
+            dockerfile: services/tenant-control-plane/Dockerfile
+            target: migration
+          - owner: billing
+            image: migration-billing
+            dockerfile: services/billing-service/Dockerfile
+            target: migration
+          - owner: telemetry
+            image: migration-telemetry
+            dockerfile: services/telemetry-ingest/Dockerfile
+            target: migration
+          - owner: projection
+            image: migration-projection
+            dockerfile: services/projection-builder/Dockerfile
+            target: migration
+          - owner: jobs
+            image: migration-jobs
+            dockerfile: services/jobs-worker/Dockerfile
+            target: migration
+          - owner: saga
+            image: migration-saga
+            dockerfile: services/saga-orchestrator/Dockerfile
+            target: migration
+          - owner: hardware
+            image: migration-hardware
+            dockerfile: services/hardware-service/Dockerfile
+            target: migration
+          - owner: inventory
+            image: migration-inventory
+            dockerfile: services/device-service/Dockerfile
+            target: migration
+          - owner: alerts
+            image: migration-alerts
+            dockerfile: services/workflow-alerts/Dockerfile
+            target: migration
+          - owner: risk
+            image: migration-risk
+            dockerfile: services/risk-engine/Dockerfile
+            target: migration
+          - owner: notifications
+            image: migration-notifications
+            dockerfile: services/notification-service/Dockerfile
+            target: migration
+          - owner: migration-gate
+            image: migration-gate
+            dockerfile: infra/gitops/disposable/migration-gate-image/Dockerfile
+            target: ""
+            kubectl: true
+          - owner: migration-sql
+            image: migration-sql
+            dockerfile: infra/gitops/disposable/migration-sql-image.Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download and checksum-verify kubectl 1.37.0
+        if: matrix.kubectl == true
+        run: |
+          set -euo pipefail
+          curl -fsSLo infra/gitops/disposable/migration-gate-image/kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+          echo '6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  infra/gitops/disposable/migration-gate-image/kubectl' | sha256sum -c -
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build immutable migration image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Scan published image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify the exact migration image digest
+        env:
+          IMAGE: ghcr.io/pahuldeepp/grainguard/${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_IDENTITY: https://github.com/pahuldeepp/Grainguard/.github/workflows/ci.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign verify \
+            --certificate-identity "${EXPECTED_IDENTITY}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}"
+      - name: Record this owner or tool digest
+        env:
+          OWNER: ${{ matrix.owner }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REVISION: ${{ github.sha }}
+        run: |
+          mkdir -p migration-digest
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          image = os.environ['IMAGE']
+          Path(f'migration-digest/{image}.json').write_text(json.dumps({
+              'service': os.environ['OWNER'],
+              'image': f'ghcr.io/pahuldeepp/grainguard/{image}@{os.environ["DIGEST"]}',
+              'revision': os.environ['REVISION']
+          }) + '\n')
+          PY
+      - name: Upload this verified migration digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: migration-digest-${{ matrix.image }}
+          path: migration-digest/${{ matrix.image }}.json
+          if-no-files-found: error
+          retention-days: 30
 
   mysql-cdc-integration:
     name: MySQL snapshot and CDC integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -231,6 +909,10 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: labs/mysql-cdc/requirements.txt
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: services/telemetry-ingest/go.mod
+          cache-dependency-path: services/telemetry-ingest/go.sum
       - run: make bootstrap
       - run: make mysql-cdc-test
       - name: Stop opt-in source and event stack
@@ -239,11 +921,12 @@ jobs:
           if test -f .env && test -f .local/mysql-cdc.env; then
             docker compose --env-file .env --env-file .local/mysql-cdc.env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml -f infra/mysql-cdc/compose.yaml stop mysql-cdc connect schema-registry kafka
           fi
-          make db-down
+          if test -f .env; then make db-down; fi
+          make ci-compose-cleanup
 
   redis-integration:
     name: Redis cache and failover integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -268,11 +951,13 @@ jobs:
       - run: make redis-test
       - name: Stop Redis infrastructure
         if: always()
-        run: make redis-down
+        run: |
+          make redis-down
+          make ci-compose-cleanup
 
   oidc-integration:
     name: OIDC authentication integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -303,10 +988,11 @@ jobs:
           make search-down
           make cassandra-down
           make db-down
+          make ci-compose-cleanup
 
   oidc-browser-integration:
     name: OIDC Chromium browser integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -339,10 +1025,11 @@ jobs:
           make search-down
           make cassandra-down
           make db-down
+          make ci-compose-cleanup
 
   stage08-integration:
     name: Gateway and dashboard end-to-end integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 60
     permissions:
       contents: read
@@ -376,6 +1063,7 @@ jobs:
           docker build -f services/bff/Dockerfile -t "greenguard-ci-bff:${GITHUB_SHA}" .
           docker build -f services/read-api/Dockerfile -t "greenguard-ci-read-api:${GITHUB_SHA}" .
           docker build -f services/workflow-alerts/Dockerfile -t "greenguard-ci-alerts:${GITHUB_SHA}" .
+          docker build -f services/saga-orchestrator/Dockerfile -t "greenguard-ci-saga:${GITHUB_SHA}" .
       - name: Install locked Chromium
         run: npx --no-install playwright install --with-deps chromium
       - name: Start event, history, search, cache, MQTT, and OIDC services
@@ -404,10 +1092,11 @@ jobs:
           make cassandra-down || true
           make events-down || true
           make db-down || true
+          make ci-compose-cleanup
 
   events-integration:
     name: Event backbone integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -419,22 +1108,33 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: services/telemetry-ingest/go.mod
           cache-dependency-path: services/telemetry-ingest/go.sum
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
       - run: make bootstrap
       - run: make events-up
       - run: make events-test
       - run: make events-e2e
+      - name: Verify ClickHouse projection, S3 archive, and replay end to end
+        run: make telemetry-pipeline-e2e
       - run: make events-faults
       - name: Stop event infrastructure
         if: always()
-        run: make events-down
+        run: |
+          make events-down
+          make ci-compose-cleanup
 
   history-integration:
     name: Cassandra history and fault integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -446,6 +1146,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: services/cassandra-writer/go.mod
@@ -458,10 +1161,11 @@ jobs:
         run: |
           make cassandra-down
           make events-down
+          make ci-compose-cleanup
 
   search-integration:
     name: Search index and Kafka integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -473,6 +1177,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: services/telemetry-ingest/go.mod
@@ -484,10 +1191,11 @@ jobs:
         run: |
           make search-down
           make events-down
+          make ci-compose-cleanup
 
   stage06-integration:
     name: Risk, alert, and delivery integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -522,10 +1230,11 @@ jobs:
         run: |
           make rabbitmq-down
           make events-down
+          make ci-compose-cleanup
 
   stage07-integration:
     name: Saga and physical sensor integration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, greenguard-ci]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -545,6 +1254,9 @@ jobs:
             services/hardware-service/go.sum
             services/telemetry-ingest/go.sum
             services/cdc-transformer/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.12"
       - run: make bootstrap
       - run: make stage07-e2e
       - name: Stop Stage 07 infrastructure
@@ -553,3 +1265,4 @@ jobs:
           docker compose --env-file .env -f infra/compose/compose.yaml -f infra/kafka/compose.yaml stop mosquitto
           make events-down
           make db-down
+          make ci-compose-cleanup

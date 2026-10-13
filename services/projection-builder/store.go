@@ -18,9 +18,11 @@ const streamTelemetry = "telemetry"
 
 type Store struct {
 	DB                 TxStarter
+	TopicPrefix        string
 	Schema             string // empty uses the live public schema
 	HistoryWindow      time.Duration
 	Lease              *writerLease
+	ShardLeases        map[string]*writerLease
 	HistoryOutOfWindow atomic.Uint64
 }
 
@@ -57,17 +59,21 @@ func (s *Store) historyWindow() time.Duration {
 // applyInTx keeps the inbox, effect, notification and checkpoint in one transaction.
 func (s *Store) applyInTx(ctx context.Context, tx pgx.Tx, m Message, e map[string]any, skipped, duplicate *bool) error {
 	tenant := e[fieldTenant].(string)
-	if err := s.Lease.check(ctx, tx); err != nil {
+	if err := s.checkLease(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'"); err != nil {
 		return err
 	}
 	if err := insertInbox(ctx, tx, m, e); err != nil {
-		if errors.Is(err, ErrDuplicate) && s.Lease != nil {
+		if errors.Is(err, ErrDuplicate) && s.hasWriterLease() {
 			*duplicate = true
 			return saveVersionFrontier(ctx, tx, m, tenant)
 		}
+		return err
+	}
+	watermark, err := advanceProjectionWatermark(ctx, tx, tenant)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared($1)", history.LockID); err != nil {
@@ -76,20 +82,24 @@ func (s *Store) applyInTx(ctx context.Context, tx pgx.Tx, m Message, e map[strin
 	if err := applyEffect(ctx, tx, e, s.historyWindow(), skipped); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose) VALUES($1,$2,'device',$3,$2,'projection_changed')`, tenant, e[fieldEvent], e[fieldAggregate]); err != nil {
+	if err := saveProjectionCompletions(ctx, tx, e, watermark); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO projection_notifications(tenant_id,notification_id,resource_type,resource_id,event_id,purpose,shard_incarnation,placement_epoch,projection_sequence)
+ VALUES($1,$2,'device',$3,$2,'projection_changed',$4,$5,$6)`, tenant, e[fieldEvent], e[fieldAggregate], watermark.ShardIncarnation, watermark.PlacementEpoch, watermark.Sequence); err != nil {
 		return err
 	}
 	if err := saveCheckpoint(ctx, tx, m, e); err != nil {
 		return err
 	}
-	if s.Lease != nil {
+	if s.hasWriterLease() {
 		return saveVersionFrontier(ctx, tx, m, tenant)
 	}
 	return nil
 }
 func insertInbox(ctx context.Context, tx pgx.Tx, m Message, e map[string]any) error {
 	tag, err := tx.Exec(ctx, `INSERT INTO consumer_inbox(consumer_name,tenant_id,event_id,source_topic,source_partition,source_offset,event)
- VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(consumer_name,tenant_id,event_id) DO NOTHING`, consumerName, e[fieldTenant], e[fieldEvent], m.Topic, m.Partition, m.Offset, string(m.Value))
+ VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(consumer_name,tenant_id,event_id) DO NOTHING`, consumerName, e[fieldTenant], e[fieldEvent], m.sourceTopic(), m.Partition, m.Offset, string(m.Value))
 	if err != nil {
 		return err
 	}
@@ -107,6 +117,18 @@ func insertInbox(ctx context.Context, tx pgx.Tx, m Message, e map[string]any) er
 	return ErrConflict
 }
 func applyEffect(ctx context.Context, tx pgx.Tx, e map[string]any, window time.Duration, skipped *bool) error {
+	switch e[fieldType] {
+	case typeSiteChanged, typeBinChanged:
+		return applyFacility(ctx, tx, e)
+	case typeCableLayout:
+		return applyCableLayout(ctx, tx, e)
+	case typeRiskPolicy:
+		return applyRiskPolicy(ctx, tx, e)
+	case typeRiskInvalidated:
+		return applyRiskInvalidation(ctx, tx, e)
+	case typeRiskAssessed:
+		return applyRiskAssessment(ctx, tx, e)
+	}
 	stream := streamInventory
 	if e[fieldType] == typeTelemetry {
 		stream = streamTelemetry
@@ -240,12 +262,18 @@ func foldInventory(ctx context.Context, tx pgx.Tx, e map[string]any) error {
 func applyReading(ctx context.Context, tx pgx.Tx, e map[string]any, highest, contiguous int64, window time.Duration, skipped *bool) error {
 	p := e[fieldPayload].(map[string]any)
 	measurements := p["measurements"].(map[string]any)
-	tag, err := tx.Exec(ctx, `INSERT INTO reading_history(tenant_id,reading_id,device_id,event_id,stream_version,source_message_id,site_id,bin_id,observed_at,received_at,temperature_c,relative_humidity_percent,inventory_enrichment)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN EXISTS(SELECT 1 FROM device_views WHERE tenant_id=$1 AND device_id=$3) THEN 'applied' ELSE 'pending' END WHERE projection_history_accepts($9::timestamptz,$13)`, e[fieldTenant], p["reading_id"], e[fieldAggregate], e[fieldEvent], e[fieldVersion], p["source_message_id"], p["site_id"], p["bin_id"], p["observed_at"], p["received_at"], number(measurements["temperature_c"]), number(measurements["relative_humidity_percent"]), window.Seconds())
+	schemaVersion, _ := strconv.Atoi(fmt.Sprint(e[fieldSchema]))
+	tag, err := tx.Exec(ctx, `INSERT INTO reading_history(tenant_id,reading_id,device_id,event_id,stream_version,source_message_id,site_id,bin_id,observed_at,received_at,temperature_c,relative_humidity_percent,co2_ppm,grain_moisture_percent,schema_version,inventory_enrichment)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,CASE WHEN EXISTS(SELECT 1 FROM device_views WHERE tenant_id=$1 AND device_id=$3) THEN 'applied' ELSE 'pending' END WHERE projection_history_accepts($9::timestamptz,$16)`, e[fieldTenant], p["reading_id"], e[fieldAggregate], e[fieldEvent], e[fieldVersion], p["source_message_id"], p["site_id"], p["bin_id"], p["observed_at"], p["received_at"], number(measurements["temperature_c"]), number(measurements["relative_humidity_percent"]), number(measurements["co2_ppm"]), number(measurements["grain_moisture_percent"]), schemaVersion, window.Seconds())
 	if err != nil {
 		return err
 	}
 	*skipped = tag.RowsAffected() == 0
+	if tag.RowsAffected() > 0 {
+		if err = applySensorReadings(ctx, tx, e); err != nil {
+			return err
+		}
+	}
 	args := []any{e[fieldTenant], e[fieldAggregate], p["reading_id"], e[fieldEvent], p["observed_at"], e[fieldVersion], highest, contiguous}
 	_, err = tx.Exec(ctx, `INSERT INTO device_latest(tenant_id,device_id,reading_id,event_id,selected_observed_at,selected_stream_version,max_seen_stream_version,contiguous_through_version)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, args...)
@@ -264,6 +292,181 @@ func applyReading(ctx context.Context, tx pgx.Tx, e map[string]any, highest, con
 	_, err = tx.Exec(ctx, `UPDATE device_latest SET max_seen_stream_version=$3,contiguous_through_version=$4,projected_at=clock_timestamp() WHERE tenant_id=$1 AND device_id=$2`, e[fieldTenant], e[fieldAggregate], highest, contiguous)
 	return err
 }
+
+func applySensorReadings(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	items, _ := p["sensor_observations"].([]any)
+	for _, item := range items {
+		s := item.(map[string]any)
+		if _, err := tx.Exec(ctx, `INSERT INTO sensor_reading_history(tenant_id,reading_id,device_id,site_id,bin_id,observed_at,received_at,stream_version,cable_id,layout_version,sensor_id,position,depth_m,metric,value,unit)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, e[fieldTenant], p["reading_id"], p["device_id"], p["site_id"], p["bin_id"], p["observed_at"], p["received_at"], e[fieldVersion], s["cable_id"], s["layout_version"], s["sensor_id"], integer(s["position"]), number(s["depth_m"]), s["metric"], number(s["value"]), s["unit"]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyFacility(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	switch e[fieldType] {
+	case typeSiteChanged:
+		_, err := tx.Exec(ctx, `INSERT INTO site_views(tenant_id,site_id,name,site_version,event_id) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(tenant_id,site_id) DO UPDATE SET name=EXCLUDED.name,site_version=EXCLUDED.site_version,event_id=EXCLUDED.event_id,updated_at=clock_timestamp()
+ WHERE site_views.site_version<EXCLUDED.site_version`, e[fieldTenant], p["site_id"], p["name"], p["site_version"], e[fieldEvent])
+		return err
+	case typeBinChanged:
+		_, err := tx.Exec(ctx, `INSERT INTO bin_views(tenant_id,bin_id,site_id,name,bin_version,event_id) VALUES($1,$2,$3,$4,$5,$6)
+ ON CONFLICT(tenant_id,bin_id) DO UPDATE SET site_id=EXCLUDED.site_id,name=EXCLUDED.name,bin_version=EXCLUDED.bin_version,event_id=EXCLUDED.event_id,updated_at=clock_timestamp()
+ WHERE bin_views.bin_version<EXCLUDED.bin_version`, e[fieldTenant], p["bin_id"], p["site_id"], p["name"], p["bin_version"], e[fieldEvent])
+		return err
+	default:
+		return errors.New("unhandled facility event")
+	}
+}
+
+func applyCableLayout(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	if _, err := tx.Exec(ctx, `INSERT INTO cable_layout_versions(tenant_id,cable_id,cable_version,device_id,bin_id,operation,event_id,occurred_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, e[fieldTenant], p["cable_id"], p["cable_version"], p["device_id"], p["bin_id"], p["operation"], e[fieldEvent], e[fieldOccurred]); err != nil {
+		return err
+	}
+	sensors, _ := p["sensors"].([]any)
+	for _, item := range sensors {
+		s := item.(map[string]any)
+		if _, err := tx.Exec(ctx, `INSERT INTO cable_layout_sensors(tenant_id,cable_id,cable_version,sensor_id,position,label,depth_m)
+ VALUES($1,$2,$3,$4,$5,$6,$7)`, e[fieldTenant], p["cable_id"], p["cable_version"], s["sensor_id"], integer(s["position"]), s["label"], number(s["depth_m"])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyRiskPolicy(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	thresholds, err := json.Marshal(p["measurement_thresholds"])
+	if err != nil {
+		return err
+	}
+	riskThresholds, err := json.Marshal(p["risk_thresholds"])
+	if err != nil {
+		return err
+	}
+	provenance, err := json.Marshal(p["provenance"])
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO risk_policy_versions(tenant_id,policy_id,policy_version,grain_type,bin_id,effective_from,effective_to,measurement_thresholds,risk_thresholds,calibrated,status,provenance,calibration_evidence,approved_by,approved_at,supersedes_policy_id,supersedes_version,event_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18)`, e[fieldTenant], p["policy_id"], p["version"], p["grain_type"], p["bin_id"], p["effective_from"], p["effective_to"], string(thresholds), string(riskThresholds), p["calibrated"], p["status"], string(provenance), p["calibration_evidence"], p["approved_by"], p["approved_at"], supersedesField(p["supersedes"], "policy_id"), supersedesField(p["supersedes"], "version"), e[fieldEvent]); err != nil {
+		return err
+	}
+	if supersedes, ok := p["supersedes"].(map[string]any); ok {
+		if err = closePolicyInterval(ctx, tx, e[fieldTenant], supersedes["policy_id"], supersedes["version"], p["effective_from"]); err != nil {
+			return err
+		}
+	}
+	var invalidSuccessor bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM risk_policy_versions successor
+ WHERE successor.tenant_id=$1 AND successor.supersedes_policy_id=$2
+ AND successor.supersedes_version=$3 AND successor.effective_from<=$4)`,
+		e[fieldTenant], p["policy_id"], p["version"], p["effective_from"]).Scan(&invalidSuccessor); err != nil {
+		return err
+	}
+	if invalidSuccessor {
+		return errors.New("existing successor must take effect after its predecessor")
+	}
+	// When a successor arrived before its predecessor, close the predecessor
+	// interval now. This uses only the explicit owner-provided supersedes edge.
+	_, err = tx.Exec(ctx, `UPDATE risk_policy_versions old SET effective_to=successor.effective_from
+ FROM risk_policy_versions successor WHERE successor.tenant_id=$1 AND old.tenant_id=successor.tenant_id
+ AND successor.supersedes_policy_id=old.policy_id AND successor.supersedes_version=old.policy_version
+ AND old.policy_id=$2 AND old.policy_version=$3 AND old.effective_to IS NULL
+ AND old.effective_from<successor.effective_from`, e[fieldTenant], p["policy_id"], p["version"])
+	return err
+}
+
+func closePolicyInterval(ctx context.Context, tx pgx.Tx, tenant, policyID, version, effectiveFrom any) error {
+	var existing *time.Time
+	var predecessorFrom time.Time
+	err := tx.QueryRow(ctx, `SELECT effective_to,effective_from FROM risk_policy_versions WHERE tenant_id=$1 AND policy_id=$2 AND policy_version=$3 FOR UPDATE`, tenant, policyID, version).Scan(&existing, &predecessorFrom)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} // predecessor may be replayed later
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	var successorFrom time.Time
+	switch value := effectiveFrom.(type) {
+	case time.Time:
+		successorFrom = value
+	case string:
+		successorFrom, err = time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("parse successor effective_from: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported successor effective_from type %T", effectiveFrom)
+	}
+	if !successorFrom.After(predecessorFrom) {
+		return errors.New("superseding policy must take effect after its predecessor")
+	}
+	tag, err := tx.Exec(ctx, `UPDATE risk_policy_versions SET effective_to=$4 WHERE tenant_id=$1 AND policy_id=$2 AND policy_version=$3 AND effective_to IS NULL`, tenant, policyID, version, effectiveFrom)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("superseded policy interval was not closed")
+	}
+	return nil
+}
+
+func applyRiskAssessment(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	var mismatch bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM risk_assessment_invalidations i WHERE i.tenant_id=$1 AND i.assessment_id=$2
+ AND (i.device_id IS DISTINCT FROM $3::uuid OR i.assessment_version IS DISTINCT FROM $4::bigint OR i.payload->>'reading_id' IS DISTINCT FROM $5 OR i.payload->>'source_event_id' IS DISTINCT FROM $6 OR i.payload->>'bin_id' IS DISTINCT FROM $7 OR i.payload->>'previous_lot_id' IS DISTINCT FROM $8))`, e[fieldTenant], p["assessment_id"], p["device_id"], e[fieldVersion], p["reading_id"], p["source_event_id"], p["bin_id"], p["lot_id"]).Scan(&mismatch); err != nil {
+		return err
+	}
+	if mismatch {
+		return fail(reasonSchema, "assessment identity conflicts with stored invalidation")
+	}
+
+	reasons, err := json.Marshal(p["reasons"])
+	if err != nil {
+		return err
+	}
+	var provenance any
+	if raw, exists := p["policy_provenance"]; exists {
+		body, marshalErr := json.Marshal(raw)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		provenance = string(body)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO risk_assessments(tenant_id,assessment_id,device_id,assessment_version,reading_id,source_event_id,bin_id,lot_id,grain_type,policy_id,policy_version,policy_calibrated,policy_provenance,score,severity,alert_eligible,reasons,event_id,occurred_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17::jsonb,$18,$19)`, e[fieldTenant], p["assessment_id"], p["device_id"], e[fieldVersion], p["reading_id"], p["source_event_id"], p["bin_id"], p["lot_id"], p["grain_type"], p["policy_id"], p["policy_version"], p["policy_calibrated"], provenance, p["score"], p["severity"], p["alert_eligible"], string(reasons), e[fieldEvent], e[fieldOccurred])
+	return err
+}
+
+func supersedesField(value any, field string) any {
+	if object, ok := value.(map[string]any); ok {
+		return object[field]
+	}
+	return nil
+}
+
+func integer(value any) int64 {
+	if n, ok := value.(json.Number); ok {
+		i, _ := n.Int64()
+		return i
+	}
+	if n, ok := value.(float64); ok {
+		return int64(n)
+	}
+	return 0
+}
 func number(v any) any {
 	if n, ok := v.(json.Number); ok {
 		f, _ := n.Float64()
@@ -274,7 +477,7 @@ func number(v any) any {
 func saveCheckpoint(ctx context.Context, tx pgx.Tx, m Message, e map[string]any) error {
 	_, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset,last_event_occurred_at)
  VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,last_event_occurred_at=EXCLUDED.last_event_occurred_at,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, e[fieldTenant], consumerName, m.Topic, m.Partition, m.Offset, e[fieldOccurred])
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, e[fieldTenant], consumerName, m.sourceTopic(), m.Partition, m.Offset, e[fieldOccurred])
 	return err
 }
 
@@ -285,14 +488,40 @@ func saveVersionFrontier(ctx context.Context, tx pgx.Tx, m Message, eventTenant 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", infrastructureTenant); err != nil {
 		return err
 	}
+	if err := admitProjectionTenant(ctx, tx, infrastructureTenant); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO projection_replay_tenants(tenant_id,event_tenant) VALUES($1,$2) ON CONFLICT DO NOTHING`, infrastructureTenant, eventTenant); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO projection_checkpoints(tenant_id,consumer_name,topic,partition,committed_offset) VALUES($1,$2,$3,$4,$5)
  ON CONFLICT(tenant_id,consumer_name,topic,partition) DO UPDATE SET committed_offset=EXCLUDED.committed_offset,last_projected_at=clock_timestamp()
- WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.Topic, m.Partition, m.Offset); err != nil {
+ WHERE projection_checkpoints.committed_offset<EXCLUDED.committed_offset`, infrastructureTenant, replayConsumer, m.sourceTopic(), m.Partition, m.Offset); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", eventTenant)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", eventTenant); err != nil {
+		return err
+	}
+	return admitProjectionTenant(ctx, tx, eventTenant)
+}
+
+// Withdrawals remain immutable regardless of assessment arrival order. The
+// surrounding tenant watermark lock serializes this check with assessment writes.
+func applyRiskInvalidation(ctx context.Context, tx pgx.Tx, e map[string]any) error {
+	p := e[fieldPayload].(map[string]any)
+	body, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	var mismatch bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM risk_assessments a WHERE a.tenant_id=$1 AND a.assessment_id=$2
+ AND (a.device_id IS DISTINCT FROM $3::uuid OR a.assessment_version IS DISTINCT FROM $4::bigint OR a.reading_id IS DISTINCT FROM $5::uuid OR a.source_event_id IS DISTINCT FROM $6::uuid OR a.bin_id IS DISTINCT FROM $7::uuid OR a.lot_id IS DISTINCT FROM $8::uuid))`, e[fieldTenant], p["assessment_id"], p["device_id"], p["assessment_version"], p["reading_id"], p["source_event_id"], p["bin_id"], p["previous_lot_id"]).Scan(&mismatch)
+	if err != nil {
+		return err
+	}
+	if mismatch {
+		return fail(reasonSchema, "invalidation target identity conflicts with stored assessment")
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO risk_assessment_invalidations(tenant_id,event_id,assessment_id,assessment_version,device_id,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`, e[fieldTenant], e[fieldEvent], p["assessment_id"], p["assessment_version"], p["device_id"], string(body), e[fieldOccurred])
 	return err
 }

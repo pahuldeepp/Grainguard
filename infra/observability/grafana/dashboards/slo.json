@@ -1,0 +1,373 @@
+{
+  "uid": "greenguard-slo-burn",
+  "title": "GreenGuard — SLO Burn Rates (proposed)",
+  "tags": ["greenguard", "stage-11", "slo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Error budget remaining (30d, PROPOSED targets)",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "slo:error_budget_remaining:ratio30d",
+          "legendFormat": "{{sli}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No data (SLI has no traffic or metric is absent)",
+          "min": -1,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.25
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "description": "1 minus the 30d error ratio divided by the budget. Negative means overspent. Targets are unmeasured proposals; see docs/SLOS.md."
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Burn rate 1h (page at 14.4x, both 1h and 5m)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "slo:burn_rate:1h",
+          "legendFormat": "{{sli}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "slo:burn_rate:5m",
+          "legendFormat": "{{sli}} 5m",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Fast pair. The alert needs both windows above 14.4."
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Burn rate 6h (page at 6x with 30m)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "slo:burn_rate:6h",
+          "legendFormat": "{{sli}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "slo:error_ratio:rate30m / on(sli) slo:error_budget:ratio",
+          "legendFormat": "{{sli}} 30m",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Slow pair. Ticket pairs (3x over 24h and 2h, 1x over 3d and 6h) are in docs/SLOS.md."
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Error ratio 5m by SLI",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "slo:error_ratio:rate5m",
+          "legendFormat": "{{sli}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Bad events divided by total events for each SLI."
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Error ratio 1h by SLI",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "slo:error_ratio:rate1h",
+          "legendFormat": "{{sli}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": ""
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Firing SLO burn alerts",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "count(ALERTS{alertname=~\"SLOBurnRate.*\",alertstate=\"firing\"}) or vector(0)",
+          "legendFormat": "firing",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "description": ""
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Firing integrity alerts (must be zero)",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "count(ALERTS{alertname=~\"Integrity.*\",alertstate=\"firing\"}) or vector(0)",
+          "legendFormat": "firing",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No data (SLI has no traffic or metric is absent)",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "description": ""
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Ingest accepted vs rejected (reference, not an SLI)",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(ingest_readings_accepted_total[5m]))",
+          "legendFormat": "accepted/s",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "expr": "sum by (reason) (rate(ingest_rejections_total[5m]))",
+          "legendFormat": "rejected {{reason}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "No data (SLI has no traffic or metric is absent)"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": ""
+    }
+  ]
+}

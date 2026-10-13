@@ -4,6 +4,23 @@ import { readConfig } from "./config.js";
 test("requires the database URL without echoing any value", () => {
   assert.throws(() => readConfig({}), /INVENTORY_DATABASE_URL is required/);
 });
+test("required shard mode rejects missing registry despite a legacy database URL", () => {
+  assert.throws(
+    () =>
+      readConfig({
+        INVENTORY_DATABASE_URL: "postgres://legacy",
+        SHARD_ROUTING_REQUIRED: "true",
+      }),
+    /shard_registry_required/,
+  );
+  assert.equal(
+    readConfig({
+      INVENTORY_DATABASE_URL: "postgres://legacy",
+      SHARD_ROUTING_REQUIRED: "false",
+    }).databaseUrl,
+    "postgres://legacy",
+  );
+});
 test("applies local defaults", () => {
   assert.deepEqual(readConfig({ INVENTORY_DATABASE_URL: "postgres://x" }), {
     databaseUrl: "postgres://x",
@@ -23,6 +40,44 @@ test("honours PORT and HOST overrides", () => {
 });
 
 const base = { INVENTORY_DATABASE_URL: "postgres://x" };
+test("mesh control lookup HTTP requires opt-in and Service DNS; JWKS stays HTTPS", () => {
+  const importEnv = {
+    IMPORT_SOURCE_ID: "partner-main",
+    IMPORT_AUTH_ISSUER: "https://idp.example",
+    IMPORT_AUTH_AUDIENCE: "greenguard-import",
+    IMPORT_AUTH_JWKS_URL: "https://idp.example/jwks",
+    IMPORT_AUTH_TENANT_CLAIM: "gg_tenant",
+    CONTROL_LOOKUP_URL:
+      "http://tenant-control.greenguard.svc.cluster.local:8080",
+    CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+  };
+  assert.throws(() => readConfig({ ...base, ...importEnv }), /use https/);
+  assert.equal(
+    readConfig({ ...base, ...importEnv, GG_MESH_INTERNAL_HTTP: "1" }).importAuth
+      ?.controlUrl,
+    `${importEnv.CONTROL_LOOKUP_URL}/`,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        GG_MESH_INTERNAL_HTTP: "1",
+        CONTROL_LOOKUP_URL: "http://example.com",
+      }),
+    /use https/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        ...base,
+        ...importEnv,
+        GG_MESH_INTERNAL_HTTP: "1",
+        IMPORT_AUTH_JWKS_URL: "http://idp.greenguard.svc",
+      }),
+    /use https/,
+  );
+});
 test("auth is optional but all-or-nothing", () => {
   assert.equal(readConfig(base).auth, undefined);
   assert.deepEqual(
@@ -36,6 +91,7 @@ test("auth is optional but all-or-nothing", () => {
       issuer: "https://idp.example",
       audience: "greenguard-api",
       jwksUrl: "https://idp.example/.well-known/jwks.json",
+      tokenMode: "audience",
     },
   );
   for (const partial of [
@@ -47,6 +103,35 @@ test("auth is optional but all-or-nothing", () => {
       () => readConfig({ ...base, ...partial }),
       /must be set together/,
     );
+});
+test("Cognito access mode requires mapped users and public client IDs", () => {
+  const cognito = {
+    ...base,
+    AUTH_TOKEN_MODE: "cognito-access",
+    AUTH_ISSUER:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example",
+    AUTH_JWKS_URL:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
+  };
+  assert.throws(() => readConfig(cognito), /AUTH_COGNITO_CLIENT_IDS/);
+  assert.throws(
+    () => readConfig({ ...cognito, AUTH_COGNITO_CLIENT_IDS: "ios" }),
+    /control-plane membership/,
+  );
+  assert.equal(
+    readConfig({
+      ...cognito,
+      AUTH_COGNITO_CLIENT_IDS: "ios",
+      AUTH_MEMBERSHIP_SOURCE: "control-plane",
+      CONTROL_PLANE_URL: "https://control.example",
+      CONTROL_LOOKUP_TOKEN: "x".repeat(32),
+    }).auth?.tokenMode,
+    "cognito-access",
+  );
+  assert.throws(
+    () => readConfig({ ...base, AUTH_COGNITO_CLIENT_IDS: "ios" }),
+    /AUTH_COGNITO_CLIENT_IDS/,
+  );
 });
 test("the JWKS URL must be https, or loopback http for local development", () => {
   const withUrl = (AUTH_JWKS_URL: string) =>
@@ -181,5 +266,12 @@ test("tracing is enabled only by a collector endpoint and validates its settings
   assert.throws(
     () => readConfig({ ...base, OTEL_EXPORTER_OTLP_ENDPOINT: "ftp://c" }),
     /http\(s\)/,
+  );
+});
+
+test("private shard registry config requires no legacy database URL", () => {
+  assert.equal(
+    readConfig({ SHARD_REGISTRY_FILE: "/private/owners.json" }).databaseUrl,
+    "",
   );
 });

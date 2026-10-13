@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: greenguard
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: redis-cluster}
+  ports:
+    - {name: redis, port: 6379, targetPort: 6379}
+    - {name: cluster-bus, port: 16379, targetPort: 16379}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+  namespace: greenguard
+  labels: {app: redis-cluster, greenguard.io/lifecycle: disposable}
+spec:
+  serviceName: redis-headless
+  replicas: 6
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {app: redis-cluster}
+  template:
+    metadata:
+      labels: {app: redis-cluster, greenguard.io/lifecycle: disposable}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      nodeSelector:
+        greenguard.io/workload-class: general
+      containers:
+        - name: redis
+          image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -ec]
+          args:
+            - >-
+              exec redis-server --port 6379 --bind 0.0.0.0
+              --cluster-enabled yes --cluster-config-file /data/nodes.conf
+              --cluster-node-timeout 5000
+              --cluster-announce-hostname "$(hostname).redis-headless.greenguard.svc.cluster.local"
+              --cluster-preferred-endpoint-type hostname
+              --cluster-announce-port 6379 --cluster-announce-bus-port 16379
+              --dir /data --appendonly yes --maxmemory 256mb
+              --maxmemory-policy allkeys-lru --protected-mode yes
+              --requirepass "$REDISCLI_AUTH" --masterauth "$REDISCLI_AUTH"
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom: {secretKeyRef: {name: greenguard-data-credentials, key: REDIS_PASSWORD}}
+          ports:
+            - {name: redis, containerPort: 6379}
+            - {name: cluster-bus, containerPort: 16379}
+          startupProbe:
+            exec: {command: [/bin/sh, -ec, 'redis-cli ping | grep -qx PONG']}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec: {command: [/bin/sh, -ec, 'redis-cli cluster info | grep -q cluster_state:ok']}
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec: {command: [/bin/sh, -ec, 'redis-cli ping | grep -qx PONG']}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: redis-data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels: {greenguard.io/lifecycle: disposable}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: greenguard-disposable-gp3
+        resources:
+          requests: {storage: 2Gi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-bootstrap
+  namespace: greenguard
+  labels: {app: redis-cluster-bootstrap, greenguard.io/lifecycle: disposable}
+spec:
+  backoffLimit: 6
+  # Keep the Completed Job object for Argo health. A TTL would delete it and
+  # make self-heal recreate it while the cell is running.
+  template:
+    metadata:
+      labels: {app: redis-cluster-bootstrap}
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bootstrap
+          image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              nodes=""
+              for i in 0 1 2 3 4 5; do
+                host="redis-cluster-$i.redis-headless.greenguard.svc.cluster.local"
+                for attempt in $(seq 1 120); do
+                  if redis-cli -h "$host" ping | grep -qx PONG; then break; fi
+                  sleep 2
+                done
+                redis-cli -h "$host" ping | grep -qx PONG
+                nodes="$nodes $host:6379"
+              done
+              if redis-cli -h redis-cluster-0.redis-headless.greenguard.svc.cluster.local cluster info | grep -q cluster_state:ok; then
+                exit 0
+              fi
+              redis-cli --cluster create $nodes --cluster-replicas 1 --cluster-yes
+              for attempt in $(seq 1 60); do
+                if redis-cli -h redis-cluster-0.redis-headless.greenguard.svc.cluster.local cluster info | grep -q cluster_state:ok; then exit 0; fi
+                sleep 2
+              done
+              echo "Redis cluster did not reach cluster_state:ok" >&2
+              exit 1
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom: {secretKeyRef: {name: greenguard-data-credentials, key: REDIS_PASSWORD}}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

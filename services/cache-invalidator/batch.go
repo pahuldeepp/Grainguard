@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // batch coalesces notifications collected during one window into distinct bumps.
 // A tenant bump supersedes that tenant's device bumps: the generation is part of every
@@ -11,11 +14,12 @@ type batch struct {
 	tenants         map[string]Target
 	devices         map[string]Target
 	epoch           *Target
+	watermarks      map[string]Target
 	oldest          time.Time
 }
 
 func newBatch() *batch {
-	return &batch{tenants: map[string]Target{}, devices: map[string]Target{}}
+	return &batch{tenants: map[string]Target{}, devices: map[string]Target{}, watermarks: map[string]Target{}}
 }
 
 func (b *batch) add(r Record) {
@@ -28,6 +32,22 @@ func (b *batch) add(r Record) {
 	}
 	if b.oldest.IsZero() || target.OccurredAt.Before(b.oldest) {
 		b.oldest = target.OccurredAt
+	}
+	// Coalescing version bumps must not lose a device's higher required sequence
+	// when a tenant/global invalidation supersedes it. Identities remain separate.
+	if target.Incarnation != "" {
+		key := target.Tenant + ":" + target.Incarnation + ":" + target.PlacementEpoch
+		previous, exists := b.watermarks[key]
+		sequence, _ := strconv.ParseInt(target.Sequence, 10, 64)
+		old, _ := strconv.ParseInt(previous.Sequence, 10, 64)
+		if !exists || sequence > old {
+			// This maximum covers multiple device notifications. Publish it to
+			// every tenant subscriber, never only the last selected device.
+			hint := target
+			hint.Scope = scopeTenant
+			hint.Device = ""
+			b.watermarks[key] = hint
+		}
 	}
 	if target.Scope == scopeTenant {
 		b.tenants[target.Tenant] = target

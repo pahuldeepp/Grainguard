@@ -5,10 +5,18 @@ import { createApp } from "./main.js";
 import { ProvisioningClient } from "./provisioning.js";
 import { operationHash, operations } from "./query-policy.js";
 import {
+  boundedRateCheck,
   operationCharge,
   redisRateLimiter,
   type RateStore,
 } from "./rate-limit.js";
+
+test("rate limit checks have a bounded wait", async () => {
+  await assert.rejects(
+    boundedRateCheck(new Promise(() => {}), 5),
+    /rate_check_timeout/,
+  );
+});
 
 const principal = (tenantId: string, subject: string): Principal => ({
   tenantId,
@@ -33,6 +41,22 @@ test("operation costs separate cheap, history, search, and provisioning traffic"
     group: "read",
     cost: 2,
   });
+  for (const [name, cost] of [
+    ["alertListV2", 2],
+    ["alertDetailV2", 1],
+    ["alertHistory", 2],
+    ["alertNotifications", 5],
+    ["binReadingsLatest", 2],
+    ["binReadingsTrend", 5],
+  ] as const)
+    assert.deepEqual(operationCharge({ query: operations[name] }), {
+      group: "read",
+      cost,
+    });
+  assert.throws(
+    () => operationCharge({ query: "query Other { __typename }" }),
+    /unregistered_operation_cost/,
+  );
   assert.deepEqual(operationCharge({ query: operations.readingRollups }), {
     group: "read",
     cost: 5,
@@ -45,13 +69,52 @@ test("operation costs separate cheap, history, search, and provisioning traffic"
     { group: "read", cost: 10 },
   );
   assert.deepEqual(operationCharge({ query: operations.startProvisioning }), {
-    group: "mutation",
+    group: "provisioning",
     cost: 1,
   });
   assert.deepEqual(operationCharge({ query: operations.acknowledgeAlert }), {
-    group: "mutation",
+    group: "alertMutation",
     cost: 1,
   });
+  assert.deepEqual(operationCharge({ query: "knowledgeQuery" }), {
+    group: "assistant",
+    cost: 5,
+  });
+  assert.deepEqual(operationCharge({ query: "assistantConversationWrite" }), {
+    group: "assistant",
+    cost: 5,
+  });
+});
+test("Assistant questions have an isolated per-user Redis budget from dashboard reads", async () => {
+  const requests: Array<{ keys: string[]; arguments: string[] }> = [];
+  const limiter = redisRateLimiter({
+    eval: async (_script, options) => {
+      requests.push(options);
+      return [1, 0];
+    },
+  });
+  const user = principal("tenant-a", "alice");
+  await limiter.check(user, { query: operations.deviceCurrent });
+  await limiter.check(user, { query: "knowledgeQuery" });
+  assert.notEqual(requests[0]?.keys[0], requests[1]?.keys[0]);
+  assert.match(requests[1]?.keys[0] ?? "", /:assistant:tenant$/);
+  assert.equal(requests[1]?.arguments[0], "5");
+  assert.equal(requests[1]?.arguments[3], "150");
+});
+test("alert acknowledgements and provisioning use separate rate buckets", async () => {
+  const requests: Array<{ keys: string[]; arguments: string[] }> = [];
+  const limiter = redisRateLimiter({
+    eval: async (_script, options) => {
+      requests.push(options);
+      return [1, 0];
+    },
+  });
+  const user = principal("tenant-a", "alice");
+  await limiter.check(user, { query: operations.acknowledgeAlert });
+  await limiter.check(user, { query: operations.startProvisioning });
+  assert.match(requests[0]?.keys[0] ?? "", /alertMutation/);
+  assert.match(requests[1]?.keys[0] ?? "", /provisioning/);
+  assert.notEqual(requests[0]?.arguments[1], requests[1]?.arguments[1]);
 });
 test("two replicas use tenant-scoped shared Redis keys and opaque user identifiers", async () => {
   const requests: Array<{ keys: string[]; arguments: string[] }> = [];

@@ -1,0 +1,9 @@
+{
+  "authorizationEndpoint": "https://auth.example.com/dex/auth",
+  "tokenEndpoint": "https://auth.example.com/dex/token",
+  "bffEndpoint": "https://api.example.com/graphql",
+  "clientId": "greenguard-mobile",
+  "scope": "openid profile email offline_access",
+  "audience": "greenguard-dashboard",
+  "audienceMode": "scope"
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	common "greenguard.local/go-common"
 )
 
 type bindingSourceFunc func(context.Context) (BindingMessage, error)
@@ -108,15 +109,47 @@ func TestBindingConsumerEveryQuarantineReason(t *testing.T) {
 	}
 }
 
+func TestBindingConsumerNeverCommitsUnresolvedPlacementOrOutage(t *testing.T) {
+	for name, failure := range map[string]error{
+		"authority not found":   common.ErrTenantPlacementNotFound,
+		"authority unavailable": common.ErrPlacementUnavailable,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, m := consumerFixture(t)
+			applied, published, committed := 0, 0, 0
+			c.Apply = func(context.Context, []byte) (BindingOutcome, error) {
+				applied++
+				return "", failure
+			}
+			c.Sink = bindingSinkFunc(func(context.Context, BindingRecord) error {
+				published++
+				return nil
+			})
+			m.Commit = func(context.Context) error {
+				committed++
+				return nil
+			}
+			if err := c.process(context.Background(), m); !errors.Is(err, failure) {
+				t.Fatalf("placement failure = %v", err)
+			}
+			if applied != 1 || published != 0 || committed != 0 || c.Quarantined.Load() != 0 {
+				t.Fatalf("unsafe placement disposition: applied=%d published=%d committed=%d quarantined=%d", applied, published, committed, c.Quarantined.Load())
+			}
+		})
+	}
+}
+
 func TestBindingConsumerRetryAndCommitFrontier(t *testing.T) {
 	c, m := consumerFixture(t)
-	applied, committed := 0, 0
+	applied, effects, committed := 0, 0, 0
 	c.Apply = func(context.Context, []byte) (BindingOutcome, error) {
 		applied++
 		if applied == 1 {
-			return "", &pgconn.PgError{Code: "40001"}
+			// The database committed, but the caller lost the acknowledgement.
+			effects++
+			return "", io.EOF
 		}
-		return BindingApplied, nil
+		return BindingDuplicate, nil
 	}
 	m.Commit = func(context.Context) error {
 		committed++
@@ -128,8 +161,15 @@ func TestBindingConsumerRetryAndCommitFrontier(t *testing.T) {
 	if err := c.process(context.Background(), m); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 2 || committed != 2 || c.Retries.Load() != 2 {
-		t.Fatal("commit retry reapplied effect")
+	if applied != 2 || effects != 1 || committed != 2 || c.Retries.Load() != 2 {
+		t.Fatalf("ambiguous apply/commit: attempts=%d effects=%d commits=%d retries=%d", applied, effects, committed, c.Retries.Load())
+	}
+	// A broker redelivery after the successful commit still has one effect.
+	if err := c.process(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 3 || effects != 1 || committed != 3 || c.Retries.Load() != 2 {
+		t.Fatalf("redelivery: attempts=%d effects=%d commits=%d retries=%d", applied, effects, committed, c.Retries.Load())
 	}
 }
 

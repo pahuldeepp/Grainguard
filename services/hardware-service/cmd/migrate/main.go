@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	shared "greenguard.local/go-migrations"
 	"greenguard.local/hardware-service/migrations"
 	"log"
 	"os"
@@ -14,9 +14,5 @@ func main() {
 }
 
 func run() error {
-	url := os.Getenv("HARDWARE_MIGRATION_URL")
-	if url == "" {
-		return errors.New("HARDWARE_MIGRATION_URL required")
-	}
-	return migrations.Up(url)
+	return shared.Run("HARDWARE_MIGRATION_URL", os.Getenv, migrations.Up)
 }

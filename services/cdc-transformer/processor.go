@@ -18,11 +18,12 @@ const maxRawBytes = 64 * 1024
 const unknownTenant = "unknown"
 
 type Message struct {
-	Topic     string
-	Partition int32
-	Offset    int64
-	Value     []byte
-	Commit    func(context.Context) error
+	Topic          string
+	TransportTopic string
+	Partition      int32
+	Offset         int64
+	Value          []byte
+	Commit         func(context.Context) error
 }
 type Record = transport.Record
 type Source interface {
@@ -44,6 +45,9 @@ type quarantine struct {
 }
 
 func quarantineRecord(m Message, err *failure) Record {
+	if m.TransportTopic != "" {
+		m.Topic = m.TransportTopic
+	}
 	raw := m.Value
 	truncated := len(raw) > maxRawBytes
 	if truncated {
@@ -104,7 +108,7 @@ func sourceForType(eventType any) string {
 		return rawControl
 	case typeSubscriptionChanged, typeEntitlementsChanged, typeUsageAccepted, typeBillingReconciliation, typeBillingCommandRequested:
 		return rawBilling
-	case typeRiskAssessed, typeRiskInvalidated:
+	case typeRiskAssessed, typeRiskPolicyChanged, typeRiskInvalidated:
 		return rawRisk
 	case typeAlertOpened, typeAlertUpdated, typeAlertAcked, typeAlertEscalated, typeAlertResolved:
 		return rawAlerts

@@ -1,0 +1,54 @@
+2026-09-28 02:42:50.464 UTC [35] LOG:  database system was interrupted; last known up at 2026-09-28 02:42:49 UTC
+2026-09-28 02:42:50.564 UTC [35] LOG:  entering standby mode
+2026-09-28 02:42:50.564 UTC [35] LOG:  starting backup recovery with redo LSN 0/8000060, checkpoint LSN 0/8000098, on timeline ID 1
+2026-09-28 02:42:50.565 UTC [35] LOG:  redo starts at 0/8000060
+2026-09-28 02:42:50.566 UTC [35] LOG:  completed backup recovery with redo LSN 0/8000060 and end LSN 0/8000138
+2026-09-28 02:42:50.566 UTC [35] LOG:  consistent recovery state reached at 0/8000138
+2026-09-28 02:42:50.566 UTC [1] LOG:  database system is ready to accept read-only connections
+2026-09-28 02:42:50.572 UTC [36] LOG:  started streaming WAL from primary at 0/9000000 on timeline 1
+2026-09-28 02:43:18.083 UTC [141] ERROR:  cannot execute UPDATE in a read-only transaction
+2026-09-28 02:43:18.083 UTC [141] STATEMENT:  UPDATE public.device_views SET inventory_version=99 WHERE tenant_id=$1
+2026-09-28 02:43:18.086 UTC [35] LOG:  recovery has paused
+2026-09-28 02:43:18.086 UTC [35] HINT:  Execute pg_wal_replay_resume() to continue.
+
+After selected s2 slot recreation and completion-marker reset:
+s1: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s2: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s3: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s4: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+
+Final fixture shutdown (all volumes retained):
+ Container greenguard-sharding-final-postgres-s2-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s1-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s3-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s4-replica-1 Stopping
+ Container greenguard-sharding-final-postgres-s2-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s2-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s4-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s4-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s1-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s1-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s2-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s2-1 Stopping
+ Container greenguard-sharding-final-postgres-s3-replica-1 Stopped
+ Container greenguard-sharding-final-postgres-s3-replica-1 Removing
+ Container greenguard-sharding-final-postgres-s4-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s4-1 Stopping
+ Container greenguard-sharding-final-postgres-s1-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s1-1 Stopping
+ Container greenguard-sharding-final-postgres-s3-replica-1 Removed
+ Container greenguard-sharding-final-postgres-s3-1 Stopping
+ Container greenguard-sharding-final-postgres-s2-1 Stopped
+ Container greenguard-sharding-final-postgres-s2-1 Removing
+ Container greenguard-sharding-final-postgres-s4-1 Stopped
+ Container greenguard-sharding-final-postgres-s4-1 Removing
+ Container greenguard-sharding-final-postgres-s2-1 Removed
+ Container greenguard-sharding-final-postgres-s4-1 Removed
+ Container greenguard-sharding-final-postgres-s1-1 Stopped
+ Container greenguard-sharding-final-postgres-s1-1 Removing
+ Container greenguard-sharding-final-postgres-s3-1 Stopped
+ Container greenguard-sharding-final-postgres-s3-1 Removing
+ Container greenguard-sharding-final-postgres-s1-1 Removed
+ Container greenguard-sharding-final-postgres-s3-1 Removed
+ Network greenguard-sharding-final_default Removing
+ Network greenguard-sharding-final_default Removed

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
-import { adminQuery, runtimeDb, uniqueSubject } from "../testing/fixtures.js";
+import {
+  adminQuery,
+  createActiveTenantFixture,
+  runtimeDb,
+  uniqueSubject,
+} from "../testing/fixtures.js";
 import { outboxEvents } from "../testing/fixtures.js";
 import { validateEvent } from "@greenguard/contracts";
-import { createOrganization, revokeMember, type Actor } from "./store.js";
+import { revokeMember, type Actor } from "./store.js";
 import {
   createApiKey,
   KEY_PATTERN,
@@ -18,7 +23,11 @@ import {
   verifyApiKeyForTenant,
 } from "./api-keys.js";
 import { identityIdOf } from "./ids.js";
-import { InvalidInputError, RoleForbiddenError } from "./errors.js";
+import {
+  DomainConflictError,
+  InvalidInputError,
+  RoleForbiddenError,
+} from "./errors.js";
 
 const db = runtimeDb(5);
 after(() => db.$disconnect());
@@ -33,12 +42,7 @@ async function org(label: string) {
     issuer: "https://issuer.test",
     subject: uniqueSubject(label),
   };
-  const created = await createOrganization(
-    db,
-    actor,
-    { name: label },
-    command(),
-  );
+  const created = await createActiveTenantFixture(db, actor, label, command());
   return { actor, tenantId: created.body.tenantId as string };
 }
 const ISSUER = "https://idp.test";
@@ -167,6 +171,7 @@ test("OAuth client maps to exactly one tenant and creator revocation disables cr
     scopes: ["read:telemetry"],
   };
   const registered = await register(a, input);
+  await assert.rejects(register(a, input), DomainConflictError);
   const lookup = (tenant?: string) =>
     lookupOAuthClient(db, input.issuer, input.clientId, tenant);
   assert.deepEqual(await lookup(a.tenantId), {
@@ -293,9 +298,7 @@ test("identical replay returns a stored safe result and never a second secret", 
   assert.equal(replay.secretAlreadyRevealed, true);
   assert.ok(!("key" in replay));
   assert.ok(first.key.startsWith(replay.keyPrefix!));
-  const secret = KEY_PATTERN.exec(first.key)?.[4];
-  assert.ok(secret);
-  assert.ok(!JSON.stringify(replay).includes(secret));
+  assert.ok(!JSON.stringify(replay).includes(first.key));
   await assert.rejects(
     createApiKey(
       db,
@@ -323,9 +326,7 @@ test("identical replay returns a stored safe result and never a second secret", 
   assert.equal(again.secretAlreadyRevealed, true);
   assert.ok(!("key" in again));
   await assert.rejects(
-    rotateApiKey(db, pepper, a.actor, a.tenantId, first.keyId, rotate, {
-      overlapHours: 5,
-    }),
+    rotateApiKey(db, pepper, a.actor, a.tenantId, first.keyId, rotate, 5),
     /Idempotency-Key/,
   );
   const revoke = command();

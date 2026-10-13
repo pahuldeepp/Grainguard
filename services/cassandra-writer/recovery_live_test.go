@@ -23,6 +23,7 @@ import (
 // migrations. It uses a fresh group and UUIDs, so it leaves existing groups
 // and history untouched.
 func TestLiveKafkaCassandraCrashReplay(t *testing.T) {
+	t.Setenv("KAFKA_TOPIC_PREFIX", "") // This acceptance fixture intentionally uses canonical shared topics.
 	if os.Getenv("KAFKA_CASSANDRA_LIVE") != "1" {
 		t.Skip("set KAFKA_CASSANDRA_LIVE=1 with local Kafka and Cassandra running")
 	}
@@ -30,7 +31,10 @@ func TestLiveKafkaCassandraCrashReplay(t *testing.T) {
 		runCrashChild(t)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// The child deliberately waits for Kafka assignment plus a Cassandra write
+	// before crashing. Give slower local broker startup/coordination a bounded
+	// window without weakening the crash boundary assertions.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	brokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
 	if brokers[0] == "" {
@@ -230,18 +234,68 @@ func commitBaseline(t *testing.T, ctx context.Context, client *kgo.Client, group
 
 func committedOffset(t *testing.T, ctx context.Context, client *kgo.Client, group string, partition int32) int64 {
 	t.Helper()
+	metadata := kmsg.NewPtrMetadataRequest()
+	topicName := topicTelemetry
+	metadata.Topics = []kmsg.MetadataRequestTopic{{Topic: &topicName}}
+	info, err := metadata.RequestWith(ctx, client)
+	if err != nil || len(info.Topics) != 1 || info.Topics[0].ErrorCode != 0 {
+		t.Fatalf("offset topic metadata: %+v err=%v", info, err)
+	}
 	req := kmsg.NewPtrOffsetFetchRequest()
 	req.Group = group
 	req.Topics = []kmsg.OffsetFetchRequestTopic{{Topic: topicTelemetry, Partitions: []int32{partition}}}
+	// Kafka v8+ uses Groups; v10+ identifies topics by UUID. Populate all
+	// representations because the client negotiates the broker API version.
+	entry := kmsg.NewOffsetFetchRequestGroup()
+	entry.Group = group
+	entry.Topics = []kmsg.OffsetFetchRequestGroupTopic{{Topic: topicTelemetry, TopicID: info.Topics[0].TopicID, Partitions: []int32{partition}}}
+	req.Groups = []kmsg.OffsetFetchRequestGroup{entry}
 	res, err := req.RequestWith(ctx, client)
-	if err != nil || len(res.Topics) != 1 || len(res.Topics[0].Partitions) != 1 {
-		t.Fatalf("offset fetch: %+v err=%v", res, err)
+	if err != nil {
+		t.Fatalf("offset fetch: %v", err)
 	}
-	p := res.Topics[0].Partitions[0]
-	if err := kerr.ErrorForCode(p.ErrorCode); err != nil {
-		t.Fatal(err)
+	if len(res.Groups) > 0 {
+		for _, g := range res.Groups {
+			if g.Group != group {
+				continue
+			}
+			if err := kerr.ErrorForCode(g.ErrorCode); err != nil {
+				t.Fatal(err)
+			}
+			for _, topic := range g.Topics {
+				if topic.Topic != topicTelemetry && topic.TopicID != info.Topics[0].TopicID {
+					continue
+				}
+				for _, p := range topic.Partitions {
+					if p.Partition == partition {
+						if err := kerr.ErrorForCode(p.ErrorCode); err != nil {
+							t.Fatal(err)
+						}
+						return p.Offset
+					}
+				}
+			}
+		}
+	} else {
+		if err := kerr.ErrorForCode(res.ErrorCode); err != nil {
+			t.Fatal(err)
+		}
+		for _, topic := range res.Topics {
+			if topic.Topic != topicTelemetry {
+				continue
+			}
+			for _, p := range topic.Partitions {
+				if p.Partition == partition {
+					if err := kerr.ErrorForCode(p.ErrorCode); err != nil {
+						t.Fatal(err)
+					}
+					return p.Offset
+				}
+			}
+		}
 	}
-	return p.Offset
+	t.Fatalf("offset fetch missing requested group/topic/partition: %+v", res)
+	return -1
 }
 
 func assertQuarantine(t *testing.T, ctx context.Context, brokers []string, start int64, source *kgo.Record) {
@@ -296,13 +350,15 @@ func crashConfirmedWorker(t *testing.T, ctx context.Context, brokers []string, g
 	confirmed := make(chan error, 1)
 	go func() {
 		scanner := bufio.NewScanner(pipe)
+		var output strings.Builder
 		for scanner.Scan() {
+			output.WriteString(scanner.Text() + "\n")
 			if scanner.Text() == "CASSANDRA_CONFIRMED" {
 				confirmed <- nil
 				return
 			}
 		}
-		confirmed <- fmt.Errorf("child ended before confirmation: %v", scanner.Err())
+		confirmed <- fmt.Errorf("child ended before confirmation: %v; stdout: %s", scanner.Err(), output.String())
 	}()
 	select {
 	case err := <-confirmed:

@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Consumer } from "kafkajs";
 import { VersionedFlagStore } from "@greenguard/feature-flags";
-import { notificationInstanceId, startFlagFeed } from "./flag-feed.js";
+import { startFlagFeed } from "./flag-feed.js";
 import { optionalSendGate } from "./flags.js";
+
+const idleProducer = () => ({
+  connect: async () => {},
+  disconnect: async () => {},
+  send: async () => [],
+});
 
 test("flag feed retries initial outage and applies queued version on recovery", async () => {
   const store = new VersionedFlagStore(60_000);
@@ -13,6 +19,7 @@ test("flag feed retries initial outage and applies queued version on recovery", 
   const stop = startFlagFeed(store, ["127.0.0.1:1"], {
     retryMs: 2,
     onUnavailable: () => failures++,
+    createProducer: idleProducer,
     createConsumer: () =>
       ({
         events: { CRASH: "consumer.crash" },
@@ -67,10 +74,10 @@ test("flag feed retries initial outage and applies queued version on recovery", 
 test("process-local flag feeds use distinct consumer groups and replay from beginning", async () => {
   const groups: string[] = [];
   const subscriptions: { topic: string; fromBeginning: boolean }[] = [];
-  const autoCommitSettings: boolean[] = [];
   const start = (instanceId: string) =>
     startFlagFeed(new VersionedFlagStore(60_000), ["127.0.0.1:1"], {
       instanceId,
+      createProducer: idleProducer,
       createConsumer: (groupId) => {
         groups.push(groupId);
         return {
@@ -83,9 +90,7 @@ test("process-local flag feeds use distinct consumer groups and replay from begi
           }) => {
             subscriptions.push(subscription);
           },
-          run: async (options: { autoCommit?: boolean }) => {
-            autoCommitSettings.push(options.autoCommit ?? true);
-          },
+          run: async () => {},
           disconnect: async () => {},
         } as unknown as Consumer;
       },
@@ -107,22 +112,9 @@ test("process-local flag feeds use distinct consumer groups and replay from begi
       { topic: "greenguard.platform.config.v1", fromBeginning: true },
       { topic: "greenguard.platform.config.v1", fromBeginning: true },
     ]);
-    assert.deepEqual(autoCommitSettings, [false, false]);
   } finally {
     await Promise.all([stopA(), stopB()]);
   }
-});
-
-test("notification flag consumers keep a stable ID per replica when available", () => {
-  assert.equal(
-    notificationInstanceId({
-      NOTIFICATION_INSTANCE_ID: " replica-a ",
-      HOSTNAME: "host-a",
-    }),
-    "replica-a",
-  );
-  assert.equal(notificationInstanceId({ HOSTNAME: "host-a" }), "host-a");
-  assert.match(notificationInstanceId({}), /^[0-9a-f-]{36}$/);
 });
 
 const T = "11111111-1111-4111-8111-111111111111";
@@ -140,9 +132,12 @@ const envelope = (
   payload: { scope, config_version: version, flags },
 });
 
-async function harness() {
+async function harness(sendFails = false) {
   const store = new VersionedFlagStore(60_000);
-  const poisonReasons: string[] = [];
+  const sent: {
+    topic: string;
+    messages: { key: string; headers: Record<string, string>; value: string }[];
+  }[] = [];
   let handler!: (m: unknown) => Promise<void>;
   const stop = startFlagFeed(store, ["127.0.0.1:1"], {
     createConsumer: () =>
@@ -156,7 +151,14 @@ async function harness() {
         },
         disconnect: async () => {},
       }) as unknown as Consumer,
-    onPoison: (reason) => poisonReasons.push(reason),
+    createProducer: () => ({
+      ...idleProducer(),
+      send: async (record: (typeof sent)[number]) => {
+        if (sendFails) throw new Error("broker down");
+        sent.push(record);
+        return [];
+      },
+    }),
   });
   for (let i = 0; i < 50 && !handler; i++)
     await new Promise((r) => setTimeout(r, 2));
@@ -178,11 +180,11 @@ async function harness() {
         ),
       },
     });
-  return { store, poisonReasons, deliver, stop };
+  return { store, sent, deliver, stop };
 }
 
-test("poison flag event is counted and skipped locally; later kill switch applies", async () => {
-  const { store, poisonReasons, deliver, stop } = await harness();
+test("poison flag event is quarantined and committed past; later kill switch applies", async () => {
+  const { store, sent, deliver, stop } = await harness();
   try {
     await deliver(
       envelope(T, "tenant", "1", { "made.up": { value: true } }),
@@ -197,11 +199,17 @@ test("poison flag event is counted and skipped locally; later kill switch applie
       { tenant_id: GLOBAL },
       "2",
     );
-    assert.deepEqual(poisonReasons, [
-      "unknown_flag_key",
-      "bad_envelope",
-      "key_mismatch",
-    ]);
+    assert.equal(sent.length, 3);
+    assert.equal(sent[0]!.topic, "greenguard.quarantine.v1");
+    assert.equal(
+      sent[0]!.messages[0]!.key,
+      "greenguard.platform.config.v1:0:0",
+    );
+    assert.equal(sent[0]!.messages[0]!.headers.reason_code, "unknown_flag_key");
+    assert.equal(sent[0]!.messages[0]!.headers.tenant_id, T);
+    assert.equal(sent[1]!.messages[0]!.headers.reason_code, "bad_envelope");
+    assert.equal(sent[1]!.messages[0]!.headers.tenant_id, "unknown");
+    assert.equal(sent[2]!.messages[0]!.headers.reason_code, "key_mismatch");
     await deliver(
       envelope(GLOBAL, "global", "1", {
         "notifications.optional_sends": { value: false, locked: true },
@@ -220,6 +228,15 @@ test("poison flag event is counted and skipped locally; later kill switch applie
       store.resolve(T, "notifications.optional_sends", "boolean")?.value,
       false,
     );
+  } finally {
+    await stop();
+  }
+});
+
+test("quarantine publish failure does not commit: the error propagates for redelivery", async () => {
+  const { deliver, stop } = await harness(true);
+  try {
+    await assert.rejects(deliver("{not json"), /broker down/);
   } finally {
     await stop();
   }

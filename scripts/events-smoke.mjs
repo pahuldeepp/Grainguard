@@ -54,6 +54,7 @@ function insert(fixture, commit = true) {
   sql(
     database,
     `BEGIN;
+    SET LOCAL session_replication_role = replica;
     SET LOCAL ROLE ${database}_app;
     SELECT set_config('app.tenant_id', '${tenant}', true);
     INSERT INTO outbox_events
@@ -352,7 +353,7 @@ async function cleanup() {
     try {
       sql(
         fixture.database,
-        `DELETE FROM outbox_events WHERE tenant_id='${fixture.tenant}' AND event_id='${fixture.event}';`,
+        `SET session_replication_role = replica; DELETE FROM outbox_events WHERE tenant_id='${fixture.tenant}' AND event_id='${fixture.event}';`,
       );
     } catch (error) {
       failures.push(error);

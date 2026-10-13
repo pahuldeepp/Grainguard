@@ -1,0 +1,161 @@
+{{- $targets := include "ownerMigration.targets" .Values | fromYamlArray -}}
+{{- range $key := list "gateImage" "sqlImage" -}}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $.Values $key | default "")) }}{{ fail "migration gate requires pinned kubectl and psql images" }}{{ end }}
+{{- end }}
+{{- $stamp := sha256sum (toJson .Values) | trunc 12 -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gg-migration-gate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gg-migration-gate
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    resourceNames:
+{{- range $targets }}
+      - {{ .job }}
+{{- end }}
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gg-migration-gate
+subjects:
+  - kind: ServiceAccount
+    name: gg-migration-gate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gg-migration-gate
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gg-migration-gate-{{ $stamp }}
+  labels:
+    greenguard.io/migration-gate: "true"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        greenguard.io/migration: "true"
+        greenguard.io/migration-gate: "true"
+    spec:
+      serviceAccountName: gg-migration-gate
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: completed-owner-jobs
+          image: {{ .Values.gateImage | quote }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+{{- range $targets }}
+              kubectl --namespace {{ $.Release.Namespace | quote }} wait --for=condition=complete --timeout=900s job/{{ .job }}
+{{- end }}
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - name: api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+{{- range $owner := $targets }}
+        - name: {{ $owner.scope }}-{{ $owner.name }}-sql
+          image: {{ $.Values.sqlImage | quote }}
+          command: [/bin/bash, -ec]
+          args:
+            - |
+{{ include "ownerMigration.uriCheck" $owner | indent 14 }}
+              psql -X --no-password "$MIGRATION_URL" -v ON_ERROR_STOP=1 <<'SQL'
+              DO $gate$
+              DECLARE table_oid oid; unsafe boolean;
+              BEGIN
+                IF current_database() <> '{{ $owner.database }}' OR current_user <> '{{ $owner.migrator }}' THEN RAISE EXCEPTION 'migration database or role mismatch'; END IF;
+                table_oid := to_regclass('public.{{ $owner.table }}');
+                IF table_oid IS NULL THEN RAISE EXCEPTION 'owner schema is missing'; END IF;
+                SELECT NOT (relrowsecurity AND relforcerowsecurity) INTO unsafe FROM pg_class WHERE oid=table_oid;
+                IF unsafe OR NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid=table_oid) THEN RAISE EXCEPTION 'forced RLS or policy missing'; END IF;
+                IF NOT has_table_privilege('{{ $owner.role }}',table_oid,'SELECT') THEN RAISE EXCEPTION 'runtime SELECT grant missing'; END IF;
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{{ $owner.role }}' AND (rolsuper OR rolbypassrls)) THEN RAISE EXCEPTION 'unsafe runtime role'; END IF;
+{{- if not $owner.central }}
+                IF to_regclass('greenguard_internal.tenant_ownership') IS NULL OR to_regprocedure('greenguard_internal.admit_tenant_placement(uuid,text,uuid,bigint)') IS NULL THEN RAISE EXCEPTION 'local ownership admission missing'; END IF;
+                IF NOT has_function_privilege('{{ $owner.role }}','greenguard_internal.admit_tenant_placement(uuid,text,uuid,bigint)','EXECUTE') THEN RAISE EXCEPTION 'runtime admission grant missing'; END IF;
+                IF EXISTS (
+                  SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                  JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped
+                  WHERE n.nspname NOT IN ('pg_catalog','information_schema','greenguard_internal') AND c.relkind IN ('r','p')
+                  AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity OR NOT EXISTS (
+                    SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace f ON f.oid=p.pronamespace
+                    WHERE t.tgrelid=c.oid AND NOT t.tgisinternal AND t.tgenabled IN ('O','A') AND t.tgtype=31 AND p.proname='enforce_tenant_ownership' AND f.nspname='greenguard_internal'
+                  ) OR NOT EXISTS (
+                    SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace f ON f.oid=p.pronamespace
+                    WHERE t.tgrelid=c.oid AND NOT t.tgisinternal AND t.tgenabled IN ('O','A') AND t.tgtype=34 AND p.proname='forbid_tenant_truncate' AND f.nspname='greenguard_internal'
+                  ))
+                ) THEN RAISE EXCEPTION 'tenant table RLS or ownership fence missing'; END IF;
+{{- else if eq $owner.name "control" }}
+                IF to_regclass('public.placement_read_leases') IS NULL OR NOT has_table_privilege('control_app','public.placement_read_leases','DELETE') THEN RAISE EXCEPTION 'read lease release capability missing'; END IF;
+                IF has_table_privilege('control_app','public.membership_events','UPDATE') OR has_table_privilege('control_app','public.membership_events','DELETE') THEN RAISE EXCEPTION 'immutable control audit grant violated'; END IF;
+{{- end }}
+              END;
+              $gate$;
+              SQL
+          env:
+            - name: MIGRATION_URL
+              valueFrom:
+                secretKeyRef: {name: {{ $owner.secret }}, key: {{ $owner.key }}}
+            - {name: PGCONNECT_TIMEOUT, value: "10"}
+            - {name: PGOPTIONS, value: "-c statement_timeout=5000 -c lock_timeout=2000"}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: ca, mountPath: /rds-ca, readOnly: true}
+{{- end }}
+      containers:
+        - name: accepted
+          image: {{ .Values.sqlImage | quote }}
+          command: [/bin/sh, -ec]
+          args: ["echo 'All owner migration Jobs and SQL admission checks passed'"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ .Values.caSecret }}
+            items: [{key: ca.pem, path: ca.pem}]
+        - name: api
+          projected:
+            sources:
+              - serviceAccountToken: {path: token, expirationSeconds: 3600}
+              - configMap:
+                  name: kube-root-ca.crt
+                  items: [{key: ca.crt, path: ca.crt}]
+              - downwardAPI:
+                  items: [{path: namespace, fieldRef: {fieldPath: metadata.namespace}}]

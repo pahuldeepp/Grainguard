@@ -6,12 +6,15 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright";
+import { isInteractiveAuthorizeRequest } from "./oidc-authorize-request.mjs";
 
 process.env.OIDC_BFF_URL = "http://127.0.0.1:4000";
 const live = await import("./oidc-live.mjs");
 const { ISSUER } = await import("./oidc-login.mjs");
 const { bffDevice, deviceOf, check, failures, DEVICE } = live;
-const DASHBOARD = "http://127.0.0.1:5173";
+const DASHBOARD =
+  process.env.OIDC_BROWSER_DASHBOARD_URL ?? "http://127.0.0.1:5173";
+const START_DASHBOARD = process.env.OIDC_BROWSER_START_DASHBOARD !== "false";
 const SHOTS = "evidence/stage08-oidc";
 const password = process.env.OIDC_DEV_PASSWORD;
 
@@ -34,10 +37,11 @@ function startDashboard() {
     cwd: "apps/dashboard",
     env: {
       ...process.env,
+      // The dev proxy defaults to the gateway port; point it at this test's BFF.
+      BFF_DEV_URL: process.env.OIDC_BFF_URL,
       VITE_OIDC_AUTHORITY: ISSUER,
       VITE_OIDC_CLIENT_ID: "greenguard-dashboard",
       VITE_OIDC_AUDIENCE: "greenguard-dashboard",
-      VITE_GRAPHQL_BFF_URL: process.env.OIDC_BFF_URL,
     },
     stdio: "ignore",
     detached: true,
@@ -46,8 +50,10 @@ function startDashboard() {
 
 async function signIn(page, user) {
   await page.goto(DASHBOARD);
+  // Silent session restore also calls /auth (prompt=none) before the user clicks;
+  // only the interactive redirect carries the nonce this test checks.
   const authorizeRequest = page.waitForRequest((r) =>
-    r.url().startsWith(`${ISSUER}/auth?`),
+    isInteractiveAuthorizeRequest(r.url(), ISSUER),
   );
   await page.getByRole("button", { name: "Sign in" }).click();
   const authorize = (await authorizeRequest).url();
@@ -116,14 +122,26 @@ async function userFlow(browser, user, own, other) {
 
 async function sessionEdges(page) {
   await page.reload();
-  const reloaded = await page
-    .getByRole("button", { name: "Sign in" })
-    .isVisible({ timeout: 5000 })
-    .catch(() => false);
+  // After a reload the in-memory session is gone. A provider with an SSO session
+  // (for example Cognito) restores it silently; Dex's password connector keeps no
+  // session, so it must fall back to asking for sign-in. Either is a defined state.
+  const outcome = await Promise.race([
+    page
+      .getByRole("button", { name: "Sign out" })
+      .waitFor({ state: "visible", timeout: 20_000 })
+      .then(() => "restored"),
+    page
+      .getByRole("button", { name: "Sign in" })
+      .waitFor({ state: "visible", timeout: 20_000 })
+      .then(() => "sign-in-required"),
+  ]).catch(() => "none");
+  const stored = await page.evaluate(() =>
+    JSON.stringify({ ...localStorage, ...sessionStorage }),
+  );
   check(
-    "reload drops the in-memory session (sign-in required)",
-    reloaded,
-    `sign-in visible=${reloaded}`,
+    "reload reaches a defined sign-in state without persisting browser tokens",
+    outcome !== "none" && !stored.includes("eyJ"),
+    `outcome=${outcome}`,
   );
   await page.goto(`${DASHBOARD}/auth/callback?code=forged&state=forged-state`);
   const alert = await page
@@ -153,7 +171,7 @@ async function signOutFlow(page) {
 async function main() {
   mkdirSync(SHOTS, { recursive: true });
   const stack = live.startStack();
-  const vite = startDashboard();
+  const vite = START_DASHBOARD ? startDashboard() : null;
   const browser = await chromium.launch();
   try {
     await stack.ready;
@@ -164,7 +182,7 @@ async function main() {
     await sessionEdges(bob.page);
   } finally {
     await browser.close();
-    process.kill(-vite.pid, "SIGKILL");
+    if (vite) process.kill(-vite.pid, "SIGKILL");
     stack.stop();
   }
   console.log(

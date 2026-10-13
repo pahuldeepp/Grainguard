@@ -1,4 +1,6 @@
 import type { CryptoDeps } from "./pkce.js";
+import { IdentityChangedError } from "./session.js";
+import type { Identity } from "./session.js";
 import type { AccessGrant } from "./session.js";
 
 export interface AccessSource {
@@ -25,6 +27,7 @@ export class GraphqlError extends Error {
 
 interface GraphqlPayload<T> {
   data?: T;
+  extensions?: { consistencyToken?: unknown };
   errors?: {
     message: string;
     extensions?: { code?: string; httpStatus?: number };
@@ -47,25 +50,47 @@ export class GraphqlClient {
   async execute<T>(
     query: string,
     variables: Record<string, string | number>,
+    expectedIdentity?: Identity,
+    onWatermark?: (token: string) => void,
+    deadline = Date.now() + (this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
   ): Promise<T> {
     const hash = toHex(
       await this.deps.crypto.sha256(new TextEncoder().encode(query)),
     );
     let grant = await this.session.getAccessToken();
-    let response = await this.post(hash, variables, grant.accessToken);
+    const identity = expectedIdentity ?? grant;
+    const requireIdentity = (value: AccessGrant) => {
+      if (
+        value.tenantId !== identity.tenantId ||
+        value.subject !== identity.subject
+      )
+        throw new IdentityChangedError();
+    };
+    requireIdentity(grant);
+    let response = await this.post(
+      hash,
+      variables,
+      grant.accessToken,
+      deadline,
+    );
     if (response.status === 401) {
       // One forced refresh; a second 401 is the caller's re-login problem.
       grant = await this.session.getAccessToken({ force: true });
-      response = await this.post(hash, variables, grant.accessToken);
+      requireIdentity(grant);
+      response = await this.post(hash, variables, grant.accessToken, deadline);
     }
-    return this.unwrap<T>(response);
+    return this.unwrap<T>(response, onWatermark);
   }
 
   private async post(
     hash: string,
     variables: Record<string, string | number>,
     accessToken: string,
+    deadline: number,
   ): Promise<Response> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      throw new GraphqlError("read_timeout", 0, "read_timeout");
     try {
       return await this.deps.fetch(this.endpoint, {
         method: "POST",
@@ -77,14 +102,17 @@ export class GraphqlClient {
           variables,
           extensions: { persistedQuery: { version: 1, sha256Hash: hash } },
         }),
-        signal: AbortSignal.timeout(this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.max(1, Math.ceil(remaining))),
       });
     } catch {
       throw new GraphqlError("Network request failed", 0);
     }
   }
 
-  private async unwrap<T>(response: Response): Promise<T> {
+  private async unwrap<T>(
+    response: Response,
+    onWatermark?: (token: string) => void,
+  ): Promise<T> {
     if (!response.ok)
       throw new GraphqlError(
         `Request failed (${response.status})`,
@@ -99,6 +127,10 @@ export class GraphqlClient {
         failure.extensions?.code,
       );
     if (!payload.data) throw new GraphqlError("Response has no data", 200);
+    const token = payload.extensions?.consistencyToken;
+    if (token != null && typeof token !== "string")
+      throw new GraphqlError("invalid_consistency_response", 502);
+    if (typeof token === "string") onWatermark?.(token);
     return payload.data;
   }
 }

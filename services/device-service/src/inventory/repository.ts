@@ -19,6 +19,8 @@ import {
 } from "./errors.js";
 import { GRAIN_TYPE, placementTime } from "./lot-validation.js";
 import { assertDeviceCapacity } from "./entitlements.js";
+import { syncDeviceCables } from "./cables.js";
+import type { Prisma } from "../generated/prisma/client.js";
 
 export interface CommandContext {
   tenantId: string;
@@ -140,10 +142,10 @@ export async function registerPendingDevice(
 export interface EventSpec {
   commandId: string;
   eventType: string;
-  aggregateType: "device" | "site" | "bin" | "bin_occupancy";
+  aggregateType: "device" | "site" | "bin" | "bin_occupancy" | "cable";
   aggregateId: string;
   version: bigint;
-  payload: Record<string, string | null>;
+  payload: Prisma.InputJsonObject;
   action: string;
 }
 
@@ -628,6 +630,7 @@ export async function changeDeviceBinding(
           );
         throw new VersionConflictError(current.bindingVersion.toString());
       }
+      await syncDeviceCables(tx, ctx, input.deviceId, input.binId);
       const eventId = await appendEvent(tx, ctx, {
         commandId: randomUUID(),
         eventType: "device.binding_changed",
@@ -739,6 +742,8 @@ export async function setDeviceStatus(
           updatedAt: new Date(),
         },
       });
+      if (input.status === "deleted")
+        await syncDeviceCables(tx, ctx, input.deviceId, null, true);
       const eventId = await appendEvent(tx, ctx, {
         commandId: randomUUID(),
         eventType: "device.status_changed",
@@ -789,6 +794,31 @@ export function getDevice(db: Db, tenantId: string, deviceId: string) {
   return withTenant(db, tenantId, (tx) =>
     tx.device.findUnique({
       where: { tenantId_deviceId: { tenantId, deviceId } },
+    }),
+  );
+}
+
+// Exact serial identity resolution stays in the owning inventory transaction.
+export function lookupDeviceBySerial(
+  db: Db,
+  tenantId: string,
+  serialNumber: string,
+) {
+  if (
+    !serialNumber ||
+    serialNumber.length > 128 ||
+    serialNumber.trim() !== serialNumber ||
+    Array.from(serialNumber).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    })
+  )
+    throw new InvalidInputError("invalid serial number");
+  return withTenant(db, tenantId, (tx) =>
+    tx.device.findMany({
+      where: { tenantId, serialNumber, status: { not: "deleted" } },
+      select: { deviceId: true, serialNumber: true },
+      take: 2,
     }),
   );
 }

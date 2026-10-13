@@ -1,0 +1,142 @@
+groups:
+  - name: platform-recording
+    interval: 30s
+    rules:
+      - record: service:http_requests:rate5m
+        expr: sum by (job, method, route) (rate(http_server_requests_total[5m]))
+      - record: service:http_errors:rate5m
+        expr: sum by (job, method, route) (rate(http_server_requests_total{status_code=~"5.."}[5m]))
+      - record: service:http_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (job, method, route, le) (rate(http_server_duration_seconds_bucket[5m])))
+      - record: service:http_latency:p99_5m
+        expr: histogram_quantile(0.99, sum by (job, method, route, le) (rate(http_server_duration_seconds_bucket[5m])))
+      # Candidate only: valid requests are all non-5xx responses; product owners
+      # must approve exclusions (including 4xx/429 policy) before this is an SLO.
+      - record: candidate_slo:api:valid_requests:rate5m
+        expr: sum(rate(http_server_requests_total[5m]))
+      - record: candidate_slo:api:bad_requests:rate5m
+        expr: sum(rate(http_server_requests_total{status_code=~"5.."}[5m]))
+      - record: candidate_slo:api:error_ratio:rate5m
+        expr: candidate_slo:api:bad_requests:rate5m / clamp_min(candidate_slo:api:valid_requests:rate5m, 0.000001)
+      - record: candidate_slo:api:error_budget_remaining:ratio30d
+        expr: clamp_min(1 - (sum(increase(http_server_requests_total{status_code=~"5.."}[30d])) / clamp_min(sum(increase(http_server_requests_total[30d])), 1)) / 0.0005, 0)
+      - record: candidate_slo:api:burn_rate:1h
+        expr: candidate_slo:api:error_ratio:rate5m / 0.0005
+      - record: candidate_slo:projection:freshness_p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(projection_event_to_projection_seconds_bucket[5m])))
+      - record: candidate_slo:projection:freshness_burn_rate:5m
+        expr: sum(rate(projection_event_to_projection_seconds_bucket{le="2"}[5m])) / clamp_min(sum(rate(projection_event_to_projection_seconds_count[5m])), 0.000001)
+  - name: platform-alerts
+    rules:
+      - alert: ObservabilityTargetDown
+        expr: up{job=~"node-exporter|otel-metrics|rehearsal-target"} == 0
+        for: 3m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Observability scrape target is unavailable"
+          description: "Target {{ $labels.job }} has not been scraped successfully for three minutes."
+          runbook_url: "docs/runbooks/observability-target-down.md"
+      - alert: APIHighServerErrorRate
+        expr: |
+          sum by (job, method, route) (rate(http_server_requests_total{status_code=~"5.."}[5m]))
+          /
+          clamp_min(sum by (job, method, route) (rate(http_server_requests_total[5m])), 0.001)
+          > 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Unexpected API server errors are elevated"
+          description: "More than 5% of requests are 5xx for {{ $labels.job }} {{ $labels.route }}."
+          runbook_url: "docs/runbooks/api-errors.md"
+      - alert: ProjectionFreshnessUnknown
+        expr: absent(projection_freshness_seconds)
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Projection freshness is not observable"
+          description: "No projection freshness metric is present; platform read freshness is unknown."
+          runbook_url: "docs/runbooks/projection-freshness.md"
+      - alert: CDCCommitLagGrowing
+        expr: cdc_commit_lag > 100
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "CDC records are waiting for confirmed commit"
+          description: "The CDC transformer has more than 100 fetched records awaiting confirmed offset commit."
+          runbook_url: "docs/runbooks/streaming-backlog.md"
+      - alert: DebeziumConnectorMissing
+        expr: up{job="kafka-connect-jmx"} == 1 unless on() count by () (debezium_postgres_streaming_connected)
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Debezium streaming metrics are missing"
+          description: "Kafka Connect is unavailable or PostgreSQL connector metrics are not being exported. Confirm connectors are registered and running."
+          runbook_url: "docs/runbooks/streaming-backlog.md"
+      - alert: DebeziumConnectorDisconnected
+        expr: debezium_postgres_streaming_connected == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "A Debezium PostgreSQL connector is disconnected"
+          description: "The {{ $labels.server }} CDC connector reports disconnected; inspect Connect task state, slot health, and source database reachability."
+          runbook_url: "docs/runbooks/streaming-backlog.md"
+      - alert: DebeziumSourceLagHigh
+        expr: debezium_postgres_streaming_millisecondsbehindsource > 30000
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Debezium source lag is above 30 seconds"
+          description: "Connector {{ $labels.server }} reports source lag above 30 seconds. Check PostgreSQL WAL retention, connector throughput, and Kafka availability."
+          runbook_url: "docs/runbooks/streaming-backlog.md"
+      - alert: ProjectionPendingRecords
+        expr: projection_pending_records > 1000
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Projection pending-record backlog is high"
+          description: "Projection pending records exceed 1000 for ten minutes. Inspect lag and freshness panels."
+          runbook_url: "docs/runbooks/projection-freshness.md"
+      - alert: JobsDispatchLagHigh
+        expr: jobs_dispatch_lag_seconds > 120
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Oldest pending job dispatch is delayed"
+          description: "Jobs dispatch lag has exceeded two minutes."
+          runbook_url: "docs/runbooks/streaming-backlog.md"
+      - alert: PostgresClientPoolWaiters
+        expr: postgres_pool_waiting_requests > 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Application requests are waiting for a PostgreSQL connection"
+          description: "The {{ $labels.pool }} client pool has waiting requests. Check pool use, database activity, and query latency."
+          runbook_url: "docs/runbooks/database-saturation.md"
+      - alert: PostgresPoolExhaustion
+        expr: increase(postgres_pool_empty_acquire_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "PostgreSQL pool had acquisitions with no idle connections"
+          description: "The {{ $labels.pool }} pool was saturated during the last five minutes; inspect acquired/idle counts and acquisition wait time."
+          runbook_url: "docs/runbooks/database-saturation.md"
+      - alert: PostgresSlowQueryRateHigh
+        expr: rate(postgres_slow_queries_total[5m]) > 2
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "PostgreSQL client queries are frequently exceeding 500ms"
+          description: "Instrumented application clients observed more than two slow queries per second; SQL text is intentionally not exported as a metric label."
+          runbook_url: "docs/runbooks/database-saturation.md"

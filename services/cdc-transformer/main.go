@@ -50,7 +50,7 @@ func buildApp(getenv func(string) string) (*app, error) {
 	if group == "" {
 		group = "greenguard-cdc-transformer-v1"
 	}
-	kafka, err := newKafka(brokers, group)
+	kafka, err := newKafkaWithPrefix(brokers, group, getenv("KAFKA_TOPIC_PREFIX"))
 	if err != nil {
 		shutdownTracing(provider)
 		return nil, err

@@ -6,7 +6,8 @@
     "moduleResolution": "bundler",
     "types": [
       "jest",
-      "react-native"
+      "react-native",
+      "node"
     ],
     "paths": {
       "@greenguard/mobile-core": [

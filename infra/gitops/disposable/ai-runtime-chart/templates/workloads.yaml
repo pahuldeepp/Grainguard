@@ -1,0 +1,159 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+{{- $profiles := list
+  (dict "name" "knowledge-service" "owner" "knowledge" "image" "knowledge" "command" (list "python" "serve.py") "port" 8080)
+  (dict "name" "knowledge-indexer" "owner" "knowledge" "image" "indexer" "command" (list "python" "worker.py") "role" "indexer")
+  (dict "name" "knowledge-relay" "owner" "knowledge" "image" "knowledge" "command" (list "python" "worker.py") "role" "relay")
+  (dict "name" "knowledge-analytics" "owner" "knowledge" "image" "knowledge" "command" (list "python" "worker.py") "role" "suggestion-analytics")
+  (dict "name" "knowledge-retention" "owner" "knowledge" "image" "knowledge" "command" (list "python" "worker.py") "role" "conversation-retention")
+  (dict "name" "knowledge-summary" "owner" "knowledge" "image" "knowledge" "command" (list "python" "summary_worker.py"))
+  (dict "name" "mcp-gateway" "owner" "mcp" "image" "mcp" "command" (list "python" "/app/gateway.py") "port" 8090)
+  (dict "name" "grain-advisor" "owner" "advisor" "image" "advisor" "command" (list "python" "services/grain-advisor/serve_delegated.py") "port" 8088)
+  (dict "name" "model-gateway" "owner" "model-gateway" "image" "gateway" "command" (list "/model-gateway") "port" 8080)
+  (dict "name" "model-gateway-usage-relay" "owner" "model-gateway-usage" "image" "usage" "command" (list "python" "usage_pipeline.py" "relay" "--config-file" "/private/relay.json"))
+  (dict "name" "model-gateway-usage-consume" "owner" "model-gateway-usage" "image" "usage" "command" (list "python" "usage_pipeline.py" "consume" "--config-file" "/private/consume.json"))
+}}
+{{- range $profile := $profiles }}
+{{- $secret := printf "greenguard-%s-runtime" $profile.owner }}
+{{- if eq $profile.owner "model-gateway-usage" }}{{ $secret = "greenguard-model-gateway-usage" }}{{ end }}
+{{- $worker := and (eq $profile.owner "knowledge") (ne $profile.name "knowledge-service") }}
+{{- $envContext := dict "Values" $.Values "profile" $profile.name "databaseSecret" (ternary "greenguard-knowledge-worker-runtime" "greenguard-knowledge-runtime" $worker) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $profile.name }}
+  labels: {app.kubernetes.io/name: {{ $profile.name }}, app.kubernetes.io/part-of: ai-runtime, greenguard.io/cell: {{ $.Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "20"}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 600
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: {{ $profile.name }}}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: {{ $profile.name }}, app.kubernetes.io/part-of: ai-runtime, greenguard.io/ai-role: runtime, greenguard.io/cell: {{ $.Values.cell | quote }}}
+      annotations:
+        greenguard.io/secret-sync-epoch: {{ $.Values.secretSyncEpoch | quote }}
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts":true}'
+    spec:
+      serviceAccountName: {{ if eq $profile.name "knowledge-service" }}knowledge-api{{ else if eq $profile.name "knowledge-indexer" }}knowledge-indexer{{ else if eq $profile.name "mcp-gateway" }}mcp-gateway{{ else }}ai-runtime{{ end }}
+      automountServiceAccountToken: {{ eq $profile.name "knowledge-indexer" }}
+{{- if eq $profile.name "knowledge-indexer" }}
+      nodeSelector: {kubernetes.io/arch: amd64}
+{{- end }}
+      terminationGracePeriodSeconds: {{ ternary 150 45 (eq $profile.name "model-gateway") }}
+      securityContext:
+{{ include "ai.security" $ | indent 8 }}
+{{- if ne $profile.owner "mcp" }}
+      initContainers:
+        - name: private-files
+          image: {{ $.Values.images.knowledge | quote }}
+          command: [python, -c, "import os,pathlib; src=pathlib.Path('/source'); dst=pathlib.Path('/private'); [( (dst/p.name).write_bytes(p.read_bytes()),os.chmod(dst/p.name,0o600)) for p in src.iterdir() if not p.name.startswith('.')]"]
+          securityContext:
+{{ include "ai.containerSecurity" $ | indent 12 }}
+          resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          volumeMounts:
+            - {name: source, mountPath: /source, readOnly: true}
+            - {name: private, mountPath: /private}
+{{- end }}
+      containers:
+        - name: runtime
+          image: {{ index $.Values.images $profile.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: {{ toJson $profile.command }}
+{{- if ne $profile.owner "model-gateway-usage" }}
+          env:
+{{- if eq $profile.owner "mcp" }}
+{{ include "ai.mcpEnv" $ | indent 12 }}
+{{- else }}
+{{ include (printf "ai.%sEnv" (ternary "gateway" $profile.owner (eq $profile.owner "model-gateway"))) $envContext | indent 12 }}
+{{- end }}
+{{- with $profile.role }}
+            - {name: KNOWLEDGE_WORKER_ROLE, value: {{ . | quote }}}
+{{- end }}
+{{- end }}
+          securityContext:
+{{ include "ai.containerSecurity" $ | indent 12 }}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi, ephemeral-storage: 128Mi}}
+{{- with $profile.port }}
+          ports: [{name: http, containerPort: {{ . }}}]
+          startupProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 60}
+          readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, timeoutSeconds: 4, failureThreshold: 2}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, timeoutSeconds: 4, failureThreshold: 3}
+{{- else }}
+          # Workers do not expose an HTTP readiness endpoint. Check the actual
+          # role-scoped database rather than declaring a sleeping process ready.
+          startupProbe:
+            exec:
+              command: [python, /healthcheck/ready.py, {{ $profile.name }}]
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [python, /healthcheck/ready.py, {{ $profile.name }}]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
+{{- end }}
+          volumeMounts:
+            - {name: private, mountPath: /private, readOnly: true}
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+            - {name: kafka-ca, mountPath: /kafka-ca, readOnly: true}
+            - {name: redis-ca, mountPath: /redis-ca, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+            - {name: healthcheck, mountPath: /healthcheck, readOnly: true}
+      volumes:
+{{- if ne $profile.owner "mcp" }}
+        - name: source
+{{- if $worker }}
+          projected:
+            defaultMode: 0440
+            sources:
+{{- if or (has $profile.name (list "knowledge-indexer" "knowledge-summary")) (has $profile.name (list "knowledge-relay" "knowledge-retention")) }}
+              - secret:
+                  name: greenguard-knowledge-runtime
+                  items:
+{{- if has $profile.name (list "knowledge-indexer" "knowledge-summary") }}
+                    - {key: gateway-tokens.json, path: gateway-tokens.json}
+{{- end }}
+{{- if eq $profile.name "knowledge-relay" }}
+                    - {key: relay-tenants.json, path: relay-tenants.json}
+{{- end }}
+{{- if eq $profile.name "knowledge-retention" }}
+                    - {key: retention-scopes.json, path: retention-scopes.json}
+{{- end }}
+{{- if eq $profile.name "knowledge-indexer" }}
+                    - {key: pinecone-api-key, path: pinecone-api-key}
+{{- end }}
+{{- end }}
+              - secret:
+                  name: greenguard-knowledge-worker-runtime
+                  items: [{key: database-url, path: database-url}]
+{{- else }}
+          secret: {secretName: {{ $secret }}, defaultMode: 0440}
+{{- end }}
+{{- end }}
+        - {name: private, emptyDir: {medium: Memory, sizeLimit: 4Mi}}
+        - {name: scratch, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+        - {name: healthcheck, configMap: {name: ai-worker-readiness, defaultMode: 0444}}
+        - {name: rds-ca, secret: {secretName: greenguard-rds-ca, defaultMode: 0440}}
+        - {name: kafka-ca, secret: {secretName: greenguard-ai-kafka-ca, defaultMode: 0440}}
+        - name: redis-ca
+          secret: {secretName: greenguard-ai-redis, defaultMode: 0440, items: [{key: ca.pem, path: ca.pem}]}
+{{- with $profile.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $profile.name }}
+  labels: {app.kubernetes.io/name: {{ $profile.name }}, greenguard.io/cell: {{ $.Values.cell | quote }}}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: {{ $profile.name }}}
+  ports: [{name: http, port: {{ . }}, targetPort: http}]
+{{- end }}
+{{- end }}
+{{- end }}

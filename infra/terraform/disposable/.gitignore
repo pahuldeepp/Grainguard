@@ -1,0 +1,9 @@
+*.tfvars
+*.tfvars.json
+!defaults.auto.tfvars
+*.tfplan
+*.tfstate
+*.tfstate.*
+.terraform/
+.last-destroy-pvs
+.last-destroy-pvs.scope.json

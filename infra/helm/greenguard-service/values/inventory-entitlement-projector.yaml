@@ -1,0 +1,45 @@
+nameOverride: inventory-entitlement-projector
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+autoscaling:
+  hpa: { enabled: false }
+service:
+  enabled: false
+  port: 8090
+  containerPort: 8090
+container:
+  name: inventory-entitlement-projector
+  command: ["node", "services/device-service/dist/entitlements/projector.js"]
+  envFrom:
+    - secretRef: { name: device-service-config }
+  env:
+    - { name: WORKER_HEALTH_PORT, value: "8090" }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  egressServices:
+    - {
+        name: tenant-control-plane,
+        namespace: greenguard,
+        release: tenant-control-plane,
+        port: 3010,
+      }
+  ingressSources: []
+probes:
+  startup:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/readyz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 10

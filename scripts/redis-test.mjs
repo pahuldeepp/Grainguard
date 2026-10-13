@@ -6,8 +6,10 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { ReadCache } from "../services/read-api/dist/cache.js";
 import { createReadRedis } from "../services/read-api/dist/redis.js";
+import { composeContainerName } from "./ci-compose-project.mjs";
 
-const PROJECT = "greenguard-redis";
+const PROJECT = process.env.COMPOSE_PROJECT_NAME || "greenguard-redis";
+const COMPOSE_FILE = "infra/redis/compose.yaml";
 const NODES = [1, 2, 3, 4, 5, 6];
 const env = {
   READ_REDIS_CLUSTER_NODES: NODES.map((n) => `redis://127.0.0.1:710${n}`).join(
@@ -19,7 +21,10 @@ const env = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
-const container = (n) => `${PROJECT}-redis-node-${n}-1`;
+const container = (n) =>
+  composeContainerName(`redis-node-${n}`, {
+    COMPOSE_PROJECT_NAME: PROJECT,
+  });
 const docker = (...args) => execFileSync("docker", args, { encoding: "utf8" });
 // Disruptions run asynchronously so they never block the event loop being measured.
 const dockerAsync = (...args) => promisify(execFile)("docker", args);
@@ -307,21 +312,51 @@ async function pause(redis) {
 
 async function fullRestart(redis) {
   const cache = new ReadCache(redis);
+  let restartError = null;
+  let restartPromise = Promise.resolve();
+  const restartNodes = async () => {
+    try {
+      // Restart one node at a time. Simultaneously restarting all Redis Cluster
+      // members can leave stale peer addresses and removes every cache endpoint
+      // at once; a rolling restart is the availability contract we rely on.
+      for (const n of NODES) {
+        await promisify(execFile)("docker", [
+          "compose",
+          "-p",
+          PROJECT,
+          "-f",
+          COMPOSE_FILE,
+          "restart",
+          `redis-node-${n}`,
+        ]);
+        const nodeReady = await waitFor(async () => {
+          try {
+            return cli(n, "ping") === "PONG";
+          } catch {
+            return false;
+          }
+        }, 15_000);
+        if (!nodeReady || !(await waitFor(() => healthyTopology(), 20_000))) {
+          throw new Error(
+            `Redis topology did not recover after restarting node ${n}`,
+          );
+        }
+      }
+    } catch (error) {
+      restartError = error;
+    }
+  };
+
   const stats = await traffic(cache, 12_000, async () => {
     await sleep(500);
-    docker(
-      "compose",
-      "-p",
-      PROJECT,
-      "restart",
-      ...NODES.map((n) => `redis-node-${n}`),
-    );
+    restartPromise = restartNodes();
     return {};
   });
-  const ok = await waitFor(() => healthyTopology(), 30_000);
+  await restartPromise;
+  const ok = restartError === null && healthyTopology();
   const warm = await traffic(new ReadCache(redis), 2_000, async () => ({}));
   record(
-    "full cluster restart (cold cache)",
+    "rolling full cluster restart (cold cache)",
     stats.failed === 0 && ok && warm.failed === 0,
     {
       requests: stats.ok,
@@ -331,6 +366,7 @@ async function fullRestart(redis) {
       redisTimeouts: stats.timeout,
       fallbacks: stats.fallback,
       topologyHealthyAfterRestart: ok,
+      restartError: restartError?.message ?? null,
       hitRatioAfterRestart: +(
         warm.hit / (warm.hit + warm.miss + warm.fallback || 1)
       ).toFixed(3),

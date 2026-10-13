@@ -4,13 +4,137 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+type placementTestTx struct {
+	pgx.Tx
+	statements []string
+	arguments  [][]any
+	execErr    error
+	commitErr  error
+	commits    int
+	rollbacks  int
+}
+
+func (t *placementTestTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	t.statements = append(t.statements, sql)
+	t.arguments = append(t.arguments, args)
+	if strings.Contains(sql, "admit_tenant_placement") {
+		return pgconn.CommandTag{}, t.execErr
+	}
+	return pgconn.CommandTag{}, nil
+}
+func (t *placementTestTx) Commit(context.Context) error   { t.commits++; return t.commitErr }
+func (t *placementTestTx) Rollback(context.Context) error { t.rollbacks++; return nil }
+
+type placementTestDB struct {
+	tx     *placementTestTx
+	begins int
+}
+
+func (d *placementTestDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	d.begins++
+	return d.tx, nil
+}
+
+func TestWithTenantPlacementSetsRouteAndAdmitsBeforeCallback(t *testing.T) {
+	tx := &placementTestTx{}
+	db := &placementTestDB{tx: tx}
+	route := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s3", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "9223372036854775807", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	called := false
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error {
+		called = true
+		if len(tx.statements) != 5 || !strings.Contains(tx.statements[4], "admit_tenant_placement") {
+			t.Fatalf("callback ran before placement admission: %v", tx.statements)
+		}
+		return nil
+	})
+	if err != nil || !called || db.begins != 1 || tx.commits != 1 || tx.rollbacks != 0 {
+		t.Fatalf("err=%v called=%v begins=%d commits=%d rollbacks=%d", err, called, db.begins, tx.commits, tx.rollbacks)
+	}
+	if len(tx.arguments) != 5 || tx.arguments[0][1] != route.TenantID || tx.arguments[1][1] != route.ShardID || tx.arguments[2][1] != route.Incarnation || tx.arguments[3][1] != route.PlacementEpoch {
+		t.Fatalf("route context arguments mismatch: %#v", tx.arguments)
+	}
+}
+
+func TestWithTenantPlacementRejectsInvalidAndInactiveRoutesBeforeBegin(t *testing.T) {
+	base := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s1", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	cases := []TenantPlacement{base, base, base, base, base, base, base}
+	cases[0].ShardID = "s5"
+	cases[1].PlacementEpoch = "9223372036854775808"
+	cases[2].PlacementEpoch = "01"
+	cases[3].State = "quiescing"
+	cases[4].Incarnation = ""
+	cases[5].ExpiresAt = time.Time{}
+	cases[6].ExpiresAt = time.Now().Add(-time.Second)
+	for _, route := range cases {
+		db := &placementTestDB{tx: &placementTestTx{}}
+		if err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("callback unexpectedly ran"); return nil }); !errors.Is(err, ErrInvalidTenantPlacement) || db.begins != 0 {
+			t.Fatalf("route=%+v err=%v begins=%d", route, err, db.begins)
+		}
+	}
+}
+
+func TestExpiredPlacementBeforeBeginReportsOnlyExpiryTimingAndRetainsErrorIdentity(t *testing.T) {
+	tx := &placementTestTx{}
+	db := &placementTestDB{tx: tx}
+	expires := time.Now().Add(-time.Second)
+	route := TenantPlacement{TenantID: tenantID, ShardID: "s1", Incarnation: tenantID, PlacementEpoch: "1", State: "active", ExpiresAt: expires}
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("expired route invoked callback"); return nil })
+	if !errors.Is(err, ErrInvalidTenantPlacement) || db.begins != 0 || len(tx.statements) != 0 || tx.rollbacks != 0 {
+		t.Fatalf("expired route reached transaction: err=%v begins=%d tx=%+v", err, db.begins, tx)
+	}
+	if !strings.Contains(err.Error(), "expired before transaction begin") || !strings.Contains(err.Error(), "expires_at="+expires.UTC().Format(time.RFC3339Nano)) || !strings.Contains(err.Error(), "observed_at=") {
+		t.Fatalf("pre-begin expiry diagnostic missing: %v", err)
+	}
+	if strings.Contains(err.Error(), tenantID) || strings.Contains(err.Error(), "placement_epoch") {
+		t.Fatalf("diagnostic exposed route identity: %v", err)
+	}
+}
+
+func TestMalformedPlacementDoesNotBecomeExpiryDiagnostic(t *testing.T) {
+	base := TenantPlacement{TenantID: tenantID, ShardID: "s1", Incarnation: tenantID, PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(-time.Second)}
+	for _, mutate := range []func(*TenantPlacement){
+		func(p *TenantPlacement) { p.TenantID = "bad" },
+		func(p *TenantPlacement) { p.ShardID = "s5" },
+		func(p *TenantPlacement) { p.Incarnation = "bad" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "01" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "9223372036854775808" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "0" },
+		func(p *TenantPlacement) { p.State = "quiescing" },
+		func(p *TenantPlacement) { p.ExpiresAt = time.Time{} },
+	} {
+		route := base
+		mutate(&route)
+		db := &placementTestDB{tx: &placementTestTx{}}
+		err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("invalid route invoked callback"); return nil })
+		if err != ErrInvalidTenantPlacement || db.begins != 0 {
+			t.Fatalf("invalid route reclassified: err=%v begins=%d", err, db.begins)
+		}
+	}
+}
+
+func TestWithTenantPlacementRollsBackWhenDatabaseRejectsAdmission(t *testing.T) {
+	denied := errors.New("stale placement")
+	tx := &placementTestTx{execErr: denied}
+	db := &placementTestDB{tx: tx}
+	route := TenantPlacement{TenantID: "3f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", ShardID: "s1", Incarnation: "4f2b8c1e-9a4d-4e7b-8c55-1d2e3f4a5b6c", PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(time.Minute)}
+	called := false
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { called = true; return nil })
+	if !errors.Is(err, denied) || called || tx.commits != 0 || tx.rollbacks != 1 {
+		t.Fatalf("err=%v called=%v commits=%d rollbacks=%d", err, called, tx.commits, tx.rollbacks)
+	}
+}
 
 func TestCanonicalEnvelopeHelpers(t *testing.T) {
 	value, err := Decode([]byte(`{"n":9223372036854775807}`))
@@ -27,6 +151,29 @@ func TestCanonicalEnvelopeHelpers(t *testing.T) {
 	}
 	if got, err := Bigint(json.Number("7")); err != nil || got != "7" {
 		t.Fatal(got, err)
+	}
+}
+
+func TestPGXPoolMetricsUseFixedPoolNamesAndExposeSaturation(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://user:pass@127.0.0.1:1/db?pool_max_conns=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	text := RenderPGXPoolMetrics("telemetry_ingest", pool.Stat())
+	for _, expected := range []string{
+		`postgres_pool_size{pool="telemetry_ingest"} 7`,
+		`postgres_pool_total_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_idle_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_acquired_connections{pool="telemetry_ingest"} 0`,
+		`postgres_pool_empty_acquire_wait_seconds_total{pool="telemetry_ingest"} 0`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing %q in %s", expected, text)
+		}
+	}
+	if leaked := RenderPGXPoolMetrics(`tenant_123`, pool.Stat()); leaked != "" {
+		t.Fatalf("unbounded pool name accepted: %s", leaked)
 	}
 }
 
@@ -83,6 +230,37 @@ func TestHealthRoutesAndBounds(t *testing.T) {
 	server := HTTPServer("127.0.0.1:1", handler)
 	if server.ReadHeaderTimeout == 0 || server.ReadTimeout == 0 || server.WriteTimeout == 0 {
 		t.Fatal("missing server bounds")
+	}
+}
+
+func TestREDMetricsUseRouteTemplatesAndExcludeProbes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/devices/{deviceID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("deviceID") == "bad" {
+			http.Error(w, "failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := REDMetrics(mux)
+	for _, path := range []string{"/v1/devices/one", "/v1/devices/two", "/v1/devices/bad"} {
+		r := httptest.NewRecorder()
+		handler.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	metricsBefore := RenderREDMetrics()
+	if !strings.Contains(metricsBefore, `route="GET /v1/devices/{deviceID}"`) || !strings.Contains(metricsBefore, `status_code="500"`) {
+		t.Fatalf("route template/status missing: %s", metricsBefore)
+	}
+	if strings.Contains(metricsBefore, "one") || strings.Contains(metricsBefore, "two") || strings.Contains(metricsBefore, `route="GET /v1/devices/bad"`) {
+		t.Fatalf("request path value leaked into labels: %s", metricsBefore)
+	}
+	count := strings.Count(metricsBefore, `route="GET /v1/devices/{deviceID}"`)
+	probeMux := http.NewServeMux()
+	probeMux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
+	probeHandler := REDMetrics(probeMux)
+	probeHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if got := strings.Count(RenderREDMetrics(), `route="GET /v1/devices/{deviceID}"`); got != count {
+		t.Fatalf("health probe affected RED series count: before=%d after=%d", count, got)
 	}
 }
 

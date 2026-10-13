@@ -1,0 +1,1097 @@
+# Generated from a compact spec; annotations are copied from rules/brokers.yaml.
+"rule_files":
+  - "../rules/brokers.yaml"
+"evaluation_interval": "1m"
+"tests":
+  - "name": "KafkaBrokerUnavailable pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'up{job="kafka-exporter",instance="kafka-exporter:9308"}'
+        "values": "1x20"
+      - "series": 'kafka_brokers{job="kafka-exporter"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "KafkaBrokerUnavailable"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "KafkaBrokerUnavailable"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+            "exp_annotations":
+              "summary": "Kafka has no reachable broker"
+              "description": "The healthy Kafka exporter reports zero brokers. Threshold is the single local broker; raise it to the cell broker count in production."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaBrokerUnavailable silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'up{job="kafka-exporter",instance="kafka-exporter:9308"}'
+        "values": "1x20"
+      - "series": 'kafka_brokers{job="kafka-exporter"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "KafkaBrokerUnavailable"
+        "exp_alerts": []
+  - "name": "KafkaExporterTargetDown fires when the target is down"
+    "interval": "1m"
+    "input_series":
+      - "series": 'up{job="kafka-exporter",instance="kafka-exporter:9308"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "KafkaExporterTargetDown"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "KafkaExporterTargetDown"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+            "exp_annotations":
+              "summary": "Kafka broker telemetry is unavailable"
+              "description": "The kafka-exporter target or broker-count metric is missing or down; broker health is unknown until telemetry recovers."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaExporterTargetDown fires when telemetry is absent"
+    "interval": "1m"
+    "alert_rule_test":
+      - "eval_time": "7m"
+        "alertname": "KafkaExporterTargetDown"
+        "exp_alerts":
+          - "exp_labels":
+              "job": "kafka-exporter"
+              "severity": "ticket"
+            "exp_annotations":
+              "summary": "Kafka broker telemetry is unavailable"
+              "description": "The kafka-exporter target or broker-count metric is missing or down; broker health is unknown until telemetry recovers."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaBrokerUnavailable stays silent when the exporter is down"
+    "interval": "1m"
+    "input_series":
+      - "series": 'up{job="kafka-exporter",instance="kafka-exporter:9308"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "7m"
+        "alertname": "KafkaBrokerUnavailable"
+        "exp_alerts": []
+  - "name": "KafkaExporterTargetDown fires when broker metric is absent"
+    "interval": "1m"
+    "input_series":
+      - "series": 'up{job="kafka-exporter",instance="kafka-exporter:9308"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "7m"
+        "alertname": "KafkaExporterTargetDown"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+            "exp_annotations":
+              "summary": "Kafka broker telemetry is unavailable"
+              "description": "The kafka-exporter target or broker-count metric is missing or down; broker health is unknown until telemetry recovers."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaOfflinePartitions pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_leader{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "-1x10"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "KafkaOfflinePartitions"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "KafkaOfflinePartitions"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "topic": "greenguard.raw.telemetry.outbox"
+            "exp_annotations":
+              "summary": "A Kafka partition has no leader"
+              "description": "At least one partition of the topic reports leader -1, so producers and consumers of that partition are blocked."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaOfflinePartitions silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_leader{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "1x10"
+    "alert_rule_test":
+      - "eval_time": "5m"
+        "alertname": "KafkaOfflinePartitions"
+        "exp_alerts": []
+  - "name": "KafkaUnderReplicatedPartitions pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_under_replicated_partition{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "KafkaUnderReplicatedPartitions"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "KafkaUnderReplicatedPartitions"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "topic": "greenguard.raw.telemetry.outbox"
+            "exp_annotations":
+              "summary": "Kafka partitions are under-replicated"
+              "description": "In-sync replicas are below the replica count for at least one partition of the topic."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaUnderReplicatedPartitions silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_under_replicated_partition{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "KafkaUnderReplicatedPartitions"
+        "exp_alerts": []
+  - "name": "KafkaConsumerGroupLagHigh pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "5000x40"
+    "alert_rule_test":
+      - "eval_time": "9m"
+        "alertname": "KafkaConsumerGroupLagHigh"
+        "exp_alerts": []
+      - "eval_time": "12m"
+        "alertname": "KafkaConsumerGroupLagHigh"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "consumergroup": "greenguard-cdc-transformer-v1"
+              "topic": "greenguard.raw.telemetry.outbox"
+            "exp_annotations":
+              "summary": "A durable Kafka consumer group is behind"
+              "description": "Lag summed over partitions stayed above 1000 records for ten minutes. The threshold is a candidate until measured under load (Stage 13)."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaConsumerGroupLagHigh silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "10x40"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "KafkaConsumerGroupLagHigh"
+        "exp_alerts": []
+  - "name": "KafkaConsumerGroupStalled pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "50x60"
+      - "series": 'kafka_consumergroup_current_offset_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "1000x60"
+    "alert_rule_test":
+      - "eval_time": "8m"
+        "alertname": "KafkaConsumerGroupStalled"
+        "exp_alerts": []
+      - "eval_time": "14m"
+        "alertname": "KafkaConsumerGroupStalled"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "consumergroup": "greenguard-cdc-transformer-v1"
+              "topic": "greenguard.raw.telemetry.outbox"
+            "exp_annotations":
+              "summary": "A durable Kafka consumer group has lag and is not advancing"
+              "description": "The group has pending records and its committed offset did not move for ten minutes; the consumer may be crash-looping, fenced or blocked on a downstream dependency."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaConsumerGroupStalled silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "50x60"
+      - "series": 'kafka_consumergroup_current_offset_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "1000+10x60"
+    "alert_rule_test":
+      - "eval_time": "40m"
+        "alertname": "KafkaConsumerGroupStalled"
+        "exp_alerts": []
+  - "name": "KafkaConsumerGroupNoMembers pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_members{consumergroup="greenguard-cdc-transformer-v1"}'
+        "values": "0x30"
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "50x30"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "KafkaConsumerGroupNoMembers"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "KafkaConsumerGroupNoMembers"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "consumergroup": "greenguard-cdc-transformer-v1"
+            "exp_annotations":
+              "summary": "A durable Kafka consumer group has no members while records are pending"
+              "description": "No consumer is joined to the group but it has unconsumed records; the service is down or cannot reach the broker."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaConsumerGroupNoMembers silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_consumergroup_members{consumergroup="greenguard-cdc-transformer-v1"}'
+        "values": "1x30"
+      - "series": 'kafka_consumergroup_lag_sum{consumergroup="greenguard-cdc-transformer-v1",topic="greenguard.raw.telemetry.outbox"}'
+        "values": "50x30"
+    "alert_rule_test":
+      - "eval_time": "15m"
+        "alertname": "KafkaConsumerGroupNoMembers"
+        "exp_alerts": []
+  - "name": "KafkaTopicRetainedMessagesHigh pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_current_offset{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "20000000x60"
+      - "series": 'kafka_topic_partition_oldest_offset{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "0x60"
+    "alert_rule_test":
+      - "eval_time": "28m"
+        "alertname": "KafkaTopicRetainedMessagesHigh"
+        "exp_alerts": []
+      - "eval_time": "35m"
+        "alertname": "KafkaTopicRetainedMessagesHigh"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "topic": "greenguard.raw.telemetry.outbox"
+            "exp_annotations":
+              "summary": "A Kafka topic retains an unusually large number of records"
+              "description": "Retained records (latest offset minus oldest offset) exceed ten million. Candidate threshold, unmeasured; the exporter exposes offsets, not bytes, so confirm disk use with the log-dir check in the runbook."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "KafkaTopicRetainedMessagesHigh silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'kafka_topic_partition_current_offset{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "1000x60"
+      - "series": 'kafka_topic_partition_oldest_offset{topic="greenguard.raw.telemetry.outbox",partition="0"}'
+        "values": "0x60"
+    "alert_rule_test":
+      - "eval_time": "45m"
+        "alertname": "KafkaTopicRetainedMessagesHigh"
+        "exp_alerts": []
+  - "name": "BindingFeedAgeWarning pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "90x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "BindingFeedAgeWarning"
+        "exp_alerts": []
+      - "eval_time": "4m"
+        "alertname": "BindingFeedAgeWarning"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "telemetry-ingest"
+            "exp_annotations":
+              "summary": "Binding feed checkpoints are aging"
+              "description": "Binding feed age is between 60 and 240 seconds. New readings are rejected with binding_feed_stale at the 5 minute bound (ADR-0009, R7)."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "BindingFeedAgeWarning silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "5x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "BindingFeedAgeWarning"
+        "exp_alerts": []
+  - "name": "BindingFeedAgeCritical fires for +Inf age after its for-duration"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "inf inf inf inf inf inf"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "BindingFeedAgeCritical"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "BindingFeedAgeCritical"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "telemetry-ingest"
+            "exp_annotations":
+              "summary": "Binding feed is about to block ingest"
+              "description": "Binding feed age exceeds 240 seconds or evidence is missing (+Inf); ingest fails closed with 503 binding_feed_stale at 300 seconds (ADR-0009, R7)."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "BindingFeedAgeCritical fires for 300s age"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "300x10"
+    "alert_rule_test":
+      - "eval_time": "3m"
+        "alertname": "BindingFeedAgeCritical"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "telemetry-ingest"
+            "exp_annotations":
+              "summary": "Binding feed is about to block ingest"
+              "description": "Binding feed age exceeds 240 seconds or evidence is missing (+Inf); ingest fails closed with 503 binding_feed_stale at 300 seconds (ADR-0009, R7)."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "BindingFeedAgeCritical silent at 200s age (warning band only)"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "200x10"
+    "alert_rule_test":
+      - "eval_time": "5m"
+        "alertname": "BindingFeedAgeCritical"
+        "exp_alerts": []
+  - "name": "BindingFeedAgeCritical silent when fresh"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_age_seconds{job="telemetry-ingest"}'
+        "values": "5x10"
+    "alert_rule_test":
+      - "eval_time": "5m"
+        "alertname": "BindingFeedAgeCritical"
+        "exp_alerts": []
+  - "name": "BindingConsumerQuarantine pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_consumer_quarantine_total{job="telemetry-ingest",reason="heartbeat"}'
+        "values": "0+1x20"
+    "alert_rule_test":
+      - "eval_time": "8m"
+        "alertname": "BindingConsumerQuarantine"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "reason": "heartbeat"
+            "exp_annotations":
+              "summary": "Binding feed checkpoints are being quarantined"
+              "description": "The telemetry binding consumer quarantined malformed or database-rejected checkpoints; inspect the quarantine envelope reason."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "BindingConsumerQuarantine silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_consumer_quarantine_total{job="telemetry-ingest",reason="heartbeat"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "BindingConsumerQuarantine"
+        "exp_alerts": []
+  - "name": "BindingFeedClockSkew pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_clock_skew_total{job="telemetry-ingest"}'
+        "values": "0+1x20"
+    "alert_rule_test":
+      - "eval_time": "8m"
+        "alertname": "BindingFeedClockSkew"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "telemetry-ingest"
+            "exp_annotations":
+              "summary": "Binding feed source and ingest clocks disagree"
+              "description": "Future-dated checkpoints were clamped to ingest time; repair clock synchronisation."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "BindingFeedClockSkew silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'binding_feed_clock_skew_total{job="telemetry-ingest"}'
+        "values": "3x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "BindingFeedClockSkew"
+        "exp_alerts": []
+  - "name": "CDCQuarantinedRecords pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'cdc_quarantined_total{job="cdc-transformer",reason="schema"}'
+        "values": "0+1x20"
+    "alert_rule_test":
+      - "eval_time": "8m"
+        "alertname": "CDCQuarantinedRecords"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "reason": "schema"
+            "exp_annotations":
+              "summary": "The CDC transformer is quarantining records"
+              "description": "Records failed canonical validation and were published to quarantine; each needs an explicit disposition."
+              "runbook_url": "docs/runbooks/kafka-consumer-lag.md"
+  - "name": "CDCQuarantinedRecords silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'cdc_quarantined_total{job="cdc-transformer",reason="schema"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "CDCQuarantinedRecords"
+        "exp_alerts": []
+  - "name": "KafkaConnectUnreachable pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_up{job="kafka-connect-state"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "KafkaConnectUnreachable"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "KafkaConnectUnreachable"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "kafka-connect-state"
+            "exp_annotations":
+              "summary": "Kafka Connect REST API is unreachable"
+              "description": "The connect state exporter cannot read the Connect REST API; CDC connector state is unknown and may be stopped."
+              "runbook_url": "docs/runbooks/kafka-connect-failed.md"
+  - "name": "KafkaConnectUnreachable silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_up{job="kafka-connect-state"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "KafkaConnectUnreachable"
+        "exp_alerts": []
+  - "name": "KafkaConnectConnectorFailed pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_connector_state{connector="inventory-outbox",state="FAILED"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "KafkaConnectConnectorFailed"
+        "exp_alerts": []
+      - "eval_time": "2m"
+        "alertname": "KafkaConnectConnectorFailed"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "connector": "inventory-outbox"
+              "state": "FAILED"
+            "exp_annotations":
+              "summary": "A Debezium connector is FAILED"
+              "description": "The connector is in the FAILED state, so committed outbox rows are not being captured while WAL is retained."
+              "runbook_url": "docs/runbooks/kafka-connect-failed.md"
+  - "name": "KafkaConnectConnectorFailed silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_connector_state{connector="inventory-outbox",state="FAILED"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "KafkaConnectConnectorFailed"
+        "exp_alerts": []
+  - "name": "KafkaConnectTaskFailed pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_task_state{connector="inventory-outbox",state="FAILED"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "KafkaConnectTaskFailed"
+        "exp_alerts": []
+      - "eval_time": "2m"
+        "alertname": "KafkaConnectTaskFailed"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "connector": "inventory-outbox"
+              "state": "FAILED"
+            "exp_annotations":
+              "summary": "A Debezium connector task is FAILED"
+              "description": "At least one task of the connector is FAILED even if the connector itself reports RUNNING."
+              "runbook_url": "docs/runbooks/kafka-connect-failed.md"
+  - "name": "KafkaConnectTaskFailed silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_task_state{connector="inventory-outbox",state="FAILED"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "KafkaConnectTaskFailed"
+        "exp_alerts": []
+  - "name": "KafkaConnectConnectorPaused pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_connector_state{connector="inventory-outbox",state="PAUSED"}'
+        "values": "1x40"
+    "alert_rule_test":
+      - "eval_time": "14m"
+        "alertname": "KafkaConnectConnectorPaused"
+        "exp_alerts": []
+      - "eval_time": "17m"
+        "alertname": "KafkaConnectConnectorPaused"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "connector": "inventory-outbox"
+              "state": "PAUSED"
+            "exp_annotations":
+              "summary": "A Debezium connector has been paused or stopped"
+              "description": "The connector was paused or stopped for fifteen minutes; WAL keeps accumulating behind its replication slot."
+              "runbook_url": "docs/runbooks/kafka-connect-failed.md"
+  - "name": "KafkaConnectConnectorPaused silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_connect_connector_state{connector="inventory-outbox",state="PAUSED"}'
+        "values": "0x40"
+    "alert_rule_test":
+      - "eval_time": "30m"
+        "alertname": "KafkaConnectConnectorPaused"
+        "exp_alerts": []
+  - "name": "SchemaRegistryDown pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_schema_registry_up{job="kafka-connect-state"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "SchemaRegistryDown"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "SchemaRegistryDown"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "kafka-connect-state"
+            "exp_annotations":
+              "summary": "Schema Registry is unreachable"
+              "description": "The state exporter cannot read the Schema Registry subjects endpoint; canonical producers and consumers that need schemas will fail."
+              "runbook_url": "docs/runbooks/kafka-connect-failed.md"
+  - "name": "SchemaRegistryDown silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'greenguard_schema_registry_up{job="kafka-connect-state"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "SchemaRegistryDown"
+        "exp_alerts": []
+  - "name": "ReplicationSlotInactive pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_active{database="greenguard_control",slot_name="greenguard_control_outbox"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "ReplicationSlotInactive"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "ReplicationSlotInactive"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "database": "greenguard_control"
+              "slot_name": "greenguard_control_outbox"
+            "exp_annotations":
+              "summary": "A logical replication slot is inactive"
+              "description": "No walsender is attached to the slot, so PostgreSQL retains WAL for it (docs/WAL_RETENTION.md)."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotInactive silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_active{database="greenguard_control",slot_name="greenguard_control_outbox"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotInactive"
+        "exp_alerts": []
+  - "name": "ReplicationSlotInactiveCritical pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_active{database="greenguard_control",slot_name="greenguard_control_outbox"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "ReplicationSlotInactiveCritical"
+        "exp_alerts": []
+      - "eval_time": "6m"
+        "alertname": "ReplicationSlotInactiveCritical"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "database": "greenguard_control"
+              "slot_name": "greenguard_control_outbox"
+            "exp_annotations":
+              "summary": "A logical replication slot has been inactive for five minutes"
+              "description": "The Debezium consumer is not attached and WAL is growing toward max_slot_wal_keep_size."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotInactiveCritical silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_active{database="greenguard_control",slot_name="greenguard_control_outbox"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotInactiveCritical"
+        "exp_alerts": []
+  - "name": "ReplicationSlotWALRetainedWarning pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_retained_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "1200000000x20"
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "2147483648x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "ReplicationSlotWALRetainedWarning"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "ReplicationSlotWALRetainedWarning"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "database": "greenguard_telemetry"
+              "slot_name": "s"
+            "exp_annotations":
+              "summary": "A replication slot retains over half of the WAL cap"
+              "description": "Retained WAL is between 50 and 75 percent of max_slot_wal_keep_size."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotWALRetainedWarning silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_retained_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "1000000x20"
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "2147483648x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotWALRetainedWarning"
+        "exp_alerts": []
+  - "name": "ReplicationSlotWALRetainedCritical pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_retained_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "1700000000x20"
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "2147483648x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "ReplicationSlotWALRetainedCritical"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "ReplicationSlotWALRetainedCritical"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "database": "greenguard_telemetry"
+              "slot_name": "s"
+            "exp_annotations":
+              "summary": "A replication slot retains over 75 percent of the WAL cap"
+              "description": "Above the cap PostgreSQL invalidates the slot and CDC continuity is lost; act before that point (docs/WAL_RETENTION.md)."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotWALRetainedCritical silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_retained_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "1200000000x20"
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "2147483648x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotWALRetainedCritical"
+        "exp_alerts": []
+  - "name": "ReplicationSlotWALCapUnbounded pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "-1x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "ReplicationSlotWALCapUnbounded"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "ReplicationSlotWALCapUnbounded"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "database": "greenguard_telemetry"
+              "slot_name": "s"
+            "exp_annotations":
+              "summary": "max_slot_wal_keep_size is unbounded"
+              "description": "An unbounded slot retention setting can exhaust the database disk; docs/WAL_RETENTION.md requires a positive cap."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotWALCapUnbounded silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_cap_bytes{database="greenguard_telemetry",slot_name="s"}'
+        "values": "2147483648x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotWALCapUnbounded"
+        "exp_alerts": []
+  - "name": "ReplicationSlotWALStatusDegraded pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_status_degraded{database="greenguard_telemetry",slot_name="s"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "ReplicationSlotWALStatusDegraded"
+        "exp_alerts": []
+      - "eval_time": "2m"
+        "alertname": "ReplicationSlotWALStatusDegraded"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "database": "greenguard_telemetry"
+              "slot_name": "s"
+            "exp_annotations":
+              "summary": "A replication slot is unreserved or lost"
+              "description": "wal_status is unreserved or lost: required WAL is being or has been removed and Debezium needs a re-snapshot with a fresh slot."
+              "runbook_url": "docs/runbooks/kafka-replication-slot.md"
+  - "name": "ReplicationSlotWALStatusDegraded silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'pg_wal_slot_status_degraded{database="greenguard_telemetry",slot_name="s"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "ReplicationSlotWALStatusDegraded"
+        "exp_alerts": []
+  - "name": "RabbitMQDeadLetterQueueNotEmpty pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages{queue="notifications.dlq",vhost="/"}'
+        "values": "3x20"
+    "alert_rule_test":
+      - "eval_time": "1m"
+        "alertname": "RabbitMQDeadLetterQueueNotEmpty"
+        "exp_alerts": []
+      - "eval_time": "3m"
+        "alertname": "RabbitMQDeadLetterQueueNotEmpty"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "queue": "notifications.dlq"
+              "vhost": "/"
+            "exp_annotations":
+              "summary": "A RabbitMQ dead-letter queue holds messages"
+              "description": "Messages were dead-lettered and not yet replayed; the queue must be empty in steady state, so any depth means a delivery failed permanently."
+              "runbook_url": "docs/runbooks/rabbitmq-dlq-growth.md"
+  - "name": "RabbitMQDeadLetterQueueNotEmpty silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages{queue="notifications.dlq",vhost="/"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "RabbitMQDeadLetterQueueNotEmpty"
+        "exp_alerts": []
+  - "name": "RabbitMQTaskBacklog pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages_ready{queue="notifications.tasks",vhost="/"}'
+        "values": "5000x30"
+    "alert_rule_test":
+      - "eval_time": "9m"
+        "alertname": "RabbitMQTaskBacklog"
+        "exp_alerts": []
+      - "eval_time": "12m"
+        "alertname": "RabbitMQTaskBacklog"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "queue": "notifications.tasks"
+              "vhost": "/"
+            "exp_annotations":
+              "summary": "The notification task queue has a backlog"
+              "description": "More than 1000 ready messages waited ten minutes. Candidate threshold until measured under load."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQTaskBacklog silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages_ready{queue="notifications.tasks",vhost="/"}'
+        "values": "5x30"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "RabbitMQTaskBacklog"
+        "exp_alerts": []
+  - "name": "RabbitMQNoConsumers pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_consumers{queue="notifications.tasks",vhost="/"}'
+        "values": "0x30"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "RabbitMQNoConsumers"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "RabbitMQNoConsumers"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "queue": "notifications.tasks"
+              "vhost": "/"
+            "exp_annotations":
+              "summary": "A RabbitMQ work queue has no consumers"
+              "description": "No consumer is attached to a queue that must always be consumed; notifications or receipts are not being processed."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQNoConsumers silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_consumers{queue="notifications.tasks",vhost="/"}'
+        "values": "1x30"
+    "alert_rule_test":
+      - "eval_time": "15m"
+        "alertname": "RabbitMQNoConsumers"
+        "exp_alerts": []
+  - "name": "RabbitMQUnackedHigh pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages_unacked{queue="notifications.tasks",vhost="/"}'
+        "values": "900x30"
+    "alert_rule_test":
+      - "eval_time": "9m"
+        "alertname": "RabbitMQUnackedHigh"
+        "exp_alerts": []
+      - "eval_time": "12m"
+        "alertname": "RabbitMQUnackedHigh"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "queue": "notifications.tasks"
+              "vhost": "/"
+            "exp_annotations":
+              "summary": "Many delivered notification tasks are unacknowledged"
+              "description": "Unacknowledged tasks stayed above 500; consumers may be stuck on a provider call or holding prefetch."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQUnackedHigh silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages_unacked{queue="notifications.tasks",vhost="/"}'
+        "values": "5x30"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "RabbitMQUnackedHigh"
+        "exp_alerts": []
+  - "name": "RabbitMQRetryQueueBacklog pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages{queue="notifications.retry",vhost="/"}'
+        "values": "500x40"
+    "alert_rule_test":
+      - "eval_time": "14m"
+        "alertname": "RabbitMQRetryQueueBacklog"
+        "exp_alerts": []
+      - "eval_time": "17m"
+        "alertname": "RabbitMQRetryQueueBacklog"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "queue": "notifications.retry"
+              "vhost": "/"
+            "exp_annotations":
+              "summary": "The notification retry queue keeps growing"
+              "description": "More than 100 tasks are waiting for backoff expiry; a provider is failing persistently."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQRetryQueueBacklog silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_detailed_queue_messages{queue="notifications.retry",vhost="/"}'
+        "values": "2x40"
+    "alert_rule_test":
+      - "eval_time": "30m"
+        "alertname": "RabbitMQRetryQueueBacklog"
+        "exp_alerts": []
+  - "name": "RabbitMQPublishConfirmFailures pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'jobs_dlq_publish_failed_total{job="jobs-worker"}'
+        "values": "0+1x20"
+    "alert_rule_test":
+      - "eval_time": "8m"
+        "alertname": "RabbitMQPublishConfirmFailures"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "jobs-worker"
+            "exp_annotations":
+              "summary": "Publishing to the RabbitMQ dead-letter queue failed"
+              "description": "The jobs worker could not confirm a dead-letter publish; the message stays in Postgres for redrive but delivery evidence is at risk."
+              "runbook_url": "docs/runbooks/rabbitmq-dlq-growth.md"
+  - "name": "RabbitMQPublishConfirmFailures silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'jobs_dlq_publish_failed_total{job="jobs-worker"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "RabbitMQPublishConfirmFailures"
+        "exp_alerts": []
+  - "name": "RabbitMQUnconfirmedMessages pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_channel_messages_unconfirmed{job="rabbitmq-node"}'
+        "values": "500x20"
+    "alert_rule_test":
+      - "eval_time": "4m"
+        "alertname": "RabbitMQUnconfirmedMessages"
+        "exp_alerts": []
+      - "eval_time": "7m"
+        "alertname": "RabbitMQUnconfirmedMessages"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "rabbitmq-node"
+            "exp_annotations":
+              "summary": "Many RabbitMQ publishes are awaiting confirmation"
+              "description": "Published but unconfirmed messages exceed 100 across channels; the broker is slow or blocked."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQUnconfirmedMessages silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_channel_messages_unconfirmed{job="rabbitmq-node"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "RabbitMQUnconfirmedMessages"
+        "exp_alerts": []
+  - "name": "RabbitMQMemoryAlarm pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_alarms_memory_used_watermark{job="rabbitmq-node"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "RabbitMQMemoryAlarm"
+        "exp_alerts": []
+      - "eval_time": "2m"
+        "alertname": "RabbitMQMemoryAlarm"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "rabbitmq-node"
+            "exp_annotations":
+              "summary": "RabbitMQ memory alarm is active"
+              "description": "The node hit its memory high watermark and is blocking publishers."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQMemoryAlarm silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_alarms_memory_used_watermark{job="rabbitmq-node"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "RabbitMQMemoryAlarm"
+        "exp_alerts": []
+  - "name": "RabbitMQDiskAlarm pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_alarms_free_disk_space_watermark{job="rabbitmq-node"}'
+        "values": "1x20"
+    "alert_rule_test":
+      - "eval_time": "30s"
+        "alertname": "RabbitMQDiskAlarm"
+        "exp_alerts": []
+      - "eval_time": "2m"
+        "alertname": "RabbitMQDiskAlarm"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "page"
+              "job": "rabbitmq-node"
+            "exp_annotations":
+              "summary": "RabbitMQ disk alarm is active"
+              "description": "Free disk fell below the node limit and publishers are blocked."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQDiskAlarm silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_alarms_free_disk_space_watermark{job="rabbitmq-node"}'
+        "values": "0x20"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "RabbitMQDiskAlarm"
+        "exp_alerts": []
+  - "name": "RabbitMQMemoryHigh pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_process_resident_memory_bytes{job="rabbitmq-node"}'
+        "values": "900x30"
+      - "series": 'rabbitmq_resident_memory_limit_bytes{job="rabbitmq-node"}'
+        "values": "1000x30"
+    "alert_rule_test":
+      - "eval_time": "9m"
+        "alertname": "RabbitMQMemoryHigh"
+        "exp_alerts": []
+      - "eval_time": "12m"
+        "alertname": "RabbitMQMemoryHigh"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "rabbitmq-node"
+            "exp_annotations":
+              "summary": "RabbitMQ memory is above 80 percent of its limit"
+              "description": "Resident memory approaches the high watermark; investigate queue depth before the alarm blocks publishers."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQMemoryHigh silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_process_resident_memory_bytes{job="rabbitmq-node"}'
+        "values": "100x30"
+      - "series": 'rabbitmq_resident_memory_limit_bytes{job="rabbitmq-node"}'
+        "values": "1000x30"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "RabbitMQMemoryHigh"
+        "exp_alerts": []
+  - "name": "RabbitMQDiskLow pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_disk_space_available_bytes{job="rabbitmq-node"}'
+        "values": "90x30"
+      - "series": 'rabbitmq_disk_space_available_limit_bytes{job="rabbitmq-node"}'
+        "values": "50x30"
+    "alert_rule_test":
+      - "eval_time": "9m"
+        "alertname": "RabbitMQDiskLow"
+        "exp_alerts": []
+      - "eval_time": "12m"
+        "alertname": "RabbitMQDiskLow"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "rabbitmq-node"
+            "exp_annotations":
+              "summary": "RabbitMQ free disk is within twice its alarm limit"
+              "description": "Available disk is below two times the configured free-disk limit."
+              "runbook_url": "docs/runbooks/rabbitmq-queue-backlog.md"
+  - "name": "RabbitMQDiskLow silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'rabbitmq_disk_space_available_bytes{job="rabbitmq-node"}'
+        "values": "500x30"
+      - "series": 'rabbitmq_disk_space_available_limit_bytes{job="rabbitmq-node"}'
+        "values": "50x30"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "RabbitMQDiskLow"
+        "exp_alerts": []
+  - "name": "JobsDispatchDeadRecords pending before its for-duration, then fires"
+    "interval": "1m"
+    "input_series":
+      - "series": 'jobs_dispatch_dead_total{job="jobs-worker"}'
+        "values": "0+1x40"
+    "alert_rule_test":
+      - "eval_time": "10m"
+        "alertname": "JobsDispatchDeadRecords"
+        "exp_alerts":
+          - "exp_labels":
+              "severity": "ticket"
+              "job": "jobs-worker"
+            "exp_annotations":
+              "summary": "Notification jobs were marked dead"
+              "description": "Dispatch attempts were exhausted; records need an audited redrive (make redrive-dead) after the cause is fixed."
+              "runbook_url": "docs/runbooks/rabbitmq-dlq-growth.md"
+  - "name": "JobsDispatchDeadRecords silent when healthy"
+    "interval": "1m"
+    "input_series":
+      - "series": 'jobs_dispatch_dead_total{job="jobs-worker"}'
+        "values": "0x40"
+    "alert_rule_test":
+      - "eval_time": "20m"
+        "alertname": "JobsDispatchDeadRecords"
+        "exp_alerts": []

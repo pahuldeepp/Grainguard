@@ -1,0 +1,10 @@
+{{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$" (.Values.cell | default "")) }}{{ fail "cell must be a 1-63 character Kubernetes label value with alphanumeric endpoints" }}{{ end }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: greenguard
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+    istio-injection: enabled
+  annotations:
+    greenguard.io/managed-by: terraform-disposable

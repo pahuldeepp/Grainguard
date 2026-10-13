@@ -1,0 +1,5 @@
+apiVersion: v2
+name: greenguard-disposable-pgbouncer
+description: Disposable transaction pooler for private RDS
+type: application
+version: 0.1.0

@@ -27,7 +27,8 @@ services/search-indexer/coverage.xml
 services/risk-engine/coverage.xml
 .omc/
 .serena/
-
+infra/observability/.generated/
+infra/observability/rehearsal/.generated/
 # Go binaries built in place (use build/)
 /services/cdc-transformer/cdc-transformer
 /services/telemetry-ingest/telemetry-ingest

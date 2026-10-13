@@ -24,6 +24,8 @@ test("starts probes only without AUTH_* and reports not ready without a database
 test("mounts the authenticated API and tracing when configured", async () => {
   const app = await start({
     ...env,
+    ALERTS_ACTOR_HMAC_KEY: "test-actor-key-at-least-32-bytes-long",
+    ALERTS_HISTORY_CURSOR_KEY: "test-cursor-key-at-least-32-bytes-long",
     AUTH_ISSUER: "https://issuer.test",
     AUTH_AUDIENCE: "greenguard-api",
     AUTH_JWKS_URL: "http://127.0.0.1:1/jwks",
@@ -77,6 +79,8 @@ test("shutdown closes the verifier even if an earlier cleanup fails", async () =
         calls.push("database");
       },
     } as unknown as Db,
+    actorHmacKey: "test-actor-key-at-least-32-bytes-long",
+    historyCursorKey: "test-cursor-key-at-least-32-bytes-long",
     verifier: {
       verify: async () => {
         throw new Error("unused");

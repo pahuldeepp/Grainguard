@@ -1,0 +1,20 @@
+=== RUN   TestRunRequiresDatabaseAndBroker
+--- PASS: TestRunRequiresDatabaseAndBroker (0.00s)
+=== RUN   TestRunWorkersWaitsForShutdownBeforeReturning
+--- PASS: TestRunWorkersWaitsForShutdownBeforeReturning (0.00s)
+=== RUN   TestMaintainMQTTConnectionReconnectsOnRequestAndStops
+--- PASS: TestMaintainMQTTConnectionReconnectsOnRequestAndStops (0.00s)
+=== RUN   TestRunWorkersCancelsSiblingsAfterError
+--- PASS: TestRunWorkersCancelsSiblingsAfterError (0.00s)
+=== RUN   TestRunWorkersPreservesWorkerErrorWhenParentCancels
+--- PASS: TestRunWorkersPreservesWorkerErrorWhenParentCancels (0.00s)
+=== RUN   TestRunWorkersRejectsUnexpectedExit
+--- PASS: TestRunWorkersRejectsUnexpectedExit (0.00s)
+=== RUN   TestSubscribeAckRetriesUntilSubscriptionSucceeds
+--- PASS: TestSubscribeAckRetriesUntilSubscriptionSucceeds (0.00s)
+=== RUN   TestSubscribeAckWaitsForConnectionAndStopsOnCancellation
+--- PASS: TestSubscribeAckWaitsForConnectionAndStopsOnCancellation (0.01s)
+=== RUN   TestMQTTSubscriptionGrantedChecksBrokerRefusals
+--- PASS: TestMQTTSubscriptionGrantedChecksBrokerRefusals (0.00s)
+PASS
+ok  	greenguard.local/hardware-service/cmd/worker	1.380s

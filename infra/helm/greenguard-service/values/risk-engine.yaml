@@ -1,0 +1,15 @@
+nameOverride: risk-engine
+service:
+  port: 8086
+  containerPort: 8086
+container:
+  name: risk-engine
+  env:
+    - { name: RISK_HEALTH_PORT, value: "8086" }
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }

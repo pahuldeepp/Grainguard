@@ -23,7 +23,10 @@ export const PORTS = {
   bffDegraded: 4302,
   gateway: 4303,
   gatewayDegraded: 4304,
+  gatewayMetrics: 19464,
+  gatewayDegradedMetrics: 19465,
   alerts: 4305,
+  searchHealth: 18300,
   deadRead: 4309,
   dashboard: 5173,
 };
@@ -127,51 +130,50 @@ export async function waitFor(predicate, label, timeoutMs = 120_000) {
   throw new Error(`${label} timed out: ${last?.message ?? "no match"}`);
 }
 
-// undici puts the real reason for "fetch failed" in error.cause; print it so a CI failure is
-// diagnosable instead of a bare message.
-export function describeError(error) {
-  const cause = error?.cause;
-  const detail = cause
-    ? ` (cause: ${cause.code ?? cause.name ?? "unknown"} ${cause.message ?? ""})`
-    : "";
-  return `${error?.stack ?? error}${detail}`;
-}
-
-// A blocking step (for example spawnSync docker compose) freezes this process while servers
-// close idle keep-alive sockets; the next request then reuses a dead socket and fails before
-// any response. Retry only that socket-level failure, never an HTTP status or a refused
-// connection (a down service must still fail the check).
-const STALE_SOCKET_CODES = new Set(["UND_ERR_SOCKET", "ECONNRESET", "EPIPE"]);
-
-// Conservative on purpose: only a document that starts (after whitespace and # comments) with
-// `query` or a shorthand `{` is provably read-only. Mutations, subscriptions, fragments-first
-// documents, empty or unknown input are all treated as non-idempotent and sent once.
-export function isReadOnlyOperation(document) {
-  if (typeof document !== "string") return false;
-  const body = document.replace(/^(?:\s|#[^\n]*(?:\n|$))*/, "");
-  return /^query\b/.test(body) || body.startsWith("{");
-}
-
-export async function fetchWithRetry(url, init, { attempts = 3 } = {}) {
-  let last;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      return await fetch(url, init);
-    } catch (error) {
-      last = error;
-      if (!STALE_SOCKET_CODES.has(error?.cause?.code)) throw error;
-      await delay(200 * attempt);
-    }
+export function placementSessionSettings(placement) {
+  if (
+    !placement ||
+    placement.shardId !== "s1" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      placement.shardIncarnation,
+    ) ||
+    !Number.isSafeInteger(placement.placementEpoch) ||
+    placement.placementEpoch < 1
+  ) {
+    throw new Error("invalid trusted fixture placement context");
   }
-  throw last;
+  return [
+    ["app.shard_id", placement.shardId],
+    ["app.shard_incarnation", placement.shardIncarnation],
+    ["app.placement_epoch", String(placement.placementEpoch)],
+  ];
 }
 
-export async function scoped(url, tenant, work) {
-  const db = new pg.Client({ connectionString: url });
+export async function scoped(url, tenant, work, fixture = false, placement) {
+  // Fixture writes run as the PostgreSQL superuser with the tenant-ownership row
+  // fence bypassed for that transaction, then switch back to the service role so
+  // RLS still applies. The services under test keep the fence enabled.
+  const target = new URL(url);
+  let connectionString = url;
+  if (fixture) {
+    const admin = new URL(process.env.POSTGRES_ADMIN_URL);
+    admin.pathname = target.pathname;
+    connectionString = admin.toString();
+  }
+  const db = new pg.Client({ connectionString });
   await db.connect();
   try {
     await db.query("BEGIN");
+    if (fixture) {
+      await db.query("SET LOCAL session_replication_role = replica");
+      await db.query(`SET LOCAL ROLE "${decodeURIComponent(target.username)}"`);
+    }
     await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenant]);
+    if (placement) {
+      for (const [setting, value] of placementSessionSettings(placement)) {
+        await db.query("SELECT set_config($1,$2,true)", [setting, value]);
+      }
+    }
     const result = await work(db);
     await db.query("COMMIT");
     return result;
@@ -182,6 +184,8 @@ export async function scoped(url, tenant, work) {
     await db.end();
   }
 }
+export const fixtureScoped = (url, tenant, work) =>
+  scoped(url, tenant, work, true);
 
 // Seed each group to the topic end only when it has never committed, so a
 // fresh private group does not replay other runs' backlog. Shared groups that
@@ -241,10 +245,24 @@ const types = {
 // Serves the built dashboard like apps/dashboard/nginx.conf: SPA fallback plus
 // `location = /graphql` proxied to the gateway. The target can be switched to a
 // second gateway/BFF pair to simulate a Read API outage without touching shared services.
-export function dashboardServer(root, target) {
+export function dashboardServer(root, target, publicOidcConfig) {
   const state = { target };
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/config.json" && req.method === "GET") {
+      if (!publicOidcConfig) {
+        res.writeHead(404, { "cache-control": "no-store" }).end();
+        return;
+      }
+      res
+        .writeHead(200, {
+          "cache-control": "no-store",
+          "content-type": "application/json; charset=utf-8",
+          "x-content-type-options": "nosniff",
+        })
+        .end(JSON.stringify(publicOidcConfig));
+      return;
+    }
     if (
       url.pathname === "/graphql" ||
       url.pathname === "/api/v1/subscription-ticket"

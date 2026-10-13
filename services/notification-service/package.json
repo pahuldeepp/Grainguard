@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @greenguard/feature-flags && tsc",
-    "typecheck": "npm run build -w @greenguard/feature-flags && tsc --noEmit",
+    "build": "npm run build:deps && tsc",
+    "typecheck": "npm run build:deps && tsc --noEmit",
+    "build:deps": "npm run build -w @greenguard/membership-client -w @greenguard/feature-flags -w @greenguard/otel",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/testing/**\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\"",
     "migrate": "npm run build && node dist/migrate.js",
@@ -16,12 +17,16 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1141.0",
     "@aws-sdk/lib-dynamodb": "^3.1141.0",
+    "@greenguard/tenant-auth": "0.1.0",
+    "@greenguard/membership-client": "0.1.0",
     "@greenguard/feature-flags": "0.1.0",
     "@kafkajs/confluent-schema-registry": "^4.1.0",
     "amqplib": "2.0.1",
     "kafkajs": "2.2.4",
     "kafkajs-snappy": "1.1.0",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "@greenguard/otel": "0.1.0",
+    "@greenguard/kafka-security": "0.1.0"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

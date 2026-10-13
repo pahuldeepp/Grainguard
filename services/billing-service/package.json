@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @greenguard/membership-client && prisma generate && tsc",
-    "typecheck": "npm run build -w @greenguard/membership-client && prisma generate && tsc --noEmit",
+    "build": "npm run build -w @greenguard/kafka-security && prisma generate && tsc",
+    "typecheck": "npm run build -w @greenguard/kafka-security && prisma generate && tsc --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 dist/src/*.test.js dist/catalog/*.test.js",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --exclude \"**/generated/**\" --reporter lcov --reporter text node --test --test-concurrency=1 dist/src/*.test.js dist/catalog/*.test.js",
     "migrate": "prisma migrate deploy",
@@ -25,7 +25,8 @@
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "stripe": "22.6.2"
+    "stripe": "22.6.2",
+    "@greenguard/kafka-security": "0.1.0"
   },
   "devDependencies": {
     "@types/pg": "8.23.1",

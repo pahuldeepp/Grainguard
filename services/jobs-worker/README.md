@@ -74,7 +74,7 @@ make redrive-dead ARGS="-reason 'broker restored' -limit 50 [-tenant UUID] [-act
 `intent_redrives` (actor, reason, time, previous attempts/error/dead_at), resets the attempt
 counter, keeps the same `intent_id` and re-arms the outbox. It works even when the DLQ copy
 was never published. With `-tenant`, every read and write runs under that tenant's RLS;
-without it, the `jobs_dead_intent_refs` selector lists bounded dead-intent IDs across tenants.
+without it, the read-only `redrive_scan` policy lists dead intents across tenants.
 
 ## Concurrency choices (ADR-0002)
 
@@ -92,6 +92,8 @@ without it, the `jobs_dead_intent_refs` selector lists bounded dead-intent IDs a
 `JOBS_DISPATCH_WORKERS` (4), `JOBS_DISPATCH_BATCH` (50), `JOBS_RECEIPT_PREFETCH` (20),
 `JOBS_MAX_DISPATCH_ATTEMPTS` (8). Critical opened/escalated/resolved transitions are always retained in the inbox but create no RabbitMQ intents; EventBridge/SQS/Lambda owns those notifications. Warning/non-critical email and SMS remain on RabbitMQ. The split is unconditional and has no runtime feature switch. Metrics carry no tenant labels.
 
+The owner read API `GET /internal/v1/notification-intents?alertId=<uuid>&limit=50&after=<cursor>` pages warning intents (maximum 100). It verifies the RS256 signature, issuer, audience and expiry, then resolves `(issuer, subject)` through the GreenGuard membership source; tenant and operator/admin roles come from that source, never from a request parameter or IdP role claims. File mode reads `AUTH_MEMBERSHIP_FILE`; control-plane mode calls the bounded internal membership lookup using `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN`. The control-plane URL must use HTTPS. Local HTTP requires the explicit `AUTH_ALLOW_INSECURE_MEMBERSHIP_LOOKUP=true` opt-in. The DB query uses transaction-local forced RLS and an explicit tenant predicate. `JOBS_NOTIFICATION_CURSOR_KEY` must contain at least 32 random bytes. Missing auth, membership or cursor configuration leaves this read capability unavailable; `/readyz/notification-history` reports that separately from worker readiness. Critical delivery history is not exposed by this service.
+
 ## Commands
 
 ```bash
@@ -100,3 +102,13 @@ cd services/jobs-worker && go test -race ./...   # unit + live Postgres tests (v
 make rabbitmq-test                    # live RabbitMQ tests; restarts the broker, purges queues
 cd services/jobs-worker && JOBS_KAFKA_LIVE=1 KAFKA_BROKERS=127.0.0.1:59092 go test -count=1 -run TestKafkaAlertIntakeLive -v .
 ```
+
+## Placement routing
+
+With `SHARD_REGISTRY_FILE`, API tenants, validated alert events, receipts, dispatch, dead-letter publication, redrive and DLQ replay resolve current placement before tenant transactions. ID-only scans visit all four primaries sequentially with `JOBS_DISPATCH_BATCH` as a per-shard cap; dispatch concurrency retains its configured global worker bound. An operator redrive remains globally capped by `-limit`. Poison transport records have no authenticated tenant and use the explicit `s1` infrastructure quarantine ledger; it stores only source coordinates/hash/reason. A required unavailable shard fails the scan. See [Go sharding contract](../../packages/go-common/SHARDING.md).
+
+For notification history recovery without background delivery, set
+`JOBS_API_ONLY=true`. This runs the same authenticated HTTP API and database
+health checks, without starting Kafka intake, receipt consumption, or RabbitMQ
+dispatch. `RABBITMQ_URL` is optional in this mode. Normal worker execution remains
+the default; invalid boolean values fail configuration.

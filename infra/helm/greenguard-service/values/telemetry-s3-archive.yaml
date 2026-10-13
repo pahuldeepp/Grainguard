@@ -1,0 +1,21 @@
+replicaCount: 1
+fullnameOverride: telemetry-s3-archive
+pdb:
+  enabled: false
+service:
+  enabled: false
+  containerPort: 8080
+probes:
+  startup: {enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30}
+  readiness: {enabled: true, path: /readyz, periodSeconds: 5}
+  liveness: {enabled: true, path: /healthz, periodSeconds: 10}
+container:
+  name: telemetry-archive
+  args: ["s3-archive"]
+networkPolicy:
+  ingressEnabled: false
+  egressCIDRs: [] # Terraform fills the region's S3 prefix-list CIDRs.
+  egressPods:
+    - namespace: greenguard
+      selector: {app: kafka}
+      port: 29092

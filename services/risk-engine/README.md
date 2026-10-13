@@ -6,9 +6,25 @@ Technology: Python 3.14, psycopg 3, confluent-kafka (pinned in `requirements*.tx
 
 ## Flow
 
-Topics consumed: `greenguard.inventory.device.v1` (bindings and ADR-0009 checkpoints), `greenguard.inventory.lot.v1` (`lot.changed`), `greenguard.telemetry.recorded.v1`.
+Topics consumed: `greenguard.inventory.device.v1` (bindings and ADR-0009 checkpoints), `greenguard.inventory.lot.v1` (`lot.changed`), `greenguard.telemetry.recorded.v1` and additive `greenguard.telemetry.recorded.v2`.
 
-Each record is parsed strictly (`risk_engine/events.py`), then applied in **one tenant transaction** (`risk_engine/apply.py`): inbox receipt, then either a local-state change (device binding or lot interval) or, for telemetry, the event-time join (`risk_engine/join.py`), scoring (`risk_engine/scoring.py`), a `risk_assessments` row and a `risk.assessed` outbox row. The Kafka offset is committed only after that commit or after a confirmed quarantine (`risk_engine/consumer.py`).
+Each record is parsed strictly (`risk_engine/events.py`), then applied in **one tenant transaction** (`risk_engine/apply.py`): inbox receipt, then either a local-state change (device binding or lot interval) or, for telemetry, the event-time join (`risk_engine/join.py`), scoring (`risk_engine/scoring.py`), a `risk_assessments` row and a `risk.assessed` outbox row. V2 sensor observations retain their owner-resolved layout metadata at ingestion; the risk engine does not invent an aggregation across sensors. The Kafka offset is committed only after that commit or after a confirmed quarantine (`risk_engine/consumer.py`).
+
+## Tenant grain policies
+
+`grain_policies` is tenant-owned and forced-RLS. One row is an immutable policy version with units, measurement limits, score hysteresis, effective interval, calibration evidence, approver and source provenance. A finite interval may be closed once; policy contents never change. Policy scope selection is deterministic at telemetry event time: exact bin scope before grain-wide scope, then effective start and version. Overlapping active intervals for the same tenant/grain/scope are rejected. Versions and `risk.policy_changed` outbox events are committed together.
+
+The consumer reads only an active, calibrated policy from the database. There is no production fallback to compiled synthetic wheat/canola constants. No applicable calibrated record is quarantined as `policy_unavailable`. Draft, uncalibrated records can be published and read for provenance but cannot be activated. A calibrated version must carry an evidence reference, approving admin subject and approval time. A `risk.assessed` v2 event carries policy ID/version, calibration state and provenance; v1 input and historical `risk.assessed` v1 records remain supported. Scoring currently uses temperature and air relative humidity only. CO2 and grain-moisture limits are independently persisted; they do not silently enter the score until an approved scoring model consumes them.
+
+The owner routes are mounted at `/v1/policies`: `POST` publishes a new version and `GET` with `grain_type`, `bin_id` (`*` for grain-wide) and event-time `at` returns the effective calibrated policy or `not_configured`. The tenant and admin role come from an `AUTH_MEMBERSHIP_FILE` entry keyed by verified issuer and subject; token tenant/role claims and request tenant selectors are ignored. Tokens are verified against RS256, `AUTH_ISSUER`, `AUTH_AUDIENCE`, and `AUTH_JWKS_URL`; device/machine/grant principals are rejected. Membership mapping is required by default. `AUTH_ALLOW_SIGNED_CLAIMS=true` explicitly opts into signed tenant/role claims for development only. Missing auth configuration fails closed with 503; health probes remain public.
+
+Optional `AUTH_TOKEN_MODE=cognito-access` accepts Cognito user access tokens
+that have `client_id` instead of `aud`. Set `AUTH_COGNITO_CLIENT_IDS` to the
+allowed public web/mobile client IDs and provide a trusted
+`AUTH_MEMBERSHIP_FILE`; token tenant/role claims remain ignored. If resource
+binding puts `aud` on the token, set `AUTH_AUDIENCE` to that exact API
+resource. A missing or unexpected bound audience is denied. The default mode
+keeps the strict audience check for Dex and other OIDC issuers.
 
 | Outcome | Offset | Effect |
 | --- | --- | --- |
@@ -46,6 +62,40 @@ Deterministic identity: `event_id` and `assessment_id` are UUIDv5 of `(tenant, s
 
 ## Run
 
+### Tenant shard routing
+
+Set `SHARD_REGISTRY_FILE` to the private `risk-engine` registry from
+`scripts/shards-local.mjs registry` (format version 1, `s1`–`s4`, owner database
+`greenguard_risk`). Configure `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN`;
+internal HTTP requires explicit `CONTROL_PLANE_MESH_MTLS=true` when protected by
+Istio. Local loopback PostgreSQL is enabled only by `SHARD_LOCAL_LOOPBACK=true`.
+Production endpoints require certificate verification with `sslmode=verify-full`
+and `sslrootcert`. The legacy URL is ignored when a registry is configured.
+
+Every risk application or policy transaction resolves the verified tenant through
+the authenticated authority, chooses that shard's primary, installs tenant/shard/
+incarnation/epoch context, and takes durable SQL ownership admission before
+business statements. Expired, foreign, quiescing or mismatched routes do not use
+another shard. A short pause or a stale-owner admission race retries the pending
+Kafka event; business RLS and permission errors remain hard failures. These
+transactions retain the existing inbox, tenant filters and atomic outbox.
+
+Each database handle has at most one connection per shard; consumer, health and
+optional policy handles therefore reserve at most 12 connections per process.
+Connection access is serialized per handle. The readiness probe checks every
+active primary (all four by default). A local single-shard fixture may set
+`SHARD_ACTIVE_IDS=s1` only alongside loopback mode; a tenant route to an omitted
+shard fails closed. The bounded, payload-free `quarantine_samples` transport
+ledger is explicitly stored on `s1`; this is independent of customer placement.
+Authority requests expose bounded outcome counters and a latency histogram,
+without tenant labels. Routing does not use stale cache entries during an outage.
+
+`test_shards.py` covers all-four selection and fail-closed cases. The scratch
+acceptance harness `node scripts/read-freshness-local.mjs` applies real risk
+migrations and proves admitted writes, shared-lock drain, cross-tenant denial,
+stale epoch rejection and fenced-owner rejection against PostgreSQL 16. These
+checks do not prove a tenant migration, broker replay or AWS deployment.
+
 ```bash
 make risk-migrate      # forward-only migrations
 make risk-test         # unit tests + live DB tests (live tests skip without RISK_* env)
@@ -53,4 +103,4 @@ KAFKA_BROKERS=127.0.0.1:59092 RISK_KAFKA_OFFSET_RESET=earliest \
   .local/risk-venv/bin/python -m risk_engine.main   # from services/risk-engine; UNVERIFIED live
 ```
 
-`RISK_KAFKA_OFFSET_RESET` defaults to `error`: a lost or expired committed offset stops the process instead of skipping. Only a brand-new group is started once with `earliest`. Health: `:8086/healthz`, `/readyz` (a separate database probe is reachable and the consumer loop has completed a step within 10 seconds), `/metrics` (labels: topic, outcome, reason; never tenant or device). The scoring policy is synthetic and must be calibrated before real alerts. See [Stage 06 plan](../../docs/STAGE_06_PLAN.md).
+`RISK_KAFKA_OFFSET_RESET` defaults to `error`: a lost or expired committed offset stops the process instead of skipping. Only a brand-new group is started once with `earliest`. Health: `:8086/healthz`, `/readyz` (a separate database probe is reachable and the consumer loop has completed a step within 10 seconds), `/metrics` (labels: topic, outcome, reason; never tenant or device). See [Stage 06 plan](../../docs/STAGE_06_PLAN.md).

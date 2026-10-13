@@ -5,7 +5,11 @@ import {
   useState,
   type SyntheticEvent,
 } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router";
 import { formatTimestamp } from "./format";
 import { deviceStatusMarker } from "./severity";
@@ -28,6 +32,8 @@ import {
 function message(error: unknown) {
   if (!(error instanceof Error))
     return "Device data is temporarily unavailable.";
+  if (error.message.includes("rollup_outside_hot_window"))
+    return "This range includes older readings outside the recent averages window. Choose a recent range, or open reading history to view older readings.";
   if (/FORBIDDEN|UNAUTHORIZED|401|403/i.test(error.message))
     return "Your session cannot access this device. Sign in again or choose another device.";
   if (/unavailable|read_busy|\b50[23]\b/i.test(error.message))
@@ -51,44 +57,59 @@ function Moment({ iso }: Readonly<{ iso: string }>) {
 
 function ReadingTable({ readings }: Readonly<{ readings: ReadingView[] }>) {
   return (
-    <section className="table-wrap" aria-label="Readings">
-      <table className="read-table">
-        <thead>
-          <tr>
-            <th scope="col">Observed</th>
-            <th scope="col">Received</th>
-            <th scope="col">Projected</th>
-            <th scope="col">Temperature</th>
-            <th scope="col">Humidity</th>
+    <div
+      className="table-wrap"
+      role="region"
+      aria-label="Readings"
+      tabIndex={0}
+    >
+      <table className="read-table" role="table">
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader">
+              Observed
+            </th>
+            <th scope="col" role="columnheader">
+              Received
+            </th>
+            <th scope="col" role="columnheader">
+              Projected
+            </th>
+            <th scope="col" role="columnheader">
+              Temperature
+            </th>
+            <th scope="col" role="columnheader">
+              Humidity
+            </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {readings.map((reading) => (
-            <tr key={reading.readingId}>
-              <td data-label="Observed">
+            <tr key={reading.readingId} role="row">
+              <td role="cell" data-label="Observed">
                 <Moment iso={reading.observedAt} />
               </td>
-              <td data-label="Received">
+              <td role="cell" data-label="Received">
                 <Moment iso={reading.receivedAt} />
               </td>
-              <td data-label="Projected">
+              <td role="cell" data-label="Projected">
                 {reading.projectedAt ? (
                   <Moment iso={reading.projectedAt} />
                 ) : (
                   "Unavailable"
                 )}
               </td>
-              <td data-label="Temperature">
+              <td role="cell" data-label="Temperature">
                 {value(reading.temperatureC, "°C")}
               </td>
-              <td data-label="Humidity">
+              <td role="cell" data-label="Humidity">
                 {value(reading.relativeHumidityPercent, "%")}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </section>
+    </div>
   );
 }
 
@@ -111,23 +132,34 @@ export function DeviceSearch({
   api: ReadApi | null;
   sessionId?: string;
 }>) {
-  const [draft, setDraft] = useState("");
-  const [term, setTerm] = useState("");
+  const [draftState, setDraftState] = useState({ sessionId, value: "" });
+  const [termState, setTermState] = useState({ sessionId, value: "" });
+  const draft = draftState.sessionId === sessionId ? draftState.value : "";
+  const term = termState.sessionId === sessionId ? termState.value : "";
+  const query = draft.trim();
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setTermState({ sessionId, value: query }),
+      300,
+    );
+    return () => window.clearTimeout(timer);
+  }, [query, sessionId]);
   const search = useQuery({
-    queryKey: ["read", sessionId, "search", term],
-    queryFn: () => api!.search(term),
-    enabled: Boolean(api && sessionId && term),
+    queryKey: ["read", sessionId, "search", query],
+    queryFn: ({ signal }) => api!.search(query, 25, undefined, signal),
+    enabled: Boolean(api && sessionId && term === query),
     retry: false,
     gcTime: 0,
   });
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    setTerm(draft.trim());
+    setTermState({ sessionId, value: query });
   }
   return (
     <section className="read-view" aria-labelledby="search-title">
-      <PageHeader id="search-title" title="Find a device">
-        Search your workspace by device name, ID or serial number.
+      <PageHeader id="search-title" title="Devices">
+        Browse your workspace sensors or search by device name, ID or serial
+        number.
       </PageHeader>
       {!api || !sessionId ? (
         <EmptyState title="Sign in to search devices." />
@@ -144,26 +176,24 @@ export function DeviceSearch({
                   className="input"
                   type="search"
                   value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
+                  onChange={(event) =>
+                    setDraftState({ sessionId, value: event.target.value })
+                  }
                   autoComplete="off"
                   maxLength={100}
                 />
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={!draft.trim()}
-                >
+                <button type="submit" className="btn btn-primary">
                   Search
                 </button>
               </div>
             </div>
           </form>
           <div className="section">
-            {!term && (
-              <EmptyState title="Enter a device name, ID, or serial number to search your workspace." />
-            )}
-            {search.isPending && term && (
-              <Loading label="Searching devices…" rows={2} />
+            {search.isPending && (
+              <Loading
+                label={query ? "Searching devices…" : "Loading devices…"}
+                rows={2}
+              />
             )}
             {search.isError && (
               <ErrorState
@@ -189,14 +219,22 @@ export function DeviceSearch({
                         ) : (
                           "Status unavailable"
                         )}
-                        {device.siteId ? ` · Site ${device.siteId}` : ""}
+                        {device.siteId ? " · Site name not projected" : ""}
                       </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <EmptyState title="No devices match this search.">
-                  Check the spelling or try the serial number.
+                <EmptyState
+                  title={
+                    query
+                      ? "No devices match this search."
+                      : "No devices in your workspace yet."
+                  }
+                >
+                  {query
+                    ? "Check the spelling or try the serial number."
+                    : "Provision a sensor to see it here."}
                 </EmptyState>
               ))}
           </div>
@@ -227,8 +265,16 @@ function CurrentResult({
           {device.status && (
             <StatusMarker marker={deviceStatusMarker(device.status)} />
           )}
-          {device.siteId && ` Site: ${device.siteId}`}
-          {device.binId && ` · Bin: ${device.binId}`}
+          {device.siteId && " Site name not projected"}
+          {device.binId && (
+            <>
+              {" "}
+              ·{" "}
+              <Link to={`/bins/${encodeURIComponent(device.binId)}`}>
+                View bin readings
+              </Link>
+            </>
+          )}
         </p>
       </div>
       <section className="section" aria-labelledby="latest-title">
@@ -400,13 +446,30 @@ export function DeviceHistory({
   const [to, setTo] = useState(initial.to);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [validation, setValidation] = useState("");
-  const history = useQuery({
+  const history = useInfiniteQuery({
     queryKey: ["read", sessionId, "history", deviceId, range?.from, range?.to],
-    queryFn: () => api!.history(deviceId, range!.from, range!.to, 100),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api!.history(deviceId, range!.from, range!.to, 100, pageParam),
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(api && sessionId && deviceId && range),
     retry: false,
     gcTime: 0,
   });
+  const historyReadings = (history.data?.pages ?? []).flatMap(
+    (page) => page.items,
+  );
+  const historyStores = (history.data?.pages ?? []).reduce(
+    (stores, page) => ({
+      postgres: stores.postgres || page.sources.postgres,
+      cassandra: stores.cassandra || page.sources.cassandra,
+    }),
+    { postgres: false, cassandra: false },
+  );
+  const historySources = [
+    historyStores.postgres && "PostgreSQL",
+    historyStores.cassandra && "Cassandra",
+  ].filter(Boolean);
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextRange = validIsoRange(from, to);
@@ -423,7 +486,8 @@ export function DeviceHistory({
   return (
     <section className="read-view" aria-labelledby="history-title">
       <PageHeader id="history-title" title="Reading history">
-        Up to 100 readings in a time range, newest first.
+        Readings in the selected time range, newest first. Load more to
+        continue.
       </PageHeader>
       {accessMessage ? (
         <EmptyState title={accessMessage} />
@@ -473,19 +537,42 @@ export function DeviceHistory({
             {history.isPending && range && (
               <Loading label="Loading reading history…" />
             )}
-            {history.isError && (
+            {history.isError && !history.data && (
               <ErrorState
                 message={message(history.error)}
                 onRetry={() => void history.refetch()}
               />
             )}
-            {history.isSuccess &&
-              (history.data.length ? (
+            {history.data &&
+              (historyReadings.length ? (
                 <>
                   <p className="meta table-note">
-                    Showing up to 100 readings, newest first.
+                    Showing {historyReadings.length} readings, newest first.
+                    {historySources.length > 0 && (
+                      <> Sources: {historySources.join(" + ")}.</>
+                    )}
                   </p>
-                  <ReadingTable readings={history.data} />
+                  <ReadingTable readings={historyReadings} />
+                  {history.hasNextPage && (
+                    <div className="form-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={history.isFetchingNextPage}
+                        onClick={() => void history.fetchNextPage()}
+                      >
+                        {history.isFetchingNextPage
+                          ? "Loading more readings…"
+                          : "Load more readings"}
+                      </button>
+                    </div>
+                  )}
+                  {history.isError && (
+                    <ErrorState
+                      message={message(history.error)}
+                      onRetry={() => void history.fetchNextPage()}
+                    />
+                  )}
                 </>
               ) : (
                 <EmptyState title="No readings in this time range." />
@@ -499,34 +586,49 @@ export function DeviceHistory({
 
 function RollupTable({ rollups }: Readonly<{ rollups: RollupView[] }>) {
   return (
-    <section className="table-wrap" aria-label="Averages">
-      <table className="read-table">
-        <thead>
-          <tr>
-            <th scope="col">Bucket start</th>
-            <th scope="col">Samples</th>
-            <th scope="col">Average temperature</th>
-            <th scope="col">Average humidity</th>
+    <div
+      className="table-wrap"
+      role="region"
+      aria-label="Averages"
+      tabIndex={0}
+    >
+      <table className="read-table" role="table">
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader">
+              Bucket start
+            </th>
+            <th scope="col" role="columnheader">
+              Samples
+            </th>
+            <th scope="col" role="columnheader">
+              Average temperature
+            </th>
+            <th scope="col" role="columnheader">
+              Average humidity
+            </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {rollups.map((item) => (
-            <tr key={item.bucketStart}>
-              <td data-label="Bucket start">
+            <tr key={item.bucketStart} role="row">
+              <td role="cell" data-label="Bucket start">
                 <Moment iso={item.bucketStart} />
               </td>
-              <td data-label="Samples">{item.sampleCount}</td>
-              <td data-label="Average temperature">
+              <td role="cell" data-label="Samples">
+                {item.sampleCount}
+              </td>
+              <td role="cell" data-label="Average temperature">
                 {value(item.avgTemperatureC, "°C")}
               </td>
-              <td data-label="Average humidity">
+              <td role="cell" data-label="Average humidity">
                 {value(item.avgRelativeHumidityPercent, "%")}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </section>
+    </div>
   );
 }
 
@@ -631,10 +733,48 @@ export function DeviceRollups({
               <Loading label="Loading averages…" />
             )}
             {rollups.isError && (
-              <ErrorState
-                message={message(rollups.error)}
-                onRetry={() => void rollups.refetch()}
-              />
+              <>
+                <ErrorState
+                  message={message(rollups.error)}
+                  onRetry={() => void rollups.refetch()}
+                />
+                {rollups.error instanceof Error &&
+                  rollups.error.message.includes(
+                    "rollup_outside_hot_window",
+                  ) && (
+                    <div className="actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const recent = defaultRange();
+                          setFrom(recent.from);
+                          setTo(recent.to);
+                          setValidation("");
+                          const selected = validIsoRange(
+                            recent.from,
+                            recent.to,
+                          );
+                          if (selected) {
+                            if (
+                              range?.from === selected.from &&
+                              range.to === selected.to &&
+                              range.bucket === bucket
+                            )
+                              void rollups.refetch();
+                            else setRange({ ...selected, bucket });
+                          }
+                        }}
+                      >
+                        Use recent 12 hours
+                      </button>
+                      <Link
+                        to={`/devices/${encodeURIComponent(deviceId)}/history`}
+                      >
+                        View older reading history
+                      </Link>
+                    </div>
+                  )}
+              </>
             )}
             {rollups.isSuccess &&
               (rollups.data.length ? (

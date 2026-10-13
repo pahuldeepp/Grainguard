@@ -1,0 +1,50 @@
+{{- $probes := .Values.acceptanceProbes | default dict }}
+{{- if $probes.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "live acceptance requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($probes.clickhouseImage | default "")) }}{{ fail "live acceptance requires the pinned ClickHouse client image" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($probes.tenantControlPlaneImage | default "")) }}{{ fail "live acceptance requires the pinned tenant-control-plane image" }}{{ end }}
+{{- if not (and .Values.dataPlane.enabled .Values.searchPlane.enabled .Values.cassandraPlane.enabled .Values.clickhousePlane.enabled) }}{{ fail "data acceptance requires Kafka/Redis, OpenSearch, Cassandra and ClickHouse Applications enabled" }}{{ end }}
+{{- if ne $probes.clickhouseImage .Values.clickhousePlane.image }}{{ fail "ClickHouse acceptance must reuse the owned server image" }}{{ end }}
+{{- range $key := list "kafka-topics" "redis" }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $.Values.dataPlane.images $key | default "")) }}{{ fail (printf "data acceptance requires owned %s image" $key) }}{{ end }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-live-acceptance-probes
+  namespace: argocd
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "29"}
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/acceptance-probes-chart
+    helm:
+      releaseName: greenguard-live-acceptance-probes
+      valuesObject:
+        dataPlaneEnabled: true
+        kafkaImage: {{ index .Values.dataPlane.images "kafka-topics" | quote }}
+        redisImage: {{ index .Values.dataPlane.images "redis" | quote }}
+        cassandraImage: {{ .Values.cassandraPlane.image | quote }}
+        clickhouseEnabled: true
+        membershipEnabled: {{ $probes.membershipEnabled | default false }}
+        namespace: greenguard
+        cell: {{ .Values.cell | quote }}
+        revision: {{ .Values.revision | quote }}
+        clickhouseImage: {{ $probes.clickhouseImage | quote }}
+        tenantControlPlaneImage: {{ $probes.tenantControlPlaneImage | quote }}
+        membershipAudience: {{ $probes.membershipAudience | quote }}
+        accessTokenSecret: greenguard-acceptance-oidc-token
+        clickhouseSecret: greenguard-telemetry-clickhouse-config
+        controlPlaneSecret: tenant-control-plane-config
+        identitySecret: greenguard-dex-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+{{- end }}

@@ -1,11 +1,10 @@
-name: greenguard-dev
+name: ${COMPOSE_PROJECT_NAME:-greenguard-dev}
 services:
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     # Local per-slot WAL budget; override POSTGRES_MAX_SLOT_WAL_KEEP_SIZE in .env.
     # Checkpoint-enforced, not a hard disk quota: alert before reaching this cap.
-    command:
-      [
+    command: [
         postgres,
         -c,
         wal_level=logical,
@@ -23,13 +22,16 @@ services:
     environment:
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
+      OBSERVABILITY_DB_PASSWORD: ${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_PROJECTOR_PASSWORD: ${INVENTORY_PROJECTOR_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
+      INVENTORY_AUDIT_READER_PASSWORD: ${INVENTORY_AUDIT_READER_PASSWORD:?Run make bootstrap}
       PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}
       READ_ENTITLEMENT_PROJECTOR_PASSWORD: ${READ_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       READ_QUERY_DB_PASSWORD: ${READ_QUERY_DB_PASSWORD:?Run make bootstrap}
       PROJECTION_MIGRATOR_PASSWORD: ${PROJECTION_MIGRATOR_PASSWORD:?Run make bootstrap}
+      PROJECTION_HISTORY_MAINTAINER_PASSWORD: ${PROJECTION_HISTORY_MAINTAINER_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
       TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD: ${TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
@@ -48,16 +50,19 @@ services:
       CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD:?Run make bootstrap}
       CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
+      CONTROL_AUDIT_WORKER_PASSWORD: ${CONTROL_AUDIT_WORKER_PASSWORD:?Run make bootstrap}
+      CONTROL_BOOTSTRAP_WORKER_PASSWORD: ${CONTROL_BOOTSTRAP_WORKER_PASSWORD:?Run make bootstrap}
       BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?Run make bootstrap}
       BILLING_MIGRATOR_PASSWORD: ${BILLING_MIGRATOR_PASSWORD:?Run make bootstrap}
-    ports: ["127.0.0.1:55432:5432"]
+      BILLING_AUDIT_READER_PASSWORD: ${BILLING_AUDIT_READER_PASSWORD:?Run make bootstrap}
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
     healthcheck:
-      # Force TCP readiness; the entrypoint's temporary init server accepts Unix
-      # sockets before the final server is ready and can otherwise race db-up.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres"]
+      # TCP, not the Unix socket: the image entrypoint runs a temporary socket-only server
+      # during first-boot initialization, which must not count as healthy.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -67,9 +72,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports: ["127.0.0.1:56432:6432"]
+    ports: ["127.0.0.1:${PGBOUNCER_HOST_PORT:-56432}:6432"]
     volumes:
-      - ../../.local/pgbouncer/userlist.txt:/run/pgbouncer/userlist.txt:ro
+      - type: bind
+        source: ../../.local/pgbouncer/userlist.txt
+        target: /run/pgbouncer/userlist.txt
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 6432"]
       interval: 2s

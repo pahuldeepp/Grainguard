@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	common "greenguard.local/go-common"
 	"io"
 	"path/filepath"
 	"strconv"
@@ -15,33 +17,62 @@ import (
 )
 
 const (
-	topicTelemetry  = "greenguard.telemetry.recorded.v1"
-	topicQuarantine = "greenguard.quarantine.v1"
-	typeTelemetry   = "telemetry.recorded"
-	fieldTenant     = "tenant_id"
-	fieldEvent      = "event_id"
-	fieldType       = "event_type"
-	fieldSchema     = "schema_version"
-	fieldAggregate  = "aggregate_id"
-	fieldTrace      = "traceparent"
-	fieldPayload    = "payload"
-	fieldDevice     = "device_id"
-	reasonEnvelope  = "bad_envelope"
-	reasonSchema    = "schema_invalid"
-	reasonKey       = "key_mismatch"
-	reasonHeaders   = "header_mismatch"
-	reasonRejected  = "cassandra_rejected"
-	schemaFile      = "telemetry-recorded.v1.schema.json"
+	topicTelemetry   = "greenguard.telemetry.recorded.v1"
+	topicTelemetryV2 = "greenguard.telemetry.recorded.v2"
+	topicQuarantine  = "greenguard.quarantine.v1"
+	typeTelemetry    = "telemetry.recorded"
+	fieldTenant      = "tenant_id"
+	fieldEvent       = "event_id"
+	fieldType        = "event_type"
+	fieldSchema      = "schema_version"
+	fieldAggregate   = "aggregate_id"
+	fieldTrace       = "traceparent"
+	fieldPayload     = "payload"
+	fieldDevice      = "device_id"
+	reasonEnvelope   = "bad_envelope"
+	reasonSchema     = "schema_invalid"
+	reasonKey        = "key_mismatch"
+	reasonHeaders    = "header_mismatch"
+	reasonRejected   = "cassandra_rejected"
+	schemaFile       = "telemetry-recorded.v1.schema.json"
 )
 
 // Validator checks a canonical event against the shared repository schema.
 type Validator interface{ Validate(any) error }
 
+type telemetrySchemas map[string]*jsonschema.Schema
+
+func (s telemetrySchemas) Validate(value any) error {
+	event, ok := value.(map[string]any)
+	if !ok {
+		return errors.New("invalid telemetry envelope")
+	}
+	schema := s[fmt.Sprint(event[fieldSchema])]
+	if schema == nil {
+		return errors.New("unsupported telemetry schema")
+	}
+	if err := schema.Validate(value); err != nil {
+		return err
+	}
+	if fmt.Sprint(event[fieldSchema]) == "2" {
+		return common.ValidateTelemetryV2(event[fieldPayload].(map[string]any))
+	}
+	return nil
+}
+
 func loadSchema(dir string) (Validator, error) {
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.AssertFormat()
-	return compiler.Compile(filepath.Join(dir, schemaFile))
+	result := telemetrySchemas{}
+	for version, file := range map[string]string{"1": schemaFile, "2": "telemetry-recorded.v2.schema.json"} {
+		schema, err := compiler.Compile(filepath.Join(dir, file))
+		if err != nil {
+			return nil, err
+		}
+		result[version] = schema
+	}
+	return result, nil
 }
 
 func decode(raw []byte) (map[string]any, bool) {
@@ -62,10 +93,14 @@ func parse(schema Validator, m Message) (history.Reading, map[string]any, string
 	if !ok {
 		return history.Reading{}, nil, reasonEnvelope
 	}
-	if e[fieldType] != typeTelemetry || fmt.Sprint(e[fieldSchema]) != "1" || schema.Validate(e) != nil {
+	if e[fieldType] != typeTelemetry || schema.Validate(e) != nil {
 		return history.Reading{}, e, reasonSchema
 	}
-	if m.Topic != topicTelemetry || string(m.Key) != fmt.Sprint(e[fieldTenant])+":"+fmt.Sprint(e[fieldAggregate]) {
+	expectedTopic := topicTelemetry
+	if fmt.Sprint(e[fieldSchema]) == "2" {
+		expectedTopic = topicTelemetryV2
+	}
+	if m.Topic != expectedTopic || string(m.Key) != fmt.Sprint(e[fieldTenant])+":"+fmt.Sprint(e[fieldAggregate]) {
 		return history.Reading{}, e, reasonKey
 	}
 	if !validHeaders(m.Headers, e) {
@@ -117,6 +152,17 @@ func reading(e map[string]any) (history.Reading, bool) {
 	measurements, _ := p["measurements"].(map[string]any)
 	r.TemperatureC = number(measurements, "temperature_c")
 	r.RelativeHumidityPercent = number(measurements, "relative_humidity_percent")
+	if fmt.Sprint(e[fieldSchema]) == "2" {
+		r.SchemaVersion = 2
+		r.CO2PPM = number(measurements, "co2_ppm")
+		r.GrainMoisturePercent = number(measurements, "grain_moisture_percent")
+		units, _ := json.Marshal(p["measurement_units"])
+		r.MeasurementUnits = string(units)
+		if samples, ok := p["sensor_observations"]; ok {
+			data, _ := json.Marshal(samples)
+			r.SensorObservations = string(data)
+		}
+	}
 	return r, true
 }
 

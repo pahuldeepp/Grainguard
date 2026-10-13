@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { connectionPorts } from "./bootstrap-connection-ports.mjs";
+import { ciComposeProjectName } from "./ci-compose-project.mjs";
 const run = (cmd, args, cwd = process.cwd()) => {
   const r = spawnSync(cmd, args, { cwd, stdio: "inherit" });
   if (r.error || r.status !== 0) process.exit(r.status || 1);
@@ -16,11 +18,14 @@ if (existsSync(".env"))
     const at = line.indexOf("=");
     if (at > 0) env.set(line.slice(0, at), line.slice(at + 1));
   }
+const ciComposeName = ciComposeProjectName(process.env);
+if (ciComposeName) env.set("COMPOSE_PROJECT_NAME", ciComposeName);
 const secret = (key) => {
   if (!env.get(key)) env.set(key, randomBytes(24).toString("hex"));
   return env.get(key);
 };
 secret("CDC_DB_PASSWORD");
+secret("OBSERVABILITY_DB_PASSWORD");
 // Throwaway password for the opt-in local Dex users (infra/oidc, ADR-0014).
 secret("OIDC_DEV_PASSWORD");
 // Throwaway credentials for the opt-in local MinIO audit-export store (infra/objectstore).
@@ -43,11 +48,16 @@ const telemetryMigrator = secret("TELEMETRY_MIGRATOR_PASSWORD");
 const projection = secret("PROJECTION_DB_PASSWORD");
 const readEntitlementProjector = secret("READ_ENTITLEMENT_PROJECTOR_PASSWORD");
 const readQuery = secret("READ_QUERY_DB_PASSWORD");
+secret("READ_HISTORY_CURSOR_SECRET");
 const projectionMigrator = secret("PROJECTION_MIGRATOR_PASSWORD");
+secret("PROJECTION_HISTORY_MAINTAINER_PASSWORD");
 const risk = secret("RISK_DB_PASSWORD");
 const riskMigrator = secret("RISK_MIGRATOR_PASSWORD");
-const direct = "127.0.0.1:55432";
-const pooled = "127.0.0.1:56432";
+const ports = connectionPorts(env);
+env.set("POSTGRES_HOST_PORT", String(ports.direct));
+env.set("PGBOUNCER_HOST_PORT", String(ports.pooled));
+const direct = `127.0.0.1:${ports.direct}`;
+const pooled = `127.0.0.1:${ports.pooled}`;
 env.set(
   "INVENTORY_DATABASE_URL",
   `postgresql://inventory_app:${inventory}@${pooled}/greenguard_inventory`,
@@ -152,6 +162,22 @@ for (const [prefix, role, db] of [
   );
   stage06dUsers.push(`"${role}_app" "${app}"\n`);
 }
+const controlAuditWorker = secret("CONTROL_AUDIT_WORKER_PASSWORD");
+env.set(
+  "CONTROL_AUDIT_DATABASE_URL",
+  `postgresql://control_audit_worker:${controlAuditWorker}@${direct}/greenguard_control`,
+);
+const controlBootstrapWorker = secret("CONTROL_BOOTSTRAP_WORKER_PASSWORD");
+env.set(
+  "CONTROL_BOOTSTRAP_DATABASE_URL",
+  `postgresql://tenant_bootstrap_worker:${controlBootstrapWorker}@${direct}/greenguard_control`,
+);
+const billingAuditReader = secret("BILLING_AUDIT_READER_PASSWORD");
+env.set(
+  "BILLING_AUDIT_DATABASE_URL",
+  `postgresql://billing_audit_reader:${billingAuditReader}@${direct}/greenguard_billing`,
+);
+secret("INVENTORY_AUDIT_READER_PASSWORD");
 env.set(
   "RABBITMQ_URL",
   `amqp://greenguard:${secret("RABBITMQ_PASSWORD")}@127.0.0.1:55672/`,

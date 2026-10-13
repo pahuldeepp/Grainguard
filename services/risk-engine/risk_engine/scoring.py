@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
-from typing import Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,10 @@ class Policy:
     humidity_warn_percent: float
     humidity_critical_percent: float
     alert_score: int
+    calibrated: bool = False
+    policy_id: str | None = None
+    provenance: str = "synthetic"
+    critical_score: int = 75
 
     def __post_init__(self) -> None:
         if not self.grain_type or self.grain_type != self.grain_type.strip().lower():
@@ -42,6 +46,7 @@ class Assessment:
     severity: str
     reasons: tuple[str, ...]
     alert_eligible: bool
+    policy_status: str = "active"
 
 
 def _measurement(measurements: Mapping[str, object], key: str, low: float, high: float) -> float | None:
@@ -63,8 +68,14 @@ def assess(measurements: Mapping[str, object], grain_type: str, policy: Policy) 
     """Score only accepted grain telemetry; absent inputs are never read as zero."""
     if grain_type != policy.grain_type:
         raise ValueError("grain type does not match selected policy")
-    if set(measurements) - {"temperature_c", "relative_humidity_percent"}:
+    if set(measurements) - {"temperature_c", "relative_humidity_percent", "co2_ppm",
+                            "grain_moisture_percent"}:
         raise ValueError("unsupported measurement")
+    if not policy.calibrated:
+        # Synthetic/unapproved limits are provenance only; they must never generate
+        # an operational score or alert.
+        return Assessment(grain_type, policy.version, None, "insufficient_data",
+                          ("policy_not_calibrated",), False, "not_calibrated")
     temperature = _measurement(measurements, "temperature_c", -80, 120)
     humidity = _measurement(measurements, "relative_humidity_percent", 0, 100)
     if temperature is None or humidity is None:
@@ -87,22 +98,10 @@ def assess(measurements: Mapping[str, object], grain_type: str, policy: Policy) 
         (temperature_points > 0, "elevated_temperature"),
         (humidity_points > 0, "elevated_humidity"),
     ) if condition)
-    if score >= 75:
+    if score >= policy.critical_score:
         severity = "critical"
     elif score >= policy.alert_score:
         severity = "warning"
     else:
         severity = "normal"
     return Assessment(grain_type, policy.version, score, severity, reasons, score >= policy.alert_score)
-
-
-# A synthetic test policy only. Persist and approve a calibrated, versioned policy
-# before any real-world alerts are enabled.
-SYNTHETIC_WHEAT_POLICY_V1 = Policy("wheat", 1, 25.0, 35.0, 65.0, 80.0, 50)
-SYNTHETIC_CANOLA_POLICY_V1 = Policy("canola", 1, 22.0, 30.0, 60.0, 75.0, 50)
-
-# Approved policies by grain type. A grain type without a policy is never scored with
-# another crop's thresholds; the consumer quarantines it as policy_unavailable.
-POLICIES: Mapping[str, Policy] = {
-    policy.grain_type: policy for policy in (SYNTHETIC_WHEAT_POLICY_V1, SYNTHETIC_CANOLA_POLICY_V1)
-}

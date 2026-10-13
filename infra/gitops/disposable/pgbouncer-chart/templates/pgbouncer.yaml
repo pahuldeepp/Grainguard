@@ -1,0 +1,112 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "PgBouncer image must be an immutable OCI digest" }}{{ end }}
+{{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" .Values.rdsHost) }}{{ fail "rdsHost must be an RDS DNS name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.authSecret) }}{{ fail "authSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.caSecret) }}{{ fail "caSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (and (le (len .Values.name) 63) (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" .Values.name)) }}{{ fail "name must be a Kubernetes name" }}{{ end }}
+{{- if not (kindIs "bool" .Values.operationalOnly) }}{{ fail "operationalOnly must be boolean" }}{{ end }}
+{{- $config := printf `[databases]
+greenguard_read = host=%s port=5432 dbname=greenguard_read
+greenguard_inventory = host=%s port=5432 dbname=greenguard_inventory
+greenguard_telemetry = host=%s port=5432 dbname=greenguard_telemetry
+greenguard_risk = host=%s port=5432 dbname=greenguard_risk
+greenguard_jobs = host=%s port=5432 dbname=greenguard_jobs
+greenguard_notifications = host=%s port=5432 dbname=greenguard_notifications
+greenguard_alerts = host=%s port=5432 dbname=greenguard_alerts
+greenguard_hardware = host=%s port=5432 dbname=greenguard_hardware
+greenguard_sagas = host=%s port=5432 dbname=greenguard_sagas
+greenguard_control = host=%s port=5432 dbname=greenguard_control
+greenguard_billing = host=%s port=5432 dbname=greenguard_billing
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+auth_type = scram-sha-256
+auth_file = /run/pgbouncer/userlist.txt
+pool_mode = transaction
+default_pool_size = 10
+max_client_conn = 500
+server_tls_sslmode = verify-full
+server_tls_ca_file = /rds-ca/ca.pem
+ignore_startup_parameters = extra_float_digits,options
+admin_users =
+` .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost .Values.rdsHost }}
+{{- if .Values.operationalOnly }}
+{{- $config = regexReplaceAll "(?m)^greenguard_(control|billing) = .*\\n" $config "" }}
+{{- end }}
+{{- $revision := sha256sum (printf "%s\n%s" .Values.image $config) | trunc 12 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-{{ $revision }}
+data:
+  pgbouncer.ini: |
+{{ $config | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.name }}
+spec:
+  type: ClusterIP
+  selector: {app: {{ .Values.name }}}
+  ports:
+    - {name: postgres, port: 6432, targetPort: 6432}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  labels: {app: {{ .Values.name }}, greenguard.io/lifecycle: disposable}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: {{ .Values.name }}}
+  template:
+    metadata:
+      labels: {app: {{ .Values.name }}, greenguard.io/lifecycle: disposable}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ .Values.name }}
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["pgbouncer", "/etc/pgbouncer/pgbouncer.ini"]
+          ports: [{name: postgres, containerPort: 6432}]
+          startupProbe:
+            tcpSocket: {port: 6432}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: {port: 6432}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 6432}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/pgbouncer/pgbouncer.ini, subPath: pgbouncer.ini, readOnly: true}
+            - {name: auth, mountPath: /run/pgbouncer/userlist.txt, subPath: userlist.txt, readOnly: true}
+            - {name: ca, mountPath: /rds-ca, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ .Values.name }}-{{ $revision }}}
+        - name: auth
+          secret: {secretName: {{ .Values.authSecret | quote }}}
+        - name: ca
+          secret: {secretName: {{ .Values.caSecret | quote }}}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

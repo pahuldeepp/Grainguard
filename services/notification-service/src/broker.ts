@@ -76,7 +76,13 @@ export async function settle(
   let result: Settlement;
   try {
     result = await handle(toIncoming(msg));
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown failure";
+    console.warn("notification task will be retried", {
+      error: message
+        .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted database URL]")
+        .slice(0, 200),
+    });
     ch.nack(msg, false, true);
     return;
   }

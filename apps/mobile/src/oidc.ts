@@ -10,6 +10,9 @@ export interface TokenSet {
   refreshToken?: string;
   idToken?: string;
   expiresAt: number;
+  // Server-confirmed tenant scope stored with the token in Keychain so offline
+  // ACKs retain their original tenant boundary until the next refresh.
+  resolvedIdentity?: { tenantId: string; subject: string };
 }
 
 export interface OidcDeps {
@@ -98,7 +101,15 @@ export async function exchangeCode(
     undefined,
     deps,
   );
-  if (tokens.idToken && decodeClaims(tokens.idToken).nonce !== grant.nonce)
+  if (!tokens.idToken)
+    throw new OidcError("Token response has no id_token", false);
+  let idTokenNonce: unknown;
+  try {
+    idTokenNonce = decodeClaims(tokens.idToken).nonce;
+  } catch {
+    throw new OidcError("Token response has an invalid id_token", false);
+  }
+  if (idTokenNonce !== grant.nonce)
     throw new OidcError("ID token nonce mismatch", false);
   return tokens;
 }

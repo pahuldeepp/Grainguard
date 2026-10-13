@@ -7,7 +7,16 @@ COPY services/hardware-service services/hardware-service
 WORKDIR /src/services/hardware-service
 RUN CGO_ENABLED=0 go build -trimpath -o /hardware-worker ./cmd/worker
 
-FROM scratch
+FROM build AS migration-build
+RUN CGO_ENABLED=0 go build -trimpath -o /hardware-migrate ./cmd/migrate
+FROM scratch AS migration
+COPY --from=migration-build /hardware-migrate /hardware-migrate
+COPY --from=migration-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+USER 65532:65532
+ENTRYPOINT ["/hardware-migrate"]
+
+FROM scratch AS runtime
 COPY --from=build /hardware-worker /usr/local/bin/hardware-worker
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/hardware-worker"]

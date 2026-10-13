@@ -4,19 +4,41 @@ GitHub repository: https://github.com/pahuldeepp/Grainguard (private). The local
 
 ## Pipeline
 
-Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, a live two-tenant read-role test, and a Docker staging check. Separate isolated jobs exercise the event backbone, Cassandra history faults, and Kafka-to-Elasticsearch search. The quality job starts a fresh SonarQube instance, imports TypeScript, Go, and Python coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days. These new jobs have only local validation until this working tree is pushed.
+Every pull request, main push, or manual CI run executes locked dependency installation, formatting/lint/type checks, tests and Go race/vet checks, builds, npm vulnerability auditing, coverage generation, database smoke tests, a live two-tenant read-role test, and a Docker staging check. Separate jobs exercise the event backbone, Cassandra history faults, and Kafka-to-Elasticsearch search. The quality job starts a fresh SonarQube instance, imports TypeScript, Go, and Python coverage, and waits for the quality gate. Missing reports, analysis failures and failed quality gates fail the job. Coverage and gate reports are retained for 14 days.
+
+### No hosted-runner spend
+
+The repository workflows use the `greenguard-ci` self-hosted Linux ARM64 runner
+label so CI does not consume GitHub-hosted runner minutes. The current runner is
+an Ubuntu 24.04 Lima VM with its own Docker daemon, no mounted host directories,
+and no static AWS credentials. Short-lived AWS OIDC access is limited to the
+protected promotion workflow. It is one runner, so jobs queue and execute serially;
+GitHub checks remain queued while this VM is stopped or offline. Start it with
+`limactl start greenguard-gha`, then run
+`limactl shell greenguard-gha sudo -u runner bash -lc 'cd /home/runner/actions-runner && ./run.sh'`.
+Stop the foreground runner with Ctrl-C and the VM with
+`limactl stop greenguard-gha`. This avoids hosted-minute charges; GHCR package storage and
+AWS resources are separately billed and are not made free by self-hosting.
 
 GitHub returned HTTP 403 when querying branch protection: this account needs GitHub Pro (or a public repository) to protect this private branch. The repository remains private. Required merge checks cannot currently be enforced by GitHub branch protection; the workflow still blocks image publication on failed quality checks. No paid upgrade was performed.
 
-Only a successful **main push** can publish dashboard, gateway, BFF, Read API, workflow-alerts, device-service and telemetry-ingest images to private GHCR packages. Image tags are the full commit SHA; local release deployment resolves them to immutable digests and stores those digests for rollback; builds include SBOM and provenance attestations. PR code has read-only GitHub permissions and no production/registry credentials. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
+Only a successful **main push** can publish dashboard, BFF and runtime service images to private GHCR packages. The image matrix includes gateway, device-service, read-api, workflow-alerts, telemetry-ingest, cdc-transformer, projection-builder, cache-invalidator, risk-engine, hardware-service and eventbridge-bridge. Image tags are the full commit SHA; BuildKit emits SBOM and provenance attestations. The publish job scans each pushed digest for unfixed high/critical OS and library vulnerabilities, signs that exact digest with Cosign keyless identity, and immediately verifies the signature against this workflow's main-branch identity. PR code has read-only GitHub permissions and no production/registry credentials. The separate CI secret-scan job scans history with Gitleaks; Trivy checks dependency manifests and IaC on every workflow run. SonarQube credentials in CI are generated for that disposable instance, never shared with the local server. Each CI run has an independent full-project analysis; the temporary server provides no persistent PR decoration or history. Download the reports from the Actions run; local SonarQube retains local history.
+
+The `image-inventory` gate checks that every application/service Dockerfile is
+mapped to exactly the expected published image service and to a Terraform ECR
+repository. The PgBouncer infrastructure image is intentionally outside the
+application image matrix. Local `docker buildx build --check` validates
+Dockerfile syntax and source paths only; CI builds, scans, signs and verifies
+actual images before publication.
 
 The SonarQube scope includes the implemented dashboard, TypeScript services/packages, Go services, and Python search indexer. CI/deployment scripts are linted; workflow YAML is also validated locally with actionlint. SonarQube does not generate coverage: Vitest V8 and c8 generate LCOV, Go produces native profiles, and coverage.py generates Cobertura XML for Python. Source paths are normalized for the scanner's container workspace. Untested entry points remain included.
 
 ## Stage 08 live integration jobs
 
 `redis-integration`, `oidc-integration`, `oidc-browser-integration`, and
-`stage08-integration` run in separate runners with read-only permissions,
-pinned actions, and unconditional cleanup. Like `events-integration`, they run
+`stage08-integration` run as separate jobs with read-only permissions,
+pinned actions, and unconditional cleanup. They share the single serial
+self-hosted runner. Like `events-integration`, they run
 on each CI trigger and are dependencies of image publication. The full Stage
 08 job builds the gateway, BFF, Read API, and workflow-alerts runtime images,
 starts Kafka, MQTT, PostgreSQL, Cassandra, Elasticsearch, Redis Cluster, Dex,
@@ -90,7 +112,7 @@ make deploy REVISION=<40-character-successful-main-commit>
 make rollback                        # Restore previous successful local release
 ```
 
-Local staging is http://127.0.0.1:5174. Its database volume is independent from the development database; only the dashboard is exposed, on localhost. The dashboard proxies device and telemetry APIs and GraphQL through the gateway over the Compose network. This staging smoke profile uses placeholder gateway identity and private upstream URLs until real services are configured; `stage08-integration` supplies the functional gateway/browser proof. `make staging` does not claim a release passed SonarQube.
+Local staging is http://127.0.0.1:5174. Its database volume is independent from the development database; only the dashboard is exposed, on localhost. The dashboard proxies device and telemetry APIs and GraphQL through the gateway over the Compose network. The staging check verifies database-backed readiness and now also requires the proxied device and telemetry routes to reject anonymous requests with 401; a 404 means `AUTH_*` is missing and the product API was never mounted. The current staging Compose file omits service `AUTH_*` and membership configuration, so `make staging` intentionally fails this functional gate until those are supplied. Its gateway still uses placeholder identity/private upstream URLs; `stage08-integration` supplies separate gateway/browser proof. `make staging` does not claim a release passed SonarQube or prove the full event pipeline.
 
 Release deployment requires a successful CI run including image publication for the specified main commit. Authenticate Docker to private GHCR using a minimally scoped credential with package read access (through password-stdin), and use the signed-in GitHub CLI to verify release status. No registry credential is embedded in the project. The deployment command runs locally; GitHub-hosted runners cannot deploy to your laptop. No self-hosted runner or public tunnel is installed.
 
@@ -113,6 +135,25 @@ The CLI reviews staged or tracked uncommitted changes; add new files to Git firs
 CodeRabbit is an additional review step, not a replacement for deterministic checks or SonarQube.
 
 This new repository is not yet connected to the CodeRabbit GitHub App. Authenticated local review uses the available free CLI allowance. GitHub PR auto-review requires installing the app for this repository; the configuration file alone does not grant it access. Usage-credit purchases are not enabled by these commands.
+
+## Stage 12 Helm baseline
+
+The dashboard and first BFF service chart are linted and rendered locally with
+`make helm-validate`.
+This verifies digest-only image input and key Pod/NetworkPolicy fields; it does
+not prove a Kubernetes rollout, ingress/TLS setup, secret rotation, or canary
+rollback. The validation uses an unmistakable all-zero digest solely to render
+the manifests. It is not a real image and must not be installed.
+
+The workflow supply-chain gates use pinned Gitleaks v3, Trivy v0.36.0 and
+Cosign installer v4.1.2 actions. BuildKit already requests SBOM and provenance
+generation. The private repository may not be eligible for GitHub artifact
+attestations on its current account plan, so signatures use Cosign keyless
+verification against GitHub Actions OIDC rather than assuming that service is
+available. The IaC scanner also checks that a deliberately privileged fixture
+produces a high/critical misconfiguration and a blocking exit code. A GitHub
+Actions run is still required to prove registry signing, verification and
+scanner behavior for published digests.
 
 ## References
 

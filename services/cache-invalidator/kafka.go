@@ -27,7 +27,11 @@ type recordID struct {
 var makeClient = func(options ...kgo.Opt) (transport.Client, error) { return kgo.NewClient(options...) }
 
 func newKafka(brokers []string, group string) (*Kafka, error) {
-	client, err := makeClient(transport.Options(brokers, group, []string{notificationTopic})...)
+	options, err := transport.SecureOptions(brokers, group, []string{notificationTopic})
+	if err != nil {
+		return nil, err
+	}
+	client, err := makeClient(options...)
 	if err != nil {
 		return nil, err
 	}

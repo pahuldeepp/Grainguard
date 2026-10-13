@@ -1,7 +1,7 @@
+import { fixtureDb } from "../testing/fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { createDb } from "../db/client.js";
 import { withTenant } from "../db/tenant.js";
 import { createTenant } from "../testing/fixtures.js";
 import { applyInventoryCommand, type InventoryCommand } from "./inventory.js";
@@ -12,14 +12,14 @@ test("inventory saga activation, replay, compensation and tenant isolation", asy
     t.skip("INVENTORY_DATABASE_URL is required");
     return;
   }
-  const db = createDb(url);
+  const db = fixtureDb(url);
   t.after(() => db.$disconnect());
   const ownerUrl = process.env.INVENTORY_MIGRATION_URL;
   if (!ownerUrl) {
     t.skip("INVENTORY_MIGRATION_URL is required to inspect append-only outbox");
     return;
   }
-  const owner = createDb(ownerUrl);
+  const owner = fixtureDb(ownerUrl);
   t.after(() => owner.$disconnect());
   const tenant = randomUUID(),
     other = randomUUID();
@@ -102,7 +102,7 @@ test("deadline deactivation of a never-activated device is a no-op success", asy
     t.skip("INVENTORY_DATABASE_URL is required");
     return;
   }
-  const db = createDb(url);
+  const db = fixtureDb(url);
   t.after(() => db.$disconnect());
   const tenant = randomUUID(),
     site = randomUUID(),

@@ -130,7 +130,19 @@ function ProvisioningSession({
     register,
     handleSubmit,
     formState: { errors: formErrors },
-  } = useForm<StartValues>({ resolver: zodResolver(startSchema) });
+  } = useForm<StartValues>({
+    resolver: zodResolver(startSchema),
+    defaultValues: (() => {
+      if (ignoreUrl) return {};
+      const params = new URLSearchParams(window.location.search);
+      const values = {
+        deviceId: params.get("deviceId"),
+        assetId: params.get("assetId"),
+      };
+      const parsed = startSchema.safeParse(values);
+      return parsed.success ? parsed.data : {};
+    })(),
+  });
   const identity = identityOf(sessionId);
   const roles = useRoles(api, sessionId);
   const [sagaId, setSagaId] = useState(() => initialSaga(identity, ignoreUrl));

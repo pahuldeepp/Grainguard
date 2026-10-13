@@ -74,6 +74,50 @@ test("notification contacts CDC is table-scoped, read-only, RLS-visible and publ
   assert.deepEqual(policy, [{ roles: ["cdc_reader"], qual: "true" }]);
 });
 
+test("audit exporter control role has only tenant-scoped read and job-state privileges", async () => {
+  const [privileges] = await adminQuery<{
+    can_read_membership: boolean;
+    can_read_jobs: boolean;
+    can_insert_jobs: boolean;
+    can_update_state: boolean;
+    can_update_requester: boolean;
+    can_read_actions: boolean;
+    can_insert_actions: boolean;
+    can_claim: boolean;
+    safe_role: boolean;
+    role_memberships: number;
+    jobs_rls: boolean;
+    actions_rls: boolean;
+  }>(
+    `SELECT has_table_privilege('control_audit_worker','public.membership_events','SELECT') AS can_read_membership,
+            has_table_privilege('control_audit_worker','public.audit_export_jobs','SELECT') AS can_read_jobs,
+            has_table_privilege('control_audit_worker','public.audit_export_jobs','INSERT') AS can_insert_jobs,
+            has_column_privilege('control_audit_worker','public.audit_export_jobs','state','UPDATE') AS can_update_state,
+            has_column_privilege('control_audit_worker','public.audit_export_jobs','requester_id','UPDATE') AS can_update_requester,
+            has_table_privilege('control_audit_worker','public.audit_export_actions','SELECT') AS can_read_actions,
+            has_table_privilege('control_audit_worker','public.audit_export_actions','INSERT') AS can_insert_actions,
+            has_function_privilege('control_audit_worker','public.claim_audit_export_job()','EXECUTE') AS can_claim,
+            (SELECT NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolinherit AND NOT rolbypassrls FROM pg_roles WHERE rolname='control_audit_worker') AS safe_role,
+            (SELECT count(*)::int FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member JOIN pg_roles g ON g.oid=m.roleid WHERE r.rolname='control_audit_worker' OR g.rolname='control_audit_worker') AS role_memberships,
+            (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.audit_export_jobs'::regclass) AS jobs_rls,
+            (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.audit_export_actions'::regclass) AS actions_rls`,
+  );
+  assert.deepEqual(privileges, {
+    can_read_membership: true,
+    can_read_jobs: true,
+    can_insert_jobs: false,
+    can_update_state: true,
+    can_update_requester: false,
+    can_read_actions: true,
+    can_insert_actions: false,
+    can_claim: true,
+    safe_role: true,
+    role_memberships: 0,
+    jobs_rls: true,
+    actions_rls: true,
+  });
+});
+
 test("notification contact migration keeps format checks and permits a versioned cleared row", async () => {
   const tenantId = randomUUID();
   const actorId = randomUUID();
@@ -117,15 +161,25 @@ test("notification contact migration keeps format checks and permits a versioned
   assert.deepEqual(rows.rows, [{ email_to: null, sms_to: null, version: "2" }]);
 });
 
-test("M12: control_app has no DELETE anywhere and cannot UPDATE audit, outbox or receipts", async () => {
+test("M12: only ephemeral read leases permit DELETE; audit, outbox and receipts remain immutable", async () => {
   const grants = await adminQuery<{
+    table_schema: string;
     table_name: string;
     privilege_type: string;
   }>(
-    `SELECT table_name, privilege_type FROM information_schema.role_table_grants
-      WHERE grantee = 'control_app' AND privilege_type IN ('DELETE', 'TRUNCATE', 'UPDATE')`,
+    `SELECT table_schema, table_name, privilege_type FROM information_schema.role_table_grants
+      WHERE grantee = 'control_app' AND privilege_type IN ('DELETE', 'TRUNCATE', 'UPDATE')
+      ORDER BY table_schema, table_name, privilege_type`,
   );
-  assert.deepEqual(grants, []);
+  // Leases are ephemeral admission capabilities; releasing them requires DELETE.
+  // The exact allowlist still rejects DELETE/TRUNCATE/table UPDATE elsewhere.
+  assert.deepEqual(grants, [
+    {
+      table_schema: "public",
+      table_name: "placement_read_leases",
+      privilege_type: "DELETE",
+    },
+  ]);
   const columns = await adminQuery<{ table_name: string }>(
     `SELECT DISTINCT table_name FROM information_schema.column_privileges
       WHERE grantee = 'control_app' AND privilege_type = 'UPDATE' ORDER BY table_name`,

@@ -1,0 +1,22 @@
+{{- if .Values.appMetrics.enabled }}
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "greenguard-service.fullname" . }}-app-metrics
+  labels:
+    {{- include "greenguard-service.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-service.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  action: DENY
+  rules:
+    - from:
+        - source:
+            notPrincipals:
+              {{- toYaml .Values.appMetrics.allowedPrincipals | nindent 14 }}
+      to:
+        - operation:
+            ports: [{{ .Values.appMetrics.port | quote }}]
+{{- end }}

@@ -1,0 +1,37 @@
+{{- $clickhouse := .Values.clickhousePlane | default dict }}
+{{- if $clickhouse.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "ClickHouse plane requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "ClickHouse plane requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($clickhouse.image | default "")) }}{{ fail "ClickHouse plane requires an immutable image digest" }}{{ end }}
+{{- if ne ($clickhouse.authSecret | default "") "greenguard-telemetry-clickhouse-config" }}{{ fail "ClickHouse must use its scoped credential Secret" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-clickhouse
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "28"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/clickhouse-chart
+    helm:
+      valuesObject:
+        image: {{ $clickhouse.image | quote }}
+        storageClassName: {{ $clickhouse.storageClassName | quote }}
+        storageSize: {{ $clickhouse.storageSize | quote }}
+        authSecret: {{ $clickhouse.authSecret | quote }}
+        replayS3CIDRs:
+{{ toYaml ($clickhouse.replayS3CIDRs | default list) | indent 10 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+{{- end }}

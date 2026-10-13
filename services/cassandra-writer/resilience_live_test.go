@@ -115,10 +115,7 @@ func TestLiveWriterSurvivesCassandraOutages(t *testing.T) {
 	if os.Getenv("KAFKA_CASSANDRA_RESILIENCE_LIVE") != "1" {
 		t.Skip("set KAFKA_CASSANDRA_RESILIENCE_LIVE=1 to stop and start the local Cassandra container")
 	}
-	container := os.Getenv("CASSANDRA_TEST_CONTAINER")
-	if container == "" {
-		container = "greenguard-dev-cassandra-1"
-	}
+	container := cassandraTestContainer()
 	long := outageDuration()
 	ctx, cancel := context.WithTimeout(context.Background(), long+6*time.Minute)
 	defer cancel()

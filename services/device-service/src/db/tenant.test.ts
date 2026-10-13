@@ -1,7 +1,8 @@
+import { fixtureDb } from "../testing/fixtures.js";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createDb, type Db } from "./client.js";
+import { type Db } from "./client.js";
 import { InvalidTenantError, postgresCode } from "./errors.js";
 import { assertTenantId, withTenant } from "./tenant.js";
 import {
@@ -50,7 +51,7 @@ test("an invalid tenant is rejected before any database call", async () => {
 // D03 runs over one direct session (same backend proven by its PID) and over
 // PgBouncer transaction pooling, where the server connection is shared.
 const connections: [string, () => Db][] = [
-  ["direct session", () => createDb(env("INVENTORY_DIRECT_URL"), 1)],
+  ["direct session", () => fixtureDb(env("INVENTORY_DIRECT_URL"), 1)],
   ["PgBouncer", () => pooledDb(1)],
 ];
 
@@ -73,6 +74,28 @@ for (const [label, connect] of connections) {
 
     test("tenant context ends with its transaction on a reused connection", async () => {
       const pid = await backendPid();
+      const [placement] = await withTenant(
+        db,
+        a.tenantId,
+        (tx) => tx.$queryRaw<
+          {
+            tenant: string;
+            shard: string;
+            incarnation: string;
+            epoch: string;
+          }[]
+        >`
+        SELECT current_setting('app.tenant_id') AS tenant,
+               current_setting('app.shard_id') AS shard,
+               current_setting('app.shard_incarnation') AS incarnation,
+               current_setting('app.placement_epoch') AS epoch`,
+      );
+      assert.deepEqual(placement, {
+        tenant: a.tenantId,
+        shard: "s1",
+        incarnation: "20000000-0000-4000-8000-000000000091",
+        epoch: "1",
+      });
       const scoped = await withTenant(db, a.tenantId, (tx) =>
         tx.device.findMany(),
       );

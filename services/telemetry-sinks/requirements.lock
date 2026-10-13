@@ -1,0 +1,5 @@
+# Direct runtime dependencies mirror requirements.txt; transitive versions are
+# resolved by pip inside the pinned container image during the build.
+boto3==1.42.63
+confluent-kafka==2.15.1
+jsonschema==4.26.0

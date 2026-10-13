@@ -162,7 +162,6 @@ test(
       tableName,
       endpoint,
       region: process.env.AWS_REGION ?? "us-east-1",
-      localCredentials: true,
     });
     const kafka = new Kafka({
       clientId: `greenguard-contact-cdc-live-${randomUUID()}`,
@@ -281,7 +280,6 @@ test(
       tableName,
       endpoint,
       region: process.env.AWS_REGION ?? "us-east-1",
-      localCredentials: true,
     });
     const kafka = new Kafka({
       clientId: `greenguard-contact-recovery-${randomUUID()}`,
@@ -411,7 +409,6 @@ test(
       tableName,
       endpoint,
       region: process.env.AWS_REGION ?? "us-east-1",
-      localCredentials: true,
     });
     const kafka = new Kafka({
       clientId: `greenguard-contact-contract-live-${randomUUID()}`,
@@ -491,11 +488,7 @@ test(
       region: process.env.AWS_REGION ?? "us-east-1",
       credentials: { accessKeyId: "local", secretAccessKey: "local" },
     });
-    const store = createDynamoContactsProjectionStore({
-      tableName,
-      endpoint,
-      localCredentials: true,
-    });
+    const store = createDynamoContactsProjectionStore({ tableName, endpoint });
     try {
       await ensureTable(ddb, tableName);
       await store.checkpoint(1_750_000_005_000);
@@ -535,11 +528,7 @@ test(
       region: process.env.AWS_REGION ?? "us-east-1",
       credentials: { accessKeyId: "local", secretAccessKey: "local" },
     });
-    const store = createDynamoContactsProjectionStore({
-      tableName,
-      endpoint,
-      localCredentials: true,
-    });
+    const store = createDynamoContactsProjectionStore({ tableName, endpoint });
     const kafka = new Kafka({
       clientId: `greenguard-contact-commit-crash-${randomUUID()}`,
       brokers,

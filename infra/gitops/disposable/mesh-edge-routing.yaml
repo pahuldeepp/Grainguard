@@ -1,0 +1,74 @@
+# Installed only after Istio ingressgateway Service and both app Services exist.
+# CloudFront injects X-GreenGuard-Origin; the private ALB forwards it unchanged.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: greenguard-edge
+  namespace: istio-system
+spec:
+  selector:
+    app: istio-ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - greenguard/*
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: greenguard-edge
+  namespace: greenguard
+spec:
+  hosts:
+    - '*'
+  gateways:
+    - istio-system/greenguard-edge
+  http:
+    - name: bff
+      match:
+        - headers:
+            x-greenguard-origin:
+              exact: bff
+      route:
+        - destination:
+            host: bff-greenguard-bff.greenguard.svc.cluster.local
+            port:
+              number: 80
+    - name: dashboard
+      match:
+        - headers:
+            x-greenguard-origin:
+              exact: dashboard
+      route:
+        - destination:
+            host: dashboard-greenguard-dashboard.greenguard.svc.cluster.local
+            port:
+              number: 80
+    - name: unknown-origin
+      directResponse:
+        status: 404
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: greenguard-edge-bff-mtls
+  namespace: greenguard
+spec:
+  host: bff-greenguard-bff.greenguard.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: greenguard-edge-dashboard-mtls
+  namespace: greenguard
+spec:
+  host: dashboard-greenguard-dashboard.greenguard.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

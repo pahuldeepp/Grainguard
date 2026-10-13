@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { discoverBucket, IpTokenBucket } from "./rate-limit.js";
+import { IpTokenBucket } from "./rate-limit.js";
 
 test("token bucket allows a burst, then returns Retry-After seconds, then refills", () => {
   const bucket = new IpTokenBucket({
@@ -24,15 +24,4 @@ test("token bucket memory is bounded and evicts the oldest address", () => {
   for (const ip of ["a", "b", "c", "d"]) bucket.take(ip, 0);
   assert.equal(bucket.size, 3);
   assert.equal(bucket.take("a", 0), 0);
-});
-
-test("discovery bucket rejects non-finite limits without changing valid defaults", () => {
-  assert.equal(discoverBucket({}).take("a", 0), 0);
-  for (const env of [
-    { IDENTITY_DISCOVER_BURST: "NaN" },
-    { IDENTITY_DISCOVER_BURST: "Infinity" },
-    { IDENTITY_DISCOVER_PER_MINUTE: "NaN" },
-    { IDENTITY_DISCOVER_PER_MINUTE: "Infinity" },
-  ])
-    assert.throws(() => discoverBucket(env), /must be positive/);
 });

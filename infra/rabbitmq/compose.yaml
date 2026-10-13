@@ -8,10 +8,15 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: greenguard
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Run make bootstrap}
-    ports: ["127.0.0.1:55672:5672"]
-    mem_limit: 256m
+    ports:
+      - "127.0.0.1:55672:5672"
+      - "127.0.0.1:15692:15692"
+    # The persisted quorum queue metadata on this developer stack exceeds the
+    # original 256 MiB ceiling during recovery after an unclean Docker stop.
+    mem_limit: 512m
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+      - ../rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 3s

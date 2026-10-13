@@ -1,10 +1,12 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate dev verify check-plan build smoke
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed ci-compose-cleanup image-inventory
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
 COMPOSE = docker compose --env-file .env -f infra/compose/compose.yaml
 bootstrap:
 	node scripts/bootstrap.mjs
+ci-compose-cleanup:
+	node scripts/ci-compose-cleanup.mjs
 db-up:
 	$(COMPOSE) up -d --wait --build
 	$(COMPOSE) exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
@@ -12,7 +14,7 @@ db-down:
 	$(COMPOSE) down
 db-logs:
 	$(COMPOSE) logs --tail=100 postgres pgbouncer
-db-migrate: db-up
+db-migrate: db-up build-otel
 	npm run migrate -w services/device-service
 	npm run migrate -w services/workflow-alerts
 	npm run migrate -w services/tenant-control-plane
@@ -20,9 +22,12 @@ db-migrate: db-up
 	cd services/telemetry-ingest && go run ./cmd/migrate
 	$(MAKE) projection-migrate
 	$(MAKE) risk-migrate
+	npm run migrate -w @greenguard/notification-service
 	$(MAKE) jobs-migrate
 	$(MAKE) saga-migrate
 	$(MAKE) hardware-migrate
+build-otel:
+	npm run build -w @greenguard/otel
 build:
 	npm run build
 	mkdir -p build
@@ -33,14 +38,24 @@ build:
 	cd services/hardware-service && go build -o ../../build/hardware-worker ./cmd/worker
 dev: db-migrate build
 	npm run dev
-verify: check-plan db-migrate
+image-inventory:
+	bash scripts/check-image-inventory.sh
+verify: check-plan image-inventory db-migrate
+	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
+	node --test scripts/browser-e2e-stack.test.mjs scripts/oidc-authorize-request.test.mjs
+	node --test scripts/sonar-token.test.mjs scripts/sonar-gate.test.mjs scripts/sonar-snapshot.test.mjs scripts/sonar-native.test.mjs scripts/sonar-issues.test.mjs
 	npm run format:check
 	npm run lint
 	npm run typecheck
 	npm test
 	node --test scripts/contacts-schema.test.mjs
-	node --test scripts/browser-e2e-stack.test.mjs
+	node --test scripts/generate-tenant-bootstrap-ledger-manifest.test.mjs
+	node --test scripts/telemetry-ingest-performance-contract.test.mjs
+	$(MAKE) telemetry-sinks-test
+	node --test scripts/placement-fixture.test.mjs
+	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
+	node --test scripts/ci-compose-project.test.mjs scripts/rabbitmq-start.test.mjs scripts/stage07-process-health.test.mjs scripts/stage07-endpoints.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...
@@ -77,6 +92,39 @@ verify: check-plan db-migrate
 	$(MAKE) build
 check-plan:
 	python3 scripts/check_plan.py
+helm-validate:
+	bash scripts/helm-validate.sh
+kyverno-validate:
+	bash scripts/kyverno-validate.sh
+observability-up:
+	docker compose -f infra/observability/compose.yaml up -d
+observability-down:
+	docker compose -f infra/observability/compose.yaml down
+observability-validate:
+	node scripts/observability-validate.mjs
+observability-test-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/platform.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/platform.test.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/brokers.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/brokers.test.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/slo.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/slo.test.yaml
+.PHONY: observability-aws-config
+observability-aws-config:
+	node scripts/render-observability-aws-config.mjs
+.PHONY: observability-test-broker-rules
+observability-test-broker-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/brokers.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/brokers.test.yaml
+	node --test infra/observability/exporters/streaming-state-exporter.test.mjs
+.PHONY: observability-runbook-check observability-rehearsal-test observability-rehearse
+observability-runbook-check:
+	node --test scripts/observability-runbook-check.test.mjs
+	node scripts/observability-runbook-check.mjs
+observability-rehearsal-test:
+	node --test scripts/observability-rehearsal.test.mjs
+observability-rehearse: observability-rehearsal-test
+	node scripts/observability-rehearsal.mjs
 smoke: db-migrate build
 	node scripts/smoke.mjs
 
@@ -107,6 +155,7 @@ staging:
 	docker compose --env-file .env -f infra/staging/compose.yaml up -d --build --wait
 	$(MAKE) staging-check
 staging-check:
+	node --test scripts/staging-check-contract.test.mjs
 	node scripts/staging-check.mjs
 staging-down:
 	docker compose --env-file .env -f infra/staging/compose.yaml down
@@ -164,7 +213,7 @@ projection-replay:
 # Opt-in Cassandra history (Stage 05c); never part of dev/verify/smoke.
 CASSANDRA_COMPOSE = $(COMPOSE) -f infra/cassandra/compose.yaml
 CASSANDRA_HOSTS ?= 127.0.0.1:59042
-.PHONY: cassandra-up cassandra-down cassandra-test
+.PHONY: cassandra-up cassandra-down cassandra-test cassandra-rf3-test
 cassandra-up:
 	$(CASSANDRA_COMPOSE) up -d --wait cassandra
 	cd services/cassandra-writer && go run ./cmd/migrate
@@ -172,6 +221,15 @@ cassandra-down:
 	$(CASSANDRA_COMPOSE) stop cassandra
 cassandra-test:
 	cd services/cassandra-writer && CASSANDRA_HOSTS=$(CASSANDRA_HOSTS) CASSANDRA_LIVE=1 go test -count=1 -race -run 'Live' -v ./...
+
+# Isolated, disposable RF3 cluster acceptance. Uses ports 59043-59045 and
+# separate persistent volumes; the script stops (but does not delete) the lab.
+cassandra-rf3-test:
+	bash scripts/cassandra-rf3-acceptance.sh
+
+.PHONY: telemetry-source-retention-guard
+telemetry-source-retention-guard:
+	bash scripts/check-write-side-retention-guard.sh
 
 # Destructive, opt-in local fault gate: stops/starts ONLY the Cassandra container
 # (startup-while-down and a CASSANDRA_OUTAGE_SECONDS outage, default 130).
@@ -294,7 +352,7 @@ RABBITMQ_COMPOSE_ABS = docker compose --env-file $(CURDIR)/.env -f $(CURDIR)/inf
 RABBITMQ_RESTART_CMD ?= $(RABBITMQ_COMPOSE_ABS) restart rabbitmq >/dev/null 2>&1 && $(RABBITMQ_COMPOSE_ABS) up -d --wait rabbitmq >/dev/null 2>&1
 .PHONY: rabbitmq-up rabbitmq-down rabbitmq-test dlq-replay redrive-dead
 rabbitmq-up:
-	$(RABBITMQ_COMPOSE) up -d --wait rabbitmq
+	node scripts/rabbitmq-start.mjs -- $(RABBITMQ_COMPOSE)
 rabbitmq-down:
 	$(RABBITMQ_COMPOSE) stop rabbitmq
 # Destructive: restarts the broker mid-flight and purges the notification queues.
@@ -328,7 +386,7 @@ cache-invalidator-down:
 	docker compose -f infra/cache-invalidator/compose.yaml down
 cache-invalidator-test:
 	cd services/cache-invalidator && go test -race ./...
-.PHONY: redis-up redis-down redis-test redis-load
+.PHONY: redis-up redis-down redis-test redis-load perf-ingest
 redis-up:
 	$(REDIS_COMPOSE) up -d --wait redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6
 	$(REDIS_COMPOSE) up redis-cluster-init
@@ -340,6 +398,29 @@ redis-test: redis-up
 redis-load: redis-up
 	npm run build -w @greenguard/read-api
 	node scripts/redis-load.mjs
+
+# Stage 13 authenticated ingest load scenario. The k6 script enforces loopback
+# for local runs and an exact URL + explicit write acknowledgement for AWS.
+perf-ingest:
+	command -v k6 >/dev/null || { echo "k6 is required; see tests/performance/README.md" >&2; exit 1; }
+	k6 run tests/performance/telemetry-ingest.js
+
+# Seeds a unique local tenant/device fixture, runs the authenticated HTTP baseline,
+# then deletes that tenant's rows. It never targets a non-loopback database/API.
+.PHONY: perf-ingest-local
+perf-ingest-local:
+	command -v k6 >/dev/null || { echo "k6 is required; see tests/performance/README.md" >&2; exit 1; }
+	: "$${GG_PERF_LOCAL_ACK:?Set GG_PERF_LOCAL_ACK=I_ACCEPT_WRITING_LOCAL_SYNTHETIC_READINGS}"
+	node scripts/performance/telemetry-ingest-local.mjs
+
+# Exercise the ClickHouse/S3 Kafka sinks and archive replay contract from the
+# required local verification gate. The environment stays under ignored .local.
+.PHONY: telemetry-sinks-test
+TELEMETRY_SINKS_VENV = .local/telemetry-sinks-venv
+telemetry-sinks-test:
+	python3 -m venv $(TELEMETRY_SINKS_VENV)
+	$(TELEMETRY_SINKS_VENV)/bin/pip install -q -r services/telemetry-sinks/requirements.lock
+	PYTHONPATH=services/telemetry-sinks $(TELEMETRY_SINKS_VENV)/bin/python -m unittest discover -s services/telemetry-sinks/tests -v
 oidc-browser-test: oidc-up
 	npm run build -w @greenguard/tenant-auth -w @greenguard/bff -w @greenguard/read-api
 	set -a; . ./.env; set +a; node scripts/oidc-browser.mjs
@@ -414,3 +495,36 @@ mysql-cdc-test: db-migrate
 design-check:
 	node --test scripts/design-check.test.mjs
 	node scripts/design-check.mjs --report=evidence/design-check-latest.md $(ARGS)
+
+.PHONY: observability-test-ml-rules
+observability-test-ml-rules:
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 check rules /etc/prometheus/rules/ml-scoring.yaml
+	docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/observability:/etc/prometheus:ro" prom/prometheus:v3.2.1 test rules /etc/prometheus/tests/ml-scoring.test.yaml
+
+# Optional local-only ClickHouse analytics plus canonical synthetic scorer fixtures.
+ml-clickhouse-up:
+	docker compose -f labs/clickhouse/compose.yaml up -d --wait clickhouse
+	docker compose -f labs/clickhouse/compose.yaml --profile init run --rm schema-init
+ml-clickhouse-down:
+	docker compose -f labs/clickhouse/compose.yaml down
+ml-local-synthetic-seed:
+	ML_SYNTHETIC_TENANT_ID=0a0a0a0a-0000-4000-8000-00000000000a PYTHONPATH=services/ml-scoring .local/ml-scoring-venv/bin/python services/ml-scoring/seed_local_synthetic.py --allow-local-synthetic
+.PHONY: telemetry-pipeline-e2e
+telemetry-pipeline-e2e:
+	@set -eu; compose='docker compose --project-name greenguard-telemetry-pipeline --env-file .local/telemetry-pipeline.env -f labs/telemetry-pipeline/compose.yaml'; \
+	cleanup() { status=$$?; if [ $$status -ne 0 ]; then $$compose logs --no-color telemetry-archive telemetry-clickhouse-sink >&2 || true; fi; if [ "$${KEEP_TELEMETRY_PIPELINE:-0}" = 1 ]; then echo "Preserving disposable telemetry lab for inspection." >&2; return $$status; fi; $$compose down --volumes --remove-orphans >/dev/null 2>&1 || true; rm -rf .local/telemetry-pipeline .local/telemetry-pipeline.env; return $$status; }; \
+	trap cleanup EXIT INT TERM; \
+	python3 labs/telemetry-pipeline/prepare.py; \
+	$$compose up -d --build --wait kafka clickhouse minio; \
+	$$compose --profile init run --rm kafka-init; \
+	$$compose --profile init run --rm minio-init; \
+	$$compose up -d --build --wait telemetry-archive telemetry-clickhouse-sink; \
+	$$compose --profile tools run --rm publisher; \
+	$$compose --profile tools run --rm acceptance; \
+	confirm_replay=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --topic greenguard.telemetry.recorded.v1 --confirm); \
+	printf '%s\n' "$$confirm_replay"; \
+	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["skipped_replayed"] == 0 and result["mode"] == "published", result' "$$confirm_replay"; \
+	$$compose --profile tools run --rm -e EXPECTED_ARCHIVE_OBJECTS=2 acceptance; \
+	replay_check=$$($$compose run -T --rm --entrypoint python telemetry-archive -m telemetry_sinks.replay --topic greenguard.telemetry.recorded.v1); \
+	printf '%s\n' "$$replay_check"; \
+	python3 -c 'import json,sys; result=json.loads(sys.argv[1]); assert result["objects"] == 1 and result["skipped_replayed"] == 1 and result["skipped_other_topic"] == 0 and result["mode"].startswith("dry-run"), result' "$$replay_check"

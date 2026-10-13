@@ -1,0 +1,326 @@
+# Generated-style SLO rules (Stage 11). PROPOSED targets, UNMEASURED; see docs/SLOS.md.
+# Ratios are empty (not zero) when a series has no traffic, so an idle system never burns.
+# Labels are bounded: only the fixed `sli` label is added.
+groups:
+  - name: slo-recording
+    interval: 1m
+    rules:
+      # ingest_availability: good = 2xx on the readings route; bad = 5xx; 4xx and 429 are client outcomes and excluded
+      - record: slo:error_budget:ratio
+        expr: vector(0.001)
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate5m
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[5m])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[5m]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate30m
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[30m])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[30m]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate1h
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[1h])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[1h]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate2h
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[2h])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[2h]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate6h
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[6h])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[6h]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate1d
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[1d])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[1d]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate3d
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[3d])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[3d]))
+        labels:
+          sli: ingest_availability
+      - record: slo:error_ratio:rate30d
+        expr: (sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"5.."}[30d])) or vector(0)) / sum(rate(http_server_requests_total{job="telemetry-ingest",route=~".*/readings",status_code=~"2..|5.."}[30d]))
+        labels:
+          sli: ingest_availability
+      # api_availability: device-service and workflow-alerts; non-5xx over non-4xx; health and metrics routes excluded
+      - record: slo:error_budget:ratio
+        expr: vector(0.001)
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate5m
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[5m])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[5m]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate30m
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[30m])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[30m]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate1h
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[1h])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[1h]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate2h
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[2h])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[2h]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate6h
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[6h])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[6h]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate1d
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[1d])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[1d]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate3d
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[3d])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[3d]))
+        labels:
+          sli: api_availability
+      - record: slo:error_ratio:rate30d
+        expr: (sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code=~"5.."}[30d])) or vector(0)) / sum(rate(http_server_requests_total{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",status_code!~"4.."}[30d]))
+        labels:
+          sli: api_availability
+      # api_latency: good = completed within 0.25 s (nearest exposed bucket at or below the 300 ms p95 target)
+      - record: slo:error_budget:ratio
+        expr: vector(0.050)
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate5m
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[5m])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[5m]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[5m]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate30m
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[30m])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[30m]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[30m]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate1h
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[1h])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[1h]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[1h]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate2h
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[2h])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[2h]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[2h]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate6h
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[6h])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[6h]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[6h]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate1d
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[1d])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[1d]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[1d]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate3d
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[3d])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[3d]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[3d]))
+        labels:
+          sli: api_latency
+      - record: slo:error_ratio:rate30d
+        expr: (sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[30d])) - sum(rate(http_server_duration_seconds_bucket{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$",le="0.25"}[30d]))) / sum(rate(http_server_duration_seconds_count{job=~"device-service|workflow-alerts",route!~".*(healthz|readyz|metrics)$"}[30d]))
+        labels:
+          sli: api_latency
+      # projection_freshness: good = event applied to the projection within 1 s
+      - record: slo:error_budget:ratio
+        expr: vector(0.050)
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate5m
+        expr: (sum(rate(projection_event_to_projection_seconds_count[5m])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[5m]))) / sum(rate(projection_event_to_projection_seconds_count[5m]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate30m
+        expr: (sum(rate(projection_event_to_projection_seconds_count[30m])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[30m]))) / sum(rate(projection_event_to_projection_seconds_count[30m]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate1h
+        expr: (sum(rate(projection_event_to_projection_seconds_count[1h])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[1h]))) / sum(rate(projection_event_to_projection_seconds_count[1h]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate2h
+        expr: (sum(rate(projection_event_to_projection_seconds_count[2h])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[2h]))) / sum(rate(projection_event_to_projection_seconds_count[2h]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate6h
+        expr: (sum(rate(projection_event_to_projection_seconds_count[6h])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[6h]))) / sum(rate(projection_event_to_projection_seconds_count[6h]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate1d
+        expr: (sum(rate(projection_event_to_projection_seconds_count[1d])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[1d]))) / sum(rate(projection_event_to_projection_seconds_count[1d]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate3d
+        expr: (sum(rate(projection_event_to_projection_seconds_count[3d])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[3d]))) / sum(rate(projection_event_to_projection_seconds_count[3d]))
+        labels:
+          sli: projection_freshness
+      - record: slo:error_ratio:rate30d
+        expr: (sum(rate(projection_event_to_projection_seconds_count[30d])) - sum(rate(projection_event_to_projection_seconds_bucket{le="1"}[30d]))) / sum(rate(projection_event_to_projection_seconds_count[30d]))
+        labels:
+          sli: projection_freshness
+      # notification_delivery: good = sent; bad = failed, dead or parked-unknown; suppressed excluded
+      - record: slo:error_budget:ratio
+        expr: vector(0.010)
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate5m
+        expr: ((sum(rate(notifications_outcome_failed_total[5m])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[5m])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[5m])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[5m])) + (sum(rate(notifications_outcome_failed_total[5m])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[5m])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[5m])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate30m
+        expr: ((sum(rate(notifications_outcome_failed_total[30m])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[30m])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[30m])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[30m])) + (sum(rate(notifications_outcome_failed_total[30m])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[30m])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[30m])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate1h
+        expr: ((sum(rate(notifications_outcome_failed_total[1h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[1h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[1h])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[1h])) + (sum(rate(notifications_outcome_failed_total[1h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[1h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[1h])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate2h
+        expr: ((sum(rate(notifications_outcome_failed_total[2h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[2h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[2h])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[2h])) + (sum(rate(notifications_outcome_failed_total[2h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[2h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[2h])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate6h
+        expr: ((sum(rate(notifications_outcome_failed_total[6h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[6h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[6h])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[6h])) + (sum(rate(notifications_outcome_failed_total[6h])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[6h])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[6h])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate1d
+        expr: ((sum(rate(notifications_outcome_failed_total[1d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[1d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[1d])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[1d])) + (sum(rate(notifications_outcome_failed_total[1d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[1d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[1d])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate3d
+        expr: ((sum(rate(notifications_outcome_failed_total[3d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[3d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[3d])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[3d])) + (sum(rate(notifications_outcome_failed_total[3d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[3d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[3d])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      - record: slo:error_ratio:rate30d
+        expr: ((sum(rate(notifications_outcome_failed_total[30d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[30d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[30d])) or vector(0))) / (sum(rate(notifications_outcome_sent_total[30d])) + (sum(rate(notifications_outcome_failed_total[30d])) or vector(0)) + (sum(rate(notifications_outcome_dead_total[30d])) or vector(0)) + (sum(rate(notifications_unknown_parked_total[30d])) or vector(0)))
+        labels:
+          sli: notification_delivery
+      # job_dispatch: good = published to the broker; bad = exhausted retries (dead); retries are not bad
+      - record: slo:error_budget:ratio
+        expr: vector(0.001)
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate5m
+        expr: (sum(rate(jobs_dispatch_dead_total[5m])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[5m])) + (sum(rate(jobs_dispatch_dead_total[5m])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate30m
+        expr: (sum(rate(jobs_dispatch_dead_total[30m])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[30m])) + (sum(rate(jobs_dispatch_dead_total[30m])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate1h
+        expr: (sum(rate(jobs_dispatch_dead_total[1h])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[1h])) + (sum(rate(jobs_dispatch_dead_total[1h])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate2h
+        expr: (sum(rate(jobs_dispatch_dead_total[2h])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[2h])) + (sum(rate(jobs_dispatch_dead_total[2h])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate6h
+        expr: (sum(rate(jobs_dispatch_dead_total[6h])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[6h])) + (sum(rate(jobs_dispatch_dead_total[6h])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate1d
+        expr: (sum(rate(jobs_dispatch_dead_total[1d])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[1d])) + (sum(rate(jobs_dispatch_dead_total[1d])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate3d
+        expr: (sum(rate(jobs_dispatch_dead_total[3d])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[3d])) + (sum(rate(jobs_dispatch_dead_total[3d])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_ratio:rate30d
+        expr: (sum(rate(jobs_dispatch_dead_total[30d])) or vector(0)) / (sum(rate(jobs_dispatch_published_total[30d])) + (sum(rate(jobs_dispatch_dead_total[30d])) or vector(0)))
+        labels:
+          sli: job_dispatch
+      - record: slo:error_budget_remaining:ratio30d
+        expr: (1 - (slo:error_ratio:rate30d / on(sli) slo:error_budget:ratio)) and on() (min(time() - prometheus_tsdb_lowest_timestamp_seconds{job="prometheus"}) >= 30 * 24 * 60 * 60)
+      - record: slo:burn_rate:5m
+        expr: slo:error_ratio:rate5m / on(sli) slo:error_budget:ratio
+      - record: slo:burn_rate:1h
+        expr: slo:error_ratio:rate1h / on(sli) slo:error_budget:ratio
+      - record: slo:burn_rate:6h
+        expr: slo:error_ratio:rate6h / on(sli) slo:error_budget:ratio
+  - name: slo-alerts
+    rules:
+      - alert: SLOHistoryWindowUnavailable
+        expr: absent(prometheus_tsdb_lowest_timestamp_seconds{job="prometheus"}) or min(time() - prometheus_tsdb_lowest_timestamp_seconds{job="prometheus"}) < 30 * 24 * 60 * 60
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "30-day SLO history is not available"
+          description: "Prometheus does not currently retain 30 days of samples. The 30-day error-budget panel is withheld until the full window is available."
+          runbook_url: "docs/runbooks/slo-history-window.md"
+      - alert: SLOBurnRateFastPage
+        expr: |
+          (slo:error_ratio:rate1h / on(sli) slo:error_budget:ratio > 14.4)
+          and on(sli)
+          (slo:error_ratio:rate5m / on(sli) slo:error_budget:ratio > 14.4)
+        labels:
+          severity: page
+          window: 1h_5m
+        annotations:
+          summary: "Fast error-budget burn for {{ $labels.sli }}"
+          description: "{{ $labels.sli }} is burning its 30d error budget at 14.4x or more over both 1h and 5m. At this rate the budget is gone in about 2 days."
+          runbook_url: "docs/runbooks/slo-burn-page.md"
+      - alert: SLOBurnRateSlowPage
+        expr: |
+          (slo:error_ratio:rate6h / on(sli) slo:error_budget:ratio > 6)
+          and on(sli)
+          (slo:error_ratio:rate30m / on(sli) slo:error_budget:ratio > 6)
+        labels:
+          severity: page
+          window: 6h_30m
+        annotations:
+          summary: "Slow error-budget burn for {{ $labels.sli }}"
+          description: "{{ $labels.sli }} is burning its 30d error budget at 6x or more over both 6h and 30m. At this rate the budget is gone in about 5 days."
+          runbook_url: "docs/runbooks/slo-burn-page.md"
+      - alert: SLOBurnRateFastTicket
+        expr: |
+          (slo:error_ratio:rate1d / on(sli) slo:error_budget:ratio > 3)
+          and on(sli)
+          (slo:error_ratio:rate2h / on(sli) slo:error_budget:ratio > 3)
+        labels:
+          severity: ticket
+          window: 24h_2h
+        annotations:
+          summary: "Moderate error-budget burn for {{ $labels.sli }}"
+          description: "{{ $labels.sli }} is burning its 30d error budget at 3x or more over both 24h and 2h. Open a ticket; the budget lasts about 10 days at this rate."
+          runbook_url: "docs/runbooks/slo-burn-ticket.md"
+      - alert: SLOBurnRateSlowTicket
+        expr: |
+          (slo:error_ratio:rate3d / on(sli) slo:error_budget:ratio > 1)
+          and on(sli)
+          (slo:error_ratio:rate6h / on(sli) slo:error_budget:ratio > 1)
+        labels:
+          severity: ticket
+          window: 3d_6h
+        annotations:
+          summary: "Slow error-budget burn for {{ $labels.sli }}"
+          description: "{{ $labels.sli }} is burning its 30d error budget at 1x or more over both 3d and 6h. The budget will not last the 30d window."
+          runbook_url: "docs/runbooks/slo-burn-ticket.md"
+  - name: slo-integrity
+    rules:
+      # Zero-tolerance invariants, not percentage SLOs: see docs/SLOS.md "Non-SLO invariants".
+      - alert: IntegrityCDCQuarantined
+        expr: sum(increase(cdc_quarantined_total[10m])) > 0
+        labels:
+          severity: page
+          slo_class: integrity
+        annotations:
+          summary: "CDC transformer quarantined an event"
+          description: "cdc_quarantined_total increased in the last 10 minutes. A quarantined event is not delivered downstream until an operator resolves it; the integrity invariant allows zero unexplained quarantines."
+          runbook_url: "docs/runbooks/slo-integrity.md"
+      - alert: IntegrityProjectionQuarantined
+        expr: increase(projection_quarantined_total[10m]) > 0
+        labels:
+          severity: page
+          slo_class: integrity
+        annotations:
+          summary: "Projection builder quarantined an event"
+          description: "projection_quarantined_total increased in the last 10 minutes; the read model is missing an event until it is resolved."
+          runbook_url: "docs/runbooks/slo-integrity.md"
+      - alert: IntegrityJobsDLQPublishFailed
+        expr: increase(jobs_dlq_publish_failed_total[10m]) > 0
+        labels:
+          severity: page
+          slo_class: integrity
+        annotations:
+          summary: "A job could not be written to the dead-letter queue"
+          description: "jobs_dlq_publish_failed_total increased; a dead job may exist only in the database and needs manual redrive."
+          runbook_url: "docs/runbooks/slo-integrity.md"

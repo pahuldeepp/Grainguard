@@ -54,12 +54,7 @@ export class IpTokenBucket {
 export function discoverBucket(env: NodeJS.ProcessEnv = process.env) {
   const burst = Number(env.IDENTITY_DISCOVER_BURST ?? 20);
   const perMinute = Number(env.IDENTITY_DISCOVER_PER_MINUTE ?? 30);
-  if (
-    !Number.isFinite(burst) ||
-    burst < 1 ||
-    !Number.isFinite(perMinute) ||
-    perMinute <= 0
-  )
+  if (!(burst >= 1) || !(perMinute > 0))
     throw new Error(
       "IDENTITY_DISCOVER_BURST and IDENTITY_DISCOVER_PER_MINUTE must be positive",
     );

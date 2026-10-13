@@ -1,0 +1,9 @@
+DROP TABLE assistant_suggestion_usage_daily;
+DROP TABLE assistant_suggestion_usage_events;
+DROP INDEX assistant_suggestion_usage_pending_idx;
+ALTER TABLE assistant_suggestion_usage_outbox
+    DROP CONSTRAINT assistant_suggestion_usage_published_unclaimed,
+    DROP CONSTRAINT assistant_suggestion_usage_claim_pair,
+    DROP COLUMN published_at,
+    DROP COLUMN claimed_until,
+    DROP COLUMN claim_token;

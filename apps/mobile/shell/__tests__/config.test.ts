@@ -1,26 +1,43 @@
-import { LIVE_CONFIG, liveConfigured } from '../src/services/config';
+import {
+  LOCAL_DEV_CONFIG,
+  resolveLiveConfig,
+} from '../src/services/config';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 declare const __dirname: string;
-const fs = require('fs');
-const path = require('path');
 
-const ios = path.join(__dirname, '../ios/GreenGuardMobile');
-const read = (name: string) => fs.readFileSync(path.join(ios, name), 'utf8');
+const ios = join(__dirname, '../ios/GreenGuardMobile');
+const read = (name: string) => readFileSync(join(ios, name), 'utf8');
 
 test('dev live config points at the local Dex client and holds no secret', () => {
-  expect(liveConfigured()).toBe(true);
-  expect(LIVE_CONFIG.clientId).toBe('greenguard-mobile');
-  expect(LIVE_CONFIG.redirectUri).toBe('greenguard://auth/callback');
-  expect(LIVE_CONFIG.authorizationEndpoint).toBe(
+  expect(LOCAL_DEV_CONFIG.clientId).toBe('greenguard-mobile');
+  expect(LOCAL_DEV_CONFIG.redirectUri).toBe('greenguard://auth/callback');
+  expect(LOCAL_DEV_CONFIG.authorizationEndpoint).toBe(
     'http://127.0.0.1:5556/dex/auth',
   );
-  expect(LIVE_CONFIG.scope).toContain('audience:server:client_id:');
-  expect(JSON.stringify(LIVE_CONFIG)).not.toMatch(/password|secret/i);
+  expect(LOCAL_DEV_CONFIG.audienceMode).toBe('scope');
+  expect(LOCAL_DEV_CONFIG.audience).toBe('greenguard-dashboard');
+  expect(LOCAL_DEV_CONFIG.scope).not.toContain('audience:server:client_id:');
+  expect(JSON.stringify(LOCAL_DEV_CONFIG)).not.toMatch(/password|secret/i);
+});
+
+test('a deployment config overrides localhost in Debug and Release', () => {
+  const deployed = {
+    ...LOCAL_DEV_CONFIG,
+    authorizationEndpoint: 'https://auth.example.com/dex/auth',
+    tokenEndpoint: 'https://auth.example.com/dex/token',
+    bffEndpoint: 'https://api.example.com/graphql',
+  };
+  expect(resolveLiveConfig(deployed, true)).toEqual(deployed);
+  expect(resolveLiveConfig(deployed, false)).toEqual(deployed);
+  expect(resolveLiveConfig(null, false).bffEndpoint).toBe('');
+  expect(resolveLiveConfig(null, true)).toEqual(LOCAL_DEV_CONFIG);
 });
 
 test('the registered redirect matches the Dex template and the URL scheme', () => {
-  const dex = fs.readFileSync(
-    path.join(__dirname, '../../../../infra/oidc/dex.yaml.tpl'),
+  const dex = readFileSync(
+    join(__dirname, '../../../../infra/oidc/dex.yaml.tpl'),
     'utf8',
   );
   expect(dex).toContain('id: greenguard-mobile');
@@ -38,8 +55,8 @@ test('plain HTTP is allowed to localhost in Debug only', () => {
   expect(debug).toContain('NSExceptionDomains');
   expect(debug).toContain('<key>127.0.0.1</key>');
   expect(debug).toMatch(/NSAllowsArbitraryLoads<\/key>\s*<false\/>/);
-  const project = fs.readFileSync(
-    path.join(ios, '../GreenGuardMobile.xcodeproj/project.pbxproj'),
+  const project = readFileSync(
+    join(ios, '../GreenGuardMobile.xcodeproj/project.pbxproj'),
     'utf8',
   );
   const debugPlists = (project.match(/INFOPLIST_FILE = [^;]+;/g) ?? []).map(

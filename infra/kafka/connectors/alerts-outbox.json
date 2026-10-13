@@ -18,6 +18,7 @@
   "tombstones.on.delete": "false",
   "include.schema.changes": "false",
   "heartbeat.interval.ms": "0",
+  "message.prefix.exclude.list": ".*",
   "key.converter": "org.apache.kafka.connect.json.JsonConverter",
   "key.converter.schemas.enable": "false",
   "value.converter": "org.apache.kafka.connect.json.JsonConverter",

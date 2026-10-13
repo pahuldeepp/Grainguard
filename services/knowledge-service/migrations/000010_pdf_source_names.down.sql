@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_document_versions DROP COLUMN source_file_name;

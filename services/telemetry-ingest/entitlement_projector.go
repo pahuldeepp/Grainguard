@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 )
 
@@ -97,7 +98,7 @@ func applyEntitlementEvent(ctx context.Context, db TxStarter, e *entitlementEven
 
 // processEntitlementRecord applies one heartbeat or plan event, quarantines a
 // malformed one to the DLQ, and commits the offset only after the effect.
-func processEntitlementRecord(ctx context.Context, db *pgxpool.Pool, client *kgo.Client, record *kgo.Record) error {
+func processEntitlementRecord(ctx context.Context, db TxStarter, client *kgo.Client, record *kgo.Record) error {
 	err := applyEntitlementRecord(ctx, db, record)
 	if err != nil {
 		var poison poisonError
@@ -114,11 +115,22 @@ func processEntitlementRecord(ctx context.Context, db *pgxpool.Pool, client *kgo
 
 type poisonError struct{ error }
 
-func applyEntitlementRecord(ctx context.Context, db *pgxpool.Pool, record *kgo.Record) error {
+func applyEntitlementRecord(ctx context.Context, db TxStarter, record *kgo.Record) error {
 	if at, ok, err := parseHeartbeat(record.Value); err != nil {
 		return poisonError{err}
 	} else if ok {
-		return applyEntitlementHeartbeat(ctx, db, record.Partition, at)
+		if shards, ok := db.(*common.ShardedDB); ok {
+			return shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+				return shards.WithInfrastructure(ctx, shard, "", func(ctx context.Context, tx pgx.Tx) error {
+					return applyEntitlementHeartbeat(ctx, tx, record.Partition, at)
+				})
+			})
+		}
+		exec, ok := db.(heartbeatExec)
+		if !ok {
+			return errors.New("entitlement heartbeat requires explicit infrastructure executor")
+		}
+		return applyEntitlementHeartbeat(ctx, exec, record.Partition, at)
 	}
 	e, err := parseEntitlement(record.Value, record.Key)
 	if err != nil {
@@ -158,16 +170,47 @@ func applyEntitlementHeartbeat(ctx context.Context, db heartbeatExec, partition 
 	return err
 }
 func runEntitlementProjector(ctx context.Context, getenv func(string) string) error {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return err
+	}
 	url, brokers := getenv("TELEMETRY_ENTITLEMENT_PROJECTOR_URL"), getenv("KAFKA_BROKERS")
-	if url == "" || brokers == "" {
+	if (url == "" && getenv("SHARD_REGISTRY_FILE") == "") || brokers == "" {
 		return errors.New("TELEMETRY_ENTITLEMENT_PROJECTOR_URL and KAFKA_BROKERS required")
 	}
-	db, err := pgxpool.New(ctx, url)
+	probe, err := newWorkerProbe(probeAddress(getenv("TELEMETRY_ENTITLEMENT_PROJECTOR_HEALTH_ADDR")))
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	client, err := kgo.NewClient(transport.Options(strings.Split(brokers, ","), "telemetry-entitlements-v1", []string{entitlementTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted()))...)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = probe.close(closeCtx)
+	}()
+	var db TxStarter
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(getenv, "telemetry-ingest", "greenguard_telemetry", "telemetry_entitlement_projector")
+		if err != nil {
+			return err
+		}
+		defer shards.Close()
+		db = shards
+	} else {
+		pool, err := pgxpool.New(ctx, url)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		db = pool
+	}
+	options, err := transport.SecureOptions(strings.Split(brokers, ","), "telemetry-entitlements-v1", []string{entitlementTopic},
+		kgo.FetchIsolationLevel(kgo.ReadCommitted()),
+		kgo.OnPartitionsAssigned(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(true) }),
+		kgo.OnPartitionsRevoked(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(false) }),
+		kgo.OnPartitionsLost(func(context.Context, *kgo.Client, map[string][]int32) { probe.setAssigned(false) }))
+	if err != nil {
+		return err
+	}
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return err
 	}

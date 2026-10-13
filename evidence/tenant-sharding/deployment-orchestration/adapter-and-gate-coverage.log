@@ -1,0 +1,6 @@
+Name                                                  Stmts   Miss  Cover
+-------------------------------------------------------------------------
+infra/gitops/disposable/check-deployed-workloads.py     137      8    94%
+infra/gitops/disposable/run-deployed-workloads.py        44      1    98%
+-------------------------------------------------------------------------
+TOTAL                                                   181      9    95%

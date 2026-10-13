@@ -73,3 +73,30 @@ test("cost gate bounds aliases, nesting, fragments, and operation count", () => 
   );
   assert.ok(new QueryPolicyError("x") instanceof Error);
 });
+
+test("all shipped operation documents fit the resolver budget and new hashes stay pinned", () => {
+  for (const query of Object.values(operations))
+    assertQueryBudget(parse(query));
+  const expected = {
+    deviceHistory:
+      "a1fba25351d29fc350e32cb67d95327ea28e1641257212c4dfbf0e1cb9108a5f",
+    alertListV2:
+      "396838eb74e8646aaa0eff147eaf1ec7c828709e47d506fe13206a5b643c5da3",
+    alertDetailV2:
+      "3c25254d5a8578cffe28243acb7244b7c072fe40adcc553e65c3cbc48290e2ae",
+    alertHistory:
+      "9b48101f81e7442fca153c8874c1e73f32ec2c76779632ad7a2939faba1472cb",
+    alertNotifications:
+      "1d698e8f7d31fa9b524760cb838ce5ae159bf319e814348ed79036a6b03b7142",
+    binReadingsLatest:
+      "4d3af85135230b288c12bb98f994c3500aabd25b68d8ff9ed570250cb5bf1158",
+    binReadingsTrend:
+      "ac6b76a7bbc7fee9ff5cb2658acd57a3264de8c85624f42f86d36b7d2eff09b4",
+  };
+  for (const [name, hash] of Object.entries(expected))
+    assert.equal(
+      operationHash(operations[name as keyof typeof operations]),
+      hash,
+      `${name} exact bytes changed`,
+    );
+});

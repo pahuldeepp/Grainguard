@@ -30,7 +30,16 @@ def run():
     consumer = None
     try:
         elastic.create_index(index)
-        consumer = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        # The local acceptance may run beside OTel or another worker already
+        # bound to 8080. This test never probes the health listener, so let the
+        # OS allocate a private ephemeral port rather than creating a false
+        # Kafka/search failure from a test-only port collision.
+        consumer = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "HEALTH_PORT": "0"},
+        )
         producer = Producer({"bootstrap.servers": bootstrap})
         # The new group must finish assignment before its first event; repeat
         # the same deterministic event until indexed if assignment is delayed.

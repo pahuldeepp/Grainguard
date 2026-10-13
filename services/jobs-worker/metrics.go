@@ -5,10 +5,14 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 // Metrics are process-wide counters. They never carry tenant or device labels.
 type Metrics struct {
+	DBPool           *pgxpool.Pool
 	EventsProcessed  atomic.Int64
 	EventsDuplicate  atomic.Int64
 	EventsQuarantine atomic.Int64
@@ -63,4 +67,8 @@ jobs_dispatch_lag_seconds %g
 `, m.EventsProcessed.Load(), m.EventsDuplicate.Load(), m.EventsQuarantine.Load(), m.IntentsCreated.Load(),
 		m.Published.Load(), m.Retried.Load(), m.Dead.Load(), m.ReceiptsApplied.Load(), m.ReceiptsIgnored.Load(),
 		m.InFlight.Load(), m.DLQPublished.Load(), m.DLQPublishFailed.Load(), m.Redriven.Load(), float64(m.lagMillis.Load())/1000)
+	_, _ = fmt.Fprint(w, common.RenderREDMetrics())
+	if m.DBPool != nil {
+		_, _ = fmt.Fprint(w, common.RenderPGXPoolMetrics("jobs_worker", m.DBPool.Stat()))
+	}
 }

@@ -1,8 +1,8 @@
+import { fixtureDb } from "../testing/fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import kafkaJs from "kafkajs";
-import { createDb } from "../db/client.js";
 import { withTenant } from "../db/tenant.js";
 import { createTenant } from "../testing/fixtures.js";
 import { type InventoryCommand, type InventoryResult } from "./inventory.js";
@@ -29,7 +29,7 @@ test("live Kafka inventory command reaches durable result outbox and result topi
     t.skip("inventory DB and Kafka are required");
     return;
   }
-  const db = createDb(url);
+  const db = fixtureDb(url);
   t.after(() => db.$disconnect());
   const tenant = randomUUID(),
     site = randomUUID(),

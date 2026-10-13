@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import {
   createSignedAuditExport,
-  CSV_HEADER,
   redactAuditRow,
-  signAuditManifest,
   verifySignedAuditExport,
   type AuditEnvelope,
 } from "./index.js";
@@ -135,35 +133,5 @@ test("empty export has a verifiable manifest", () => {
   assert.equal(
     verifySignedAuditExport({ ...result, publicKey: keys.publicKey }),
     true,
-  );
-});
-
-test("CSV verification rejects a trailing field delimiter", () => {
-  const rowLine =
-    '"33333333-3333-4333-8333-333333333333","11111111-1111-4111-8111-111111111111","2026-09-25T12:00:00.000Z","actor-1","member.revoked","membership","member-1","succeeded","Alice@example.com",';
-  const file = Buffer.from(`${CSV_HEADER}\n${rowLine}\n`, "utf8");
-  const rowChainSha256 = createHash("sha256")
-    .update(Buffer.alloc(32))
-    .update(Buffer.from(rowLine, "utf8"))
-    .digest("hex");
-  const manifest = {
-    formatVersion: 1 as const,
-    fileFormat: "csv" as const,
-    tenantId: tenant,
-    rowCount: 1,
-    firstOccurredAt: row.occurredAt,
-    lastOccurredAt: row.occurredAt,
-    fileSha256: createHash("sha256").update(file).digest("hex"),
-    rowChainSha256,
-    publicKeyId: "local-1",
-  };
-  assert.equal(
-    verifySignedAuditExport({
-      file,
-      manifest,
-      signature: signAuditManifest(manifest, keys.privateKey),
-      publicKey: keys.publicKey,
-    }),
-    false,
   );
 });

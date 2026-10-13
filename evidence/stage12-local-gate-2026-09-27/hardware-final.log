@@ -1,0 +1,5 @@
+ok  	greenguard.local/hardware-service/cmd/migrate	1.316s
+?   	greenguard.local/hardware-service/cmd/mqtt-fixture	[no test files]
+ok  	greenguard.local/hardware-service/cmd/worker	1.659s
+ok  	greenguard.local/hardware-service/hardware	1.714s
+ok  	greenguard.local/hardware-service/migrations	1.908s

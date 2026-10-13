@@ -1,16 +1,29 @@
 name: grainguard-staging
+x-staging-oidc: &staging-oidc
+  # Deliberately non-routable endpoints: this local staging profile proves the
+  # product routes are mounted and fail closed for anonymous requests. Real
+  # login is covered by the dedicated OIDC browser acceptance profile.
+  AUTH_ISSUER: ${STAGING_AUTH_ISSUER:-https://staging.invalid/}
+  AUTH_AUDIENCE: ${STAGING_AUTH_AUDIENCE:-greenguard-staging}
+  AUTH_JWKS_URL: ${STAGING_AUTH_JWKS_URL:-https://staging.invalid/keys}
 services:
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:?Run make bootstrap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap}
+      OBSERVABILITY_DB_PASSWORD: ${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?Run make bootstrap}
+      INVENTORY_PROJECTOR_PASSWORD: ${INVENTORY_PROJECTOR_PASSWORD:?Run make bootstrap}
       INVENTORY_MIGRATOR_PASSWORD: ${INVENTORY_MIGRATOR_PASSWORD:?Run make bootstrap}
+      INVENTORY_AUDIT_READER_PASSWORD: ${INVENTORY_AUDIT_READER_PASSWORD:?Run make bootstrap}
       PROJECTION_DB_PASSWORD: ${PROJECTION_DB_PASSWORD:?Run make bootstrap}
+      READ_ENTITLEMENT_PROJECTOR_PASSWORD: ${READ_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       PROJECTION_MIGRATOR_PASSWORD: ${PROJECTION_MIGRATOR_PASSWORD:?Run make bootstrap}
+      PROJECTION_HISTORY_MAINTAINER_PASSWORD: ${PROJECTION_HISTORY_MAINTAINER_PASSWORD:?Run make bootstrap}
       READ_QUERY_DB_PASSWORD: ${READ_QUERY_DB_PASSWORD:?Run make bootstrap}
       TELEMETRY_DB_PASSWORD: ${TELEMETRY_DB_PASSWORD:?Run make bootstrap}
+      TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD: ${TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       TELEMETRY_MIGRATOR_PASSWORD: ${TELEMETRY_MIGRATOR_PASSWORD:?Run make bootstrap}
       RISK_DB_PASSWORD: ${RISK_DB_PASSWORD:?Run make bootstrap}
       RISK_MIGRATOR_PASSWORD: ${RISK_MIGRATOR_PASSWORD:?Run make bootstrap}
@@ -25,15 +38,13 @@ services:
       HARDWARE_DB_PASSWORD: ${HARDWARE_DB_PASSWORD:?Run make bootstrap}
       HARDWARE_MIGRATOR_PASSWORD: ${HARDWARE_MIGRATOR_PASSWORD:?Run make bootstrap}
       CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD:?Run make bootstrap}
+      CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
       CONTROL_MIGRATOR_PASSWORD: ${CONTROL_MIGRATOR_PASSWORD:?Run make bootstrap}
-      # Every role password the shared init script reads with \getenv must be passed here,
-      # or the init script fails and the container exits (code 3).
+      CONTROL_AUDIT_WORKER_PASSWORD: ${CONTROL_AUDIT_WORKER_PASSWORD:?Run make bootstrap}
+      CONTROL_BOOTSTRAP_WORKER_PASSWORD: ${CONTROL_BOOTSTRAP_WORKER_PASSWORD:?Run make bootstrap}
       BILLING_DB_PASSWORD: ${BILLING_DB_PASSWORD:?Run make bootstrap}
       BILLING_MIGRATOR_PASSWORD: ${BILLING_MIGRATOR_PASSWORD:?Run make bootstrap}
-      CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD: ${CONTROL_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
-      INVENTORY_PROJECTOR_PASSWORD: ${INVENTORY_PROJECTOR_PASSWORD:?Run make bootstrap}
-      READ_ENTITLEMENT_PROJECTOR_PASSWORD: ${READ_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
-      TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD: ${TELEMETRY_ENTITLEMENT_PROJECTOR_PASSWORD:?Run make bootstrap}
+      BILLING_AUDIT_READER_PASSWORD: ${BILLING_AUDIT_READER_PASSWORD:?Run make bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ../compose/init-databases.sql:/docker-entrypoint-initdb.d/001-databases.sql:ro
@@ -48,20 +59,24 @@ services:
       context: ../..
       dockerfile: services/device-service/Dockerfile
     environment:
+      <<: *staging-oidc
       INVENTORY_DATABASE_URL: postgresql://inventory_app:${INVENTORY_DB_PASSWORD:?}@postgres:5432/greenguard_inventory
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres: { condition: service_healthy }
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
   telemetry-ingest:
+    # Private staging service: deliberately no host port. Public deployments need
+    # a trusted WAF/ingress per-source-IP limit before this container.
     image: ${IMAGE_PREFIX:-grainguard}/telemetry-ingest:${IMAGE_TAG:-local}
     build:
       context: ../..
       dockerfile: services/telemetry-ingest/Dockerfile
     environment:
       TELEMETRY_DATABASE_URL: postgresql://telemetry_app:${TELEMETRY_DB_PASSWORD:?}@postgres:5432/greenguard_telemetry
+      <<: *staging-oidc
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres: { condition: service_healthy }
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
@@ -73,14 +88,18 @@ services:
     expose: ["4002"]
     environment:
       # Local staging only checks process health; supply real private upstreams for live use.
-      AUTH_ISSUER: ${AUTH_ISSUER:-https://staging.invalid/}
-      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-greenguard-dashboard}
-      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-https://staging.invalid/keys}
+      <<: *staging-oidc
       GATEWAY_BFF_URL: ${GATEWAY_BFF_URL:-http://bff:4000}
       GATEWAY_READ_URL: ${GATEWAY_READ_URL:-http://read-api:4001}
       GATEWAY_SAGA_URL: ${GATEWAY_SAGA_URL:-http://saga-api:8092}
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:4002/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4002/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -94,9 +113,9 @@ services:
       dockerfile: apps/dashboard/Dockerfile
     ports: ["127.0.0.1:5174:8080"]
     depends_on:
-      device-service: {condition: service_started}
-      telemetry-ingest: {condition: service_started}
-      gateway: {condition: service_healthy}
+      device-service: { condition: service_started }
+      telemetry-ingest: { condition: service_started }
+      gateway: { condition: service_healthy }
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
 volumes:

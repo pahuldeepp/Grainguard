@@ -1,0 +1,50 @@
+{
+  "uid": "greenguard-ai-gateway",
+  "title": "AI Gateway local observability",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "ai",
+    "local"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Provider p95 seconds",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(greenguard_model_gateway_operation_seconds_bucket{kind=\"provider\"}[5m])))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Denials per second",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (rate(greenguard_model_gateway_operations_total{kind=\"request\",outcome=\"denied\"}[5m]))"
+        }
+      ]
+    }
+  ]
+}

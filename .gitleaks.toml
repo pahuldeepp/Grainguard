@@ -1,0 +1,24 @@
+title = "GreenGuard gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Legacy single-table form: the CI pins gitleaks 8.24.3, which predates [[allowlists]].
+[allowlist]
+description = "Known public non-secret values"
+# CocoaPods "SPEC CHECKSUMS" are public SHA-1 hashes of pod specs, not credentials.
+# The gateway test uses a fixed WebSocket handshake nonce, a public protocol value.
+paths = [
+  '''apps/mobile/shell/ios/Podfile\.lock''',
+  '''services/gateway/src/server\.test\.ts''',
+  # Test fixtures with dummy values and Terraform maps of secret key *names* (password_key = "password").
+  '''infra/gitops/disposable/test_run_public_edge\.py''',
+  '''infra/gitops/disposable/test_check_secrets_ready\.py''',
+  '''infra/gitops/disposable/test_runtime_secret_lifecycle\.py''',
+  '''infra/terraform/disposable/runtime-secrets\.tf''',
+  '''infra/terraform/disposable/shard-secret-values\.tf''',
+  '''services/knowledge-service/tests/test_redaction\.py''',
+  '''services/model-gateway/redaction_test\.go''',
+  '''services/workflow-alerts/src/(config|main)\.test\.ts''',
+  '''services/workflow-alerts/src/testing/api\.ts''',
+]

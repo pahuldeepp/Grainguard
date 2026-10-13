@@ -49,9 +49,12 @@ export class BillingWorker {
       /* Failure state is durable on the command; the queue row backs off below. */
     }
     const receipt = await this.commands.get(row.tenant_id, row.command_id);
-    let status: "quarantined" | "completed" | "pending" = "pending";
-    if (receipt?.status === "quarantined") status = "quarantined";
-    else if (completed || receipt?.status === "completed") status = "completed";
+    const status =
+      receipt?.status === "quarantined"
+        ? "quarantined"
+        : completed || receipt?.status === "completed"
+          ? "completed"
+          : "pending";
     // Exponential backoff (1s..5min) on the queue row: a not-yet-runnable or failing
     // command is not polled every second.
     await withTenant(

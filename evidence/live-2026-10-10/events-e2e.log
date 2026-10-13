@@ -1,0 +1,9 @@
+node scripts/events-e2e.mjs
+2026/10/10 15:13:01 INFO telemetry-ingest listening address=127.0.0.1:18080
+PASS: committed inventory outbox -> raw -> transformer -> canonical -> binding
+PASS: poison preserved in quarantine; following good event applied
+2026/10/10 15:13:16 INFO telemetry-ingest listening address=127.0.0.1:18080
+PASS: SIGKILL mid-stream, restart and replay have exactly one effect per event
+PASS: source heartbeat traversed idle feed and persisted six partition checkpoints
+PASS: stale feed -> 503 binding_feed_stale; identical retry answered from its receipt
+PASS: freshness gate admitted new readings again after the feed recovered

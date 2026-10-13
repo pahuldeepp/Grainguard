@@ -1,5 +1,5 @@
 export type MarkerKind =
-  "critical" | "high" | "warning" | "notice" | "ok" | "offline";
+  "critical" | "high" | "warning" | "notice" | "ok" | "offline" | "open";
 export interface Marker {
   kind: MarkerKind;
   word: string;
@@ -27,6 +27,7 @@ export function severityMarker(severity: string): Marker {
 export function alertStateMarker(state: string): Marker {
   if (state === "acknowledged") return { kind: "ok", word: "Acknowledged" };
   if (state === "resolved") return { kind: "ok", word: "Resolved" };
+  if (state === "open") return { kind: "open", word: "Open" };
   return { kind: "notice", word: word(state) };
 }
 

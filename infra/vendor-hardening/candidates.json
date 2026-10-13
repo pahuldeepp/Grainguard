@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "status": "rejected-until-security-and-provenance-gates-pass",
+  "platform": "linux/arm64",
+  "candidates": {
+    "kafka": {
+      "version": "3.9.2",
+      "source": "apache/kafka@sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02",
+      "dockerfile": "Dockerfile.kafka",
+      "uid": "1000:1000",
+      "provenanceVerified": false,
+      "remainingFixableFindings": {
+        "HIGH": 21,
+        "CRITICAL": 1
+      }
+    },
+    "cassandra": {
+      "version": "5.0.9",
+      "source": "cassandra@sha256:618a493bcf1f817ea2f07288a46fa76fb2d9c4dfd5a04c28227336405782889c",
+      "dockerfile": "Dockerfile.cassandra",
+      "uid": "999:999",
+      "provenanceVerified": false,
+      "remainingFixableFindings": {
+        "HIGH": 17,
+        "CRITICAL": 1
+      },
+      "gosuCompilerVersion": "1.27.2"
+    }
+  }
+}

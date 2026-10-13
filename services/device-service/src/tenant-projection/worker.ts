@@ -1,16 +1,48 @@
-import {
-  connectWorker,
-  createWorkerClients,
-  processWithDlq,
-} from "@greenguard/kafka-runtime";
+import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
+import { createRequire } from "node:module";
+import { createServer, type Server } from "node:http";
+import kafkaJs from "kafkajs";
 import { validateEvent, type DomainEvent } from "@greenguard/contracts";
 import type { Db } from "../db/client.js";
 import { withTenant } from "../db/tenant.js";
 
+const { CompressionCodecs, CompressionTypes, Kafka, logLevel } = kafkaJs;
 export const TENANT_TOPIC = "greenguard.inventory.tenant.v1";
 export const TENANT_DLQ_TOPIC = "greenguard.inventory.tenant.dlq.v1";
 
 export class InvalidTenantProjectionEvent extends Error {}
+
+/** Readiness means Kafka completed group assignment, not that a message arrived.
+ * An assigned idle consumer is healthy and must remain ready. */
+export class TenantProjectorHealth {
+  private assigned = false;
+
+  setAssigned(assigned: boolean): void {
+    this.assigned = assigned;
+  }
+
+  status(path: string): number {
+    if (path === "/healthz") return 200;
+    if (path === "/readyz") return this.assigned ? 200 : 503;
+    return 404;
+  }
+}
+
+/** Loopback-only probe listener; Kubernetes probes use exec from the container. */
+export function serveTenantProjectorHealth(
+  health: TenantProjectorHealth,
+  port: number,
+): Server {
+  const server = createServer((request, response) => {
+    const status = health.status(request.url ?? "");
+    response.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+    response.end(
+      status === 200 ? "ok\n" : status === 503 ? "not ready\n" : "not found\n",
+    );
+  });
+  server.listen(port, "127.0.0.1");
+  return server;
+}
 
 export function decodeTenantEvent(
   value: Buffer,
@@ -35,7 +67,10 @@ export function decodeTenantEvent(
     event.payload.tenant_id !== event.tenant_id
   )
     throw new InvalidTenantProjectionEvent("tenant identity mismatch");
-  if (key?.toString("utf8") !== `${event.tenant_id}:${event.aggregate_id}`)
+  if (
+    !key ||
+    key.toString("utf8") !== `${event.tenant_id}:${event.aggregate_id}`
+  )
     throw new InvalidTenantProjectionEvent("tenant Kafka key mismatch");
   if (event.payload.organization_version !== event.aggregate_version)
     throw new InvalidTenantProjectionEvent("tenant version mismatch");
@@ -69,40 +104,76 @@ export async function startTenantProjector(
   brokers: string[],
   groupId = "greenguard-inventory-tenant-v1",
   onFatal?: (error: Error) => void,
+  health = new TenantProjectorHealth(),
 ): Promise<() => Promise<void>> {
-  const { consumer, producer, close } = createWorkerClients({
-    moduleUrl: import.meta.url,
-    brokers,
+  if (!brokers.length || brokers.some((broker) => !broker))
+    throw new Error("tenant projector requires Kafka brokers");
+  CompressionCodecs[CompressionTypes.Snappy] = createRequire(import.meta.url)(
+    "kafkajs-snappy",
+  );
+  const kafka = new Kafka({
     clientId: "inventory-tenant-projector",
-    groupId,
-    missingBrokersMessage: "tenant projector requires Kafka brokers",
-    onFatal,
+    brokers,
+    logLevel: logLevel.ERROR,
+    ...kafkaSecurityFromEnv(),
   });
-  await connectWorker(consumer, producer);
+  const consumer = kafka.consumer({ groupId, allowAutoTopicCreation: false });
+  const producer = kafka.producer({ allowAutoTopicCreation: false });
+  consumer.on(consumer.events.GROUP_JOIN, () => health.setAssigned(true));
+  consumer.on(consumer.events.DISCONNECT, () => health.setAssigned(false));
+  consumer.on(consumer.events.CRASH, ({ payload }) => {
+    health.setAssigned(false);
+    if (!payload.restart) onFatal?.(payload.error);
+  });
+  await producer.connect();
   try {
+    await consumer.connect();
     await consumer.subscribe({ topic: TENANT_TOPIC, fromBeginning: true });
     await consumer.run({
       autoCommit: false,
-      eachMessage: async (payload) => {
-        await processWithDlq({
-          consumer,
-          producer,
-          message: payload,
-          dlqTopic: TENANT_DLQ_TOPIC,
-          isInvalid: (error): error is InvalidTenantProjectionEvent =>
-            error instanceof InvalidTenantProjectionEvent,
-          process: async (message) => {
-            if (!message.value)
-              throw new InvalidTenantProjectionEvent("missing value");
-            const event = decodeTenantEvent(message.value, message.key);
-            if (event) await applyTenantEvent(db, event);
+      eachMessage: async ({ topic, partition, message }) => {
+        try {
+          if (!message.value)
+            throw new InvalidTenantProjectionEvent("missing value");
+          const event = decodeTenantEvent(message.value, message.key);
+          if (event) await applyTenantEvent(db, event);
+        } catch (error) {
+          if (!(error instanceof InvalidTenantProjectionEvent)) throw error;
+          await producer.send({
+            topic: TENANT_DLQ_TOPIC,
+            acks: -1,
+            messages: [
+              {
+                key: `${topic}:${partition}:${message.offset}`,
+                value: JSON.stringify({
+                  source_topic: topic,
+                  partition,
+                  offset: message.offset,
+                  reason: error.message,
+                  key_base64: message.key?.toString("base64") ?? "",
+                  value_base64: message.value?.toString("base64") ?? "",
+                }),
+              },
+            ],
+          });
+        }
+        await consumer.commitOffsets([
+          {
+            topic,
+            partition,
+            offset: (BigInt(message.offset) + 1n).toString(),
           },
-        });
+        ]);
       },
     });
-    return close;
+    return async () => {
+      health.setAssigned(false);
+      await consumer.disconnect();
+      await producer.disconnect();
+    };
   } catch (error) {
-    await close();
+    await consumer.disconnect().catch(() => undefined);
+    await producer.disconnect();
     throw error;
   }
 }

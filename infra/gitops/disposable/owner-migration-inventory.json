@@ -1,0 +1,123 @@
+[
+  {
+    "name": "control",
+    "database": "greenguard_control",
+    "key": "CONTROL_MIGRATION_URL",
+    "table": "organizations",
+    "role": "control_app",
+    "migrator": "control_migrator",
+    "central": true,
+    "node": true,
+    "python": false
+  },
+  {
+    "name": "billing",
+    "database": "greenguard_billing",
+    "key": "BILLING_MIGRATION_URL",
+    "table": "billing_audit_events",
+    "role": "billing_app",
+    "migrator": "billing_migrator",
+    "central": true,
+    "node": true,
+    "python": false
+  },
+  {
+    "name": "telemetry",
+    "database": "greenguard_telemetry",
+    "key": "TELEMETRY_MIGRATION_URL",
+    "table": "readings",
+    "role": "telemetry_app",
+    "migrator": "telemetry_migrator",
+    "central": false,
+    "node": false,
+    "python": false
+  },
+  {
+    "name": "projection",
+    "database": "greenguard_read",
+    "key": "PROJECTION_MIGRATION_URL",
+    "table": "device_views",
+    "role": "projection_app",
+    "migrator": "projection_migrator",
+    "central": false,
+    "node": false,
+    "python": false
+  },
+  {
+    "name": "jobs",
+    "database": "greenguard_jobs",
+    "key": "JOBS_MIGRATION_URL",
+    "table": "notification_intents",
+    "role": "jobs_app",
+    "migrator": "jobs_migrator",
+    "central": false,
+    "node": false,
+    "python": false
+  },
+  {
+    "name": "saga",
+    "database": "greenguard_sagas",
+    "key": "SAGA_MIGRATION_URL",
+    "table": "provisioning_sagas",
+    "role": "saga_app",
+    "migrator": "saga_migrator",
+    "central": false,
+    "node": false,
+    "python": false
+  },
+  {
+    "name": "hardware",
+    "database": "greenguard_hardware",
+    "key": "HARDWARE_MIGRATION_URL",
+    "table": "hardware_assets",
+    "role": "hardware_app",
+    "migrator": "hardware_migrator",
+    "central": false,
+    "node": false,
+    "python": false
+  },
+  {
+    "name": "inventory",
+    "database": "greenguard_inventory",
+    "key": "INVENTORY_MIGRATION_URL",
+    "table": "devices",
+    "role": "inventory_app",
+    "migrator": "inventory_migrator",
+    "central": false,
+    "node": true,
+    "python": false
+  },
+  {
+    "name": "alerts",
+    "database": "greenguard_alerts",
+    "key": "ALERTS_MIGRATION_URL",
+    "table": "alert_episodes",
+    "role": "alerts_app",
+    "migrator": "alerts_migrator",
+    "central": false,
+    "node": true,
+    "python": false
+  },
+  {
+    "name": "risk",
+    "database": "greenguard_risk",
+    "key": "RISK_MIGRATION_URL",
+    "table": "risk_assessments",
+    "role": "risk_app",
+    "migrator": "risk_migrator",
+    "central": false,
+    "node": false,
+    "python": true
+  },
+  {
+    "name": "notifications",
+    "database": "greenguard_notifications",
+    "key": "NOTIFICATIONS_MIGRATION_URL",
+    "table": "deliveries",
+    "role": "notifications_app",
+    "migrator": "notifications_migrator",
+    "central": false,
+    "node": true,
+    "python": false
+  }
+]

@@ -6,12 +6,17 @@ import {
   contactConnectors,
   connectorName,
   connectorConfig,
+  allConnectorConfigs,
+  validateSharedDatabaseHeartbeatConfigs,
   registerConnector,
 } from "./events-lib.mjs";
 import {
   registerAndValidateContactSchemas,
   validateRegisteredContactSchemas,
 } from "./contacts-schema.mjs";
+
+const configs = allConnectorConfigs();
+validateSharedDatabaseHeartbeatConfigs(configs);
 
 // Register the checked-in contracts before Debezium starts its initial snapshot.
 // The converter must then publish values compatible with these exact subjects.

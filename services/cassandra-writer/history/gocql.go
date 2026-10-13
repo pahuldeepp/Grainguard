@@ -2,9 +2,12 @@ package history
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +24,7 @@ type Config struct {
 	ReplicationFactor int
 	Username          string
 	Password          string
+	TLSConfig         *tls.Config
 	Timeout           time.Duration
 }
 
@@ -30,6 +34,27 @@ var identifier = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 // which is not highly available; the resilient profile sets RF3.
 func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{Keyspace: getenv("CASSANDRA_KEYSPACE"), Datacenter: getenv("CASSANDRA_DATACENTER"), ReplicationFactor: 1, Username: getenv("CASSANDRA_USERNAME"), Password: getenv("CASSANDRA_PASSWORD"), Timeout: 5 * time.Second}
+	if (cfg.Username == "") != (cfg.Password == "") {
+		return cfg, errors.New("CASSANDRA_USERNAME and CASSANDRA_PASSWORD must be supplied together")
+	}
+	caPath, serverName := getenv("CASSANDRA_TLS_CA_FILE"), getenv("CASSANDRA_TLS_SERVER_NAME")
+	if getenv("CASSANDRA_REQUIRE_SECURE") == "1" && (cfg.Username == "" || caPath == "" || serverName == "") {
+		return cfg, errors.New("CASSANDRA_REQUIRE_SECURE requires credentials and verified TLS")
+	}
+	if (caPath == "") != (serverName == "") {
+		return cfg, errors.New("CASSANDRA_TLS_CA_FILE and CASSANDRA_TLS_SERVER_NAME must be supplied together")
+	}
+	if caPath != "" {
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			return cfg, fmt.Errorf("read Cassandra TLS CA: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pem) {
+			return cfg, errors.New("Cassandra TLS CA has no valid certificates")
+		}
+		cfg.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: serverName}
+	}
 	for _, host := range strings.Split(getenv("CASSANDRA_HOSTS"), ",") {
 		if host = strings.TrimSpace(host); host != "" {
 			cfg.Hosts = append(cfg.Hosts, host)
@@ -68,6 +93,9 @@ func (c Config) Cluster(keyspace string) *gocql.ClusterConfig {
 	if c.Username != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{Username: c.Username, Password: c.Password}
 	}
+	if c.TLSConfig != nil {
+		cluster.SslOpts = &gocql.SslOptions{Config: c.TLSConfig.Clone(), EnableHostVerification: true}
+	}
 	return cluster
 }
 
@@ -104,6 +132,24 @@ func (s *CQLSession) Close() { s.session.Close() }
 // Transient reports driver and server failures worth retrying: unavailable,
 // timeouts, overload, bootstrapping and connection loss.
 func Transient(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Network wrappers can also carry permanent TLS verification errors. Check
+	// those before the broad net.Error classification below so bad trust roots,
+	// names or certificates fail visibly instead of retrying forever.
+	var verification *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var unknownAuthorityPtr *x509.UnknownAuthorityError
+	var invalidCertificate x509.CertificateInvalidError
+	var invalidCertificatePtr *x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	var hostnamePtr *x509.HostnameError
+	if errors.As(err, &verification) || errors.As(err, &unknownAuthority) || errors.As(err, &unknownAuthorityPtr) ||
+		errors.As(err, &invalidCertificate) || errors.As(err, &invalidCertificatePtr) ||
+		errors.As(err, &hostname) || errors.As(err, &hostnamePtr) {
+		return false
+	}
 	var unavailable *gocql.RequestErrUnavailable
 	var writeTimeout *gocql.RequestErrWriteTimeout
 	var readTimeout *gocql.RequestErrReadTimeout
@@ -116,6 +162,28 @@ func Transient(err error) bool {
 	}
 	if errors.Is(err, gocql.ErrNoConnections) || errors.Is(err, gocql.ErrTimeoutNoResponse) || errors.Is(err, gocql.ErrConnectionClosed) {
 		return true
+	}
+	// CreateSession in the pinned gocql driver formats protocol-negotiation
+	// failures with %v (it drops the underlying net.OpError), so errors.As
+	// cannot see a refused/timeout dial while Cassandra is starting or
+	// recovering. Match only known network-failure phrases; do not treat every
+	// protocol-negotiation error as transient because a real protocol
+	// incompatibility must still fail visibly.
+	message := strings.ToLower(err.Error())
+	for _, networkFailure := range []string{
+		"connection refused",
+		"i/o timeout",
+		"operation timed out",
+		"no route to host",
+		"network is unreachable",
+		"connection reset by peer",
+		"broken pipe",
+		"unexpected eof",
+		"unable to discover protocol version: eof",
+	} {
+		if strings.Contains(message, networkFailure) {
+			return true
+		}
 	}
 	var request gocql.RequestError
 	if errors.As(err, &request) {

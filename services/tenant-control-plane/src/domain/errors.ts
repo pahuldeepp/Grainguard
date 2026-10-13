@@ -1,6 +1,8 @@
 // Domain failures of the control plane; api/problem.ts maps each to one HTTP status.
 export class InvalidInputError extends Error {}
 
+export class DomainConflictError extends Error {}
+
 export class NotFoundError extends Error {
   constructor(what = "organization") {
     super(`${what} not found`);
@@ -46,5 +48,11 @@ export class IdempotencyConflictError extends Error {
 export class AmbiguousMembershipError extends Error {
   constructor() {
     super("identity has active memberships in more than one tenant");
+  }
+}
+
+export class MembershipLookupLimitError extends Error {
+  constructor() {
+    super("identity membership lookup exceeds its bounded candidate limit");
   }
 }

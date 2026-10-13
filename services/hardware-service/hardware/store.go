@@ -9,13 +9,15 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	common "greenguard.local/go-common"
 )
 
 var (
-	ErrInvalidCommand  = errors.New("invalid hardware command")
-	ErrCommandConflict = errors.New("command id reused with different request")
-	ErrStaleCommand    = errors.New("stale fencing token")
+	ErrInvalidCommand   = errors.New("invalid hardware command")
+	ErrCommandConflict  = errors.New("command id reused with different request")
+	ErrStaleCommand     = errors.New("stale fencing token")
+	ErrMissingAckSecret = errors.New("device acknowledgement key is missing or too short")
 )
 
 const (
@@ -101,8 +103,8 @@ func applyTx(ctx context.Context, tx pgx.Tx, c Command, hash []byte) (Result, er
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO hardware_command_receipts
 		(tenant_id,command_id,saga_id,step,saga_version,fencing_token,request_hash,outcome,request_payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING result_id`,
-		c.TenantID, c.CommandID, c.SagaID, c.Step, c.SagaVersion, c.FencingToken, hash, status, dataFor(c)).Scan(&id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING result_id`,
+		c.TenantID, c.CommandID, c.SagaID, c.Step, c.SagaVersion, c.FencingToken, hash, status, string(dataFor(c))).Scan(&id)
 	if err != nil {
 		return Result{}, fmt.Errorf("insert receipt: %w", err)
 	}
@@ -153,6 +155,10 @@ func decideStatus(ctx context.Context, tx pgx.Tx, c Command) (string, error) {
 		return "rejected", nil
 	}
 	if c.Step == hardwareStepConfigure {
+		if _, err := tx.Exec(ctx, `UPDATE hardware_assets SET fencing_token=$3,updated_at=now()
+			WHERE tenant_id=$1 AND asset_id=$2`, c.TenantID, c.Payload.AssetID, c.FencingToken); err != nil {
+			return "", fmt.Errorf("advance hardware fencing token: %w", err)
+		}
 		return "pending", nil
 	}
 	if err := updateAsset(ctx, tx, c); err != nil {
@@ -183,9 +189,6 @@ func updateAsset(ctx context.Context, tx pgx.Tx, c Command) error {
 	case hardwareStepReserve:
 		query = `UPDATE hardware_assets SET state='reserved',owner_saga_id=$3,device_id=$4,fencing_token=$5,updated_at=now() WHERE tenant_id=$1 AND asset_id=$2`
 		args = []any{c.TenantID, c.Payload.AssetID, c.SagaID, c.Payload.DeviceID, c.FencingToken}
-	case hardwareStepConfigure:
-		query = `UPDATE hardware_assets SET state='configured',fencing_token=$3,updated_at=now() WHERE tenant_id=$1 AND asset_id=$2`
-		args = []any{c.TenantID, c.Payload.AssetID, c.FencingToken}
 	case hardwareStepRelease:
 		query = `UPDATE hardware_assets SET state='available',owner_saga_id=NULL,device_id=NULL,fencing_token=0,updated_at=now() WHERE tenant_id=$1 AND asset_id=$2`
 		args = []any{c.TenantID, c.Payload.AssetID}
@@ -223,7 +226,7 @@ func (s Store) ConfigureSecret(ctx context.Context, c Command) ([]byte, error) {
 		return nil, fmt.Errorf("read configure key: %w", err)
 	}
 	if len(secret) < 32 {
-		return nil, errors.New("device acknowledgement key is missing or too short")
+		return nil, ErrMissingAckSecret
 	}
 	return secret, nil
 }
@@ -237,6 +240,18 @@ func (s Store) ConfirmConfiguration(ctx context.Context, c Command, attestedSecr
 	}
 	var result Result
 	err := common.WithTenantSchema(ctx, s.DB, c.TenantID, "", func(ctx context.Context, tx pgx.Tx) error {
+		var state, owner, device string
+		var fence int64
+		var secret []byte
+		assetErr := tx.QueryRow(ctx, `SELECT state,COALESCE(owner_saga_id::text,''),COALESCE(device_id::text,''),fencing_token,mqtt_ack_secret
+			FROM hardware_assets WHERE tenant_id=$1 AND asset_id=$2 FOR UPDATE`, c.TenantID, c.Payload.AssetID).
+			Scan(&state, &owner, &device, &fence, &secret)
+		if errors.Is(assetErr, pgx.ErrNoRows) {
+			return ErrStaleCommand
+		}
+		if assetErr != nil {
+			return fmt.Errorf("lock hardware asset for acknowledgement: %w", assetErr)
+		}
 		var outcome string
 		var id string
 		err := tx.QueryRow(ctx, `SELECT result_id,outcome FROM hardware_command_receipts
@@ -252,11 +267,8 @@ func (s Store) ConfirmConfiguration(ctx context.Context, c Command, attestedSecr
 		if outcome != "pending" {
 			return ErrStaleCommand
 		}
-		var secret []byte
-		err = tx.QueryRow(ctx, `SELECT mqtt_ack_secret FROM hardware_assets WHERE tenant_id=$1 AND asset_id=$2
-			AND owner_saga_id=$3 AND device_id=$4 AND state='reserved' AND fencing_token=$5 FOR UPDATE`,
-			c.TenantID, c.Payload.AssetID, c.SagaID, c.Payload.DeviceID, c.FencingToken).Scan(&secret)
-		if err != nil || len(secret) < 32 || !EqualMAC(secret, attestedSecret) {
+		if state != "reserved" || owner != c.SagaID || device != c.Payload.DeviceID || fence != c.FencingToken ||
+			len(secret) < 32 || !EqualMAC(secret, attestedSecret) {
 			return ErrStaleCommand
 		}
 		if _, err = tx.Exec(ctx, `UPDATE hardware_assets SET state='configured',updated_at=now() WHERE tenant_id=$1 AND asset_id=$2`, c.TenantID, c.Payload.AssetID); err != nil {
@@ -324,6 +336,9 @@ func (s Store) ClaimPendingConfigurations(ctx context.Context, limit int) ([]Dis
 			d, err = claimTx(ctx, tx, key[0], key[1])
 			return err
 		})
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -369,6 +384,31 @@ func claimTx(ctx context.Context, tx pgx.Tx, tenant, commandID string) (*Dispatc
 
 // idPairs runs an ID-only SECURITY DEFINER selector and returns its key pairs.
 func (s Store) idPairs(ctx context.Context, query string, args ...any) ([][2]string, error) {
+	if shards, ok := s.DB.(*common.ShardedDB); ok {
+		var keys [][2]string
+		err := shards.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+			tx, err := shards.InfrastructureDB(shard).BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+			if err != nil {
+				return err
+			}
+			defer common.Rollback(tx)
+			rows, err := tx.Query(ctx, query, args...)
+			if err != nil {
+				return err
+			}
+			page, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+				var key [2]string
+				err := row.Scan(&key[0], &key[1])
+				return key, err
+			})
+			keys = append(keys, page...)
+			if err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		})
+		return keys, err
+	}
 	db, ok := s.DB.(interface {
 		Query(context.Context, string, ...any) (pgx.Rows, error)
 	})
@@ -419,7 +459,7 @@ func (s Store) UnpublishedResults(ctx context.Context) ([]Result, error) {
 		err = common.WithTenantSchema(ctx, s.DB, k[0], "", func(ctx context.Context, tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT tenant_id,saga_id,command_id,result_id,step,saga_version,fencing_token,outcome,COALESCE(traceparent,'') FROM hardware_result_outbox WHERE tenant_id=$1 AND result_id=$2 AND published_at IS NULL`, k[0], k[1]).Scan(&r.TenantID, &r.SagaID, &r.CommandID, &r.ResultID, &r.Step, &r.SagaVersion, &r.FencingToken, &r.Outcome, &r.Traceparent)
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, common.ErrTenantQuiescing) {
 			continue
 		}
 		if err != nil {

@@ -22,16 +22,12 @@ export class Metrics {
     this.heldAgeSeconds = Math.max(0, (nowMs - firstHeldMs) / 1000);
   }
 
-  resetHeld(): void {
-    this.heldAgeSeconds = 0;
-  }
-
   render(gauges: Record<string, number> = {}): string {
     const lines = [...this.counters].map(
       ([k, v]) => `notifications_${k}_total ${v}`,
     );
+    lines.push(`notifications_task_lag_seconds ${this.lagSeconds}`);
     lines.push(
-      `notifications_task_lag_seconds ${this.lagSeconds}`,
       `notifications_optional_held_age_seconds ${this.heldAgeSeconds}`,
     );
     for (const [k, v] of Object.entries(gauges))

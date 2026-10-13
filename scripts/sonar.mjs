@@ -1,4 +1,9 @@
-import { existsSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { ensureAnalysisToken } from "./sonar-token.mjs";
+import { assertMeasuredQualityGate } from "./sonar-gate.mjs";
+import { prepareSonarSnapshot } from "./sonar-snapshot.mjs";
+import { summarizeSonarIssues } from "./sonar-issues.mjs";
+import { runNativeScanner, scannerProfile } from "./sonar-native.mjs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 const command = process.argv[2];
@@ -158,24 +163,26 @@ if (command === "init") {
     key: "sonar.qualitygate.ignoreSmallChanges",
     value: "false",
   });
-  if (!process.env.SONAR_TOKEN) {
-    const token = await api("user_tokens/generate", {
-      name: "grainguard-local-" + Date.now(),
-      type: "PROJECT_ANALYSIS_TOKEN",
-      projectKey: "grainguard",
-    });
-    appendFileSync(
-      ".env.sonar",
-      `SONAR_TOKEN=${token.token}
-`,
-    );
-  }
+  process.env.SONAR_TOKEN = await ensureAnalysisToken({
+    host,
+    token: process.env.SONAR_TOKEN,
+    path: ".env.sonar",
+    generate: async () => {
+      const result = await api("user_tokens/generate", {
+        name: "grainguard-local-" + Date.now(),
+        type: "PROJECT_ANALYSIS_TOKEN",
+        projectKey: "grainguard",
+      });
+      return result.token;
+    },
+  });
   console.log(
     "Private project and strict gate configured. Credentials are in ignored .env.sonar (mode 0600).",
   );
   process.exit(0);
 }
 if (!process.env.SONAR_TOKEN) throw new Error("Run make sonar-init first");
+const profile = scannerProfile(process.env.SONAR_SCANNER_PROFILE);
 for (const f of [
   "apps/dashboard/coverage/lcov.info",
   "services/device-service/coverage/lcov.info",
@@ -183,13 +190,30 @@ for (const f of [
 ])
   if (!existsSync(f)) throw new Error(`Missing ${f}; run make coverage`);
 mkdirSync(".scannerwork", { recursive: true, mode: 0o777 });
-const scannerArgs = ["run", "--rm", "scanner"];
-if (process.env.SONAR_DISABLE_SCM === "true")
-  scannerArgs.push(
-    "-Dsonar.scanner.skipJreProvisioning=true",
-    "-Dsonar.scm.disabled=true",
-  );
-const scanExit = compose(scannerArgs, false);
+const reports = [
+  ...readFileSync("sonar-project.properties", "utf8").matchAll(
+    /^sonar\.(?:javascript\.lcov|go\.coverage|python\.coverage)\.reportPaths=(.+)$/gm,
+  ),
+].flatMap((match) => match[1].split(",").map((path) => path.trim()));
+const source = prepareSonarSnapshot(process.cwd(), reports);
+let scanExit;
+try {
+  scanExit =
+    profile === "native"
+      ? await runNativeScanner(source.directory)
+      : compose(
+          [
+            "run",
+            "--rm",
+            "--volume",
+            `${source.directory}:/usr/src`,
+            "scanner",
+          ],
+          false,
+        );
+} finally {
+  source.cleanup();
+}
 const gateStatus = await api(
   "qualitygates/project_status",
   { projectKey: "grainguard" },
@@ -201,11 +225,37 @@ const measures = await api(
   {
     component: "grainguard",
     metricKeys:
-      "coverage,line_coverage,branch_coverage,violations,security_hotspots,duplicated_lines_density",
+      "ncloc,coverage,line_coverage,branch_coverage,violations,security_hotspots,duplicated_lines_density",
   },
   undefined,
   "GET",
 );
+const firstIssuePage = await api(
+  "issues/search",
+  { componentKeys: "grainguard", p: "1", ps: "500" },
+  undefined,
+  "GET",
+);
+const allIssues = [...(firstIssuePage.issues ?? [])];
+for (
+  let page = 2;
+  allIssues.length < firstIssuePage.total && page <= 50;
+  page++
+) {
+  const next = await api(
+    "issues/search",
+    { componentKeys: "grainguard", p: String(page), ps: "500" },
+    undefined,
+    "GET",
+  );
+  if (next.total !== firstIssuePage.total || next.issues.length === 0)
+    throw new Error("SonarQube issue pages are inconsistent or incomplete");
+  allIssues.push(...next.issues);
+}
+const issueSummary = summarizeSonarIssues({
+  total: firstIssuePage.total,
+  issues: allIssues,
+});
 mkdirSync("coverage", { recursive: true });
 writeFileSync(
   "coverage/sonar-quality-gate.json",
@@ -215,14 +265,13 @@ writeFileSync(
     2,
   ) + "\n",
 );
-const hotspots = measures.component.measures.find(
-  (m) => m.metric === "security_hotspots",
+writeFileSync(
+  "coverage/sonar-issue-summary.json",
+  JSON.stringify(issueSummary, null, 2) + "\n",
 );
-if (
-  scanExit !== 0 ||
-  gateStatus.projectStatus.status !== "OK" ||
-  !hotspots ||
-  Number(hotspots.value) !== 0
-)
-  process.exit(scanExit || 1);
+if (scanExit !== 0) process.exit(scanExit);
+assertMeasuredQualityGate({
+  gate: gateStatus.projectStatus,
+  measures: measures.component.measures,
+});
 console.log("SonarQube gate passed; zero security hotspots confirmed.");

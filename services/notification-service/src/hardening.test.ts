@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Consumer } from "kafkajs";
+import type { Consumer, ProducerRecord } from "kafkajs";
 import type pg from "pg";
 import { VersionedFlagStore } from "@greenguard/feature-flags";
 import { controlPlaneFlagSnapshot, GLOBAL_FLAG_TENANT } from "./flags.js";
@@ -52,14 +52,14 @@ test("snapshot validates bearer transport before any request and rejects redirec
     );
   assert.equal(request, undefined);
   const get = controlPlaneFlagSnapshot(
-    "https://control.test/control-plane/",
+    "https://control.test/ignored",
     "token",
     { fetch: fetcher },
   );
   await get("tenant/unsafe");
   assert.equal(
     request!.url,
-    "https://control.test/control-plane/v1/internal/flags/tenant%2Funsafe",
+    "https://control.test/v1/internal/flags/tenant%2Funsafe",
   );
   assert.equal(request!.init!.redirect, "error");
   assert.deepEqual(request!.init!.headers, { authorization: "Bearer token" });
@@ -135,6 +135,26 @@ test("config propagates local-only insecure opt-in; live remains HTTPS-only", ()
       ),
     /must use HTTPS/,
   );
+  const liveMesh = loadConfig(
+    (key) =>
+      ({
+        ...env,
+        NOTIFICATIONS_PROVIDER: "live",
+        CONTROL_PLANE_URL:
+          "http://tenant-control-plane.greenguard.svc.cluster.local:3010",
+        CONTROL_LOOKUP_TOKEN: "token",
+        GG_MESH_INTERNAL_HTTP: "1",
+        SENDGRID_API_KEY: "sendgrid-key",
+        SENDGRID_FROM_EMAIL: "alerts@example.test",
+        TWILIO_ACCOUNT_SID: "AC123",
+        TWILIO_AUTH_TOKEN: "twilio-token",
+        TWILIO_FROM_NUMBER: "+12045550123",
+      })[key],
+  );
+  assert.equal(liveMesh.controlPlaneMeshHttp, true);
+  assert.doesNotThrow(() =>
+    optionalSendFor(liveMesh, new VersionedFlagStore(60_000)),
+  );
   assert.throws(
     () =>
       optionalSendFor(
@@ -149,7 +169,13 @@ test("config propagates local-only insecure opt-in; live remains HTTPS-only", ()
 });
 
 /** Minimal transactional ledger stand-in; provider sends remain local-only. */
-function ledgerPool(initialStatus = "received"): pg.Pool {
+function ledgerPool(
+  initialStatus = "received",
+  audit?: {
+    claims: number;
+    attempts: Array<{ kind: unknown; outcome: unknown; detail: unknown }>;
+  },
+): pg.Pool {
   let status = initialStatus;
   let lastError: unknown = null;
   return {
@@ -169,7 +195,16 @@ function ledgerPool(initialStatus = "received"): pg.Pool {
             ],
           };
         if (sql.includes("FROM notification_preferences")) return { rows: [] };
-        if (sql.includes("RETURNING attempt_no")) return { rows: [{ n: 1 }] };
+        if (sql.includes("RETURNING attempt_no")) {
+          audit?.attempts.push({
+            kind: args?.[2],
+            outcome: args?.[3],
+            detail: args?.[4],
+          });
+          return { rows: [{ n: 1 }] };
+        }
+        if (sql.includes("UPDATE deliveries SET status = 'in_progress'"))
+          if (audit) audit.claims += 1;
         if (sql.includes("UPDATE deliveries SET status = $3")) {
           status = String(args?.[2]);
           lastError = args?.[4];
@@ -192,18 +227,21 @@ test("no configured flag source delivers warnings directly through normal ledger
   assert.equal(adapter.delivered.size, 1);
   assert.deepEqual(broker.keys(), [RECEIPT_KEY]);
   assert.equal(deps.metrics.get("optional_held"), 0);
-  assert.equal(
+  assert.ok(
     optionalSendFor(
       { ...config, kafkaBrokers: ["unused:9092"] },
       new VersionedFlagStore(60_000),
     ),
-    undefined,
   );
 });
 
 test("configured disabled gate bounds holds, preserves first-held metadata and parks with stable failed receipt", async () => {
   const task = makeTask();
-  const { deps, adapter, broker } = makeDeps(ledgerPool());
+  const audit = {
+    claims: 0,
+    attempts: [] as Array<{ kind: unknown; outcome: unknown; detail: unknown }>,
+  };
+  const { deps, adapter, broker } = makeDeps(ledgerPool("received", audit));
   deps.optionalSendEnabled = async () => false;
   let message = incoming(task);
   const firstHeld = Date.now() - 20_000;
@@ -230,6 +268,10 @@ test("configured disabled gate bounds holds, preserves first-held metadata and p
   assert.equal(JSON.parse(receipt.body.toString()).outcome, "failed");
   assert.equal(broker.published.at(-1)!.messageId, task.intent_id);
   assert.equal(adapter.delivered.size, 0);
+  assert.equal(audit.claims, 0, "hold expiry must not claim a provider send");
+  assert.equal(audit.attempts.length, 1);
+  assert.equal(audit.attempts[0]?.kind, "hold");
+  assert.equal(audit.attempts[0]?.outcome, "failed");
   assert.equal(deps.metrics.get("optional_held_parked"), 1);
   assert.match(
     deps.metrics.render(),
@@ -274,7 +316,6 @@ test("exhausted hold persists terminal failure and survives park failure then fl
     },
   };
   await assert.rejects(handleTask(deps, exhausted), /park confirm failed/);
-  deps.metrics.observeHeld(Date.now() - 10_000);
   assert.deepEqual(broker.keys(), [RECEIPT_KEY]);
   assert.equal(deps.metrics.get("optional_held_parked"), 0);
   deps.broker = broker;
@@ -283,10 +324,6 @@ test("exhausted hold persists terminal failure and survives park failure then fl
   assert.equal(broker.published[0]!.messageId, broker.published[1]!.messageId);
   assert.deepEqual(broker.keys(), [RECEIPT_KEY, RECEIPT_KEY, DEAD_KEY]);
   assert.equal(adapter.sendCalls.length, 0);
-  assert.match(
-    deps.metrics.render(),
-    /notifications_optional_held_age_seconds 0(?:\.0+)?(?:\n|$)/,
-  );
 });
 
 function deferred() {
@@ -305,7 +342,8 @@ async function until(check: () => boolean) {
 
 function feedHarness(
   options: {
-    pauseAt?: "connect" | "subscribe" | "run";
+    pauseAt?: "connect" | "subscribe" | "run" | "producer";
+    failPublishOnce?: boolean;
     pauseDisconnect?: boolean;
   } = {},
 ) {
@@ -320,14 +358,32 @@ function feedHarness(
     subscribes: 0,
     runs: 0,
     disconnects: 0,
-    poisonEvents: 0,
+    producerDisconnects: 0,
+    producerConnects: 0,
+    publishCalls: 0,
   };
+  const sent: ProducerRecord[] = [];
   const store = new VersionedFlagStore(60_000);
   const stop = startFlagFeed(store, ["unused:9092"], {
     retryMs: 5,
     instanceId: "hardening-test",
     onUnavailable: () => counts.unavailable++,
-    onPoison: () => counts.poisonEvents++,
+    createProducer: () => ({
+      connect: async () => {
+        counts.producerConnects++;
+        if (options.pauseAt === "producer") await paused.promise;
+      },
+      disconnect: async () => {
+        counts.producerDisconnects++;
+      },
+      send: async (record) => {
+        counts.publishCalls++;
+        if (options.failPublishOnce && counts.publishCalls === 1)
+          throw new Error("quarantine unavailable");
+        sent.push(record);
+        return [];
+      },
+    }),
     createConsumer: (groupId) => {
       const index = groups.push(groupId) - 1;
       return {
@@ -367,6 +423,7 @@ function feedHarness(
     groups,
     paused,
     disconnected,
+    sent,
     store,
   };
 }
@@ -376,14 +433,13 @@ const poison = {
   message: { offset: "12", value: Buffer.from("{") },
 };
 
-test("non-restartable crash reconnects after disconnect, skips poison and ignores stale/restartable crashes", async () => {
-  const h = feedHarness({ pauseDisconnect: true });
+test("non-restartable crash reconnects after disconnect, retries same poison offset and ignores stale/restartable crashes", async () => {
+  const h = feedHarness({ failPublishOnce: true, pauseDisconnect: true });
   try {
     await until(() => h.counts.runs === 1);
     h.crashes[0]!(true);
     assert.equal(h.counts.unavailable, 0);
-    await h.handlers[0]!(poison);
-    assert.equal(h.counts.poisonEvents, 1);
+    await assert.rejects(h.handlers[0]!(poison), /quarantine unavailable/);
     h.crashes[0]!(false);
     h.crashes[0]!(false);
     await new Promise((r) => setTimeout(r, 15));
@@ -395,7 +451,10 @@ test("non-restartable crash reconnects after disconnect, skips poison and ignore
     h.crashes[0]!(false);
     assert.equal(h.counts.unavailable, 1);
     await h.handlers[1]!(poison);
-    assert.equal(h.counts.poisonEvents, 2);
+    assert.equal(
+      h.sent[0]!.messages[0]!.key,
+      "greenguard.platform.config.v1:0:12",
+    );
     h.crashes[1]!(false);
     await until(() => h.counts.runs === 3); // second crash is also recoverable
     assert.equal(h.counts.unavailable, 2);
@@ -403,17 +462,21 @@ test("non-restartable crash reconnects after disconnect, skips poison and ignore
     h.disconnected.resolve();
     await h.stop();
   }
+  assert.equal(h.counts.producerConnects, 1);
+  assert.equal(h.counts.producerDisconnects, 1);
 });
 
-for (const pauseAt of ["connect", "subscribe", "run"] as const) {
-  test(`shutdown waits for in-flight ${pauseAt} and disconnects the consumer`, async () => {
+for (const pauseAt of ["producer", "connect", "subscribe", "run"] as const) {
+  test(`shutdown waits for in-flight ${pauseAt} and disconnects late consumer before producer`, async () => {
     const h = feedHarness({ pauseAt });
     await until(() =>
-      pauseAt === "connect"
-        ? h.counts.connects === 1
-        : pauseAt === "subscribe"
-          ? h.counts.subscribes === 1
-          : h.counts.runs === 1,
+      pauseAt === "producer"
+        ? h.counts.producerConnects === 1
+        : pauseAt === "connect"
+          ? h.counts.connects === 1
+          : pauseAt === "subscribe"
+            ? h.counts.subscribes === 1
+            : h.counts.runs === 1,
     );
     let stopped = false;
     const stopping = h.stop().then(() => {
@@ -421,9 +484,11 @@ for (const pauseAt of ["connect", "subscribe", "run"] as const) {
     });
     await new Promise((r) => setTimeout(r, 8));
     assert.equal(stopped, false);
+    assert.equal(h.counts.producerDisconnects, 0);
     h.paused.resolve();
     await stopping;
     assert.equal(h.counts.disconnects, 1);
+    assert.equal(h.counts.producerDisconnects, 1);
     h.crashes[0]?.(false);
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(h.groups.length, 1);

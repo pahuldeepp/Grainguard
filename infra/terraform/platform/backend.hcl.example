@@ -1,0 +1,5 @@
+bucket       = "<globally-unique-state-bucket>"
+key          = "greenguard/<environment>/<cell>/platform.tfstate"
+region       = "<state-bucket-region>"
+use_lockfile = true
+encrypt      = true

@@ -1,10 +1,16 @@
+import {
+  parseWatermark,
+  serializeWatermark,
+} from "@greenguard/membership-client";
+import { randomInt } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import type { Principal } from "@greenguard/tenant-auth";
 import { WebSocketServer, WebSocket } from "ws";
-import { ReadClient } from "./read-client.js";
+import { ReadClient, ReadUpstreamError } from "./read-client.js";
 import { operations, resolvePersistedOperation } from "./query-policy.js";
 import type { LiveFeed } from "./live-feed.js";
+import { boundedRateCheck, type RateLimiter } from "./rate-limit.js";
 
 type Verify = (authorization: string | undefined) => Promise<Principal>;
 type Message = {
@@ -98,6 +104,11 @@ export function attachSubscriptions(
     read: Pick<ReadClient, "device" | "latest">;
     feed?: LiveFeed;
     intervalMs?: number;
+    maxConnections?: number;
+    maxConcurrentPolls?: number;
+    rateLimiter?: RateLimiter;
+    connectionInitTimeoutMs?: number;
+    heartbeatIntervalMs?: number;
   },
 ): () => Promise<void> {
   const wss = new WebSocketServer({
@@ -107,8 +118,13 @@ export function attachSubscriptions(
       offered.has("graphql-transport-ws") ? "graphql-transport-ws" : false,
   });
   const intervalMs = Math.max(250, options.intervalMs ?? 2000);
+  const maxConnections = Math.max(1, options.maxConnections ?? 100);
+  const maxConcurrentPolls = Math.max(1, options.maxConcurrentPolls ?? 25);
   const callers = new Map<string, number>();
+  let connectionCount = 0;
+  let inFlightPolls = 0;
   const reject = (socket: Duplex, status: string) => {
+    if (socket.destroyed || !socket.writable) return;
     socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
     socket.destroy();
   };
@@ -118,6 +134,9 @@ export function attachSubscriptions(
     else callers.set(caller, remaining);
   };
   server.on("upgrade", async (request, socket, head) => {
+    const ignoreSocketError = () => {};
+    socket.on("error", ignoreSocketError);
+    socket.once("close", () => socket.off("error", ignoreSocketError));
     if (!isSubscriptionUpgrade(request)) {
       reject(socket, "400 Bad Request");
       return;
@@ -134,22 +153,40 @@ export function attachSubscriptions(
       reject(socket, "401 Unauthorized");
       return;
     }
+    if (socket.destroyed || !socket.writable) {
+      socket.off("error", ignoreSocketError);
+      return;
+    }
+    if (connectionCount >= maxConnections) {
+      reject(socket, "503 Service Unavailable");
+      return;
+    }
     const caller = `${principal.tenantId}:${principal.subject}`;
     if ((callers.get(caller) ?? 0) >= 2) {
       reject(socket, "429 Too Many Requests");
       return;
     }
     callers.set(caller, (callers.get(caller) ?? 0) + 1);
+    connectionCount++;
+    let released = false;
+    const releaseOnce = () => {
+      if (released) return;
+      released = true;
+      connectionCount--;
+      release(caller);
+    };
+    socket.once("close", releaseOnce);
     try {
       wss.handleUpgrade(request, socket, head, (ws) => {
-        ws.once("close", () => release(caller));
+        socket.off("error", ignoreSocketError);
         wss.emit("connection", ws, request, {
           authorization: authorization!,
           principal,
         });
       });
     } catch {
-      release(caller);
+      socket.off("error", ignoreSocketError);
+      releaseOnce();
       socket.destroy();
     }
   });
@@ -166,6 +203,31 @@ export function attachSubscriptions(
         () => ws.close(4401, "token_expired"),
         Math.max(1, identity.principal.expiresAt.getTime() - Date.now()),
       );
+      const initTimeout = setTimeout(
+        () => {
+          ws.close(4408, "connection_init_timeout");
+          // A peer that ignores the close handshake must not retain a caller slot.
+          initCloseForce = setTimeout(() => ws.terminate(), 1_000);
+        },
+        Math.max(1, options.connectionInitTimeoutMs ?? 10_000),
+      );
+      let initCloseForce: ReturnType<typeof setTimeout> | undefined;
+      let awaitingPong = false;
+      const heartbeat = setInterval(
+        () => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (awaitingPong) {
+            ws.terminate();
+            return;
+          }
+          awaitingPong = true;
+          ws.ping();
+        },
+        Math.max(10, options.heartbeatIntervalMs ?? 30_000),
+      );
+      ws.on("pong", () => {
+        awaitingPong = false;
+      });
       const send = (value: unknown) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
       };
@@ -184,6 +246,7 @@ export function attachSubscriptions(
             return;
           }
           initialized = true;
+          clearTimeout(initTimeout);
           send({ type: "connection_ack" });
           return;
         }
@@ -207,42 +270,245 @@ export function attachSubscriptions(
           return;
         }
         const { id, deviceId } = selection;
-        subscriptions.set(id, () => {});
+        let cleanup = () => {};
+        const reservation = () => cleanup();
+        const isCurrent = () => subscriptions.get(id) === reservation;
+        subscriptions.set(id, reservation);
+        if (options.rateLimiter) {
+          try {
+            const decision = await boundedRateCheck(
+              options.rateLimiter.check(identity.principal, {
+                query: operations.deviceChanged,
+              }),
+              1000,
+            );
+            if (!isCurrent()) return;
+            if (!decision.allowed) {
+              subscriptions.delete(id);
+              fail(id, "rate_limited");
+              return;
+            }
+          } catch {
+            if (isCurrent()) {
+              subscriptions.delete(id);
+              fail(id, "rate_limit_unavailable");
+            }
+            return;
+          }
+        }
         try {
           const device = await options.read.device(
             identity.authorization,
             deviceId,
+            { tenantId: identity.principal.tenantId },
           );
-          if (!subscriptions.has(id)) return;
+          if (!isCurrent()) return;
           if (!device) {
             subscriptions.delete(id);
             fail(id, "device_not_found");
             return;
           }
         } catch {
-          if (subscriptions.has(id)) {
+          if (isCurrent()) {
             subscriptions.delete(id);
             fail(id, "read_unavailable");
           }
           return;
         }
+        let minimumConsistency: string | undefined;
+        const observe = (token: unknown, hint = false) => {
+          if (token == null) return;
+          if (typeof token !== "string")
+            throw new ReadUpstreamError(502, "invalid_consistency_response");
+          const incoming = parseWatermark(token, identity.principal.tenantId);
+          if (minimumConsistency) {
+            const current = parseWatermark(
+              minimumConsistency,
+              identity.principal.tenantId,
+            );
+            if (
+              hint &&
+              BigInt(incoming.placementEpoch) < BigInt(current.placementEpoch)
+            )
+              return false;
+            if (
+              hint &&
+              BigInt(incoming.placementEpoch) > BigInt(current.placementEpoch)
+            ) {
+              minimumConsistency = serializeWatermark(incoming);
+              return;
+            }
+            if (
+              current.shardIncarnation !== incoming.shardIncarnation ||
+              current.placementEpoch !== incoming.placementEpoch
+            )
+              throw new ReadUpstreamError(409, "consistency_identity_mismatch");
+            if (BigInt(current.sequence) > BigInt(incoming.sequence)) return;
+          }
+          minimumConsistency = serializeWatermark(incoming);
+        };
+        const failRead = (error: unknown) => {
+          if (isCurrent()) {
+            subscriptions.get(id)?.();
+            subscriptions.delete(id);
+            fail(
+              id,
+              error instanceof ReadUpstreamError
+                ? error.code
+                : "read_unavailable",
+            );
+          }
+        };
         let fingerprint: string | undefined;
         let busy = false;
+        let activeRead: AbortController | undefined;
+        let initialPollComplete = false;
+        let rerun = false;
+        let retryTimer: ReturnType<typeof setTimeout> | undefined;
+        const retryWhenCapacityOpens = () => {
+          if (retryTimer || !isCurrent()) return;
+          retryTimer = setTimeout(
+            () => {
+              retryTimer = undefined;
+              rerun = false;
+              void poll();
+            },
+            25 + randomInt(76),
+          );
+        };
         const poll = async () => {
-          if (
-            busy ||
-            !subscriptions.has(id) ||
-            ws.readyState !== WebSocket.OPEN
-          )
+          if (!isCurrent() || ws.readyState !== WebSocket.OPEN) return;
+          if (busy) {
+            rerun = true;
             return;
+          }
+          if (inFlightPolls >= maxConcurrentPolls) {
+            rerun = true;
+            retryWhenCapacityOpens();
+            return;
+          }
           busy = true;
+          inFlightPolls++;
+          const controller = new AbortController();
+          activeRead = controller;
+          const deadline = Date.now() + 8000;
           try {
-            const reading = (await options.read.latest(
-              identity.authorization,
-              deviceId,
-            )) as Record<string, unknown> | null;
-            const next = JSON.stringify(reading ?? null);
-            if (subscriptions.has(id) && next !== fingerprint) {
+            let reading: Record<string, unknown> | null;
+            let responseWatermark: string | undefined;
+            const onWatermark = (token: string) => {
+              responseWatermark = token;
+            };
+            const requestedMinimum = minimumConsistency;
+            try {
+              reading = (await options.read.latest(
+                identity.authorization,
+                deviceId,
+                {
+                  tenantId: identity.principal.tenantId,
+                  minimumConsistency: requestedMinimum,
+                  onWatermark,
+                  deadline,
+                  signal: controller.signal,
+                },
+              )) as Record<string, unknown> | null;
+            } catch (error) {
+              if (
+                !requestedMinimum ||
+                !(error instanceof ReadUpstreamError) ||
+                error.status !== 409 ||
+                error.code !== "consistency_identity_mismatch"
+              )
+                throw error;
+              // Exactly one authenticated admitted snapshot discovers current identity.
+              responseWatermark = undefined;
+              reading = (await options.read.latest(
+                identity.authorization,
+                deviceId,
+                {
+                  tenantId: identity.principal.tenantId,
+                  onWatermark,
+                  deadline,
+                  signal: controller.signal,
+                },
+              )) as Record<string, unknown> | null;
+              const actualToken =
+                responseWatermark ?? reading?.consistencyToken;
+              if (typeof actualToken !== "string")
+                throw new ReadUpstreamError(
+                  502,
+                  "invalid_consistency_response",
+                );
+              const previous = parseWatermark(
+                requestedMinimum,
+                identity.principal.tenantId,
+              );
+              const actual = parseWatermark(
+                actualToken,
+                identity.principal.tenantId,
+              );
+              if (
+                BigInt(actual.placementEpoch) <
+                  BigInt(previous.placementEpoch) ||
+                (actual.shardIncarnation === previous.shardIncarnation &&
+                  actual.placementEpoch === previous.placementEpoch)
+              )
+                throw new ReadUpstreamError(
+                  409,
+                  "consistency_identity_mismatch",
+                );
+              const current =
+                minimumConsistency &&
+                parseWatermark(minimumConsistency, identity.principal.tenantId);
+              if (
+                current &&
+                (BigInt(current.placementEpoch) >
+                  BigInt(actual.placementEpoch) ||
+                  ((current.shardIncarnation !== previous.shardIncarnation ||
+                    current.placementEpoch !== previous.placementEpoch) &&
+                    (current.shardIncarnation !== actual.shardIncarnation ||
+                      current.placementEpoch !== actual.placementEpoch)))
+              )
+                throw new ReadUpstreamError(
+                  409,
+                  "consistency_identity_mismatch",
+                );
+              if (
+                current &&
+                current.shardIncarnation === actual.shardIncarnation &&
+                current.placementEpoch === actual.placementEpoch &&
+                BigInt(current.sequence) > BigInt(actual.sequence)
+              )
+                throw new ReadUpstreamError(
+                  502,
+                  "consistency_minimum_unsatisfied",
+                );
+              minimumConsistency = serializeWatermark(actual);
+            }
+            const actualToken = responseWatermark ?? reading?.consistencyToken;
+            if (minimumConsistency && typeof actualToken === "string") {
+              const wanted = parseWatermark(
+                minimumConsistency,
+                identity.principal.tenantId,
+              );
+              const actual = parseWatermark(
+                actualToken,
+                identity.principal.tenantId,
+              );
+              // A hint can advance while an older admitted snapshot is in flight.
+              // Do not publish that stale result; rerun under the newer demand.
+              if (
+                BigInt(wanted.placementEpoch) > BigInt(actual.placementEpoch) ||
+                (wanted.shardIncarnation === actual.shardIncarnation &&
+                  wanted.placementEpoch === actual.placementEpoch &&
+                  BigInt(wanted.sequence) > BigInt(actual.sequence))
+              ) {
+                rerun = true;
+                return;
+              }
+            }
+            observe(actualToken);
+            const next = JSON.stringify([reading ?? null, actualToken ?? null]);
+            if (isCurrent() && next !== fingerprint) {
               fingerprint = next;
               send({
                 type: "next",
@@ -254,43 +520,73 @@ export function attachSubscriptions(
                       readingId: reading?.readingId ?? null,
                       projectedAt: reading?.projectedAt ?? null,
                       streamVersion: reading?.streamVersion ?? null,
+                      consistencyToken: actualToken ?? null,
                     },
                   },
                 },
               });
             }
-          } catch {
-            subscriptions.get(id)?.();
-            subscriptions.delete(id);
-            fail(id, "read_unavailable");
+          } catch (error) {
+            failRead(error);
           } finally {
+            if (activeRead === controller) activeRead = undefined;
             busy = false;
+            inFlightPolls--;
+            if (rerun) {
+              rerun = false;
+              void poll();
+            }
           }
         };
         let timer: ReturnType<typeof setInterval> | undefined;
         const status = (ready: boolean) => {
           if (timer) clearInterval(timer);
-          timer = ready ? undefined : setInterval(poll, intervalMs);
-          if (ready) void poll();
+          timer = ready
+            ? undefined
+            : setInterval(
+                poll,
+                intervalMs + randomInt(Math.max(1, Math.ceil(intervalMs / 4))),
+              );
+          if (ready && initialPollComplete) void poll();
         };
         const offHint = options.feed?.onHint(
           identity.principal.tenantId,
           deviceId,
-          () => {
-            void poll();
+          (hint) => {
+            try {
+              if (
+                hint.scope !== "epoch" &&
+                observe(hint.consistencyToken, true) === false
+              )
+                return;
+              void poll();
+            } catch (error) {
+              if (
+                error instanceof ReadUpstreamError &&
+                error.code === "consistency_identity_mismatch"
+              )
+                void poll();
+              else failRead(error);
+            }
           },
         );
         const offStatus = options.feed?.onStatus(status);
-        subscriptions.set(id, () => {
+        cleanup = () => {
+          activeRead?.abort();
           if (timer) clearInterval(timer);
+          if (retryTimer) clearTimeout(retryTimer);
           offHint?.();
           offStatus?.();
-        });
+        };
         status(options.feed?.isReady() ?? false);
         await poll();
+        initialPollComplete = true;
       });
       ws.on("close", () => {
         clearTimeout(expiry);
+        clearTimeout(initTimeout);
+        if (initCloseForce) clearTimeout(initCloseForce);
+        clearInterval(heartbeat);
         for (const cleanup of subscriptions.values()) cleanup();
         subscriptions.clear();
       });

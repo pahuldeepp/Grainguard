@@ -231,6 +231,7 @@ export async function invalidateRisk(
 export interface CommandContext {
   tenantId: string;
   actorId: string;
+  actorIssuer?: string;
   correlationId: string;
   traceparent: string;
   idempotencyKey: string;
@@ -264,6 +265,7 @@ async function acknowledgeLocked(
     version: episode.version + 1n,
     acknowledgedAt: now,
     acknowledgedBy: ctx.actorId,
+    acknowledgedByIssuer: ctx.actorIssuer ?? null,
   };
   await saveEpisode(tx, next, now);
   const commandId = randomUUID();
@@ -277,7 +279,7 @@ async function acknowledgeLocked(
       causeId: commandId,
       correlationId: ctx.correlationId,
       traceparent: ctx.traceparent,
-      actor: { type: "user", id: ctx.actorId },
+      actor: { type: "user", id: ctx.actorId, issuer: ctx.actorIssuer },
     },
     now,
   );
@@ -307,10 +309,12 @@ export function acknowledge(
     episodeId,
     expectedVersion: expectedVersion.toString(),
     actorId: ctx.actorId,
+    ...(ctx.actorIssuer && { actorIssuer: ctx.actorIssuer }),
   };
   const receiptKey = deterministicId(
     ctx.tenantId,
     ACK_COMMAND,
+    ...(ctx.actorIssuer ? [ctx.actorIssuer] : []),
     ctx.actorId,
     ctx.idempotencyKey,
   );

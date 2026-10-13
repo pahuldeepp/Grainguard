@@ -11,7 +11,7 @@ import { identityIdOf } from "../domain/ids.js";
 import { once, type Actor, type Command } from "../domain/store.js";
 import { limit } from "../domain/entitlements.js";
 import { RateLimitedError } from "../api/rate-limited.js";
-import type { AuditSources } from "./owners.js";
+import type { AuditSources, AuditReader } from "./owners.js";
 
 type AuditRecord = {
   audit_id: string;
@@ -32,6 +32,12 @@ type JobRecord = {
   expires_at: Date;
   file_sha256: string | null;
 };
+export type ClaimedAuditJob = JobRecord & { attempts: number };
+export class AuditClaimLostError extends Error {
+  constructor() {
+    super("audit export claim lost");
+  }
+}
 
 export async function authorizeAudit(tx: Tx, tenantId: string, actor: Actor) {
   const actorId = identityIdOf(actor.issuer, actor.subject);
@@ -121,7 +127,7 @@ async function readAllRows(
   to: Date,
   cursor: { at: string; id: string } | null,
   limit: number,
-  sources?: AuditSources,
+  sources?: AuditReader,
 ) {
   const [control, inventory, billing] = await Promise.all([
     readRows(tx, tenantId, from, to, cursor, limit),
@@ -182,8 +188,7 @@ export class ExportQuotaError extends RateLimitedError {}
 
 // Serialized per tenant so concurrent requests cannot jointly exceed the quota.
 async function assertExportQuota(tx: Tx, tenantId: string) {
-  const lockKey = `audit-export-quota|${tenantId}`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`audit-export-quota|${tenantId}`}, 0))`;
   const { max } = await limit(tx, tenantId, "exports.per_day");
   const [usage] = await tx.$queryRaw<{ n: bigint; retry_after: number }[]>`
     SELECT count(*)::bigint AS n,
@@ -250,7 +255,7 @@ export async function requestAuditExport(
 /** Attempts per export before it is parked as `failed` (backoff doubles from 60 s to 1 h). */
 export const MAX_EXPORT_ATTEMPTS = 5;
 
-export async function claimAuditJob(db: Db): Promise<JobRecord | null> {
+export async function claimAuditJob(db: Db): Promise<ClaimedAuditJob | null> {
   const candidates = await db.$queryRaw<
     { tenant_id: string; job_id: string }[]
   >`
@@ -268,14 +273,14 @@ export async function claimAuditJob(db: Db): Promise<JobRecord | null> {
         WHERE tenant_id=${candidate.tenant_id}::uuid AND job_id=${candidate.job_id}::uuid
           AND state='running' AND lease_until < now() AND attempts >= ${MAX_EXPORT_ATTEMPTS}`;
         if (exhausted) return undefined;
-        const [row] = await tx.$queryRaw<JobRecord[]>`
+        const [row] = await tx.$queryRaw<ClaimedAuditJob[]>`
         UPDATE audit_export_jobs SET state='running',
           lease_until=now() + interval '5 minutes', attempts=attempts+1, next_attempt_at=NULL
         WHERE tenant_id=${candidate.tenant_id}::uuid AND job_id=${candidate.job_id}::uuid
           AND attempts < ${MAX_EXPORT_ATTEMPTS}
           AND ((state='queued' AND (next_attempt_at IS NULL OR next_attempt_at <= now()))
             OR (state='running' AND lease_until < now()))
-        RETURNING tenant_id::text, job_id::text, from_at, to_at, format, state, expires_at, file_sha256`;
+        RETURNING tenant_id::text, job_id::text, from_at, to_at, format, state, expires_at, file_sha256, attempts`;
         return row;
       },
     );
@@ -296,7 +301,7 @@ const reasonOf = (error: unknown) =>
  */
 export async function recordAuditFailure(
   db: Db,
-  job: JobRecord,
+  job: ClaimedAuditJob,
   error: unknown,
 ) {
   await inScope(db, { tenantId: job.tenant_id }, async (tx) => {
@@ -307,8 +312,23 @@ export async function recordAuditFailure(
           ELSE clock_timestamp() + make_interval(secs => LEAST(30 * power(2, attempts), 3600)) END,
         failed_at = CASE WHEN attempts >= ${MAX_EXPORT_ATTEMPTS} THEN clock_timestamp() END,
         last_error = ${reasonOf(error)}
-      WHERE tenant_id=${job.tenant_id}::uuid AND job_id=${job.job_id}::uuid AND state='running'`;
+      WHERE tenant_id=${job.tenant_id}::uuid AND job_id=${job.job_id}::uuid
+        AND state='running' AND attempts=${job.attempts} AND lease_until > now()`;
   });
+}
+
+/** Renew only this attempt's unexpired lease; a reclaimed worker cannot be fenced back in. */
+export async function renewAuditLease(db: Db, job: ClaimedAuditJob) {
+  const renewed = await inScope(
+    db,
+    { tenantId: job.tenant_id },
+    (tx) =>
+      tx.$executeRaw`UPDATE audit_export_jobs
+      SET lease_until=clock_timestamp() + interval '5 minutes'
+      WHERE tenant_id=${job.tenant_id}::uuid AND job_id=${job.job_id}::uuid
+        AND state='running' AND attempts=${job.attempts} AND lease_until > clock_timestamp()`,
+  );
+  if (renewed !== 1) throw new AuditClaimLostError();
 }
 
 export async function* auditJobRows(
@@ -316,6 +336,7 @@ export async function* auditJobRows(
   job: JobRecord,
   sources?: AuditSources,
 ): AsyncGenerator<AuditEnvelope> {
+  const session = await sources?.session(job.tenant_id);
   let cursor: { at: string; id: string } | null = null;
   for (;;) {
     const current: { at: string; id: string } | null = cursor;
@@ -330,7 +351,7 @@ export async function* auditJobRows(
           job.to_at,
           current,
           500,
-          sources,
+          session,
         ),
     );
     if (!rows.length) return;
@@ -340,13 +361,21 @@ export async function* auditJobRows(
   }
 }
 
-export async function completeAuditJob(db: Db, job: JobRecord, digest: string) {
-  await inScope(db, { tenantId: job.tenant_id }, async (tx) => {
-    await tx.$executeRaw`UPDATE audit_export_jobs SET state='ready',
+export async function completeAuditJob(
+  db: Db,
+  job: ClaimedAuditJob,
+  digest: string,
+) {
+  const updated = await inScope(
+    db,
+    { tenantId: job.tenant_id },
+    (tx) =>
+      tx.$executeRaw`UPDATE audit_export_jobs SET state='ready',
       file_sha256=${digest}, completed_at=clock_timestamp(), lease_until=NULL
       WHERE tenant_id=${job.tenant_id}::uuid AND job_id=${job.job_id}::uuid
-      AND state='running'`;
-  });
+      AND state='running' AND attempts=${job.attempts} AND lease_until > clock_timestamp()`,
+  );
+  if (updated !== 1) throw new AuditClaimLostError();
 }
 
 export async function getAuditJob(

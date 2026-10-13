@@ -1,0 +1,215 @@
+{{- if .Values.dataPlaneEnabled }}
+{{- range $key := list "kafkaImage" "redisImage" "cassandraImage" }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $.Values $key | default "")) }}{{ fail (printf "data acceptance %s must be an immutable OCI digest" $key) }}{{ end }}
+{{- end }}
+{{- $run := sha256sum (printf "%s:%s" (toJson .Values) (.Files.Glob "files/*").AsConfig) | trunc 12 }}
+{{- $probes := list
+  (dict "id" "kafka-produce-consume" "image" .Values.kafkaImage "script" "kafka-roundtrip.sh" "uid" 1000 "target" (dict "app" "kafka") "port" 29092 "mesh" true)
+  (dict "id" "redis-tenant-cache-roundtrip" "image" .Values.redisImage "script" "redis-roundtrip.sh" "uid" 999 "target" (dict "app" "redis-cluster") "port" 6379 "mesh" true)
+  (dict "id" "cassandra-tenant-partition-roundtrip" "image" .Values.cassandraImage "script" "cassandra-roundtrip.py" "uid" 999 "target" (dict "app" "greenguard-cassandra" "greenguard.io/cassandra-auth-ready" "true") "port" 9042 "mesh" false)
+  (dict "id" "opensearch-index-search" "image" .Values.cassandraImage "script" "opensearch-roundtrip.py" "uid" 999 "target" (dict "app" "greenguard-opensearch") "port" 9200 "mesh" true)
+}}
+{{- range $probe := $probes }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gg-acceptance-{{ $probe.id }}-{{ $run }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    greenguard.io/cell: {{ $.Values.cell | quote }}
+    greenguard.io/migration-gate: "false"
+    greenguard.io/acceptance-probe: {{ $probe.id }}
+    greenguard.io/acceptance-revision: {{ $.Values.revision | quote }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: greenguard-live-acceptance-probes
+        app.kubernetes.io/instance: greenguard-live-acceptance-probes
+        greenguard.io/cell: {{ $.Values.cell | quote }}
+        greenguard.io/acceptance-probe: {{ $probe.id }}
+      annotations:
+        sidecar.istio.io/inject: {{ $probe.mesh | quote }}
+        sidecar.istio.io/nativeSidecar: "true"
+        proxy.istio.io/config: '{"holdApplicationUntilProxyStarts":true}'
+    spec:
+      serviceAccountName: greenguard-live-acceptance-probes
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $probe.uid }}
+        runAsGroup: {{ $probe.uid }}
+        fsGroup: {{ $probe.uid }}
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: roundtrip
+          image: {{ $probe.image | quote }}
+          imagePullPolicy: IfNotPresent
+{{- if or (eq $probe.id "opensearch-index-search") (eq $probe.id "cassandra-tenant-partition-roundtrip") }}
+          command: [python3, /probe/{{ $probe.script }}]
+{{- else }}
+          command: [/bin/sh, /probe/{{ $probe.script }}]
+{{- end }}
+          env:
+{{- if eq $probe.id "kafka-produce-consume" }}
+            - name: KAFKA_SASL_JAAS_CONFIG
+              valueFrom: {secretKeyRef: {name: greenguard-kafka-auth, key: acceptance-client-jaas}}
+{{- else if eq $probe.id "redis-tenant-cache-roundtrip" }}
+            - name: REDISCLI_AUTH
+              valueFrom: {secretKeyRef: {name: greenguard-data-credentials, key: REDIS_PASSWORD}}
+{{- else }}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+{{- end }}
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: probe, mountPath: /probe, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+{{- if eq $probe.id "kafka-produce-consume" }}
+            - {name: ca, mountPath: /etc/greenguard/kafka, readOnly: true}
+{{- else if eq $probe.id "cassandra-tenant-partition-roundtrip" }}
+            - {name: ca, mountPath: /cql-tls, readOnly: true}
+            - {name: auth, mountPath: /auth, readOnly: true}
+{{- else if eq $probe.id "opensearch-index-search" }}
+            - {name: ca, mountPath: /search-ca, readOnly: true}
+            - {name: auth, mountPath: /search-auth, readOnly: true}
+{{- end }}
+      volumes:
+        - {name: probe, configMap: {name: greenguard-acceptance-{{ $run }}, defaultMode: 0444}}
+        - {name: tmp, emptyDir: {}}
+{{- if eq $probe.id "kafka-produce-consume" }}
+        - name: ca
+          secret: {secretName: greenguard-kafka-ca, items: [{key: ca.crt, path: ca.crt}]}
+{{- else if eq $probe.id "cassandra-tenant-partition-roundtrip" }}
+        - name: ca
+          secret: {secretName: greenguard-cassandra-tls, items: [{key: ca.crt, path: ca.crt}]}
+        - name: auth
+          secret:
+            secretName: greenguard-cassandra-auth
+            items: [{key: reader-password, path: reader-password}, {key: writer-password, path: writer-password}]
+{{- else if eq $probe.id "opensearch-index-search" }}
+        - name: ca
+          secret: {secretName: greenguard-opensearch-ca, items: [{key: ca.crt, path: ca.crt}]}
+        - name: auth
+          secret:
+            secretName: greenguard-opensearch-clients
+            items: [{key: acceptance-reader-password, path: acceptance-reader-password}, {key: acceptance-writer-password, path: acceptance-writer-password}]
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acceptance-{{ $probe.id }}-egress
+  namespace: {{ $.Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: greenguard-live-acceptance-probes
+      greenguard.io/acceptance-probe: {{ $probe.id }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: greenguard}
+          podSelector:
+            matchLabels:
+{{ toYaml $probe.target | indent 14 }}
+      ports: [{protocol: TCP, port: {{ $probe.port }}}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acceptance-{{ $probe.id }}-ingress
+  namespace: {{ $.Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+{{ toYaml $probe.target | indent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: greenguard}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: greenguard-live-acceptance-probes
+              greenguard.io/acceptance-probe: {{ $probe.id }}
+      ports: [{protocol: TCP, port: {{ $probe.port }}}]
+{{- end }}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: opensearch-acceptance, namespace: {{ .Release.Namespace }}}
+spec:
+  selector:
+    matchLabels: {app: greenguard-opensearch}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: [cluster.local/ns/greenguard/sa/greenguard-live-acceptance-probes]
+      to:
+        - operation:
+            ports: ["9200"]
+{{- end }}
+{{- if or .Values.dataPlaneEnabled .Values.clickhouseEnabled }}
+{{- range $target := list (dict "name" "redis" "labels" (dict "app" "redis-cluster") "host" "*.redis-headless.greenguard.svc.cluster.local") (dict "name" "clickhouse" "labels" (dict "app.kubernetes.io/name" "greenguard-clickhouse") "host" "greenguard-clickhouse.greenguard.svc.cluster.local") }}
+{{- if or (and (eq $target.name "redis") $.Values.dataPlaneEnabled) (and (eq $target.name "clickhouse") $.Values.clickhouseEnabled) }}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata: {name: {{ $target.name }}-acceptance-strict, namespace: {{ $.Release.Namespace }}}
+spec:
+  selector:
+    matchLabels:
+{{ toYaml $target.labels | indent 6 }}
+  mtls: {mode: STRICT}
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata: {name: {{ $target.name }}-acceptance-mtls, namespace: {{ $.Release.Namespace }}}
+spec:
+  host: {{ $target.host | quote }}
+  workloadSelector:
+    matchLabels: {app.kubernetes.io/name: greenguard-live-acceptance-probes}
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+      subjectAltNames: [spiffe://cluster.local/ns/greenguard/sa/default]
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.clickhouseEnabled }}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: clickhouse-native-acceptance, namespace: {{ .Release.Namespace }}}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: greenguard-clickhouse}
+  action: ALLOW
+  rules:
+    # Existing HTTP application access keeps its NetworkPolicy boundary.
+    - from:
+        - source:
+            principals: [cluster.local/ns/greenguard/sa/telemetry-clickhouse-sink-greenguard-service]
+      to:
+        - operation:
+            ports: ["8123"]
+    - from:
+        - source:
+            principals: [cluster.local/ns/greenguard/sa/greenguard-live-acceptance-probes]
+      to:
+        - operation:
+            ports: ["9000"]
+{{- end }}

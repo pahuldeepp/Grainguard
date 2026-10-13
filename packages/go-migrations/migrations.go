@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	neturl "net/url"
 	"os"
 	"strings"
 
@@ -68,6 +69,19 @@ func Run(envKey string, getenv func(string) string, up func(string) error) error
 	url := getenv(envKey)
 	if url == "" {
 		return UsageError(envKey + " is required")
+	}
+	if getenv("GG_RDS") == "1" {
+		parsed, err := neturl.Parse(url)
+		if err != nil {
+			return UsageError(envKey + " must use a PostgreSQL URL with sslmode=verify-full and sslrootcert=/rds-ca/ca.pem for RDS")
+		}
+		query := parsed.Query()
+		if (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Hostname() == "" ||
+			len(query["sslmode"]) != 1 || query.Get("sslmode") != "verify-full" ||
+			len(query["sslrootcert"]) != 1 || query.Get("sslrootcert") != "/rds-ca/ca.pem" ||
+			query.Has("host") || query.Has("hostaddr") {
+			return UsageError(envKey + " must use a PostgreSQL URL with sslmode=verify-full and sslrootcert=/rds-ca/ca.pem for RDS")
+		}
 	}
 	return up(url)
 }

@@ -10,10 +10,20 @@ import {
 const hex = (bytes: Uint8Array) =>
   Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 
+type TestGlobals = {
+  crypto?: { getRandomValues(array: Uint8Array): Uint8Array } | undefined;
+  TextEncoder?: (new () => { encode(text?: string): Uint8Array }) | undefined;
+  TextDecoder?: (new () => { decode(bytes: Uint8Array): string }) | undefined;
+  atob?: ((input: string) => string) | undefined;
+  btoa?: ((input: string) => string) | undefined;
+  AbortSignal?: (typeof AbortSignal & { timeout?: (ms: number) => AbortSignal }) | undefined;
+};
+const globals = () => globalThis as unknown as TestGlobals;
+
 // Deterministic stand-in for react-native-get-random-values (native in the app).
 function fakeRandom() {
   let counter = 1;
-  (globalThis as any).crypto = {
+  globals().crypto = {
     getRandomValues: (array: Uint8Array) => {
       for (let i = 0; i < array.length; i++) array[i] = counter++ & 0xff;
       return array;
@@ -60,12 +70,12 @@ test('random bytes come from getRandomValues and fail closed without it', () => 
   expect(shellCrypto().randomUUID()).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
-  (globalThis as any).crypto = undefined;
+  globals().crypto = undefined;
   expect(() => shellCrypto().randomBytes(4)).toThrow(/secure random/i);
 });
 
 test('installPolyfills fills missing text and base64 globals only', () => {
-  const g = globalThis as any;
+  const g = globals();
   const saved = {
     TextEncoder: g.TextEncoder,
     TextDecoder: g.TextDecoder,
@@ -75,13 +85,13 @@ test('installPolyfills fills missing text and base64 globals only', () => {
   g.TextEncoder = g.TextDecoder = g.atob = g.btoa = undefined;
   try {
     installPolyfills();
-    const encoder = new g.TextEncoder();
+    const encoder = new g.TextEncoder!();
     expect(base64Url(encoder.encode('any carnal pleas'))).toBe(
       'YW55IGNhcm5hbCBwbGVhcw',
     );
-    expect(new g.TextDecoder().decode(encoder.encode('é'))).toBe('é');
-    expect(g.atob('Zm9v')).toBe('foo');
-    const kept = () => 1;
+    expect(new g.TextDecoder!().decode(encoder.encode('é'))).toBe('é');
+    expect(g.atob!('Zm9v')).toBe('foo');
+    const kept = () => 'kept';
     g.btoa = kept;
     installPolyfills();
     expect(g.btoa).toBe(kept);
@@ -92,17 +102,21 @@ test('installPolyfills fills missing text and base64 globals only', () => {
 
 test('AbortSignal.timeout is supplied when missing and aborts after the delay', () => {
   jest.useFakeTimers();
-  const g = globalThis as any;
-  const saved = g.AbortSignal.timeout;
-  delete g.AbortSignal.timeout;
+  const g = globals();
+  const signalConstructor = g.AbortSignal as unknown as
+    | { timeout?: (ms: number) => AbortSignal }
+    | undefined;
+  if (!signalConstructor) throw new Error('AbortSignal is unavailable in test');
+  const saved = signalConstructor.timeout;
+  signalConstructor.timeout = undefined;
   try {
     installPolyfills();
-    const signal = g.AbortSignal.timeout(50);
+    const signal = signalConstructor.timeout!(50);
     expect(signal.aborted).toBe(false);
     jest.advanceTimersByTime(60);
     expect(signal.aborted).toBe(true);
   } finally {
-    g.AbortSignal.timeout = saved;
+    signalConstructor.timeout = saved;
     jest.useRealTimers();
   }
 });

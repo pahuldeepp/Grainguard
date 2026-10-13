@@ -1,0 +1,69 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: disposable-rabbitmq-ingress
+  namespace: greenguard
+spec:
+  podSelector:
+    matchLabels: {app: rabbitmq}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: disposable-redis-ingress
+  namespace: greenguard
+spec:
+  podSelector:
+    matchLabels: {app: redis-cluster}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 6379}
+    - from:
+        - podSelector:
+            matchLabels: {app: redis-cluster}
+      ports:
+        - {protocol: TCP, port: 16379}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: disposable-kafka-ingress
+  namespace: greenguard
+spec:
+  podSelector:
+    matchLabels: {app: kafka}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 29092}
+    - from:
+        - podSelector:
+            matchLabels: {app: kafka}
+      ports:
+        - {protocol: TCP, port: 9093}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: disposable-schema-registry-ingress
+  namespace: greenguard
+spec:
+  podSelector:
+    matchLabels: {app: schema-registry}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 8081}

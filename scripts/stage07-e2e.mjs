@@ -16,11 +16,25 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import kafkaJs from "kafkajs";
 import pg from "pg";
+import {
+  bootstrapTenantOwnership,
+  controlIncarnations,
+  localShardSelection,
+  startPlacementAuthority,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
+import { composeContainerName } from "./ci-compose-project.mjs";
+import {
+  createStage07ProcessMonitor,
+  Stage07ProcessFailure,
+} from "./stage07-process-health.mjs";
+import { stage07Endpoints } from "./stage07-endpoints.mjs";
 
 process.loadEnvFile(".env");
 const { Kafka, logLevel } = kafkaJs;
-const broker = "127.0.0.1:59092";
-const mqttBroker = "tcp://127.0.0.1:51883";
+const { kafkaBrokers, mqttBrokerUrl: mqttBroker } = stage07Endpoints();
+const broker = kafkaBrokers.join(",");
+const connectURL = process.env.KAFKA_CONNECT_URL ?? "http://127.0.0.1:58083";
 const tmp = mkdtempSync(path.join(tmpdir(), "greenguard-stage07-"));
 const children = [];
 const logs = new Map();
@@ -92,10 +106,14 @@ const idp = createServer((_req, res) =>
 let idpStarted = false;
 const kafka = new Kafka({
   clientId: `stage07-e2e-${id}`,
-  brokers: [broker],
+  brokers: kafkaBrokers,
   logLevel: logLevel.ERROR,
 });
 let admin;
+// Tenant placement: services resolve ownership through a private shard registry and a
+// placement authority, exactly as in a sharded deployment (set in main()).
+let placementEnv = () => ({});
+let placementAuthority;
 
 function buildGo(module, target, name) {
   const output = path.join(tmp, name);
@@ -117,6 +135,7 @@ function start(name, command, args, cwd, env = {}) {
     env: { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
   });
+  p.stage07Name = name;
   let log = "";
   p.stderr.on("data", (chunk) => {
     log = (log + chunk.toString()).slice(-5000);
@@ -143,6 +162,7 @@ async function waitFor(predicate, label, timeoutMs = 120_000) {
       const value = await predicate();
       if (value) return value;
     } catch (error) {
+      if (error instanceof Stage07ProcessFailure) throw error;
       last = error;
     }
     await delay(300);
@@ -151,11 +171,25 @@ async function waitFor(predicate, label, timeoutMs = 120_000) {
     `${label} timed out: ${last?.message ?? "no matching state"}\n${[...logs].map(([name, log]) => `${name}: ${log.slice(-1000)}`).join("\n")}`,
   );
 }
-async function scoped(url, tenant, work) {
-  const db = new pg.Client({ connectionString: url });
+async function scoped(url, tenant, work, fixture = false) {
+  // Fixture writes are seeded as the PostgreSQL superuser with the tenant-ownership
+  // row fence bypassed for that transaction, then switch back to the service role so
+  // RLS still applies. The services under test keep the fence enabled.
+  const target = new URL(url);
+  let connectionString = url;
+  if (fixture) {
+    const admin = new URL(process.env.POSTGRES_ADMIN_URL);
+    admin.pathname = target.pathname;
+    connectionString = admin.toString();
+  }
+  const db = new pg.Client({ connectionString });
   await db.connect();
   try {
     await db.query("BEGIN");
+    if (fixture) {
+      await db.query("SET LOCAL session_replication_role = replica");
+      await db.query(`SET LOCAL ROLE "${decodeURIComponent(target.username)}"`);
+    }
     await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenant]);
     const result = await work(db);
     await db.query("COMMIT");
@@ -167,9 +201,10 @@ async function scoped(url, tenant, work) {
     await db.end();
   }
 }
+const fixtureScoped = (url, tenant, work) => scoped(url, tenant, work, true);
 async function seed() {
   for (const item of items) {
-    await scoped(
+    await fixtureScoped(
       process.env.INVENTORY_PROJECTOR_DIRECT_URL,
       item.tenant,
       (db) =>
@@ -178,18 +213,22 @@ async function seed() {
           [item.tenant],
         ),
     );
-    await scoped(process.env.INVENTORY_DIRECT_URL, item.tenant, async (db) => {
-      await db.query(
-        "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'Stage07 Site')",
-        [item.tenant, item.site],
-      );
-      await db.query(
-        `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
+    await fixtureScoped(
+      process.env.INVENTORY_DIRECT_URL,
+      item.tenant,
+      async (db) => {
+        await db.query(
+          "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,'Stage07 Site')",
+          [item.tenant, item.site],
+        );
+        await db.query(
+          `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
         VALUES($1,$2,$3,$4,'provisioning',$5)`,
-        [item.tenant, item.device, item.site, item.serial, item.asset],
-      );
-    });
-    await scoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
+          [item.tenant, item.device, item.site, item.serial, item.asset],
+        );
+      },
+    );
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `
       INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
@@ -198,42 +237,48 @@ async function seed() {
       ),
     );
   }
-  await scoped(process.env.INVENTORY_DIRECT_URL, compensate.tenant, (db) =>
-    db.query(
-      `
+  await fixtureScoped(
+    process.env.INVENTORY_DIRECT_URL,
+    compensate.tenant,
+    (db) =>
+      db.query(
+        `
     INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
     VALUES($1,$2,$3,$4,'provisioning',$5)`,
-      [
-        compensate.tenant,
-        compensate.device,
-        compensate.site,
-        compensate.serial,
-        compensate.inventoryAsset,
-      ],
-    ),
+        [
+          compensate.tenant,
+          compensate.device,
+          compensate.site,
+          compensate.serial,
+          compensate.inventoryAsset,
+        ],
+      ),
   );
-  await scoped(process.env.HARDWARE_DIRECT_URL, compensate.tenant, (db) =>
-    db.query(
-      `
+  await fixtureScoped(
+    process.env.HARDWARE_DIRECT_URL,
+    compensate.tenant,
+    (db) =>
+      db.query(
+        `
     INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
     VALUES($1,$2,$3,$4)`,
-      [
-        compensate.tenant,
-        compensate.asset,
-        compensate.serial,
-        compensate.secret,
-      ],
-    ),
+        [
+          compensate.tenant,
+          compensate.asset,
+          compensate.serial,
+          compensate.secret,
+        ],
+      ),
   );
   for (const item of Object.values(gate)) {
-    await scoped(process.env.INVENTORY_DIRECT_URL, item.tenant, (db) =>
+    await fixtureScoped(process.env.INVENTORY_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
         VALUES($1,$2,$3,$4,'provisioning',$5)`,
         [item.tenant, item.device, item.site, item.serial, item.asset],
       ),
     );
-    await scoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, item.tenant, (db) =>
       db.query(
         `INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
         VALUES($1,$2,$3,$4)`,
@@ -324,7 +369,7 @@ async function status(item, sagaID) {
 }
 async function main() {
   const connector = await fetch(
-    "http://127.0.0.1:58083/connectors/inventory-outbox/status",
+    `${connectURL}/connectors/inventory-outbox/status`,
     { signal: AbortSignal.timeout(5000) },
   ).then((r) => r.json());
   assert.equal(
@@ -333,6 +378,27 @@ async function main() {
     "inventory CDC connector must run",
   );
   assert.ok(connector.tasks.every((task) => task.state === "RUNNING"));
+  const incarnations = await controlIncarnations();
+  await bootstrapTenantOwnership(
+    tenants,
+    ["inventory", "telemetry", "sagas", "hardware"],
+    incarnations,
+  );
+  placementAuthority = await startPlacementAuthority(incarnations);
+  placementAuthority.add(...tenants);
+  const registryDir = path.join(tmp, "registry");
+  placementEnv = (service, database, directUrlEnv) => ({
+    SHARD_REGISTRY_FILE: writeServiceRegistry({
+      dir: registryDir,
+      service,
+      database,
+      directUrl: process.env[directUrlEnv],
+      incarnations,
+    }),
+    ...localShardSelection(),
+    CONTROL_PLANE_URL: placementAuthority.url,
+    CONTROL_LOOKUP_TOKEN: placementAuthority.token,
+  });
   const fixtureFile = await seed();
   await seedOffsets();
   await new Promise((resolve) => idp.listen(18192, "127.0.0.1", resolve));
@@ -381,6 +447,7 @@ async function main() {
     AUTH_ISSUER: issuer,
     AUTH_AUDIENCE: audience,
     AUTH_JWKS_URL: "http://127.0.0.1:18192/keys",
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   const orchestrator = startSaga("saga-worker");
   await waitFor(
@@ -539,6 +606,7 @@ function startSaga(name, current = true) {
     SAGA_RESULT_GROUP: sagaGroup,
     SAGA_LEASE_TTL_SECONDS: "3",
     SAGA_WORKER_ID: `stage07-${id}-${name}-${Date.now()}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   if (current) procs.saga = p;
   return p;
@@ -548,13 +616,21 @@ const participantArgs = {
     bins.hardware,
     [],
     "services/hardware-service",
-    { KAFKA_BROKERS: broker, MQTT_BROKER_URL: mqttBroker },
+    {
+      KAFKA_BROKERS: broker,
+      MQTT_BROKER_URL: mqttBroker,
+      MQTT_CLIENT_ID: `stage07-${id}-hardware`,
+      ...placementEnv("hardware-service", "hardware", "HARDWARE_DIRECT_URL"),
+    },
   ],
   inventory: () => [
     process.execPath,
     ["dist/saga/main.js"],
     "services/device-service",
-    { KAFKA_BROKERS: broker },
+    {
+      KAFKA_BROKERS: broker,
+      ...placementEnv("device-service", "inventory", "INVENTORY_DIRECT_URL"),
+    },
   ],
   telemetry: () => [
     bins.telemetry,
@@ -565,10 +641,7 @@ const participantArgs = {
       SAGA_BINDING_ENABLED: "1",
       EVENT_SCHEMA_DIR: path.resolve("contracts/events"),
       HTTP_ADDR: "127.0.0.1:18097",
-      // The saga gate does not exercise machine API keys; a lookup token
-      // inherited from .env without CONTROL_PLANE_URL would abort startup.
-      CONTROL_PLANE_URL: "",
-      CONTROL_LOOKUP_TOKEN: "",
+      ...placementEnv("telemetry-ingest", "telemetry", "TELEMETRY_DIRECT_URL"),
     },
   ],
 };
@@ -578,12 +651,6 @@ function startParticipant(name) {
   return procs[name];
 }
 const exited = (p) => p.exitCode !== null || p.signalCode !== null;
-async function kill9(p) {
-  if (exited(p)) return;
-  const closed = new Promise((resolve) => p.once("close", resolve));
-  p.kill("SIGKILL");
-  await closed;
-}
 async function restart(name) {
   if (name === "saga") startSaga(`saga-${Date.now()}`);
   else startParticipant(name);
@@ -596,8 +663,11 @@ async function ensureRunning(report) {
     }
   }
 }
+// Includes a deadline UPDATE that simulates a stalled saga, so it bypasses the row fence.
 const sagaDb = (tenant, sql, args) =>
-  scoped(process.env.SAGA_DIRECT_URL, tenant, (db) => db.query(sql, args));
+  fixtureScoped(process.env.SAGA_DIRECT_URL, tenant, (db) =>
+    db.query(sql, args),
+  );
 async function provision(item, device = item.device) {
   const response = await request(item.tenant, "/v1/provisioning", "POST", {
     device_id: device,
@@ -606,11 +676,20 @@ async function provision(item, device = item.device) {
   assert.equal(response.status, 202, JSON.stringify(response));
   return response.body.SagaID;
 }
-async function waitState(item, sagaID, states, label, timeoutMs = 120_000) {
+async function waitState(
+  item,
+  sagaID,
+  states,
+  label,
+  timeoutMs = 120_000,
+  assertRunning,
+) {
   const wanted = [states].flat();
   return waitFor(
     async () => {
+      assertRunning?.();
       const state = await status(item, sagaID);
+      assertRunning?.();
       return wanted.includes(state.State) && state;
     },
     label,
@@ -816,25 +895,41 @@ async function gateKill() {
   const sagaID = await provision(item);
   const kills = [];
   const order = ["saga", "hardware", "inventory", "telemetry"];
-  // SIGKILL every service at each newly committed saga version: just after the
-  // transition/outbox commit and around its command publication.
-  const end = Date.now() + 240_000;
-  let seen = 0;
-  while (Date.now() < end) {
-    const state = await status(item, sagaID);
-    if (state.State === "active") break;
-    if (state.Version !== seen) {
-      seen = state.Version;
-      for (const name of order) {
-        kills.push(`${name}@${state.State}/v${state.Version}`);
-        await kill9(procs[name]);
-        await restart(name);
+  const monitor = createStage07ProcessMonitor(procs, logs);
+  try {
+    // SIGKILL every service at each newly committed saga version. Unexpected
+    // exits remain recorded throughout each awaited kill and replacement.
+    const end = Date.now() + 240_000;
+    let seen = 0;
+    while (Date.now() < end) {
+      monitor.assertRunning("SIGKILL rotation");
+      const state = await status(item, sagaID);
+      const context = `SIGKILL rotation state=${state.State}/v${state.Version}`;
+      monitor.assertRunning(context);
+      if (state.State === "active") break;
+      if (state.Version !== seen) {
+        seen = state.Version;
+        for (const name of order) {
+          await monitor.rotate(name, restart, context);
+          kills.push(`${name}@${state.State}/v${state.Version}`);
+        }
       }
+      await delay(150);
     }
-    await delay(150);
+    await waitState(
+      item,
+      sagaID,
+      "active",
+      "active after SIGKILL rotation",
+      120_000,
+      () => monitor.assertRunning("active after SIGKILL rotation"),
+    );
+    const dup = await assertNoDuplicates(item, sagaID);
+    monitor.assertRunning("SIGKILL rotation final duplicate check");
+    out.kill = { kills, dup };
+  } finally {
+    monitor.close();
   }
-  await waitState(item, sagaID, "active", "active after SIGKILL rotation");
-  out.kill = { kills, dup: await assertNoDuplicates(item, sagaID) };
 }
 async function gateOutage() {
   const item = gate.outage;
@@ -862,14 +957,15 @@ async function gateOutage() {
 async function gateBroker() {
   const item = gate.broker;
   const sagaID = await provision(item);
-  const paused = spawnSync("docker", ["pause", "greenguard-dev-kafka-1"], {
+  const kafka = composeContainerName("kafka");
+  const paused = spawnSync("docker", ["pause", kafka], {
     encoding: "utf8",
   });
   assert.equal(paused.status, 0, paused.stderr);
   try {
     await delay(8000);
   } finally {
-    spawnSync("docker", ["unpause", "greenguard-dev-kafka-1"]);
+    spawnSync("docker", ["unpause", kafka]);
   }
   const restarted = [];
   for (let i = 0; i < 40; i++) {
@@ -1075,6 +1171,7 @@ try {
 } finally {
   for (const child of children.reverse()) await stop(child);
   if (idpStarted) await new Promise((resolve) => idp.close(resolve));
+  placementAuthority?.close();
   await admin?.disconnect();
   rmSync(tmp, { recursive: true, force: true });
 }

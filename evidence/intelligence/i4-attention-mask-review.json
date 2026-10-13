@@ -1,0 +1,44 @@
+{
+  "benchmark_source_sha256": "a10a32ef8e18c4a18828d2728b10a6ebd103662298201e5874f73a0f2043e694",
+  "created_at_utc": "2026-10-01T02:07:10.612615+00:00",
+  "finding": "P2 combined additive and causal masks can fully mask query rows and produce NaN",
+  "fix": "Compute fully-masked status from final combined scores before softmax",
+  "fixed_source_sha256": "b4318d8108e3c1b929f1a02d7769c36be9b4fe58143fbc9a0d36fd11cfec7285",
+  "limitation": "The original report remains the historical benchmark source snapshot. The final source was replayed through the full eight-epoch comparison; all five validation/test metrics and the Transformer tensor fingerprint match. The post-review regression suite also verifies finite outputs/gradients and valid-row preservation. No model selection/promotion or production data.",
+  "preserved_benchmark": {
+    "artifact_sha256": "c98c69be1fe57f4e67b2482bf12b15568cc8652d4c7223e72af72d809d8a36bc",
+    "frozen_sha256": "724fc9a326e34560b1a8319cf36106fa282a826000125a8ad7b6f70fe8cb280e",
+    "report_sha256": "264f4ce382232f2b973f31c3188e82024b5f3d7301948549a8c1703e80166fb9",
+    "same_environment_replay_checks": {
+      "drift_reference": true,
+      "environment": true,
+      "frozen_record_sha256": true,
+      "inputs": true,
+      "label_fingerprints": true,
+      "models": true,
+      "split_definition": true,
+      "split_fingerprints": true,
+      "transformer_tensor_fingerprint": true
+    }
+  },
+  "production_eligible": false,
+  "regression": {
+    "dtypes": [
+      "float32",
+      "float64"
+    ],
+    "fully_masked_row_is_zero": true,
+    "matches_pytorch_sdpa": true,
+    "outputs_and_gradients_finite": true,
+    "valid_row_preserved": true
+  },
+  "schema_version": "synthetic-i4-attention-mask-review-v1",
+  "synthetic_only": true,
+  "tests": {
+    "command": "PYTHONPATH=. .local/intelligence-venv/bin/python -m unittest ml.deep_learning.test_sequence_models -v",
+    "log": "i4-attention-mask-review-tests.log",
+    "log_sha256": "10d8ef2be55e4cb73041fbc7dc337d93f0686ff4e54d0ea9c681e76fd1813073",
+    "passed": 18,
+    "source_sha256": "20f4be814e2e870ff4846912ac2a5a282d3bd3dea8e8dcc239acf6d20626876e"
+  }
+}

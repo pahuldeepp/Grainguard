@@ -35,6 +35,22 @@ func TestReplayConfigurationFailsClosed(t *testing.T) {
 	}
 }
 
+func TestReplayMainRejectsShardedModeBeforeOpeningAnyDependencies(t *testing.T) {
+	err := replayMain(context.Background(), func(key string) string {
+		switch key {
+		case "SHARD_ROUTING_REQUIRED":
+			return "false"
+		case "SHARD_REGISTRY_FILE":
+			return "/path/not-needed-for-rejection/registry.json"
+		default:
+			return ""
+		}
+	})
+	if err == nil || !strings.Contains(err.Error(), "sharded operational replay requires an explicit shard migration/replay protocol") {
+		t.Fatalf("expected preflight sharded-replay refusal, got %v", err)
+	}
+}
+
 func replayFixture(t *testing.T, ctx context.Context) (*testCluster, *kgo.Client, []replayPartition, map[string]any) {
 	t.Helper()
 	c := cluster(t)
@@ -50,7 +66,7 @@ func replayFixture(t *testing.T, ctx context.Context) (*testCluster, *kgo.Client
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parts) != 4 {
+	if len(parts) != len(projectionTopics)*2 {
 		t.Fatal(parts)
 	}
 	return c, producer, parts, e

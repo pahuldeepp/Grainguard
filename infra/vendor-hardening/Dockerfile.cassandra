@@ -1,0 +1,19 @@
+# Build unchanged gosu 1.19 source with a patched, checksum-locked Go toolchain.
+# No compiler or build dependencies are copied into the final runtime.
+FROM cassandra@sha256:618a493bcf1f817ea2f07288a46fa76fb2d9c4dfd5a04c28227336405782889c AS gosu-build
+USER root
+COPY go.tar.gz gosu.tar.gz vendor.tar.gz SHA256SUMS /build/
+RUN set -eu; cd /build; sha256sum -c SHA256SUMS; \
+    tar -xzf go.tar.gz; mkdir source; tar -xzf gosu.tar.gz -C source --strip-components=1; \
+    cd source; tar -xzf ../vendor.tar.gz; \
+    export PATH=/build/go/bin:$PATH GOTOOLCHAIN=local CGO_ENABLED=0 GOMAXPROCS=1 GOMEMLIMIT=512MiB; \
+    go build -mod=vendor -trimpath -buildvcs=false -ldflags '-d -w' -o /build/gosu .; \
+    go version -m /build/gosu; /build/gosu --version; /build/gosu nobody id
+
+# Cassandra 5.0.9; all upstream Java libraries, cqlsh and entrypoint retained.
+FROM cassandra@sha256:618a493bcf1f817ea2f07288a46fa76fb2d9c4dfd5a04c28227336405782889c
+USER root
+COPY --from=gosu-build /build/gosu /usr/local/bin/gosu
+RUN set -eu; test "$(gosu 999:999 id -u)" = 999; \
+    test "$(gosu 999:999 id -g)" = 999; gosu nobody ls -l /proc/self/fd
+USER 999:999

@@ -1,0 +1,74 @@
+{{- if and .Values.enabled .Values.migration.enabled }}
+{{- if ne .Values.environment "cluster-synthetic" }}{{ fail "the chart-owned migration job is limited to cluster-synthetic" }}{{ end }}
+{{- if ne .Values.secretRefs.migrator.name "ml-scoring-migrator" }}{{ fail "migrator credentials must use the dedicated ml-scoring-migrator Secret" }}{{ end }}
+{{- if ne .Values.secretRefs.database.caSecretName "ml-synthetic-postgres-auth" }}{{ fail "migration CA must use the isolated ml-synthetic-postgres-auth Secret" }}{{ end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ml-scoring.name" . }}-schema
+  labels:
+    {{- include "ml-scoring.labels" . | nindent 4 }}
+    greenguard.io/data-class: synthetic
+    greenguard.io/workload-mode: shadow
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "ml-scoring.labels" . | nindent 8 }}
+        greenguard.io/data-class: synthetic
+        greenguard.io/workload-mode: shadow
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: schema-migration
+          image: {{ include "ml-scoring.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "/app/migrate_cluster.py"]
+          env:
+            - name: ML_ENVIRONMENT
+              value: cluster-synthetic
+            - name: ML_MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRefs.migrator.name | quote }}
+                  key: {{ .Values.secretRefs.migrator.key | quote }}
+            - name: PGSSLROOTCERT
+              value: /var/run/postgres-tls/root.crt
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /var/run/postgres-tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: {{ .Values.secretRefs.database.caSecretName | quote }}
+            items:
+              - key: {{ .Values.secretRefs.database.caKey | quote }}
+                path: root.crt
+{{- end }}

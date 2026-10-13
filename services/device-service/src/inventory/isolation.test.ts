@@ -25,8 +25,10 @@ import {
 const TABLES = [
   "audit_events",
   "bin_occupancies",
+  "bin_cables",
   "bins",
   "command_receipts",
+  "cable_sensors",
   "devices",
   "entitlement_feed_health",
   "grain_lots",
@@ -70,7 +72,7 @@ test("D02: runtime role cannot bypass RLS and owns no tables", async () => {
   );
   assert.deepEqual(
     tables,
-    TABLES.map((relname) => ({
+    TABLES.sort().map((relname) => ({
       relname,
       owner: "inventory_migrator",
       forced: true,

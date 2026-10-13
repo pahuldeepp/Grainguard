@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import {
   getDevice,
+  getBinReadings,
   getDevices,
   getFreshness,
   getLatestReading,
@@ -27,6 +28,7 @@ test("tenant transaction commits and releases, while failures roll back", async 
   assert.deepEqual(calls, [
     "BEGIN READ ONLY",
     "SELECT set_config('app.tenant_id', $1, true)",
+    "SELECT set_config('statement_timeout', '2000', true)",
     "COMMIT",
     "release",
   ]);
@@ -40,6 +42,7 @@ test("tenant transaction commits and releases, while failures roll back", async 
   assert.deepEqual(calls, [
     "BEGIN READ ONLY",
     "SELECT set_config('app.tenant_id', $1, true)",
+    "SELECT set_config('statement_timeout', '2000', true)",
     "ROLLBACK",
     "release",
   ]);
@@ -74,6 +77,93 @@ test("tenant transaction commits and releases, while failures roll back", async 
     /original failure/,
   );
   assert.match(released[0]?.message ?? "", /socket lost/);
+});
+
+test("bin latest independently selects the newest non-null sample per metric across active devices", async () => {
+  const older = new Date("2026-09-25T10:00:00Z");
+  const newer = new Date("2026-09-25T11:00:00Z");
+  const sample = (
+    device_id: string,
+    metric: string,
+    observed_at: Date,
+    value: number,
+    stream_version: string,
+  ) => ({
+    tenant_id: "tenant",
+    bin_id: "bin",
+    device_id,
+    metric,
+    unit: "ppm",
+    value,
+    observed_at,
+    received_at: observed_at,
+    projected_at: observed_at,
+    reading_id: `${device_id}-${metric}`,
+    stream_version,
+  });
+  const tx = {
+    query: async (sql: string) => {
+      if (sql.includes("FROM read.bin_views"))
+        return {
+          rows: [
+            {
+              tenant_id: "tenant",
+              bin_id: "bin",
+              site_id: "site",
+              name: "North",
+              site_name: "Farm",
+              bin_version: "1",
+              projected_at: newer,
+            },
+          ],
+        };
+      if (sql.includes("FROM read.device_views"))
+        return {
+          rows: [
+            {
+              tenant_id: "tenant",
+              device_id: "device-a",
+              site_id: "site",
+              bin_id: "bin",
+              status: "active",
+              serial_number: "a",
+              inventory_version: "1",
+            },
+            {
+              tenant_id: "tenant",
+              device_id: "device-b",
+              site_id: "site",
+              bin_id: "bin",
+              status: "active",
+              serial_number: "b",
+              inventory_version: "1",
+            },
+          ],
+        };
+      if (sql.includes("FROM public.consumer_inbox"))
+        return {
+          rows: [
+            sample("device-a", "co2_ppm", older, 600, "3"),
+            sample("device-b", "co2_ppm", newer, 720, "2"),
+            sample("device-a", "temperature_c", newer, 21, "3"),
+          ],
+        };
+      return { rows: [] };
+    },
+  } as unknown as PoolClient;
+  const result = await getBinReadings(tx, "tenant", "bin", newer);
+  assert.deepEqual(
+    result?.readings.map((reading) => [
+      reading.metric,
+      reading.device_id,
+      reading.value,
+    ]),
+    [
+      ["co2_ppm", "device-b", 720],
+      ["temperature_c", "device-a", 21],
+    ],
+  );
+  assert.equal(result?.freshness, "not_configured");
 });
 
 test("all read queries include an explicit tenant predicate and bounded list inputs", async () => {
@@ -126,6 +216,9 @@ test(
     const observed = new Date();
     try {
       await client.query("BEGIN");
+      // Fixture rows are seeded as the superuser; bypass the tenant-ownership row fence
+      // for this transaction only. Privilege checks below still apply to read_query.
+      await client.query("SET LOCAL session_replication_role = replica");
       await client.query(
         "SELECT public.projection_history_partition($1::date)",
         [observed.toISOString().slice(0, 10)],

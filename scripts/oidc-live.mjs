@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { SignJWT, generateKeyPair, importJWK, exportSPKI } from "jose";
 import { createTokenVerifierFromEnv } from "@greenguard/tenant-auth";
 import { ISSUER, decodeJwt, login, refresh } from "./oidc-login.mjs";
+import { composeContainerName } from "./ci-compose-project.mjs";
 
 const TENANT = {
   a: "0a0a0a0a-0000-4000-8000-00000000000a",
@@ -52,7 +53,7 @@ const authEnv = {
 function psql(sql) {
   execFileSync("docker", [
     "exec",
-    "greenguard-dev-postgres-1",
+    composeContainerName("postgres"),
     "psql",
     "-U",
     "postgres",
@@ -65,18 +66,30 @@ function psql(sql) {
   ]);
 }
 
+// The tenant-ownership row fence rejects direct writes without a bootstrapped
+// shard placement. This test seeds and removes fixture rows as the PostgreSQL
+// superuser, so it bypasses row triggers for that one transaction only; the
+// services under test keep the fence enabled.
+function asFixture(statement) {
+  return `SET LOCAL session_replication_role = replica; ${statement}`;
+}
+
 function seed() {
   cleanup();
   psql(
-    "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES " +
-      `('${TENANT.a}','${DEVICE.a}','${SITE}','oidc-a','active',1),` +
-      `('${TENANT.b}','${DEVICE.b}','${SITE}','oidc-b','active',1)`,
+    asFixture(
+      "INSERT INTO public.device_views(tenant_id,device_id,site_id,serial_number,status,inventory_version) VALUES " +
+        `('${TENANT.a}','${DEVICE.a}','${SITE}','oidc-a','active',1),` +
+        `('${TENANT.b}','${DEVICE.b}','${SITE}','oidc-b','active',1)`,
+    ),
   );
 }
 
 function cleanup() {
   psql(
-    `DELETE FROM public.device_views WHERE (tenant_id,device_id) IN (('${TENANT.a}','${DEVICE.a}'),('${TENANT.b}','${DEVICE.b}'))`,
+    asFixture(
+      `DELETE FROM public.device_views WHERE (tenant_id,device_id) IN (('${TENANT.a}','${DEVICE.a}'),('${TENANT.b}','${DEVICE.b}'))`,
+    ),
   );
 }
 
@@ -104,8 +117,10 @@ async function waitHealthy(base) {
 }
 
 const hash = (query) => createHash("sha256").update(query).digest("hex");
-const DEVICE_CURRENT = `query DeviceCurrent($id: ID!) { device(id: $id) { deviceId siteId binId name status projectedAt } latestReading(deviceId: $id) { readingId deviceId observedAt receivedAt projectedAt temperatureC relativeHumidityPercent streamVersion inventoryEnrichment } }`;
-const START = `mutation StartProvisioning($deviceId: ID!, $assetId: ID!, $idempotencyKey: String!) { startProvisioning(deviceId: $deviceId, assetId: $assetId, idempotencyKey: $idempotencyKey) { tenantId sagaId deviceId assetId state version fencingToken deadlineAt } }`;
+// Use the BFF's own persisted operations so this test cannot drift from the allowlist.
+const { operations } = await import("../services/bff/dist/query-policy.js");
+const DEVICE_CURRENT = operations.deviceCurrent;
+const START = operations.startProvisioning;
 
 async function graphql(token, query, variables) {
   const response = await fetch(`${BFF}/graphql`, {

@@ -1,0 +1,21 @@
+nameOverride: device-service
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: dashboard }
+  egressServices:
+    - { name: tenant-control-plane, namespace: greenguard, release: tenant-control-plane, port: 3010 }
+service:
+  port: 3001
+  containerPort: 3001
+container:
+  name: device-service
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

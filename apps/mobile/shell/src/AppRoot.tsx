@@ -117,7 +117,10 @@ export function AppRoot(props: {
     );
     services.session
       .identity()
-      .catch(() => null)
+      .catch(error => {
+        if (live) setSignInError(messageOf(error));
+        return null;
+      })
       .then(id => {
         if (!live) return;
         clearTimeout(timeout);

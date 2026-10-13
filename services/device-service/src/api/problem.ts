@@ -1,11 +1,16 @@
+import { PlacementError } from "@greenguard/membership-client";
 import { ArgumentsHost, HttpException } from "@nestjs/common";
 import { BaseExceptionFilter } from "@nestjs/core";
 import { AuthError } from "@greenguard/tenant-auth";
 import { ServiceAuthError } from "@greenguard/tenant-auth/service-principals";
 import { LockNotAvailableError } from "../db/errors.js";
-import { EntitlementExceededError } from "../inventory/entitlements.js";
+import {
+  EntitlementExceededError,
+  TenantProjectionUnavailableError,
+} from "../inventory/entitlements.js";
 import {
   DeviceNotFoundError,
+  DeviceLookupAmbiguousError,
   DuplicateBinError,
   DuplicateSerialError,
   IdempotencyConflictError,
@@ -15,6 +20,7 @@ import {
 } from "../inventory/errors.js";
 import { PreconditionRequiredError } from "./errors.js";
 import { ImportConflictError } from "../import/admission.js";
+import { CableNotFoundError } from "../inventory/cables.js";
 import type { ApiRequest, ApiResponse } from "./http.js";
 
 export interface Problem {
@@ -37,6 +43,13 @@ const AUTH_HEADERS: Record<number, Record<string, string>> = {
 };
 
 export function classify(error: unknown): Problem {
+  if (error instanceof PlacementError)
+    return {
+      status: 503,
+      code: error.code,
+      title: "Service unavailable",
+      headers: { "Retry-After": "1" },
+    };
   if (error instanceof ServiceAuthError) {
     return {
       status: error.status,
@@ -45,6 +58,8 @@ export function classify(error: unknown): Problem {
       headers: AUTH_HEADERS[error.status],
     };
   }
+  if (error instanceof DeviceLookupAmbiguousError)
+    return { status: 409, code: "device_lookup_ambiguous", title: "Conflict" };
   if (error instanceof AuthError) {
     return {
       status: error.status,
@@ -59,6 +74,13 @@ export function classify(error: unknown): Problem {
       code: "entitlement_exceeded",
       title: "Forbidden",
       detail: error.message,
+    };
+  if (error instanceof TenantProjectionUnavailableError)
+    return {
+      status: 503,
+      code: error.code,
+      title: "Service unavailable",
+      headers: { "Retry-After": "5" },
     };
   if (error instanceof InvalidInputError)
     return {
@@ -121,7 +143,10 @@ export function classify(error: unknown): Problem {
       title: "Unprocessable request",
       detail: error.message,
     };
-  if (error instanceof DeviceNotFoundError)
+  if (
+    error instanceof DeviceNotFoundError ||
+    error instanceof CableNotFoundError
+  )
     return { status: 404, code: "not_found", title: "Not found" };
   if (error instanceof HttpException)
     return {

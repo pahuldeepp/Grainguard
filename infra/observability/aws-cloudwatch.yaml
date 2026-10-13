@@ -1,0 +1,62 @@
+region: us-east-1
+period_seconds: 60
+range_seconds: 600
+delay_seconds: 600
+set_timestamp: true
+use_get_metric_data: true
+metrics:
+  - aws_namespace: AWS/Lambda
+    aws_metric_name: Invocations
+    aws_dimensions: [FunctionName]
+    aws_dimension_select:
+      FunctionName: [greenguard-lambda-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/Lambda
+    aws_metric_name: Errors
+    aws_dimensions: [FunctionName]
+    aws_dimension_select:
+      FunctionName: [greenguard-lambda-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/Lambda
+    aws_metric_name: Throttles
+    aws_dimensions: [FunctionName]
+    aws_dimension_select:
+      FunctionName: [greenguard-lambda-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/Lambda
+    aws_metric_name: Duration
+    aws_dimensions: [FunctionName]
+    aws_dimension_select:
+      FunctionName: [greenguard-lambda-allowlist-required]
+    aws_statistics: [Average]
+    aws_extended_statistics: [p95, p99]
+  - aws_namespace: LambdaInsights
+    aws_metric_name: init_duration
+    aws_dimensions: [function_name]
+    aws_dimension_select:
+      function_name: [greenguard-lambda-allowlist-required]
+    aws_statistics: [Average, Maximum]
+  - aws_namespace: AWS/DynamoDB
+    aws_metric_name: ThrottledRequests
+    aws_dimensions: [TableName]
+    aws_dimension_select:
+      TableName: [greenguard-dynamodb-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/DynamoDB
+    aws_metric_name: ReadThrottleEvents
+    aws_dimensions: [TableName]
+    aws_dimension_select:
+      TableName: [greenguard-dynamodb-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/DynamoDB
+    aws_metric_name: WriteThrottleEvents
+    aws_dimensions: [TableName]
+    aws_dimension_select:
+      TableName: [greenguard-dynamodb-allowlist-required]
+    aws_statistics: [Sum]
+  - aws_namespace: AWS/DynamoDB
+    aws_metric_name: ConditionalCheckFailedRequests
+    aws_dimensions: [TableName]
+    aws_dimension_select:
+      TableName: [greenguard-dynamodb-allowlist-required]
+    aws_statistics: [Sum]

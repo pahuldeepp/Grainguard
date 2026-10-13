@@ -82,3 +82,34 @@ Creating a site or bin writes `site.changed` or `bin.changed` respectively, with
 The transformer routes both facility event types to `greenguard.inventory.facility.v1` (six partitions), keyed by `tenant_id:aggregate_id`. Device events retain `greenguard.inventory.device.v1`. Unknown event types are quarantined as `unknown_event_type`. Values are plain JSON with the six headers specified by [ADR-0010](adr/0010-schema-registry-contract.md); correlation, command causation and origin trace context are persisted with each event. Schema Registry is a CI compatibility/registration gate, not a runtime dependency.
 
 Grain-lot placement writes `lot.changed` with aggregate type `bin_occupancy`, aggregate ID equal to the bin ID and a monotone occupancy version. Its payload identifies the new lot/grain, the replaced lot (if any), and the effective start. The transformer routes it to dedicated `greenguard.inventory.lot.v1`, so existing device, facility, telemetry and Cassandra consumers do not receive a new event type. The interval is `[effective_from, next effective_from)`; late sensor readings use the lot active at their observation time. Empty-bin retirement is a later command and event.
+
+## Cable/sensor owner API
+
+Cable inventory is owned by device-service (ADR-0027). All routes require a
+human bearer principal; viewer/operator/admin can read, operator/admin can
+create, edit and remove. Each cable is associated with an active provisioned
+device and its current agricultural bin binding. Hardware `assetId` is a
+separate identity and is rejected in cable bodies.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /v1/cables` | Body `{binId, deviceId, label, sensors}`; requires `Idempotency-Key`; returns 201, ETag and Location. Retrying retains assigned cable/sensor IDs. |
+| `GET /v1/bins/{id}/cables?limit&after` | Current cables; keyset cursor is the last cable ID; at most 20 cables per page, including at most 100 sensors per cable. |
+| `GET /v1/cables/{id}` | Current owner layout or removed tombstone, with ETag/cableVersion. Another tenant's ID returns 404. |
+| `PATCH /v1/cables/{id}` | Complete replacement body; requires `If-Match`; existing `sensorId` retains identity, entries without IDs receive new IDs, omissions retire sensors. |
+| `DELETE /v1/cables/{id}` | Requires `If-Match`; writes a removed tombstone and a versioned empty layout event. |
+
+Sensors use `{sensorId?, position, label, depthM}`. IDs are allowed only on
+edits and must already belong to the current cable. Positions are distinct
+integers from 1 through 100. `depthM` is nullable finite nonnegative meters;
+missing stays null, and zero is an actual depth. These cardinality/position
+bounds limit API work, not agronomic or device operating ranges. A retired
+sensor ID cannot be reassigned or revived.
+
+Cable edits/removals require a quoted positive ETag. Missing `If-Match` is 428;
+stale is 412 with the current ETag. Invalid references, including another
+cable's/tenant's sensor, are 422. Every successful mutation commits state,
+audit and `cable.layout_changed` v1 together. Device/import moves emit new
+versions with the same stable sensor IDs; unbinding or deletion emits
+`operation: deleted` with no sensors. Event snapshots retain prior layout
+provenance for accepted observations.

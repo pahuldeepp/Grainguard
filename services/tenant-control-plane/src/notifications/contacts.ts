@@ -28,25 +28,21 @@ export function validateContacts(input: unknown): {
     throw new InvalidInputError(
       "at least one notification contact field is required",
     );
-  const email = value.email ?? null;
-  const sms = value.sms ?? null;
-  const emailAt = typeof email === "string" ? email.indexOf("@") : -1;
-  const emailDomainDot =
-    typeof email === "string" ? email.lastIndexOf(".") : -1;
+  const email =
+    value.email === null || value.email === undefined ? null : value.email;
+  const sms = value.sms === null || value.sms === undefined ? null : value.sms;
   if (
     email !== null &&
     (typeof email !== "string" ||
       email.length > 320 ||
-      emailAt < 1 ||
-      emailAt !== email.lastIndexOf("@") ||
-      emailDomainDot <= emailAt + 1 ||
-      emailDomainDot === email.length - 1 ||
-      /[\s<>;,"\p{Cc}]/u.test(email))
+      !/^[^\s@<>;,"\p{Cc}]+@[^\s@<>;,"\p{Cc}]+\.[^\s@<>;,"\p{Cc}]+$/u.test(
+        email,
+      ))
   )
     throw new InvalidInputError("invalid notification email");
   if (
     sms !== null &&
-    (typeof sms !== "string" || !/^\+[1-9]\d{7,14}$/.test(sms))
+    (typeof sms !== "string" || !/^\+[1-9][0-9]{7,14}$/.test(sms))
   )
     throw new InvalidInputError("notification SMS number must be E.164");
   if (

@@ -1,0 +1,259 @@
+{{- $required := list "otel-collector" "prometheus" "grafana" "tempo" "loki" -}}
+{{- if ne (len .Values.images) (len $required) }}{{ fail "exactly five observability image digests are required" }}{{ end -}}
+{{- range $required }}
+{{- $image := index $.Values.images . -}}
+{{- if not $image }}{{ fail (printf "%s image digest is required" .) }}{{ end -}}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" $image) }}{{ fail (printf "%s image must be an immutable OCI digest" .) }}{{ end -}}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-observability-config
+data:
+  otel.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: "0.0.0.0:4317"}
+          http: {endpoint: "0.0.0.0:4318"}
+    processors:
+      memory_limiter: {check_interval: 1s, limit_mib: 192, spike_limit_mib: 48}
+      batch: {send_batch_size: 512, timeout: 5s}
+      attributes/redact:
+        actions:
+          - {key: http.request.header.authorization, action: delete}
+          - {key: http.request.header.cookie, action: delete}
+          - {key: db.statement, action: delete}
+          - {key: db.query.text, action: delete}
+          - {key: enduser.id, action: delete}
+          - {key: user.email, action: delete}
+    exporters:
+      otlp/tempo: {endpoint: "tempo:4317", tls: {insecure: true}}
+      otlphttp/loki: {endpoint: "http://loki:3100/otlp"}
+      prometheus:
+        endpoint: "0.0.0.0:8890"
+        namespace: greenguard_otel
+        add_metric_suffixes: true
+    service:
+      pipelines:
+        traces: {receivers: [otlp], processors: [memory_limiter, attributes/redact, batch], exporters: [otlp/tempo]}
+        metrics: {receivers: [otlp], processors: [memory_limiter, attributes/redact, batch], exporters: [prometheus]}
+        logs: {receivers: [otlp], processors: [memory_limiter, attributes/redact, batch], exporters: [otlphttp/loki]}
+  prometheus.yaml: |
+    global: {scrape_interval: 15s, evaluation_interval: 15s}
+    rule_files: ["/etc/prometheus/rules/*.yaml"]
+    scrape_configs:
+      - job_name: otel-collector
+        static_configs: [{targets: ["otel-collector:8890"]}]
+      - job_name: greenguard-istio-merged-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: {names: [greenguard]}
+        metrics_path: /stats/prometheus
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], action: keep, regex: "true"}
+          - {source_labels: [__meta_kubernetes_pod_phase], action: keep, regex: Running}
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], action: keep, regex: "15090"}
+          - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_istio_io_merge_metrics], action: keep, regex: "(true|)"}
+          - {source_labels: [__meta_kubernetes_pod_ip], target_label: __address__, replacement: "$1:15020"}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: greenguard_release}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: job}
+      - job_name: greenguard-istio-proxy-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: {names: [greenguard]}
+        metrics_path: /stats/prometheus
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], action: keep, regex: "true"}
+          - {source_labels: [__meta_kubernetes_pod_phase], action: keep, regex: Running}
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], action: keep, regex: "15090"}
+          - {source_labels: [__meta_kubernetes_pod_annotation_prometheus_istio_io_merge_metrics], action: keep, regex: "false"}
+          - {source_labels: [__meta_kubernetes_pod_ip], target_label: __address__, replacement: "$1:15090"}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: greenguard_release}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: job}
+      - job_name: greenguard-gateway-app
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: {names: [greenguard]}
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_annotation_greenguard_io_app_metrics_scrape], action: keep, regex: "true"}
+          - {source_labels: [__meta_kubernetes_pod_phase], action: keep, regex: Running}
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], action: keep, regex: "9464"}
+          - {source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_greenguard_io_app_metrics_port], separator: ";", regex: "(.+);([0-9]+)", target_label: __address__, replacement: "$1:$2"}
+          - {source_labels: [__meta_kubernetes_pod_annotation_greenguard_io_app_metrics_path], target_label: __metrics_path__, regex: "(/metrics)"}
+          - {source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance], target_label: greenguard_release}
+      - job_name: prometheus
+        static_configs: [{targets: ["localhost:9090"]}]
+  tempo.yaml: |
+    server: {http_listen_port: 3200}
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc: {endpoint: "0.0.0.0:4317"}
+    storage:
+      trace:
+        backend: local
+        wal: {path: /var/tempo/wal}
+        local: {path: /var/tempo/blocks}
+  loki.yaml: |
+    auth_enabled: false
+    server: {http_listen_port: 3100}
+    common:
+      path_prefix: /loki
+      storage: {filesystem: {chunks_directory: /loki/chunks, rules_directory: /loki/rules}}
+      replication_factor: 1
+      ring: {kvstore: {store: inmemory}}
+    schema_config:
+      configs:
+        - {from: "2024-01-01", store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
+    limits_config: {retention_period: 24h, allow_structured_metadata: true}
+    compactor: {working_directory: /loki/compactor, compaction_interval: 10m, retention_enabled: true, delete_request_store: filesystem}
+  grafana-datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - {name: Prometheus, uid: prometheus, type: prometheus, access: proxy, url: "http://prometheus:9090", isDefault: true}
+      - {name: Tempo, uid: tempo, type: tempo, access: proxy, url: "http://tempo:3200"}
+      - {name: Loki, uid: loki, type: loki, access: proxy, url: "http://loki:3100"}
+  grafana-dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: GreenGuard
+        orgId: 1
+        folder: GreenGuard
+        type: file
+        disableDeletion: true
+        editable: false
+        options:
+          path: /var/lib/grafana/dashboards
+  ml-scoring-dashboard.json: |
+{{ .Files.Get "files/ml-scoring-dashboard.json" | indent 4 }}
+  ml-scoring-rules.yaml: |
+{{ .Files.Get "files/ml-scoring-rules.yaml" | indent 4 }}
+  slo-rules.yaml: |
+{{ .Files.Get "files/slo-rules.yaml" | indent 4 }}
+{{- $components := dict
+  "otel-collector" (dict "port" 4317 "extraPort" 4318 "metricsPort" 8890 "args" (list "--config=/etc/otel/config.yaml") "file" "otel.yaml" "configTarget" "/etc/otel/config.yaml" "dataPath" "")
+  "prometheus" (dict "port" 9090 "args" (list "--config.file=/etc/prometheus/prometheus.yml" "--storage.tsdb.path=/prometheus" "--storage.tsdb.retention.time=35d" "--storage.tsdb.retention.size=24GB") "file" "prometheus.yaml" "configTarget" "/etc/prometheus/prometheus.yml" "dataPath" "/prometheus")
+  "tempo" (dict "port" 4317 "extraPort" 3200 "args" (list "-config.file=/etc/tempo/tempo.yaml") "file" "tempo.yaml" "configTarget" "/etc/tempo/tempo.yaml" "dataPath" "/var/tempo")
+  "loki" (dict "port" 3100 "args" (list "-config.file=/etc/loki/config.yaml") "file" "loki.yaml" "configTarget" "/etc/loki/config.yaml" "dataPath" "/loki")
+  "grafana" (dict "port" 3000 "args" (list) "file" "grafana-datasources.yaml" "configTarget" "/etc/grafana/provisioning/datasources/datasources.yaml" "dataPath" "/var/lib/grafana")
+-}}
+{{- range $name := $required }}
+{{- $component := index $components $name }}
+{{- if eq $name "prometheus" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: greenguard-disposable-gp3
+  resources:
+    requests:
+      storage: 30Gi
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: {{ $name }}}}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+{{- if eq $name "prometheus" }}
+        sidecar.istio.io/inject: "true"
+{{- end }}
+    spec:
+      serviceAccountName: {{ if eq $name "prometheus" }}greenguard-prometheus{{ else }}default{{ end }}
+      automountServiceAccountToken: {{ eq $name "prometheus" }}
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: {{ $name }}
+          image: {{ index $.Values.images $name | quote }}
+          imagePullPolicy: IfNotPresent
+{{- if $component.args }}
+          args: {{ toJson $component.args }}
+{{- end }}
+{{- if eq $name "grafana" }}
+          envFrom:
+            - secretRef: {name: grafana-admin}
+          env:
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
+{{- end }}
+          ports:
+            - {name: main, containerPort: {{ $component.port }}}
+{{- if $component.extraPort }}
+            - {name: extra, containerPort: {{ $component.extraPort }}}
+{{- end }}
+{{- if $component.metricsPort }}
+            - {name: metrics, containerPort: {{ $component.metricsPort }}}
+{{- end }}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: config, mountPath: {{ $component.configTarget | quote }}, subPath: {{ $component.file }}, readOnly: true}
+{{- if eq $name "prometheus" }}
+            - {name: ml-scoring-rules, mountPath: /etc/prometheus/rules, readOnly: true}
+{{- end }}
+{{- if eq $name "grafana" }}
+            - {name: config, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: grafana-dashboards.yaml, readOnly: true}
+            - {name: ml-scoring-dashboard, mountPath: /var/lib/grafana/dashboards, readOnly: true}
+{{- end }}
+{{- if $component.dataPath }}
+            - {name: data, mountPath: {{ $component.dataPath }}}
+{{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: greenguard-observability-config
+            items:
+              - {key: {{ $component.file }}, path: {{ $component.file }}}
+{{- if eq $name "grafana" }}
+              - {key: grafana-dashboards.yaml, path: grafana-dashboards.yaml}
+{{- end }}
+{{- if eq $name "prometheus" }}
+        - name: ml-scoring-rules
+          configMap:
+            name: greenguard-observability-config
+            items:
+              - {key: ml-scoring-rules.yaml, path: ml-scoring.yaml}
+              - {key: slo-rules.yaml, path: slo.yaml}
+{{- end }}
+{{- if eq $name "grafana" }}
+        - name: ml-scoring-dashboard
+          configMap:
+            name: greenguard-observability-config
+            items: [{key: ml-scoring-dashboard.json, path: ml-scoring.json}]
+{{- end }}
+{{- if eq $name "prometheus" }}
+        - {name: data, persistentVolumeClaim: {claimName: prometheus-data}}
+{{- else if $component.dataPath }}
+        - {name: data, emptyDir: {sizeLimit: 2Gi}}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  type: ClusterIP
+  selector: {app: {{ $name }}}
+  ports:
+    - {name: main, port: {{ $component.port }}, targetPort: main}
+{{- if $component.extraPort }}
+    - {name: extra, port: {{ $component.extraPort }}, targetPort: extra}
+{{- end }}
+{{- if $component.metricsPort }}
+    - {name: metrics, port: {{ $component.metricsPort }}, targetPort: metrics}
+{{- end }}
+{{- end }}

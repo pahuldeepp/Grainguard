@@ -382,10 +382,27 @@ export function cacheBackends(
     q.from.toISOString(),
     q.to.toISOString(),
     q.limit,
+    q.after ? [q.after.observedAt.toISOString(), q.after.readingId] : null,
   ];
   return {
     cache,
     devices: backends.devices,
+    deviceCurrent: backends.deviceCurrent,
+    deviceRisk: backends.deviceRisk,
+    sites: (tenant, ids) =>
+      cache.get(
+        tenant,
+        "sites",
+        [...ids].sort((a, b) => Number(a > b) - Number(a < b)),
+        () => backends.sites(tenant, ids),
+      ),
+    bins: (tenant, ids) =>
+      cache.get(
+        tenant,
+        "bins",
+        [...ids].sort((a, b) => Number(a > b) - Number(a < b)),
+        () => backends.bins(tenant, ids),
+      ),
     reading: backends.reading,
     device: (tenant, device) =>
       cache.get(tenant, "device", [device], () =>
@@ -405,6 +422,10 @@ export function cacheBackends(
         () => backends.latest(tenant, device),
         device,
       ),
+    // Bin payloads carry readings from several independently versioned devices.
+    // Until the cache supports a version vector, bypass it to avoid stale telemetry.
+    binReadings: backends.binReadings,
+    binTrend: backends.binTrend,
     hotReadings: (q) =>
       cache.get(
         q.tenantId,

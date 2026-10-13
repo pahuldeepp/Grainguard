@@ -10,9 +10,14 @@ import {
   InvalidReferenceError,
 } from "../inventory/errors.js";
 import { appendEvent, type CommandContext } from "../inventory/repository.js";
+import { syncDeviceCables } from "../inventory/cables.js";
 import { parseImportChange, type ImportChange } from "./contract.js";
 
-export class ImportConflictError extends Error {}
+export class ImportConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
 export interface ImportResult {
   outcome: "applied" | "stale";
   entityId: string;
@@ -253,122 +258,14 @@ async function applyDevice(
       updatedAt: new Date(),
     },
   });
+  if (bindingChanged || status === "deleted")
+    await syncDeviceCables(tx, ctx, deviceId, binId, status === "deleted");
   return {
     outcome: "applied",
     entityId: deviceId,
     aggregateVersion: version.toString(),
     eventIds,
   };
-}
-
-async function findCanonicalEntity(
-  tx: Tx,
-  change: ImportChange,
-  tenantId: string,
-): Promise<unknown> {
-  const identity = { tenantId, siteId: change.entity_id };
-  switch (change.entity_type) {
-    case "site":
-      return tx.site.findUnique({ where: { tenantId_siteId: identity } });
-    case "bin":
-      return tx.bin.findUnique({
-        where: { tenantId_binId: { tenantId, binId: change.entity_id } },
-      });
-    case "device":
-      return tx.device.findUnique({
-        where: { tenantId_deviceId: { tenantId, deviceId: change.entity_id } },
-      });
-  }
-}
-
-async function applyChange(
-  tx: Tx,
-  ctx: CommandContext,
-  change: ImportChange,
-): Promise<ImportResult> {
-  switch (change.entity_type) {
-    case "site":
-      return applySite(tx, ctx, change);
-    case "bin":
-      return applyBin(tx, ctx, change);
-    case "device":
-      return applyDevice(tx, ctx, change);
-  }
-}
-
-async function replayOrValidateSourceState(
-  tx: Tx,
-  change: ImportChange,
-  tenantId: string,
-  previous: Awaited<ReturnType<Tx["inventoryImportState"]["findUnique"]>>,
-  offset: bigint,
-): Promise<ImportResult | undefined> {
-  if (!previous) {
-    if (change.operation === "delete")
-      throw new ImportConflictError(
-        "source delete has no previously admitted entity",
-      );
-    // A deterministic ID is import-owned only when its source state already
-    // exists. Refuse collisions with canonical entities created by a user.
-    const existing = await findCanonicalEntity(tx, change, tenantId);
-    if (existing)
-      throw new ImportConflictError("canonical identity is already owned");
-    return undefined;
-  }
-
-  const coordinate = change.source_coordinate;
-  if (
-    previous.entityId !== change.entity_id ||
-    previous.connectorGeneration !== coordinate.connector_generation ||
-    previous.topic !== coordinate.topic ||
-    previous.partitionId !== coordinate.partition
-  )
-    throw new ImportConflictError("source entity coordinate lineage changed");
-  if (offset < previous.sourceOffset)
-    return {
-      ...(previous.responseBody as unknown as ImportResult),
-      outcome: "stale",
-    };
-  if (offset !== previous.sourceOffset) return undefined;
-  if (previous.payloadSha256 !== change.payload_sha256)
-    throw new ImportConflictError(
-      "source coordinate reused with different bytes",
-    );
-  return previous.responseBody as unknown as ImportResult;
-}
-
-async function saveSourceState(
-  tx: Tx,
-  change: ImportChange,
-  tenantId: string,
-  response: ImportResult,
-  previous: Awaited<ReturnType<Tx["inventoryImportState"]["findUnique"]>>,
-): Promise<void> {
-  const coordinate = change.source_coordinate;
-  const key = keyOf(change, tenantId);
-  const state = {
-    sourceOffset: BigInt(coordinate.offset),
-    payloadSha256: change.payload_sha256,
-    responseBody: { ...response },
-    updatedAt: new Date(),
-  };
-  if (previous) {
-    await tx.inventoryImportState.update({
-      where: { tenantId_sourceId_entityType_externalId: key },
-      data: state,
-    });
-    return;
-  }
-  await tx.inventoryImportState.create({
-    data: {
-      ...key,
-      entityId: change.entity_id,
-      connectorGeneration: coordinate.connector_generation,
-      topic: coordinate.topic,
-      partitionId: coordinate.partition,
-      ...state,
-    },
-  });
 }
 
 /** Atomic source fence, canonical mutation, outbox and audit admission. */
@@ -395,16 +292,96 @@ export async function admitImport(
         });
         const coordinate = change.source_coordinate;
         const offset = BigInt(coordinate.offset);
-        const replay = await replayOrValidateSourceState(
-          tx,
-          change,
-          ctx.tenantId,
-          previous,
-          offset,
-        );
-        if (replay) return replay;
-        const response = await applyChange(tx, ctx, change);
-        await saveSourceState(tx, change, ctx.tenantId, response, previous);
+        if (previous) {
+          if (
+            previous.entityId !== change.entity_id ||
+            previous.connectorGeneration !== coordinate.connector_generation ||
+            previous.topic !== coordinate.topic ||
+            previous.partitionId !== coordinate.partition
+          )
+            throw new ImportConflictError(
+              "source entity coordinate lineage changed",
+            );
+          if (offset < previous.sourceOffset)
+            return {
+              ...(previous.responseBody as unknown as ImportResult),
+              outcome: "stale",
+            };
+          if (offset === previous.sourceOffset) {
+            if (previous.payloadSha256 !== change.payload_sha256)
+              throw new ImportConflictError(
+                "source coordinate reused with different bytes",
+              );
+            return previous.responseBody as unknown as ImportResult;
+          }
+        } else {
+          if (change.operation === "delete")
+            throw new ImportConflictError(
+              "source delete has no previously admitted entity",
+            );
+          // A deterministic ID is import-owned only when its source state already
+          // exists. Refuse a collision with a human-created canonical entity.
+          const existing =
+            change.entity_type === "site"
+              ? await tx.site.findUnique({
+                  where: {
+                    tenantId_siteId: {
+                      tenantId: ctx.tenantId,
+                      siteId: change.entity_id,
+                    },
+                  },
+                })
+              : change.entity_type === "bin"
+                ? await tx.bin.findUnique({
+                    where: {
+                      tenantId_binId: {
+                        tenantId: ctx.tenantId,
+                        binId: change.entity_id,
+                      },
+                    },
+                  })
+                : await tx.device.findUnique({
+                    where: {
+                      tenantId_deviceId: {
+                        tenantId: ctx.tenantId,
+                        deviceId: change.entity_id,
+                      },
+                    },
+                  });
+          if (existing)
+            throw new ImportConflictError(
+              "canonical identity is already owned",
+            );
+        }
+        const response =
+          change.entity_type === "site"
+            ? await applySite(tx, ctx, change)
+            : change.entity_type === "bin"
+              ? await applyBin(tx, ctx, change)
+              : await applyDevice(tx, ctx, change);
+        if (previous)
+          await tx.inventoryImportState.update({
+            where: { tenantId_sourceId_entityType_externalId: key },
+            data: {
+              sourceOffset: offset,
+              payloadSha256: change.payload_sha256,
+              responseBody: { ...response },
+              updatedAt: new Date(),
+            },
+          });
+        else
+          await tx.inventoryImportState.create({
+            data: {
+              ...key,
+              entityId: change.entity_id,
+              connectorGeneration: coordinate.connector_generation,
+              topic: coordinate.topic,
+              partitionId: coordinate.partition,
+              sourceOffset: offset,
+              payloadSha256: change.payload_sha256,
+              responseBody: { ...response },
+            },
+          });
         return response;
       },
       { lockTimeoutMs: 2000, timeoutMs: 10000 },

@@ -5,11 +5,13 @@ import { outboxRowToEvent, validateEvent } from "@greenguard/contracts";
 import type { Db } from "../db/client.js";
 import {
   adminQuery,
+  calibratedRiskEventV2,
   newStream,
   invalidationEvent,
   outboxFor,
   pooledDb,
   riskEvent,
+  uncalibratedRiskEventV2,
 } from "../testing/fixtures.js";
 import { deterministicId } from "../alerts/ids.js";
 import { handleRiskEvent, type HandleResult } from "./handler.js";
@@ -47,6 +49,31 @@ const count = async (table: string, tenantId: string) =>
   );
 
 describe("risk.assessed consumer", () => {
+  test("v2 opens alerts and orders by the envelope stream sequence", async () => {
+    const s = newStream();
+    const event = calibratedRiskEventV2(s, 70);
+    const result = await handleRiskEvent(db, event);
+    assert.equal(result.status, "applied");
+    if (result.status === "applied")
+      assert.equal(result.effect.outcome, "applied");
+    assert.equal((await episodes(s.tenantId))[0].score, 70);
+    const staleV1 = riskEvent(s, 90, { version: 2 });
+    const stale = await handleRiskEvent(db, staleV1);
+    assert.equal(stale.status, "applied");
+    if (stale.status === "applied") assert.equal(stale.effect.outcome, "stale");
+  });
+
+  test("v2 uses envelope stream sequence and uncalibrated policy cannot open alerts", async () => {
+    const s = newStream();
+    const event = uncalibratedRiskEventV2(s);
+    const result = await handleRiskEvent(db, event);
+    assert.equal(result.status, "applied");
+    if (result.status === "applied")
+      assert.equal(result.effect.outcome, "no_change");
+    assert.equal((await episodes(s.tenantId)).length, 0);
+    assert.equal(await count("outbox_events", s.tenantId), 0);
+  });
+
   test("invalidation resolves only the causally current alert and is replay-safe", async () => {
     const s = newStream();
     const assessed = riskEvent(s, 75);

@@ -444,3 +444,83 @@ test("imported devices obey the existing tenant device capacity and failed admis
   assert.equal(state[0]!.n, "0");
   assert.deepEqual(await counts(t, over.entity_id), { events: 0, audits: 0 });
 });
+
+test("import device moves and removals publish atomic cable layout snapshots", async () => {
+  const owner = await tenant();
+  const jwt = await token(owner);
+  const siteExternal = `cable-site-${randomUUID()}`;
+  const binExternal = `cable-bin-${randomUUID()}`;
+  const movedBinExternal = `cable-moved-${randomUUID()}`;
+  const deviceExternal = `cable-device-${randomUUID()}`;
+  for (const change of [
+    site(owner, siteExternal, 1),
+    bin(owner, binExternal, siteExternal, 1),
+    bin(owner, movedBinExternal, siteExternal, 2),
+    device(owner, deviceExternal, siteExternal, binExternal, 1),
+  ])
+    assert.equal((await admit(change, jwt)).status, 201);
+  const human = await api.token(owner, ["operator"]);
+  const created = await api.call("POST", "/v1/cables", {
+    token: human,
+    headers: { "idempotency-key": randomUUID() },
+    body: {
+      deviceId: canonicalId(SOURCE, owner, "device", deviceExternal),
+      binId: canonicalId(SOURCE, owner, "bin", binExternal),
+      label: "Imported device cable",
+      sensors: [{ label: "Upper", position: 1, depthM: null }],
+    },
+  });
+  assert.equal(created.status, 201);
+  const path = created.headers.get("location") as string;
+  const sensorId = (created.json?.sensors as { sensorId: string }[])[0]
+    .sensorId;
+  assert.equal(
+    (
+      await admit(
+        device(owner, deviceExternal, siteExternal, movedBinExternal, 2),
+        jwt,
+      )
+    ).status,
+    201,
+  );
+  const moved = await api.call("GET", path, { token: human });
+  assert.equal(moved.json?.cableVersion, "2");
+  assert.equal(
+    moved.json?.binId,
+    canonicalId(SOURCE, owner, "bin", movedBinExternal),
+  );
+  assert.equal(
+    (moved.json?.sensors as { sensorId: string }[])[0].sensorId,
+    sensorId,
+  );
+  const deletedChange = device(
+    owner,
+    deviceExternal,
+    siteExternal,
+    movedBinExternal,
+    3,
+    "deleted",
+  );
+  deletedChange.operation = "delete";
+  assert.equal((await admit(deletedChange, jwt)).status, 201);
+  const removed = await api.call("GET", path, { token: human });
+  assert.equal(removed.json?.cableVersion, "3");
+  assert.deepEqual(removed.json?.sensors, []);
+  const snapshots = await adminQuery<{
+    payload: { operation: string; sensors: { sensor_id: string }[] };
+    version: string;
+  }>(
+    "SELECT payload, aggregate_version::text AS version FROM outbox_events WHERE tenant_id=$1 AND aggregate_type='cable' AND aggregate_id=$2 ORDER BY aggregate_version",
+    [owner, created.json?.cableId],
+  );
+  assert.deepEqual(
+    snapshots.map((s) => [s.version, s.payload.operation]),
+    [
+      ["1", "upsert"],
+      ["2", "upsert"],
+      ["3", "deleted"],
+    ],
+  );
+  assert.equal(snapshots[0].payload.sensors[0].sensor_id, sensorId);
+  assert.deepEqual(snapshots[2].payload.sensors, []);
+});

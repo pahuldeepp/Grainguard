@@ -18,10 +18,16 @@ import { CONTROL_DB } from "../api/controllers.js";
 import {
   commandFrom,
   correlationOf,
+  strictBody,
   type ControlRequest,
 } from "../api/http.js";
-import { putGlobalFlags, requireRegisteredFlags } from "./store.js";
-import { parseFlagUpdate } from "./controller-input.js";
+import { InvalidInputError } from "../domain/errors.js";
+import {
+  putGlobalFlags,
+  requireRegisteredFlags,
+  validateFlags,
+  type Flags,
+} from "./store.js";
 
 export const FLAG_ADMIN_TOKEN = "CONTROL_FLAG_ADMIN_TOKEN";
 export const FLAG_ADMIN_ACTOR_ID = "CONTROL_FLAG_ADMIN_ACTOR_ID";
@@ -60,16 +66,23 @@ export class GlobalFlagsController {
     @Body() body: unknown,
     @Res({ passthrough: true }) res: Reply,
   ) {
-    const { flags, expectedVersion } = parseFlagUpdate(
-      body,
-      req.headers["if-match"],
-    );
+    const raw = req.headers["if-match"];
+    const match =
+      typeof raw === "string" ? /^"(0|[1-9]\d{0,18})"$/.exec(raw) : null;
+    if (!match)
+      throw new InvalidInputError(
+        'If-Match must be a quoted version; use "0" to create',
+      );
+    const input = strictBody<{ flags: Flags }>(body, {
+      flags: (v) => !!v && typeof v === "object" && !Array.isArray(v),
+    });
+    const flags = validateFlags(input.flags);
     requireRegisteredFlags(flags);
     const result = await putGlobalFlags(
       this.db,
       this.actorId,
       flags,
-      expectedVersion,
+      BigInt(match[1]!),
       commandFrom(req),
     );
     res.setHeader("ETag", `"${result.version}"`);

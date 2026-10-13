@@ -22,7 +22,9 @@ staticClients:
     public: true
     redirectURIs:
       - http://127.0.0.1:5173/auth/callback
+      - http://127.0.0.1:5173/auth/silent-callback
       - http://localhost:5173/auth/callback
+      - http://localhost:5173/auth/silent-callback
     # Stage 10e: the BFF accepts one audience (greenguard-dashboard). The mobile
     # client requests the cross-client scope
     # audience:server:client_id:greenguard-dashboard and this trust makes Dex

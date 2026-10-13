@@ -1,13 +1,16 @@
 import { AuthError } from "@greenguard/tenant-auth";
 import { resolveTxt } from "node:dns/promises";
-import type { Db, Tx } from "../db/client.js";
+import type { Db } from "../db/client.js";
+import type { Tx } from "../db/client.js";
 import { inScope, UUID } from "../db/session.js";
 import {
   InvalidInputError,
+  DomainConflictError,
   RoleForbiddenError,
   VersionConflictError,
   NotFoundError,
 } from "./errors.js";
+import { isUniqueViolation } from "./db-conflict.js";
 import { identityIdOf, nameId } from "./ids.js";
 import { SeatLimitError, assertSeatCapacity } from "./entitlements.js";
 import {
@@ -129,9 +132,15 @@ export async function createIdentityConnection(
     for (const domain of domains) {
       // Retire another tenant's lapsed claim; a live claim still trips the unique index.
       await tx.$executeRaw`SELECT release_expired_domain(${domain}, ${tenantId}::uuid)`;
-      await tx.$executeRaw`INSERT INTO identity_connection_domains
-        (tenant_id, connection_id, domain, verified_until)
-        VALUES (${tenantId}::uuid, ${connectionId}::uuid, ${domain}, clock_timestamp() + make_interval(days => ${ttl}))`;
+      try {
+        await tx.$executeRaw`INSERT INTO identity_connection_domains
+          (tenant_id, connection_id, domain, verified_until)
+          VALUES (${tenantId}::uuid, ${connectionId}::uuid, ${domain}, clock_timestamp() + make_interval(days => ${ttl}))`;
+      } catch (error) {
+        if (isUniqueViolation(error))
+          throw new DomainConflictError("domain is already claimed");
+        throw error;
+      }
     }
     await emitConnectionChanged(
       tx,
@@ -291,6 +300,12 @@ export async function jitMembership(db: Db, actor: Actor, cmd: Command) {
   if (!realm?.tenant_id) throw new AuthError(401, "invalid_claims");
   const tenantId = realm.tenant_id;
   return inScope(db, { tenantId }, async (tx) => {
+    // Serialize seat grants with invitation acceptance and other membership
+    // commands. ADR-0017 requires the organization lock before member rows.
+    const [organization] = await tx.$queryRaw<unknown[]>`
+      SELECT 1 FROM organizations
+       WHERE tenant_id = ${tenantId}::uuid AND state = 'active' FOR UPDATE`;
+    if (!organization) throw new AuthError(401, "invalid_claims");
     // Recheck inside the tenant transaction so disabling JIT or suspending the
     // organization before this write cannot grant membership.
     const [allowed] = await tx.$queryRaw<unknown[]>`
@@ -304,7 +319,18 @@ export async function jitMembership(db: Db, actor: Actor, cmd: Command) {
     if (!allowed) throw new AuthError(401, "invalid_claims");
     const actorId = identityIdOf(actor.issuer, actor.subject);
     await assertSeatCapacity(tx, tenantId, actorId);
-    await grantFirstMembership(tx, tenantId, actor, "viewer", actorId, cmd);
+    if (
+      !(await grantFirstMembership(tx, tenantId, actor, "viewer", actorId, cmd))
+    ) {
+      // Another request may have granted this identity while our initial lookup
+      // was in flight. Return only the actual active membership.
+      const [current] = await tx.$queryRaw<{ role: string; state: string }[]>`
+        SELECT role, state FROM memberships
+         WHERE tenant_id = ${tenantId}::uuid AND identity_id = ${actorId}::uuid`;
+      if (current?.state !== "active")
+        throw new AuthError(401, "invalid_claims");
+      return { tenantId, roles: [current.role], state: "active" as const };
+    }
     return { tenantId, roles: ["viewer"], state: "active" as const };
   }).catch(async (error: unknown) => {
     // The rejected membership transaction rolled back. Record the security outcome

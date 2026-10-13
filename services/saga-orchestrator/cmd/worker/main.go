@@ -20,11 +20,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 	"greenguard.local/saga-orchestrator/saga"
 )
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "probe" {
+		if err := probeHealth(os.Args[2], os.Args[3]); err != nil {
+			slog.Error("saga worker probe failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Getenv); err != nil {
@@ -43,11 +51,15 @@ type config struct {
 	ttl       time.Duration
 	maxShards int
 	metrics   string
+	health    string
 }
 
 // loadConfig fails closed. The retired explicit tenant list is rejected so a
 // stale deployment cannot silently fall back to unleased static dispatch.
 func loadConfig(getenv func(string) string) (config, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		url:       getenv("SAGA_DATABASE_URL"),
 		brokers:   strings.FieldsFunc(getenv("KAFKA_BROKERS"), func(r rune) bool { return r == ',' || r == ' ' }),
@@ -56,26 +68,16 @@ func loadConfig(getenv func(string) string) (config, error) {
 		ttl:       15 * time.Second,
 		maxShards: saga.ShardCount,
 		metrics:   strings.TrimSpace(getenv("SAGA_METRICS_ADDR")),
+		health:    strings.TrimSpace(getenv("SAGA_HEALTH_ADDR")),
 	}
 	if getenv("SAGA_TENANT_IDS") != "" {
 		return config{}, errors.New("SAGA_TENANT_IDS is retired: workers take leased shards (ADR-0013)")
 	}
-	if cfg.url == "" || len(cfg.brokers) == 0 {
+	if (cfg.url == "" && getenv("SHARD_REGISTRY_FILE") == "") || len(cfg.brokers) == 0 {
 		return config{}, errors.New("SAGA_DATABASE_URL and KAFKA_BROKERS are required")
 	}
-	if raw := getenv("SAGA_LEASE_TTL_SECONDS"); raw != "" {
-		seconds, err := strconv.Atoi(raw)
-		if err != nil || seconds < 2 || seconds > 300 {
-			return config{}, errors.New("SAGA_LEASE_TTL_SECONDS must be 2..300")
-		}
-		cfg.ttl = time.Duration(seconds) * time.Second
-	}
-	if raw := getenv("SAGA_MAX_SHARDS"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > saga.ShardCount {
-			return config{}, fmt.Errorf("SAGA_MAX_SHARDS must be 1..%d", saga.ShardCount)
-		}
-		cfg.maxShards = n
+	if err := cfg.loadLeaseConfig(getenv); err != nil {
+		return config{}, err
 	}
 	if cfg.group == "" {
 		cfg.group = "greenguard-saga-orchestrator-v1"
@@ -84,6 +86,24 @@ func loadConfig(getenv func(string) string) (config, error) {
 		cfg.holder = defaultHolder()
 	}
 	return cfg, nil
+}
+
+func (cfg *config) loadLeaseConfig(getenv func(string) string) error {
+	if raw := getenv("SAGA_LEASE_TTL_SECONDS"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 2 || seconds > 300 {
+			return errors.New("SAGA_LEASE_TTL_SECONDS must be 2..300")
+		}
+		cfg.ttl = time.Duration(seconds) * time.Second
+	}
+	if raw := getenv("SAGA_MAX_SHARDS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > saga.ShardCount {
+			return fmt.Errorf("SAGA_MAX_SHARDS must be 1..%d", saga.ShardCount)
+		}
+		cfg.maxShards = n
+	}
+	return nil
 }
 
 func defaultHolder() string {
@@ -98,19 +118,33 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		return runSharded(ctx, getenv, cfg)
+	}
 	pool, err := pgxpool.New(ctx, cfg.url)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	producer, err := kgo.NewClient(kgo.SeedBrokers(cfg.brokers...), kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.RecordDeliveryTimeout(15*time.Second), kgo.ProducerLinger(0))
+	security, err := transport.SecurityOptions(getenv)
+	if err != nil {
+		return err
+	}
+	producerOptions := append([]kgo.Opt{kgo.SeedBrokers(cfg.brokers...), kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.RecordDeliveryTimeout(15 * time.Second), kgo.ProducerLinger(0)}, security...)
+	producer, err := kgo.NewClient(producerOptions...)
 	if err != nil {
 		return err
 	}
 	defer producer.Close()
-	consumer, err := kgo.NewClient(transport.Options(cfg.brokers, cfg.group,
-		[]string{saga.ResultTopic}, kgo.FetchIsolationLevel(kgo.ReadCommitted()))...)
+	if err := producer.Ping(ctx); err != nil {
+		return fmt.Errorf("saga producer broker ping: %w", err)
+	}
+	health := newWorkerHealth(1, 90*time.Second)
+	consumerExtra := append([]kgo.Opt{kgo.FetchIsolationLevel(kgo.ReadCommitted())}, health.consumerGroupOptions()...)
+	consumerOptions := append(transport.Options(cfg.brokers, cfg.group,
+		[]string{saga.ResultTopic}, consumerExtra...), security...)
+	consumer, err := kgo.NewClient(consumerOptions...)
 	if err != nil {
 		return err
 	}
@@ -130,13 +164,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 	metrics := &saga.Metrics{}
 	results := make(chan error, 2)
 	go func() {
-		results <- resultConsumer{store: saga.Store{DB: pool}, client: consumer, producer: producer, metrics: metrics}.run(workerCtx)
+		results <- resultConsumer{store: saga.Store{DB: pool}, client: consumer, producer: producer, metrics: metrics, health: health}.run(workerCtx)
 	}()
+	if cfg.health != "" {
+		stopHealth := serveWorkerHealth(workerCtx, cfg.health, health, results)
+		defer stopHealth()
+	}
 	if cfg.metrics != "" {
 		stopMetrics := serveMetrics(workerCtx, cfg.metrics, saga.Handler(metrics, pool), results)
 		defer stopMetrics()
 	}
-	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics,
+	w := worker{db: pool, store: saga.Store{DB: pool, Fence: leases}, leases: leases, metrics: metrics, cursors: map[int]string{}, health: health, healthID: "legacy",
 		publish: func(ctx context.Context, key, value []byte) error {
 			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
 		}}
@@ -144,11 +182,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 
 type worker struct {
-	db      *pgxpool.Pool
-	store   saga.Store
-	leases  *saga.Leases
-	publish saga.PublishCommand
-	metrics *saga.Metrics
+	db       common.TxStarter
+	store    saga.Store
+	leases   *saga.Leases
+	publish  saga.PublishCommand
+	metrics  *saga.Metrics
+	cursors  map[int]string
+	health   *workerHealth
+	healthID string
 }
 
 // commandHeaders copies the command's trace context into Kafka headers.
@@ -185,6 +226,7 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 	if err := w.renew(ctx); err != nil {
 		return err
 	}
+	w.progress()
 	renewTicker := time.NewTicker(ttl / 3)
 	defer renewTicker.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -202,6 +244,7 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 			err = w.renew(ctx)
 		case <-deadlineTicker.C:
 			err = w.eachTenant(ctx, func(tenant string) error {
+				w.progress()
 				n, err := w.store.ExpireDue(ctx, tenant, 100)
 				w.metrics.DeadlinesExpired.Add(int64(n))
 				return err
@@ -212,6 +255,15 @@ func (w worker) loop(ctx context.Context, ttl time.Duration, results <-chan erro
 		if err != nil && ctx.Err() == nil {
 			return err
 		}
+		if err == nil {
+			w.progress()
+		}
+	}
+}
+
+func (w worker) progress() {
+	if w.health != nil {
+		w.health.workerProgress(w.healthID)
 	}
 }
 
@@ -229,6 +281,7 @@ func (w worker) renew(ctx context.Context) error {
 
 func (w worker) publishTenant(ctx context.Context, tenant string) error {
 	for i := 0; i < 50; i++ {
+		w.progress()
 		sent, err := w.store.PublishNextCommand(ctx, tenant, w.publish)
 		if err != nil || !sent {
 			return err
@@ -250,29 +303,38 @@ func (w worker) eachTenant(ctx context.Context, fn func(string) error) error {
 }
 
 func (w worker) eachTenantInShard(ctx context.Context, shard int, fn func(string) error) error {
-	after := ""
-	for {
-		ids, err := saga.TenantsWithWork(ctx, w.db, shard, after, tenantPage)
-		if err != nil {
-			return err
-		}
-		lost, err := visit(ids, fn)
-		if err != nil {
-			return err
-		}
-		if lost {
-			w.metrics.LeaseLost.Add(1)
-		}
-		if lost || len(ids) < tenantPage {
-			return nil
-		}
-		after = ids[len(ids)-1]
+	after := w.cursors[shard]
+	ids, err := saga.TenantsWithWork(ctx, w.db, shard, after, tenantPage)
+	if err != nil {
+		return err
 	}
+	lost, err := visit(ids, func(tenant string) error {
+		w.progress()
+		return fn(tenant)
+	})
+	if err != nil {
+		return err
+	}
+	if lost {
+		w.metrics.LeaseLost.Add(1)
+	}
+	if w.cursors != nil {
+		if lost || len(ids) < tenantPage {
+			w.cursors[shard] = ""
+		} else {
+			w.cursors[shard] = ids[len(ids)-1]
+		}
+	}
+	return nil
 }
 
 func visit(ids []string, fn func(string) error) (bool, error) {
 	for _, id := range ids {
-		if err := fn(id); errors.Is(err, saga.ErrLeaseLost) {
+		err := fn(id)
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
+		}
+		if errors.Is(err, saga.ErrLeaseLost) {
 			slog.Warn("saga shard lease lost; side effect refused", "shard", saga.ShardFor(id))
 			return true, nil
 		} else if err != nil {
@@ -291,6 +353,7 @@ type resultConsumer struct {
 	client   transport.Client
 	producer transport.Client
 	metrics  *saga.Metrics
+	health   *workerHealth
 }
 
 func (c resultConsumer) run(ctx context.Context) error {
@@ -302,11 +365,17 @@ func (c resultConsumer) run(ctx context.Context) error {
 			}
 			return err
 		}
+		if c.health != nil {
+			c.health.beginConsumerWork()
+		}
 		if err := c.apply(ctx, message); err != nil {
 			return err
 		}
 		if err := message.Commit(ctx); err != nil {
 			return err
+		}
+		if c.health != nil {
+			c.health.endConsumerWork()
 		}
 	}
 	return nil

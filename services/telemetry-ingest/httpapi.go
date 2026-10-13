@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	common "greenguard.local/go-common"
 )
 
 const (
@@ -30,6 +33,7 @@ const (
 // ingest endpoint is mounted and Ingestor, Limiter, Recorder and Metrics must be set too;
 // without it the service exposes only its health probes.
 type App struct {
+	DBPool   *pgxpool.Pool
 	Consumer *BindingConsumer
 	Feed     *BindingFeed
 	Ping     func(context.Context) error
@@ -40,31 +44,33 @@ type App struct {
 	Recorder *RejectionRecorder
 	Metrics  *Metrics
 	Tracing  *Tracing
+	PreAuth  *PreAuthGuard
 }
 
 func newHandler(app App) http.Handler {
+	if app.PreAuth == nil {
+		app.PreAuth = NewPreAuthGuard()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeStatus(w, http.StatusOK, "ok") })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 		defer cancel()
-		if err := app.Ping(ctx); err != nil || (app.Consumer != nil && !app.Consumer.Ready.Load()) {
+		if err := app.Ping(ctx); err != nil || (app.Consumer != nil && !app.Consumer.Ready.Load()) ||
+			(app.Feed != nil && !app.Feed.Ready(ctx)) {
 			writeStatus(w, http.StatusServiceUnavailable, "not_ready")
 			return
 		}
 		writeStatus(w, http.StatusOK, "ready")
 	})
-	if app.Verifier == nil && app.Consumer != nil {
-		mux.Handle("GET /metrics", app.metricsHandler())
-	}
+	mux.Handle("GET /metrics", app.metricsHandler())
 	if app.Verifier != nil {
-		mux.Handle("GET /metrics", app.metricsHandler())
-		mux.HandleFunc("POST /v1/devices/{deviceId}/readings", app.ingest)
+		mux.Handle("POST /v1/devices/{deviceId}/readings", app.PreAuth.middleware(http.HandlerFunc(app.ingest)))
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusNotFound, codeNotFound, "")
 	})
-	handler := CorrelationMiddleware(mux)
+	handler := common.REDMetrics(CorrelationMiddleware(mux))
 	if app.Tracing != nil {
 		handler = app.Tracing.Middleware(handler)
 	}
@@ -128,6 +134,13 @@ func (a App) admit(w http.ResponseWriter, r *http.Request) (Principal, string, b
 	deviceID := r.PathValue("deviceId")
 	var principal Principal
 	var err error
+	if a.PreAuth != nil {
+		if !a.PreAuth.AcquireVerification() {
+			writeProblem(w, r, http.StatusTooManyRequests, "rate_limited", "Credential verification is busy; retry later.", headerRetryAfter, "1")
+			return Principal{}, "", false
+		}
+		defer a.PreAuth.ReleaseVerification()
+	}
 	if a.APIKeys != nil && len(r.Header.Get("Authorization")) >= 10 &&
 		strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer gg_") {
 		principal, err = a.APIKeys.Verify(r.Context(), r.Header.Get("Authorization"), deviceID)
@@ -196,8 +209,14 @@ func (a App) ingest(w http.ResponseWriter, r *http.Request) {
 
 func (a App) refuse(w http.ResponseWriter, r *http.Request, p Principal, deviceID string, rejection *Rejection, body []byte) {
 	a.Recorder.Record(r.Context(), p.TenantID, deviceID, rejection, body)
-	if rejection.Reason == bindingFeedStale || rejection.Reason == ReasonEntitlementVolume {
+	if rejection.Reason == bindingFeedStale || rejection.Reason == ReasonTelemetryV2Disabled {
 		writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail, headerRetryAfter, authRetryAfter)
+		return
+	}
+	if rejection.Reason == ReasonEntitlementVolume {
+		// A monthly quota does not reset after the fixed five-second retry used
+		// for transient service unavailability. Do not advertise a false delay.
+		writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail)
 		return
 	}
 	writeProblem(w, r, rejection.Status, rejection.Reason, rejection.Detail)
@@ -216,6 +235,10 @@ func (a App) metricsHandler() http.Handler {
 			ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 			defer cancel()
 			_, _ = io.WriteString(w, a.Feed.metrics(ctx))
+		}
+		_, _ = io.WriteString(w, common.RenderREDMetrics())
+		if a.DBPool != nil {
+			_, _ = io.WriteString(w, common.RenderPGXPoolMetrics("telemetry_ingest", a.DBPool.Stat()))
 		}
 	})
 }

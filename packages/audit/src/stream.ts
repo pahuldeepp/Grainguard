@@ -57,16 +57,44 @@ export async function writeSignedAuditExport(options: {
     `.tmp-${jobId}-${randomUUID()}`,
   );
   const completed = path.join(destinationDirectory, jobId);
-  const prior = await readCompletedExport({
-    directory: completed,
-    tenantId,
-    publicKeyId,
-    privateKey,
-    format,
-  });
+  async function readCompleted() {
+    try {
+      await stat(completed);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    const manifest = JSON.parse(
+      await readFile(path.join(completed, "manifest.json"), "utf8"),
+    ) as AuditManifest;
+    const signature = await readFile(path.join(completed, "signature"), "utf8");
+    if (
+      manifest.tenantId !== tenantId ||
+      manifest.publicKeyId !== publicKeyId ||
+      manifest.fileFormat !== (format === "csv" ? "csv" : undefined) ||
+      !verifyAuditManifest(manifest, signature, createPublicKey(privateKey))
+    )
+      throw new Error(
+        "existing audit export has invalid identity or signature",
+      );
+    const digest = createHash("sha256");
+    for await (const chunk of createReadStream(
+      path.join(completed, format === "csv" ? "audit.csv" : "audit.jsonl"),
+    ))
+      digest.update(chunk);
+    if (digest.digest("hex") !== manifest.fileSha256)
+      throw new Error("existing audit export file is corrupted");
+    return { directory: completed, manifest, signature };
+  }
+  const prior = await readCompleted();
   if (prior) return prior;
   await mkdir(staging, { mode: 0o700 });
   const fileHash = createHash("sha256");
+  let chain = Buffer.alloc(32);
+  let count = 0;
+  let first: string | null = null;
+  let last: string | null = null;
+  let previousKey = "";
   let writtenManifest: AuditManifest | undefined;
   try {
     const handle = await open(
@@ -74,15 +102,33 @@ export async function writeSignedAuditExport(options: {
       "wx",
       0o600,
     );
-    let rowsSummary: RowSummary;
     try {
-      rowsSummary = await writeAuditRows({
-        rows,
-        tenantId,
-        handle,
-        fileHash,
-        format,
-      });
+      if (format === "csv") {
+        const header = Buffer.from(`${CSV_HEADER}\n`, "utf8");
+        await handle.writeFile(header);
+        fileHash.update(header);
+      }
+      for await (const row of rows) {
+        if (row.tenantId !== tenantId)
+          throw new Error("cross-tenant audit export row");
+        const key = `${row.occurredAt}\0${row.auditId}`;
+        if (previousKey && key <= previousKey)
+          throw new Error("audit rows must be in keyset order");
+        previousKey = key;
+        const clean = redactAuditRow(row, true);
+        const line =
+          format === "csv" ? encodeCsvRow(clean) : JSON.stringify(clean);
+        const bytes = Buffer.from(`${line}\n`, "utf8");
+        await handle.writeFile(bytes);
+        fileHash.update(bytes);
+        chain = createHash("sha256")
+          .update(chain)
+          .update(Buffer.from(line, "utf8"))
+          .digest();
+        first ??= row.occurredAt;
+        last = row.occurredAt;
+        count++;
+      }
       await handle.sync();
     } finally {
       await handle.close();
@@ -91,11 +137,11 @@ export async function writeSignedAuditExport(options: {
       formatVersion: 1,
       ...(format === "csv" && { fileFormat: "csv" as const }),
       tenantId,
-      rowCount: rowsSummary.count,
-      firstOccurredAt: rowsSummary.first,
-      lastOccurredAt: rowsSummary.last,
+      rowCount: count,
+      firstOccurredAt: first,
+      lastOccurredAt: last,
       fileSha256: fileHash.digest("hex"),
-      rowChainSha256: rowsSummary.chain.toString("hex"),
+      rowChainSha256: chain.toString("hex"),
       publicKeyId,
     };
     writtenManifest = manifest;
@@ -119,105 +165,10 @@ export async function writeSignedAuditExport(options: {
     // Another worker may have published the same leased job concurrently. Reuse
     // only a valid, byte-identical result; never replace a completed export.
     if (writtenManifest) {
-      const winner = await readCompletedExport({
-        directory: completed,
-        tenantId,
-        publicKeyId,
-        privateKey,
-        format,
-      });
-      if (winner?.manifest.fileSha256 === writtenManifest.fileSha256)
+      const winner = await readCompleted();
+      if (winner && winner.manifest.fileSha256 === writtenManifest.fileSha256)
         return winner;
     }
     throw error;
   }
-}
-
-type RowSummary = {
-  count: number;
-  first: string | null;
-  last: string | null;
-  chain: Buffer;
-};
-
-async function writeAuditRows(options: {
-  rows: AsyncIterable<ExportRow>;
-  tenantId: string;
-  handle: Awaited<ReturnType<typeof open>>;
-  fileHash: ReturnType<typeof createHash>;
-  format: "jsonl" | "csv";
-}): Promise<RowSummary> {
-  const { rows, tenantId, handle, fileHash, format } = options;
-  if (format === "csv") {
-    const header = Buffer.from(`${CSV_HEADER}\n`, "utf8");
-    await handle.writeFile(header);
-    fileHash.update(header);
-  }
-
-  let chain = Buffer.alloc(32);
-  let count = 0;
-  let first: string | null = null;
-  let last: string | null = null;
-  let previousKey = "";
-  for await (const row of rows) {
-    if (row.tenantId !== tenantId)
-      throw new Error("cross-tenant audit export row");
-    const key = `${row.occurredAt}\0${row.auditId}`;
-    if (previousKey && key <= previousKey)
-      throw new Error("audit rows must be in keyset order");
-    previousKey = key;
-    const clean = redactAuditRow(row, true);
-    const line = format === "csv" ? encodeCsvRow(clean) : JSON.stringify(clean);
-    const bytes = Buffer.from(`${line}\n`, "utf8");
-    await handle.writeFile(bytes);
-    fileHash.update(bytes);
-    chain = createHash("sha256")
-      .update(chain)
-      .update(Buffer.from(line, "utf8"))
-      .digest();
-    first ??= row.occurredAt;
-    last = row.occurredAt;
-    count++;
-  }
-  return { count, first, last, chain };
-}
-
-async function readCompletedExport(options: {
-  directory: string;
-  tenantId: string;
-  publicKeyId: string;
-  privateKey: KeyObject;
-  format: "jsonl" | "csv";
-}): Promise<{
-  directory: string;
-  manifest: AuditManifest;
-  signature: string;
-} | null> {
-  const { directory, tenantId, publicKeyId, privateKey, format } = options;
-  try {
-    await stat(directory);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-  const manifest = JSON.parse(
-    await readFile(path.join(directory, "manifest.json"), "utf8"),
-  ) as AuditManifest;
-  const signature = await readFile(path.join(directory, "signature"), "utf8");
-  const expectedFileFormat = format === "csv" ? "csv" : undefined;
-  if (
-    manifest.tenantId !== tenantId ||
-    manifest.publicKeyId !== publicKeyId ||
-    manifest.fileFormat !== expectedFileFormat ||
-    !verifyAuditManifest(manifest, signature, createPublicKey(privateKey))
-  )
-    throw new Error("existing audit export has invalid identity or signature");
-
-  const fileName = format === "csv" ? "audit.csv" : "audit.jsonl";
-  const digest = createHash("sha256");
-  for await (const chunk of createReadStream(path.join(directory, fileName)))
-    digest.update(chunk);
-  if (digest.digest("hex") !== manifest.fileSha256)
-    throw new Error("existing audit export file is corrupted");
-  return { directory, manifest, signature };
 }

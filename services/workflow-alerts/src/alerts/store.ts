@@ -11,6 +11,7 @@ export type TransitionType =
 export interface Actor {
   type: "system" | "user";
   id: string;
+  issuer?: string;
 }
 
 // Envelope context carried from the cause (risk event or HTTP command).
@@ -34,6 +35,7 @@ interface EpisodeRow {
   opened_at: Date;
   acknowledged_at: Date | null;
   acknowledged_by: string | null;
+  acknowledged_by_issuer: string | null;
   resolved_at: Date | null;
   escalation_level: number;
   escalated_at: Date | null;
@@ -53,6 +55,7 @@ const toEpisode = (r: EpisodeRow): Episode => ({
   openedAt: r.opened_at,
   acknowledgedAt: r.acknowledged_at,
   acknowledgedBy: r.acknowledged_by,
+  acknowledgedByIssuer: r.acknowledged_by_issuer,
   resolvedAt: r.resolved_at,
   escalationLevel: r.escalation_level,
   escalatedAt: r.escalated_at,
@@ -167,6 +170,7 @@ export interface Page {
   limit: number;
   after?: string;
   state?: EpisodeState;
+  deviceId?: string;
 }
 
 // Keyset pagination on episode_id; the tenant filter is explicit on top of RLS.
@@ -177,9 +181,18 @@ export async function listEpisodes(
 ): Promise<Episode[]> {
   const after = page.after ?? "00000000-0000-0000-0000-000000000000";
   const rows = await tx.$queryRaw<EpisodeRow[]>`
-    SELECT * FROM alert_episodes
-     WHERE tenant_id = ${tenantId}::uuid AND episode_id > ${after}::uuid
+    SELECT e.* FROM alert_episodes e
+     WHERE e.tenant_id = ${tenantId}::uuid AND episode_id > ${after}::uuid
        AND (${page.state ?? null}::text IS NULL OR state = ${page.state ?? null}::text)
+     AND (${page.deviceId ?? null}::text IS NULL OR EXISTS (
+         SELECT 1 FROM consumer_inbox i
+          WHERE i.tenant_id = ${tenantId}::uuid AND i.tenant_id = e.tenant_id
+            AND i.consumer_name = 'workflow-alerts.risk-assessed'
+            AND i.event->>'event_type' = 'risk.assessed'
+            AND i.event->>'tenant_id' = ${tenantId}::text
+            AND i.event->'payload'->>'assessment_id' = e.current_assessment_id::text
+            AND i.event->'payload'->>'device_id' = ${page.deviceId ?? null}::text
+       ))
      ORDER BY episode_id LIMIT ${page.limit}`;
   return rows.map(toEpisode);
 }
@@ -201,7 +214,7 @@ export async function saveEpisode(
   await tx.$executeRaw`
     UPDATE alert_episodes SET state = ${e.state}, severity = ${e.severity}, score = ${e.score},
       version = ${e.version}, acknowledged_at = ${e.acknowledgedAt}, acknowledged_by = ${e.acknowledgedBy},
-      resolved_at = ${e.resolvedAt}, escalation_level = ${e.escalationLevel},
+      acknowledged_by_issuer = ${e.acknowledgedByIssuer ?? null}, resolved_at = ${e.resolvedAt}, escalation_level = ${e.escalationLevel},
       escalated_at = ${e.escalatedAt}, current_assessment_id = ${e.currentAssessmentId}::uuid, updated_at = ${now}
     WHERE tenant_id = ${e.tenantId}::uuid AND episode_id = ${e.episodeId}::uuid`;
 }
@@ -266,15 +279,15 @@ export async function recordTransition(
   });
   await tx.$executeRaw`
     INSERT INTO alert_transitions (tenant_id, transition_id, episode_id, episode_version, transition_type,
-      from_state, to_state, actor_type, actor_id, cause_id, event_id, occurred_at)
+      from_state, to_state, actor_type, actor_id, actor_issuer, cause_id, event_id, occurred_at)
     VALUES (${e.tenantId}::uuid, ${eventId}::uuid, ${e.episodeId}::uuid, ${e.version}, ${type},
-      ${from}, ${e.state}, ${cause.actor.type}, ${cause.actor.id}, ${cause.causeId}::uuid, ${eventId}::uuid, ${at})`;
+      ${from}, ${e.state}, ${cause.actor.type}, ${cause.actor.id}, ${cause.actor.issuer ?? null}, ${cause.causeId}::uuid, ${eventId}::uuid, ${at})`;
   await tx.$executeRaw`
     INSERT INTO outbox_events (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type,
-      schema_version, occurred_at, correlation_id, causation_id, traceparent, payload)
+      schema_version, occurred_at, correlation_id, causation_id, traceparent, payload, actor_issuer)
     VALUES (${eventId}::uuid, ${e.tenantId}::uuid, 'alert_episode', ${e.episodeId}::uuid, ${e.version},
       ${event.event_type}, 1, ${at}, ${cause.correlationId}::uuid, ${cause.causeId}::uuid,
-      ${cause.traceparent}, ${JSON.stringify(event.payload)}::jsonb)`;
+      ${cause.traceparent}, ${JSON.stringify(event.payload)}::jsonb, ${cause.actor.issuer ?? null})`;
   return event;
 }
 
@@ -294,9 +307,9 @@ export async function recordSuppressedEscalation(
   );
   await tx.$executeRaw`
     INSERT INTO alert_transitions (tenant_id, transition_id, episode_id, episode_version, transition_type,
-      from_state, to_state, actor_type, actor_id, cause_id, event_id, occurred_at)
+      from_state, to_state, actor_type, actor_id, actor_issuer, cause_id, event_id, occurred_at)
     VALUES (${e.tenantId}::uuid, ${transitionId}::uuid, ${e.episodeId}::uuid, ${e.version},
-      'escalation_suppressed', ${e.state}, ${e.state}, ${cause.actor.type}, ${cause.actor.id},
+      'escalation_suppressed', ${e.state}, ${e.state}, ${cause.actor.type}, ${cause.actor.id}, ${cause.actor.issuer ?? null},
       ${cause.causeId}::uuid, NULL, ${at})
     ON CONFLICT (tenant_id, transition_id) DO NOTHING`;
   return transitionId;

@@ -1,0 +1,60 @@
+nameOverride: tenant-bootstrap-worker
+replicaCount: 1
+terminationGracePeriodSeconds: 40
+autoscaling:
+  hpa: { enabled: false }
+  keda: { enabled: false }
+pdb:
+  enabled: false
+service:
+  enabled: false
+  port: 3010
+  containerPort: 3010
+container:
+  name: tenant-bootstrap-worker
+  command: ["node"]
+  args: ["services/tenant-control-plane/dist/tenant-bootstrap/worker.js"]
+  volumeMounts:
+    - name: tenant-bootstrap-registries
+      mountPath: /var/run/greenguard/tenant-bootstrap
+      readOnly: true
+    - name: tenant-bootstrap-owner-ca
+      mountPath: /var/run/greenguard/tenant-bootstrap/ca
+      readOnly: true
+probes:
+  startup: { enabled: false, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: false, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: false, path: /healthz, periodSeconds: 10 }
+networkPolicy:
+  ingressEnabled: false
+  egressCIDRs: []
+postgresReadReplica:
+  caSecretName: greenguard-rds-ca
+kafka:
+  caSecretName: ""
+volumes:
+  - name: tenant-bootstrap-registries
+    projected:
+      defaultMode: 0440
+      sources:
+        - secret:
+            name: greenguard-s1-tenant-bootstrap
+            items:
+              - {key: registry.json, path: s1.json}
+        - secret:
+            name: greenguard-s2-tenant-bootstrap
+            items:
+              - {key: registry.json, path: s2.json}
+        - secret:
+            name: greenguard-s3-tenant-bootstrap
+            items:
+              - {key: registry.json, path: s3.json}
+        - secret:
+            name: greenguard-s4-tenant-bootstrap
+            items:
+              - {key: registry.json, path: s4.json}
+  - name: tenant-bootstrap-owner-ca
+    secret:
+      secretName: greenguard-rds-ca
+      items:
+        - {key: ca.pem, path: ca.crt}

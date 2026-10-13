@@ -5,10 +5,10 @@ import { test } from "node:test";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import { startMembershipRuntime } from "@greenguard/membership-client";
 import { createControlPlaneApp } from "./app.js";
+import { createActiveTenantFixture } from "./testing/fixtures.js";
 import { createDb } from "./db/client.js";
 import {
   acceptInvitation,
-  createOrganization,
   inviteMember,
   revokeMember,
 } from "./domain/store.js";
@@ -62,16 +62,16 @@ test(
     let first: Awaited<ReturnType<typeof startMembershipRuntime>> | undefined;
     let second: Awaited<ReturnType<typeof startMembershipRuntime>> | undefined;
     try {
-      const a = await createOrganization(
+      const a = await createActiveTenantFixture(
         db,
         admin,
-        { name: "CDC runtime A" },
+        "CDC runtime A",
         cmd(),
       );
-      const b = await createOrganization(
+      const b = await createActiveTenantFixture(
         db,
         bob,
-        { name: "CDC runtime B" },
+        "CDC runtime B",
         cmd(),
       );
       const tenantA = a.body.tenantId as string;

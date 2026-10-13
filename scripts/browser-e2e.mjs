@@ -3,6 +3,7 @@
 // and -> Read API (Postgres read DB, Cassandra, Elasticsearch, Redis Cluster).
 // Mandatory Stage 08 CI gate: `make browser-e2e`. Never prints tokens.
 import { randomBytes, randomUUID, createHash } from "node:crypto";
+import assert from "node:assert/strict";
 import {
   closeSync,
   copyFileSync,
@@ -20,10 +21,18 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import * as S from "./browser-e2e-stack.mjs";
+import {
+  bootstrapTenantOwnership,
+  controlIncarnations,
+  localShardSelection,
+  startPlacementAuthority,
+  writeServiceRegistry,
+} from "./placement-fixture.mjs";
+import { isInteractiveAuthorizeRequest } from "./oidc-authorize-request.mjs";
 import { operations } from "../services/bff/dist/query-policy.js";
 
 process.loadEnvFile(".env");
-const { PORTS, waitFor, scoped } = S;
+const { PORTS, waitFor, scoped, fixtureScoped } = S;
 const OUT_BASE = "evidence/stage08-e2e";
 const RUN_ID = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
 const OUT = path.join(OUT_BASE, "runs", RUN_ID);
@@ -32,12 +41,20 @@ const ISSUER = "http://127.0.0.1:5556/dex";
 // The dashboard is served on [::1]:5173 as http://localhost:5173 (a Dex-registered
 // redirect URI) so it never collides with a developer's IPv4 vite on 127.0.0.1:5173.
 const DASHBOARD = `http://localhost:${PORTS.dashboard}`;
+// Node-side requests use the bound socket directly. Chromium maps localhost to both
+// loopbacks itself, but Node asks the OS, and a stock Ubuntu /etc/hosts (the CI
+// runner VM) lists localhost only as 127.0.0.1, where this harness does not listen.
+const DASHBOARD_SOCKET = `http://[::1]:${PORTS.dashboard}`;
 const password = process.env.OIDC_DEV_PASSWORD;
 const TENANT = {
   a: "0a0a0a0a-0000-4000-8000-00000000000a",
   b: "0b0b0b0b-0000-4000-8000-00000000000b",
 };
 const id = randomUUID().slice(0, 8);
+// Tenant placement (set in stackUp): every DB-writing service resolves ownership
+// through a private shard registry and a placement authority.
+let placementEnv = () => ({});
+let sagaAdmissionContext;
 const tmp = mkdtempSync(path.join(tmpdir(), "greenguard-browser-e2e-"));
 const alias = `greenguard-browser-e2e-${id}`;
 const failures = [];
@@ -113,24 +130,31 @@ const authEnv = {
 
 async function seed() {
   for (const it of Object.values(items)) {
-    await scoped(process.env.INVENTORY_PROJECTOR_DIRECT_URL, it.tenant, (db) =>
-      db.query(
-        "INSERT INTO tenants(tenant_id,name) VALUES($1,'Browser E2E') ON CONFLICT DO NOTHING",
-        [it.tenant],
-      ),
+    await fixtureScoped(
+      process.env.INVENTORY_PROJECTOR_DIRECT_URL,
+      it.tenant,
+      (db) =>
+        db.query(
+          "INSERT INTO tenants(tenant_id,name) VALUES($1,'Browser E2E') ON CONFLICT DO NOTHING",
+          [it.tenant],
+        ),
     );
-    await scoped(process.env.INVENTORY_DIRECT_URL, it.tenant, async (db) => {
-      await db.query(
-        "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,$3)",
-        [it.tenant, it.site, `Browser E2E ${it.name}`],
-      );
-      await db.query(
-        `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
+    await fixtureScoped(
+      process.env.INVENTORY_DIRECT_URL,
+      it.tenant,
+      async (db) => {
+        await db.query(
+          "INSERT INTO sites(tenant_id,site_id,name) VALUES($1,$2,$3)",
+          [it.tenant, it.site, `Browser E2E ${it.name}`],
+        );
+        await db.query(
+          `INSERT INTO devices(tenant_id,device_id,site_id,serial_number,status,asset_id)
          VALUES($1,$2,$3,$4,'provisioning',$5)`,
-        [it.tenant, it.device, it.site, it.serial, it.asset],
-      );
-    });
-    await scoped(process.env.HARDWARE_DIRECT_URL, it.tenant, (db) =>
+          [it.tenant, it.device, it.site, it.serial, it.asset],
+        );
+      },
+    );
+    await fixtureScoped(process.env.HARDWARE_DIRECT_URL, it.tenant, (db) =>
       db.query(
         `INSERT INTO hardware_assets(tenant_id,asset_id,serial_number,mqtt_ack_secret)
          VALUES($1,$2,$3,$4)`,
@@ -138,7 +162,7 @@ async function seed() {
       ),
     );
   }
-  await scoped(process.env.ALERTS_DIRECT_URL, TENANT.a, async (db) => {
+  await fixtureScoped(process.env.ALERTS_DIRECT_URL, TENANT.a, async (db) => {
     await db.query(
       `INSERT INTO alert_rules(tenant_id,rule_id,rule_key,resource_kind,open_score,clear_score,escalation_timeout_seconds)
        VALUES($1,$2,$3,'bin',70,40,300)`,
@@ -257,9 +281,10 @@ const bffEnv = (port, readUrl) => ({
   BFF_RATE_REDIS_CLUSTER_NODES: "",
   BFF_ALLOW_NO_RATE_LIMIT: "true",
 });
-const gatewayEnv = (port, bffPort, readPort) => ({
+const gatewayEnv = (port, bffPort, readPort, metricsPort) => ({
   ...authEnv,
   GATEWAY_PORT: String(port),
+  GATEWAY_METRICS_PORT: String(metricsPort),
   GATEWAY_BFF_URL: `http://127.0.0.1:${bffPort}`,
   GATEWAY_READ_URL: `http://127.0.0.1:${readPort}`,
   GATEWAY_SAGA_URL: `http://127.0.0.1:${PORTS.sagaApi}`,
@@ -274,6 +299,8 @@ function startHardware(bins) {
     {
       KAFKA_BROKERS: S.broker,
       MQTT_BROKER_URL: "tcp://127.0.0.1:51883",
+      MQTT_CLIENT_ID: `browser-e2e-${id}-hardware`,
+      ...placementEnv("hardware-service", "hardware", "HARDWARE_DIRECT_URL"),
     },
   );
 }
@@ -292,6 +319,7 @@ function startBackends(bins, fixtureFile) {
     "services/device-service",
     {
       KAFKA_BROKERS: S.broker,
+      ...placementEnv("device-service", "inventory", "INVENTORY_DIRECT_URL"),
     },
   );
   start("telemetry", bins.telemetry, [], "services/telemetry-ingest", {
@@ -303,6 +331,7 @@ function startBackends(bins, fixtureFile) {
     AUTH_AUDIENCE: "greenguard-ingest",
     AUTH_JWKS_URL: `http://127.0.0.1:${PORTS.idp}/keys`,
     INGEST_BINDING_FEED_MAX_STALE: "45s",
+    ...placementEnv("telemetry-ingest", "telemetry", "TELEMETRY_DIRECT_URL"),
   });
   start("cdc", bins.cdc, [], "services/cdc-transformer", {
     KAFKA_BROKERS: S.broker,
@@ -313,6 +342,7 @@ function startBackends(bins, fixtureFile) {
   start("projection", bins.projection, [], "services/projection-builder", {
     KAFKA_BROKERS: S.broker,
     EVENT_SCHEMA_DIR: schemaDir,
+    ...placementEnv("projection-builder", "read", "PROJECTION_DIRECT_URL"),
   });
   start("cassandra-writer", bins.cassandra, [], "services/cassandra-writer", {
     KAFKA_BROKERS: S.broker,
@@ -336,17 +366,19 @@ function startBackends(bins, fixtureFile) {
       path.join(tmp, "search-quarantine.jsonl"),
     ],
     "services/search-indexer",
-    { SEARCH_ALIAS: alias },
+    { SEARCH_ALIAS: alias, HEALTH_PORT: String(PORTS.searchHealth) },
   );
   start("saga-api", bins.sagaApi, [], "services/saga-orchestrator", {
     ...authEnv,
     SAGA_API_ADDR: `127.0.0.1:${PORTS.sagaApi}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   start("saga-worker", bins.saga, [], "services/saga-orchestrator", {
     KAFKA_BROKERS: S.broker,
     SAGA_RESULT_GROUP: `browser-e2e-saga-${id}`,
     SAGA_LEASE_TTL_SECONDS: "3",
     SAGA_WORKER_ID: `browser-e2e-${id}`,
+    ...placementEnv("saga-orchestrator", "sagas", "SAGA_DIRECT_URL"),
   });
   start(
     "read-api",
@@ -364,6 +396,10 @@ function startBackends(bins, fixtureFile) {
       ...authEnv,
       PORT: String(PORTS.alerts),
       KAFKA_BROKERS: "",
+      // Local-only signing keys for this run (the service requires >= 32 bytes).
+      ALERTS_ACTOR_HMAC_KEY: randomBytes(32).toString("hex"),
+      ALERTS_HISTORY_CURSOR_KEY: randomBytes(32).toString("hex"),
+      ...placementEnv("workflow-alerts", "alerts", "ALERTS_DIRECT_URL"),
     },
   );
   start(
@@ -385,14 +421,19 @@ function startBackends(bins, fixtureFile) {
     process.execPath,
     ["dist/main.js"],
     "services/gateway",
-    gatewayEnv(PORTS.gateway, PORTS.bff, PORTS.read),
+    gatewayEnv(PORTS.gateway, PORTS.bff, PORTS.read, PORTS.gatewayMetrics),
   );
   start(
     "gateway-degraded",
     process.execPath,
     ["dist/main.js"],
     "services/gateway",
-    gatewayEnv(PORTS.gatewayDegraded, PORTS.bffDegraded, PORTS.deadRead),
+    gatewayEnv(
+      PORTS.gatewayDegraded,
+      PORTS.bffDegraded,
+      PORTS.deadRead,
+      PORTS.gatewayDegradedMetrics,
+    ),
   );
 }
 
@@ -422,7 +463,7 @@ async function aliasSearchIndex() {
 // ---------- Browser helpers ----------
 async function signIn(page, user) {
   const [authorize] = await Promise.all([
-    page.waitForRequest((r) => r.url().startsWith(`${ISSUER}/auth?`)),
+    page.waitForRequest((r) => isInteractiveAuthorizeRequest(r.url(), ISSUER)),
     page.getByRole("button", { name: "Sign in" }).click(),
   ]);
   const url = new URL(authorize.url());
@@ -460,6 +501,13 @@ async function newUser(browser, user) {
   const graphql = [];
   page.on("console", (m) => {
     if (m.type() === "error") console.log(`[browser:${user}] ${m.text()}`);
+  });
+  page.on("response", (response) => {
+    if (response.status() < 500) return;
+    const url = new URL(response.url());
+    console.log(
+      `[browser:${user}] HTTP ${response.status()} ${url.origin}${url.pathname}`,
+    );
   });
   page.on("request", (r) => {
     if (r.url().endsWith("/graphql")) graphql.push(r);
@@ -556,31 +604,28 @@ async function sagaRows(it) {
 }
 
 async function sagaDb(it, sql, args) {
-  return scoped(process.env.SAGA_DIRECT_URL, it.tenant, (db) =>
-    db.query(sql, args),
+  return scoped(
+    process.env.SAGA_DIRECT_URL,
+    it.tenant,
+    (db) => db.query(sql, args),
+    false,
+    sagaAdmissionContext,
   );
 }
 
 const hash = (q) => createHash("sha256").update(q).digest("hex");
-// A reset can arrive after the server already applied the request, so anything that is not
-// provably read-only (mutations, including ones with leading comments) is sent exactly once.
-
 async function gql(token, query, variables, port = PORTS.gateway) {
-  const r = await S.fetchWithRetry(
-    `http://127.0.0.1:${port}/graphql`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        variables,
-        extensions: { persistedQuery: { version: 1, sha256Hash: hash(query) } },
-      }),
+  const r = await fetch(`http://127.0.0.1:${port}/graphql`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
     },
-    { attempts: S.isReadOnlyOperation(query) ? 3 : 1 },
-  );
+    body: JSON.stringify({
+      variables,
+      extensions: { persistedQuery: { version: 1, sha256Hash: hash(query) } },
+    }),
+  });
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 const code = (res) =>
@@ -658,18 +703,50 @@ async function scenarioReload(browser, alice) {
   it.saga = first.saga?.sagaId;
   const before = await badge(alice.page).catch(() => "");
   await alice.page.reload();
-  const needSignIn = await waitVisible(
-    alice.page.getByRole("button", { name: "Sign in" }),
-    5000,
-  );
-  await signIn(alice.page, "alice");
+  let authState;
+  try {
+    const state = await alice.page.waitForFunction(
+      () => {
+        const labels = [...document.querySelectorAll("button")].map((button) =>
+          button.textContent?.trim(),
+        );
+        if (labels.includes("Sign in")) return "signed-out";
+        if (labels.includes("Sign out")) return "signed-in";
+        return false;
+      },
+      null,
+      { timeout: 15_000 },
+    );
+    authState = await state.jsonValue();
+  } catch (error) {
+    const body = (
+      await alice.page
+        .locator("body")
+        .innerText()
+        .catch(() => "")
+    )
+      .replaceAll(/\s+/g, " ")
+      .slice(0, 400);
+    throw new Error(
+      `reload did not reach a sign-in state (${alice.page.url()}): ${body || error.message}`,
+      { cause: error },
+    );
+  }
+  const needSignIn = authState === "signed-out";
+  if (needSignIn) {
+    await signIn(alice.page, "alice");
+  } else {
+    await alice.page
+      .getByRole("button", { name: "Sign out" })
+      .waitFor({ timeout: 15_000 });
+  }
   const url = alice.page.url();
   const restored = await waitVisible(
     alice.page.locator(".provisioning-status"),
   );
   const after = await badge(alice.page);
   check(
-    "S2 reload mid-provisioning restores the tracked saga after sign-in",
+    "S2 reload mid-provisioning reauthenticates and restores the tracked saga",
     needSignIn && restored && url.includes(it.saga ?? "missing"),
     `before=${before || "(not yet rendered)"} signInRequired=${needSignIn} url=${url.replace(DASHBOARD, "")} restoredState=${after}`,
   );
@@ -778,7 +855,7 @@ function deviceToken(it) {
 
 async function ingest(it, observedAt, temperature, humidity) {
   const sourceMessageId = `bre2e-${id}-${observedAt.getTime()}`;
-  const r = await S.fetchWithRetry(
+  const r = await fetch(
     `http://127.0.0.1:${PORTS.telemetry}/v1/devices/${it.device}/readings`,
     {
       method: "POST",
@@ -798,12 +875,9 @@ async function ingest(it, observedAt, temperature, humidity) {
 }
 
 async function readApi(token, route) {
-  const r = await S.fetchWithRetry(
-    `http://127.0.0.1:${PORTS.read}/api/v1/read${route}`,
-    {
-      headers: { authorization: `Bearer ${token}` },
-    },
-  );
+  const r = await fetch(`http://127.0.0.1:${PORTS.read}/api/v1/read${route}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 
@@ -847,9 +921,16 @@ async function scenarioReads(alice) {
         token,
         `/devices/${it.device}/readings?from=${from}&to=${new Date().toISOString()}&limit=10`,
       );
-      return r.body.source === "cassandra" && r.body.data?.length >= 2;
+      const rows = r.body.data ?? [];
+      const returnedIds = new Set(rows.map((row) => row.reading_id));
+      return (
+        r.body.sources?.postgres === true &&
+        r.body.sources?.cassandra === true &&
+        returnedIds.has(accepted.body.reading_id) &&
+        returnedIds.has(coldRes.body.reading_id)
+      );
     },
-    "Cassandra history holds both readings",
+    "history API merges the hot PostgreSQL and cold Cassandra readings",
     90_000,
   );
   await waitFor(
@@ -956,9 +1037,13 @@ async function scenarioReads(alice) {
   );
   await shot(page, "s4-history-older-cassandra");
   check(
-    "S4 UI older range served from Cassandra",
-    coldText.includes("12.5") && apiSource.body.source === "cassandra",
-    `ui has 48h-old 12.5 °C=${coldText.includes("12.5")} readApi source=${apiSource.body.source} rows=${apiSource.body.data?.length}`,
+    "S4 UI shows the 48h-old Cassandra reading in a hybrid history range",
+    coldText.includes("12.5") &&
+      apiSource.body.sources?.cassandra === true &&
+      apiSource.body.data?.some(
+        (row) => row.reading_id === coldRes.body.reading_id,
+      ),
+    `ui has 48h-old 12.5 °C=${coldText.includes("12.5")} readApi sources=${JSON.stringify(apiSource.body.sources)} rows=${apiSource.body.data?.length}`,
   );
   return it;
 }
@@ -1036,15 +1121,32 @@ async function scenarioRedisOutage(alice, bobToken) {
       redisCompose("up", "redis-cluster-init");
     }
   }
-  const after = await gql(alice.token(), operations.deviceCurrent, {
-    id: it.device,
-  });
-  const restored =
-    after.body.data?.latestReading?.readingId === accepted?.body.reading_id;
+  let restoredResponse;
+  let restoredError;
+  const restored = await waitFor(
+    async () => {
+      try {
+        restoredResponse = await gql(alice.token(), operations.deviceCurrent, {
+          id: it.device,
+        });
+        restoredError = undefined;
+        return (
+          restoredResponse.status === 200 &&
+          restoredResponse.body.data?.latestReading?.readingId ===
+            accepted?.body.reading_id
+        );
+      } catch (error) {
+        restoredError = error.message;
+        return false;
+      }
+    },
+    "fresh scoped read after Redis restoration",
+    20_000,
+  ).catch(() => false);
   check(
     "S8 Redis outage and browser WebSocket reconnect preserve scoped fresh reads",
     accepted?.status === 202 && reconnected && projected && scoped && restored,
-    `accepted=${accepted?.status} reconnect=${reconnected} projected=${projected} tenantIsolation=${scoped} restored=${restored}`,
+    `accepted=${accepted?.status} reconnect=${reconnected} projected=${projected} tenantIsolation=${scoped} restored=${restored} afterStatus=${restoredResponse?.status ?? "unavailable"} afterReading=${restoredResponse?.body.data?.latestReading?.readingId ?? "unavailable"} transportError=${restoredError ?? "none"}`,
   );
 }
 
@@ -1235,6 +1337,11 @@ async function scenarioDegraded(alice, dashboard) {
 
 async function scenarioAlerts(alice, victor, bobToken) {
   const page = alice.page;
+  const alertLink = page.locator(`#alert-link-${alertFixture.id}`);
+  const alertBinSuffix = alertFixture.bin
+    .replace(/[^a-z\d]/gi, "")
+    .slice(-4)
+    .toUpperCase();
   const alertResponses = [];
   const captureAlertResponse = async (response) => {
     if (!response.url().endsWith("/graphql")) return;
@@ -1250,9 +1357,10 @@ async function scenarioAlerts(alice, victor, bobToken) {
   page.on("response", captureAlertResponse);
   try {
     await page.getByRole("link", { name: "Alerts", exact: true }).click();
-    const listed = await waitVisible(
-      page.getByText(`critical · Bin ${alertFixture.bin}`),
-    );
+    const listed = await waitVisible(alertLink);
+    const displayedAlert = (await alertLink.textContent().catch(() => ""))
+      .replace(/\s+/g, " ")
+      .trim();
     const bob = await gql(bobToken, operations.alertList, {
       limit: 25,
       state: "open",
@@ -1265,14 +1373,13 @@ async function scenarioAlerts(alice, victor, bobToken) {
     check(
       "S8 alert list is tenant scoped and viewer cannot acknowledge",
       listed &&
+        displayedAlert.includes(`Critical · Bin ${alertBinSuffix}`) &&
         (bob.body?.data?.alerts?.items ?? []).length === 0 &&
         code(viewer) === "insufficient_role",
-      `listed=${listed} bobItems=${bob.body?.data?.alerts?.items?.length ?? "error"} viewer=${code(viewer)}`,
+      `listed=${listed} title=${displayedAlert} bobItems=${bob.body?.data?.alerts?.items?.length ?? "error"} viewer=${code(viewer)}`,
     );
     await shot(page, "s8-alert-open");
-    const fixtureRow = page
-      .getByRole("listitem")
-      .filter({ hasText: alertFixture.bin });
+    const fixtureRow = page.getByRole("listitem").filter({ has: alertLink });
     await fixtureRow.getByRole("button", { name: "Acknowledge" }).click();
     const gone = await fixtureRow
       .waitFor({ state: "hidden", timeout: 15_000 })
@@ -1280,7 +1387,7 @@ async function scenarioAlerts(alice, victor, bobToken) {
       .catch(() => false);
     await page.locator("#alert-state").selectOption("acknowledged");
     const acknowledged = await waitVisible(
-      page.getByRole("listitem").filter({ hasText: alertFixture.bin }),
+      page.getByRole("listitem").filter({ has: alertLink }),
     );
     check(
       "S8 admin acknowledges an alert through the gateway and UI refreshes",
@@ -1297,13 +1404,7 @@ async function scenarioLoading(alice) {
   const page = alice.page;
   await page.route("**/graphql", async (route) => {
     await delay(1500);
-    // unroute() below can resolve a request that is still in this delay before this handler
-    // gets to it; Playwright then throws "Route is already handled!" on the redundant
-    // continue(), which would otherwise crash the whole harness process uncaught. Only that
-    // exact race is swallowed; any other continue() failure still surfaces.
-    await route.continue().catch((error) => {
-      if (!/already handled/i.test(error?.message ?? "")) throw error;
-    });
+    await route.continue();
   });
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.fill("#device-search", `loading-${id}`);
@@ -1353,6 +1454,33 @@ async function stackUp() {
     if (!(await portFree(port))) throw new Error(`port ${port} is in use`);
   if (!(await portFree(PORTS.dashboard, "::1")))
     throw new Error("[::1]:5173 is in use");
+  const incarnations = await controlIncarnations();
+  sagaAdmissionContext = {
+    shardId: "s1",
+    shardIncarnation: incarnations.s1,
+    placementEpoch: 1,
+  };
+  const tenantIds = Object.values(TENANT);
+  await bootstrapTenantOwnership(
+    tenantIds,
+    ["inventory", "telemetry", "read", "sagas", "hardware", "alerts"],
+    incarnations,
+  );
+  const placement = await startPlacementAuthority(incarnations);
+  placement.add(...tenantIds);
+  servers.push({ close: () => placement.close() });
+  placementEnv = (service, database, directUrlEnv) => ({
+    SHARD_REGISTRY_FILE: writeServiceRegistry({
+      dir: path.join(tmp, "registry"),
+      service,
+      database,
+      directUrl: process.env[directUrlEnv],
+      incarnations,
+    }),
+    ...localShardSelection(),
+    CONTROL_PLANE_URL: placement.url,
+    CONTROL_LOOKUP_TOKEN: placement.token,
+  });
   const fixtureFile = await seed();
   await offsets();
   const idp = (await import("node:http")).createServer((_q, s) =>
@@ -1366,7 +1494,7 @@ async function stackUp() {
   const dist = path.join(tmp, "dashboard-dist");
   const built = spawnSync(
     "npx",
-    ["vite", "build", "--outDir", dist, "--emptyOutDir"],
+    ["vite", "build", "--mode", "e2e", "--outDir", dist, "--emptyOutDir"],
     {
       cwd: "apps/dashboard",
       encoding: "utf8",
@@ -1380,9 +1508,18 @@ async function stackUp() {
   );
   if (built.status !== 0)
     throw new Error(`dashboard build: ${built.stderr.slice(-800)}`);
-  const dashboard = S.dashboardServer(dist, PORTS.gateway);
+  const publicOidcConfig = {
+    authority: ISSUER,
+    clientId: "greenguard-dashboard",
+    audience: "greenguard-dashboard",
+    tokenMode: "audience",
+  };
+  const dashboard = S.dashboardServer(dist, PORTS.gateway, publicOidcConfig);
   await S.listen(dashboard.server, PORTS.dashboard, "::1");
   servers.push(dashboard.server);
+  const configResponse = await fetch(`${DASHBOARD_SOCKET}/config.json`);
+  assert.equal(configResponse.status, 200, "public OIDC config is served");
+  assert.deepEqual(await configResponse.json(), publicOidcConfig);
   await waitFor(
     () => healthy(`http://127.0.0.1:${PORTS.sagaApi}/healthz`),
     "saga API",
@@ -1506,8 +1643,12 @@ async function main() {
   try {
     await run();
   } catch (error) {
-    failures.push(`harness: ${error.message}`);
-    console.log(`FAIL harness :: ${S.describeError(error)}`);
+    // Node's fetch hides the real reason (code, address, port) in error.cause.
+    const cause = error.cause
+      ? ` (cause: ${error.cause.code ?? ""} ${error.cause.address ?? ""}:${error.cause.port ?? ""} ${error.cause.message ?? ""})`
+      : "";
+    failures.push(`harness: ${error.message}${cause}`);
+    console.log(`FAIL harness :: ${error.stack}${cause}`);
     for (const [name, log] of S.logs)
       console.log(`--- ${name} ---\n${log.slice(-1500)}`);
   } finally {

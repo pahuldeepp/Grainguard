@@ -1,0 +1,18 @@
+nameOverride: telemetry-ingest
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: dashboard }
+service:
+  port: 8080
+  containerPort: 8080
+container:
+  name: telemetry-ingest
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

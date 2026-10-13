@@ -1,0 +1,20 @@
+aws_region             = "<aws-region>"
+target_account_id      = "<12-digit-account-id>"
+environment            = "disposable"
+cluster_name           = "greenguard-sandbox-cell-1"
+kubernetes_version     = "<supported-eks-version>"
+ebs_csi_addon_version  = "<supported-vX.Y.Z-eksbuild.N>"
+vpc_cni_addon_version  = "<supported-vX.Y.Z-eksbuild.N>"
+availability_zones     = ["<region-az-a>", "<region-az-b>"]
+cluster_admin_role_arn = "arn:aws:iam::<account-id>:role/<operator-role>"
+
+# To run kubectl/Helm and the pre-destroy hook from your laptop without a VPN,
+# enable the public EKS API for your current operator egress IP only. Terraform
+# rejects 0.0.0.0/0 and ::/0. Update the /32 if your egress address changes.
+# cluster_endpoint_public_access       = true
+# cluster_endpoint_public_access_cidrs = ["<operator-public-ip>/32"]
+
+# Optional extra cell-owned secret containers. The application tree's required
+# containers are derived from its contract. Never put a password, token or
+# secret_string in this file or Terraform state.
+secret_names = []

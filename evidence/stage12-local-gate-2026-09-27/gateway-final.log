@@ -1,0 +1,38 @@
+
+> @greenguard/gateway@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/gateway@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+✔ a stalled provisioning POST has a bounded deadline and one upstream effect (123.239209ms)
+✔ a still-valid JWT loses gateway access after membership.changed (56.022042ms)
+✔ machine may proxy read and GraphQL but cannot start provisioning or obtain a subscription ticket (10.321083ms)
+✔ public liveness and dependency readiness (5.421459ms)
+✔ requires verified bearer on protected routes (2.471458ms)
+✔ forwards original bearer and strips spoofed tenant header (3.692459ms)
+✔ forwards caller trace context to the GraphQL BFF (1.991041ms)
+✔ routes BFF and saga via explicit method/path allowlist (6.5035ms)
+✔ blocks query identity, path normalization and oversized body (3.205417ms)
+✔ WebSocket requires bearer and rejects token in query string (9.506417ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 483.10025

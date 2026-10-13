@@ -21,6 +21,8 @@ DerivedData
 *.ipa
 *.xcuserstate
 **/.xcode.env.local
+src/services/deployment.generated.ts
+deployment.local.json
 
 # Android/IntelliJ
 #

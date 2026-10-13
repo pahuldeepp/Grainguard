@@ -39,6 +39,9 @@ export interface SessionDeps {
   now: () => number;
   crypto: CryptoDeps;
   refreshSkewMs?: number;
+  // Cognito/Dex tokens contain no authoritative GreenGuard tenant. Resolve it
+  // through the BFF's verified session before using tenant-scoped local state.
+  resolveMembership?: (accessToken: string) => Promise<Identity>;
 }
 
 const TOKENS_KEY = "greenguard.mobile.tokens.v1";
@@ -47,16 +50,15 @@ const DEFAULT_SKEW_MS = 30_000;
 
 function identityOf(tokens: TokenSet): Identity {
   const claims = decodeClaims(tokens.accessToken);
-  const { tenant_id: tenantClaim, sub, iss } = claims;
+  const { sub, iss } = claims;
   if (typeof sub !== "string" || !sub) throw new Error("Token has no subject");
-  if (typeof tenantClaim === "string" && tenantClaim)
-    return { tenantId: tenantClaim, subject: sub };
-  // The local IdP (Dex) issues no tenant claim: GreenGuard maps membership to a
-  // tenant server side (ADR-0014). The BFF stays the authority; this value only
-  // scopes local caches and queues per user, and is never sent as a tenant.
+  // Tenant membership is first-party GreenGuard state, not an IdP claim. Even
+  // when an access token happens to contain tenant_id, this client cannot
+  // verify its signature and must ask the BFF to validate the token and resolve
+  // (issuer, subject) against authoritative membership before scoping local data.
   if (typeof iss === "string" && iss)
     return { tenantId: `unresolved@${iss}`, subject: sub };
-  throw new Error("Token has no tenant claim");
+  throw new Error("Token has no issuer");
 }
 
 // Tokens and the PKCE material live only in the injected SecureStore (Keychain
@@ -98,7 +100,8 @@ export class MobileSession {
       { code, verifier: pending.verifier, nonce: pending.nonce },
       this.deps,
     );
-    const identity = identityOf(tokens);
+    const identity = await this.identityFor(tokens);
+    tokens.resolvedIdentity = identity;
     const previous = await this.identity();
     await this.store.setItem(TOKENS_KEY, JSON.stringify(tokens));
     if (previous && !sameIdentity(previous, identity))
@@ -108,7 +111,7 @@ export class MobileSession {
 
   async identity(): Promise<Identity | null> {
     const tokens = await this.load();
-    return tokens ? identityOf(tokens) : null;
+    return tokens ? this.identityFor(tokens) : null;
   }
 
   async getAccessToken(
@@ -119,7 +122,7 @@ export class MobileSession {
     const skew = this.deps.refreshSkewMs ?? DEFAULT_SKEW_MS;
     if (options.force || tokens.expiresAt - skew <= this.deps.now())
       tokens = await this.refresh(tokens);
-    return { accessToken: tokens.accessToken, ...identityOf(tokens) };
+    return { accessToken: tokens.accessToken, ...await this.identityFor(tokens) };
   }
 
   async signOut(): Promise<void> {
@@ -148,6 +151,7 @@ export class MobileSession {
         tokens.refreshToken,
         this.deps,
       );
+      renewed.resolvedIdentity = await this.identityFor(renewed);
       await this.store.setItem(TOKENS_KEY, JSON.stringify(renewed));
       return renewed;
     } catch (error) {
@@ -165,6 +169,25 @@ export class MobileSession {
   private async load(): Promise<TokenSet | null> {
     const raw = await this.store.getItem(TOKENS_KEY);
     return raw ? (JSON.parse(raw) as TokenSet) : null;
+  }
+
+  private async identityFor(tokens: TokenSet): Promise<Identity> {
+    const claimed = identityOf(tokens);
+    if (tokens.resolvedIdentity) {
+      if (tokens.resolvedIdentity.subject !== claimed.subject ||
+          !tokens.resolvedIdentity.tenantId ||
+          tokens.resolvedIdentity.tenantId.startsWith("unresolved@"))
+        throw new Error("Stored tenant membership does not match the token");
+      return tokens.resolvedIdentity;
+    }
+    if (!claimed.tenantId.startsWith("unresolved@")) return claimed;
+    if (!this.deps.resolveMembership)
+      throw new Error("Tenant membership must be resolved by the BFF");
+    const verified = await this.deps.resolveMembership(tokens.accessToken);
+    if (!verified.tenantId || verified.tenantId.startsWith("unresolved@") ||
+        verified.subject !== claimed.subject)
+      throw new Error("BFF session does not match the signed-in identity");
+    return verified;
   }
 
   private dropTokens(): Promise<void> {

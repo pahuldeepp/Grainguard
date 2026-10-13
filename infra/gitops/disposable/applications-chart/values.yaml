@@ -1,0 +1,59 @@
+cell: ""
+repositoryUrl: ""
+revision: ""
+releases: []
+edgeRouting:
+  enabled: false
+  targetGroupARN: ""
+  accountId: ""
+  region: ""
+observabilityImages: {}
+dataPlane:
+  enabled: false
+  rdsHost: ""
+  images: {}
+  secrets: {}
+searchPlane:
+  enabled: false
+  image: ""
+  bootstrapImage: ""
+cassandraPlane:
+  enabled: false
+  image: ""
+  migratorImage: ""
+  authSecret: ""
+  tlsSecret: ""
+  apiServerCIDR: ""
+mqttPlane:
+  enabled: false
+  image: ""
+  credentialSecret: ""
+clickhousePlane:
+  enabled: false
+  image: ""
+  storageClassName: gp3
+  storageSize: 20Gi
+  authSecret: greenguard-telemetry-clickhouse-config
+mlSynthetic:
+  enabled: false
+  imageDigest: ""
+  secretSyncEpoch: ""
+  scopeIdentity: ""
+
+aiRuntime:
+  enabled: false
+managedDex:
+  enabled: false
+  image: ""
+  issuer: ""
+  webOrigin: ""
+  databaseHost: ""
+  databaseCIDRs: []
+  secret: "greenguard-dex-config"
+  caSecret: "greenguard-rds-ca"
+acceptanceProbes:
+  enabled: false
+  membershipEnabled: false
+  clickhouseImage: ""
+  tenantControlPlaneImage: ""
+  membershipAudience: ""

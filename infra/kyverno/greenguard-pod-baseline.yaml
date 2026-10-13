@@ -1,0 +1,83 @@
+apiVersion: policies.kyverno.io/v1
+kind: NamespacedValidatingPolicy
+metadata:
+  name: greenguard-pod-baseline
+  namespace: greenguard
+spec:
+  validationActions:
+    - Deny
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+  validations:
+    - message: All application and injected container images must use immutable SHA-256 digests.
+      expression: >-
+        object.spec.containers.all(c, c.image.matches('^.+@sha256:[a-f0-9]{64}$')) &&
+        (!has(object.spec.initContainers) ||
+          object.spec.initContainers.all(c, c.image.matches('^.+@sha256:[a-f0-9]{64}$')))
+    - message: Pods must run as non-root with RuntimeDefault seccomp and containers must not escalate privileges, use a writable root filesystem, or retain Linux capabilities.
+      expression: >-
+        has(object.spec.securityContext) &&
+        object.spec.securityContext.runAsNonRoot == true &&
+        has(object.spec.securityContext.seccompProfile) &&
+        object.spec.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        object.spec.containers.all(c,
+          has(c.securityContext) &&
+          (!has(c.securityContext.runAsNonRoot) || c.securityContext.runAsNonRoot == true) &&
+          (!has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0) &&
+          (!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type == 'RuntimeDefault') &&
+          c.securityContext.allowPrivilegeEscalation == false &&
+          c.securityContext.readOnlyRootFilesystem == true &&
+          (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+          has(c.securityContext.capabilities) &&
+          has(c.securityContext.capabilities.drop) &&
+          c.securityContext.capabilities.drop.exists(cap, cap == 'ALL') &&
+          (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)) &&
+        (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+          has(c.securityContext) &&
+          (!has(c.securityContext.runAsNonRoot) || c.securityContext.runAsNonRoot == true) &&
+          (!has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0) &&
+          (!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type == 'RuntimeDefault') &&
+          c.securityContext.allowPrivilegeEscalation == false &&
+          c.securityContext.readOnlyRootFilesystem == true &&
+          (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+          has(c.securityContext.capabilities) &&
+          has(c.securityContext.capabilities.drop) &&
+          c.securityContext.capabilities.drop.exists(cap, cap == 'ALL') &&
+          (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)))
+    - message: Application and init containers must declare CPU and memory requests and limits.
+      expression: >-
+        object.spec.containers.all(c,
+          has(c.resources) &&
+          has(c.resources.requests) &&
+          has(c.resources.limits) &&
+          'cpu' in c.resources.requests &&
+          'memory' in c.resources.requests &&
+          'cpu' in c.resources.limits &&
+          'memory' in c.resources.limits) &&
+        (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+          has(c.resources) &&
+          has(c.resources.requests) &&
+          has(c.resources.limits) &&
+          'cpu' in c.resources.requests &&
+          'memory' in c.resources.requests &&
+          'cpu' in c.resources.limits &&
+          'memory' in c.resources.limits))
+    - message: Ephemeral containers must use immutable images and the restricted container security settings.
+      expression: >-
+        !has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c,
+          c.image.matches('^.+@sha256:[a-f0-9]{64}$') &&
+          has(c.securityContext) &&
+          (!has(c.securityContext.runAsNonRoot) || c.securityContext.runAsNonRoot == true) &&
+          (!has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0) &&
+          (!has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type == 'RuntimeDefault') &&
+          c.securityContext.allowPrivilegeEscalation == false &&
+          c.securityContext.readOnlyRootFilesystem == true &&
+          (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+          has(c.securityContext.capabilities) &&
+          has(c.securityContext.capabilities.drop) &&
+          c.securityContext.capabilities.drop.exists(cap, cap == 'ALL') &&
+          (!has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0))

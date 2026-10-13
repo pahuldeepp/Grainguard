@@ -49,16 +49,36 @@ async function connect(): Promise<Connection> {
   return c;
 }
 
-async function consumer(deps: Deps): Promise<Connection> {
+async function consumer(
+  deps: Deps,
+): Promise<{ waitForIdle: () => Promise<void> }> {
   const c = await connect();
   deps.broker = new ConfirmBroker(c.channel);
   await c.channel.prefetch(4);
+  const pending = new Set<Promise<void>>();
+  let settlementError: unknown;
   await c.channel.consume(
     TASK_QUEUE,
-    (msg) => msg && void settle(c.channel, msg, (t) => handleTask(deps, t)),
+    (msg) => {
+      if (!msg) return;
+      const operation = settle(c.channel, msg, (t) => handleTask(deps, t))
+        .catch((error: unknown) => {
+          settlementError = error;
+        })
+        .finally(() => pending.delete(operation));
+      pending.add(operation);
+    },
     { noAck: false },
   );
-  return c;
+  return {
+    waitForIdle: async () => {
+      await waitFor(
+        () => Promise.resolve(pending.size === 0),
+        "consumer settlement",
+      );
+      if (settlementError) throw settlementError;
+    },
+  };
 }
 
 async function publishTask(task: Task): Promise<void> {
@@ -129,11 +149,12 @@ test(
       async () => crashed && (await status(task)) === "sent",
       "first delivery",
     );
-    await consumer(deps);
+    const worker = await consumer(deps);
     await waitFor(
       async () => deps.metrics.get("duplicates") === 1,
       "redelivery",
     );
+    await worker.waitForIdle();
     assert.equal(adapter.sendCalls.length, 1);
     assert.equal(adapter.delivered.size, 1);
     assert.equal(await status(task), "sent");
@@ -149,13 +170,14 @@ test(
     const { deps } = makeDeps(pool!, adapter);
     const task = makeTask();
     const seen: string[] = [];
-    await consumer(deps);
+    const worker = await consumer(deps);
     await publishTask(task);
     await waitFor(async () => {
       const s = await status(task);
       if (s && seen.at(-1) !== s) seen.push(s);
       return s === "sent";
     }, "reconciled delivery");
+    await worker.waitForIdle();
     assert.ok(
       seen.includes("unknown") || deps.metrics.get("outcome_unknown") === 1,
       `statuses ${seen}`,
@@ -172,7 +194,7 @@ test(
     adapter.queue("transient", "transient", "transient");
     const { deps } = makeDeps(pool!, adapter);
     const task = makeTask();
-    await consumer(deps);
+    const worker = await consumer(deps);
     await publishTask(task);
     await waitFor(
       async () => (await status(task)) === "dead",
@@ -196,5 +218,6 @@ test(
         receipts.includes(`${task.intent_id}:sent`),
       `${receipts}`,
     );
+    await worker.waitForIdle();
   },
 );

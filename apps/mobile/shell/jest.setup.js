@@ -1,6 +1,7 @@
+/* global jest */
 // Native safe-area views do not exist under Jest; render plain Views.
 jest.mock('react-native-safe-area-context', () => {
-  const { View } = require('react-native');
+  const { View } = jest.requireActual('react-native');
   return {
     SafeAreaView: View,
     SafeAreaProvider: ({ children }) => children,

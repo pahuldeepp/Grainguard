@@ -1,0 +1,52 @@
+nameOverride: read-api
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: greenguard-opensearch }, port: 9200 }
+    - { namespace: greenguard, selector: { app: greenguard-cassandra }, port: 9042 }
+  ingressSources:
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: gateway, app.kubernetes.io/instance: gateway }
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff }
+  egressServices:
+    - { name: tenant-control-plane, namespace: greenguard, release: tenant-control-plane, port: 3010 }
+service:
+  port: 4001
+  containerPort: 4001
+container:
+  name: read-api
+  env:
+    - { name: READ_HISTORY_HOT_WINDOW, value: 24h }
+    - { name: READ_HISTORY_CURSOR_SECRET, valueFrom: { secretKeyRef: { name: read-api-config, key: READ_HISTORY_CURSOR_SECRET } } }
+    - { name: CASSANDRA_REQUIRE_SECURE, value: "1" }
+    - { name: CASSANDRA_HOSTS, value: greenguard-cassandra }
+    - { name: CASSANDRA_KEYSPACE, value: greenguard_history }
+    - { name: CASSANDRA_DATACENTER, value: datacenter1 }
+    - { name: CASSANDRA_USERNAME, value: gg_history_reader }
+    - { name: CASSANDRA_PASSWORD, valueFrom: { secretKeyRef: { name: greenguard-cassandra-auth, key: reader-password } } }
+    - { name: CASSANDRA_TLS_CA_FILE, value: /etc/cassandra-ca/ca.crt }
+    - { name: CASSANDRA_TLS_SERVER_NAME, value: greenguard-cassandra }
+    - { name: NODE_EXTRA_CA_CERTS, value: /etc/opensearch-ca/ca.crt }
+    - { name: OPENSEARCH_CA_FILE, value: /etc/opensearch-ca/ca.crt }
+    - { name: OPENSEARCH_USERNAME, value: greenguard_reader }
+    - { name: OPENSEARCH_PASSWORD, valueFrom: { secretKeyRef: { name: greenguard-opensearch-clients, key: reader-password } } }
+  volumeMounts:
+    - { name: cassandra-ca, mountPath: /etc/cassandra-ca, readOnly: true }
+    - { name: opensearch-ca, mountPath: /etc/opensearch-ca, readOnly: true }
+volumes:
+  - name: cassandra-ca
+    secret:
+      secretName: greenguard-cassandra-tls
+      items: [{ key: ca.crt, path: ca.crt }]
+  - name: opensearch-ca
+    secret:
+      secretName: greenguard-opensearch-ca
+      items: [{ key: ca.crt, path: ca.crt }]
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

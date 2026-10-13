@@ -1,0 +1,37 @@
+{{- $mqtt := .Values.mqttPlane | default dict }}
+{{- if and (hasKey $mqtt "enabled") (not (kindIs "bool" $mqtt.enabled)) }}{{ fail "mqttPlane.enabled must be boolean" }}{{ end }}
+{{- if $mqtt.enabled }}
+{{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "MQTT requires an exact Git revision" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($mqtt.image | default "")) }}{{ fail "MQTT image must be an immutable OCI digest" }}{{ end }}
+{{- if ne ($mqtt.credentialSecret | default "") "greenguard-mqtt-broker" }}{{ fail "MQTT broker Secret name drifted" }}{{ end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenguard-mqtt
+  namespace: argocd
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repositoryUrl | quote }}
+    targetRevision: {{ .Values.revision | quote }}
+    path: infra/gitops/disposable/mqtt-chart
+    helm:
+      valuesObject:
+        image: {{ $mqtt.image | quote }}
+        credentialSecret: {{ $mqtt.credentialSecret | quote }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenguard
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

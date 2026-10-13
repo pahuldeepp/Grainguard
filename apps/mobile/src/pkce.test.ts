@@ -54,6 +54,27 @@ test("authorization URL carries PKCE, state, nonce and audience", async () => {
   assert.equal(url.searchParams.has("code_verifier"), false);
 });
 
+test("Dex scope audience is requested as a scope without an audience query parameter", async () => {
+  const request = await createPkceRequest(defaultCrypto());
+  const url = new URL(buildAuthorizationUrl({
+    ...config,
+    audience: "greenguard-dashboard",
+    audienceMode: "scope",
+  }, request));
+  assert.ok(url.searchParams.get("scope")?.split(" ").includes(
+    "audience:server:client_id:greenguard-dashboard",
+  ));
+  assert.equal(url.searchParams.has("audience"), false);
+});
+
+test("scope audience mode requires a client ID", async () => {
+  const request = await createPkceRequest(defaultCrypto());
+  assert.throws(
+    () => buildAuthorizationUrl({ ...config, audience: undefined, audienceMode: "scope" }, request),
+    /requires an audience client ID/,
+  );
+});
+
 test("callback returns the code when state matches", () => {
   assert.equal(
     parseCallback("greenguard://auth/callback?code=abc&state=s1", "s1"),

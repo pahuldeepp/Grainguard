@@ -5,6 +5,16 @@
 // there is deliberately no Math.random fallback for PKCE material.
 import type { CryptoDeps } from '@greenguard/mobile-core';
 
+type PolyfillGlobals = {
+  TextEncoder?: (new () => { encode(text?: string): Uint8Array }) | undefined;
+  TextDecoder?: (new () => { decode(bytes: Uint8Array): string }) | undefined;
+  btoa?: ((input: string) => string) | undefined;
+  atob?: ((input: string) => string) | undefined;
+  AbortSignal?: (typeof AbortSignal & { timeout?: (ms: number) => AbortSignal }) | undefined;
+  AbortController?: (new () => AbortController) | undefined;
+  crypto?: { getRandomValues<T extends ArrayBufferView>(array: T): T } | undefined;
+};
+
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
   0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -141,7 +151,7 @@ function atobFallback(input: string): string {
 
 // Install only what the runtime lacks; never replace a native implementation.
 export function installPolyfills(): void {
-  const g = globalThis as any;
+  const g = globalThis as unknown as PolyfillGlobals;
   if (typeof g.TextEncoder !== 'function')
     g.TextEncoder = class {
       encode(text = '') {
@@ -162,17 +172,20 @@ export function installPolyfills(): void {
     typeof g.AbortSignal === 'function' &&
     typeof g.AbortSignal.timeout !== 'function' &&
     typeof g.AbortController === 'function'
-  )
-    g.AbortSignal.timeout = (ms: number) => {
-      const controller = new g.AbortController();
+  ) {
+    const signal = g.AbortSignal;
+    const Controller = g.AbortController;
+    signal.timeout = (ms: number) => {
+      const controller = new Controller();
       setTimeout(() => controller.abort(), ms);
       return controller.signal;
     };
+  }
 }
 
 export function shellCrypto(): CryptoDeps {
   const randomBytes = (length: number) => {
-    const source = (globalThis as any).crypto;
+    const source = (globalThis as unknown as PolyfillGlobals).crypto;
     if (!source || typeof source.getRandomValues !== 'function')
       throw new Error('No secure random source (crypto.getRandomValues)');
     return source.getRandomValues(new Uint8Array(length)) as Uint8Array;

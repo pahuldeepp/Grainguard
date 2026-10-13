@@ -37,6 +37,21 @@ client, and `VITE_OIDC_AUDIENCE` with the API audience. Register
 must allow authorization code with PKCE and issue access tokens for the API
 audience. Enable refresh tokens for sessions that should renew silently.
 
+Local Vite builds can use those three public `VITE_OIDC_*` values. A production
+container loads `/config.json` from its own origin with `Cache-Control:
+no-store` before creating the auth manager. It fails closed if that file is
+missing or invalid. This lets one immutable image work after Terraform learns
+the CloudFront hostname. The dashboard Helm chart can mount the public JSON
+from `publicOidc` values and sets `CSP_CONNECT_EXTRA` to the issuer origin.
+The file contains only issuer URL, public client ID, token mode, and optional
+audience/resource URL; never put secrets in it.
+
+For Cognito set `tokenMode` to `cognito-access`, omit `audience`, and optionally
+set `resource` to request a resource-bound access token. If `resource` is set,
+the API verifier's `AUTH_AUDIENCE` must match it exactly. Local Docker builds
+may still use the `VITE_OIDC_*` build args for development; a production build
+must have the deployed `/config.json` available at runtime.
+
 For local testing, Keycloak can supply the IdP: create a realm, a public client
 with standard flow enabled, and an API audience mapper. Point the three variables
 at that realm, client and audience. The Vite SPA fallback handles the callback.
@@ -77,3 +92,25 @@ sensor readings for a bin, transition history and the notification log need new
 BFF queries; see `evidence/STAGE_UI_DASHBOARD_VALIDATION.md`.
 `node evidence/stage-ui-dashboard/contrast-check.mjs` verifies every token pair
 against WCAG AA.
+
+ReadApi retains the greatest observed PostgreSQL consistency token on its own
+instance and supplies it to refreshes of supported read fields. Live DeviceChange
+tokens are observed before refetch. Higher epochs advance the identity; late
+lower epochs are discarded. Controlled identity409 permits one tenant-bound fresh
+snapshot reset within the original deadline, including empty responses certified
+by GraphQL response extensions. Outages retain the old minimum. App creates a fresh instance for every
+`sessionId` change; `clearConsistency()` invalidates pending context responses.
+Cassandra history and search remain eventual unless the caller explicitly
+requests a minimum, which unsupported stores reject. See the
+[consistency contract](../../docs/api/bff-read-consistency.md).
+
+## ML operations
+
+Operators and administrators can open `/ml` for the ML operations view. It reads
+the operator-only `mlOperations` persisted GraphQL query and shows scorer
+readiness, prediction volume, inference latency, canary percentage, model
+metadata, PSI drift and retraining status. The page refreshes every 15 seconds.
+The UI always labels synthetic/shadow models as not production validated and
+does not expose promotion or retraining controls to ordinary tenant users.
+Set the BFF `ML_OPERATIONS_URL` to enable the query; an unavailable scorer is
+shown as a bounded error state rather than replaced with demo data.

@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { LOOKUP_TOKEN, startApi } from "../testing/api.js";
 import { validateEvent } from "@greenguard/contracts";
-import { adminQuery, asRuntime, outboxEvents } from "../testing/fixtures.js";
+import {
+  adminQuery,
+  asRuntime,
+  outboxEvents,
+  activateTenantFixture,
+} from "../testing/fixtures.js";
 
 let api: Awaited<ReturnType<typeof startApi>>;
 before(async () => {
@@ -18,7 +23,18 @@ async function org(label: string) {
     body: { name: label },
     headers: { "idempotency-key": randomUUID() },
   });
-  assert.equal(response.status, 201, JSON.stringify(response.json));
+  assert.equal(response.status, 202, JSON.stringify(response.json));
+  assert.equal(response.json.state, "provisioning");
+  await activateTenantFixture(
+    api.db,
+    { issuer: api.issuer.issuer, subject: person.subject },
+    response.json.tenantId as string,
+    {
+      idempotencyKey: randomUUID(),
+      correlationId: randomUUID(),
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    },
+  );
   return { tenantId: response.json.tenantId as string, token: person.token };
 }
 

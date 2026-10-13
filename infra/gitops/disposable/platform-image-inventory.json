@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "status": "blocked_pending_upstream_signature_review",
+  "note": "All vendor images are pinned by OCI digest. Do not promote external images until the recorded source signature/provenance verification policy is completed. The release assembler intentionally reports this block.",
+  "application_release_gaps": [],
+  "ai_runtime_images": [
+    {"name":"knowledge-service","status":"source_present","dockerfile":"services/knowledge-service/Dockerfile"},
+    {"name":"knowledge-indexer","status":"source_present","dockerfile":"services/knowledge-service/Dockerfile.indexer"},
+    {"name":"knowledge-parser","status":"source_present","dockerfile":"services/knowledge-service/Dockerfile.parser"},
+    {"name":"grain-advisor","status":"source_present","dockerfile":"services/grain-advisor/Dockerfile"},
+    {"name":"mcp-gateway","status":"source_present","dockerfile":"services/mcp-gateway/Dockerfile"},
+    {"name":"model-gateway","status":"source_present","dockerfile":"services/model-gateway/Dockerfile"},
+    {"name":"model-gateway-usage","status":"source_present","dockerfile":"services/model-gateway/Dockerfile.usage"}
+  ],
+  "images": [
+    {"name":"otel-collector","kind":"vendor","source":"otel/opentelemetry-collector-contrib@sha256:e39311df1f3d941923c00da79ac7ba6269124a870ee87e3c3ad24d60f8aee4d2","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"prometheus","kind":"vendor","source":"prom/prometheus@sha256:6927e0919a144aa7616fd0137d4816816d42f6b816de3af269ab065250859a62","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"grafana","kind":"vendor","source":"grafana/grafana@sha256:8b37a2f028f164ce7b9889e1765b9d6ee23fec80f871d156fbf436d6198d32b7","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"tempo","kind":"vendor","source":"grafana/tempo@sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"loki","kind":"vendor","source":"grafana/loki@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"pgbouncer","kind":"build","dockerfile":"infra/compose/pgbouncer/Dockerfile"},
+    {"name":"kafka-topics","kind":"vendor","source":"apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"redis","kind":"vendor","source":"redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"kafka-connect","kind":"build","dockerfile":"infra/kafka/Dockerfile.connect"},
+    {"name":"connector-registration","kind":"build","dockerfile":"infra/gitops/disposable/connector-registration/Dockerfile"},
+    {"name":"opensearch","kind":"vendor","source":"opensearchproject/opensearch@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"cassandra","kind":"vendor","source":"cassandra@sha256:8b55dd41d5d1220e11eb8cf80f26ab655c21f7cf271ca4a7577c1da7d9221624","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"mqtt","kind":"vendor","source":"eclipse-mosquitto@sha256:199ea8ef2e35ec2b1b37e59cfd1dbae538ed4dfa4a2251a121a52215a6248a21","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"clickhouse","kind":"vendor","source":"clickhouse/clickhouse-server@sha256:157423fca52f596b62a1bf301b037b9f74bfca38089aa57d1bd36c9025f7ecef","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"clamav","kind":"vendor_optional","source":"clamav/clamav@sha256:629a3050df6a706aedb31859fbb8139e9aaf8f56b0ffefbf251b8358a7c9e76c","source_signature_verified":false,"signature_review":"pending"}
+  ],
+  "acceptance_probes": {
+    "status": "ready",
+    "chart": "infra/gitops/disposable/acceptance-probes-chart",
+    "image_roles": {
+      "kafka": "data_plane_image_digests.kafka-topics",
+      "redis": "data_plane_image_digests.redis",
+      "cassandra": "cassandra_image_digest",
+      "opensearch_probe": "cassandra_image_digest",
+      "clickhouse": "clickhouse_image_digest",
+      "tenant_membership_readback": "deployment_image_digests.tenant-control-plane"
+    },
+    "reason": "The chart reuses owned Kafka, Redis, Cassandra (bundled driver 3.29.0/python3), ClickHouse (native client) and tenant-control-plane (Node) digests. Ready describes chart implementation; credentials and live execution remain unproved."
+  }
+}

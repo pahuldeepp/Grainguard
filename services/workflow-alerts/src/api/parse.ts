@@ -3,6 +3,7 @@ import { InvalidInputError } from "../alerts/errors.js";
 import type { Episode, EpisodeState } from "../alerts/policy.js";
 import { currentTraceparent } from "../alerts/trace.js";
 import { isUuid } from "../db/tenant.js";
+import type { ActorDisplay } from "./identity.js";
 import type { AlertRequest } from "./auth.js";
 
 export class PreconditionRequiredError extends Error {
@@ -35,7 +36,12 @@ export function expectedVersion(req: AlertRequest): bigint {
 
 const STATES = new Set(["open", "acknowledged", "resolved"]);
 
-export function page(limit?: string, after?: string, state?: string) {
+export function page(
+  limit?: string,
+  after?: string,
+  state?: string,
+  deviceId?: string,
+) {
   const size = limit === undefined ? 50 : Number(limit);
   if (!Number.isInteger(size) || size < 1 || size > 200)
     throw new InvalidInputError("limit must be an integer from 1 to 200");
@@ -43,7 +49,14 @@ export function page(limit?: string, after?: string, state?: string) {
     throw new InvalidInputError("after must be a lowercase UUID");
   if (state !== undefined && !STATES.has(state))
     throw new InvalidInputError("state must be open, acknowledged or resolved");
-  return { limit: size, after, state: state as EpisodeState | undefined };
+  if (deviceId !== undefined && !isUuid(deviceId))
+    throw new InvalidInputError("deviceId must be a lowercase UUID");
+  return {
+    limit: size,
+    after,
+    state: state as EpisodeState | undefined,
+    deviceId,
+  };
 }
 
 // Correlation and trace context for commands; malformed caller values are replaced.
@@ -55,7 +68,7 @@ export function correlate(req: AlertRequest): void {
 
 export const etag = (version: bigint | string) => `"${version}"`;
 
-export const toAlertDto = (e: Episode) => ({
+export const toAlertDto = (e: Episode, actor: ActorDisplay) => ({
   alertId: e.episodeId,
   ruleId: e.ruleId,
   binId: e.resourceId,
@@ -66,7 +79,15 @@ export const toAlertDto = (e: Episode) => ({
   openWindowStart: e.openWindowStart.toISOString(),
   openedAt: e.openedAt.toISOString(),
   acknowledgedAt: e.acknowledgedAt?.toISOString() ?? null,
-  acknowledgedBy: e.acknowledgedBy,
+  acknowledgedBy: !e.acknowledgedBy
+    ? null
+    : actor.isYou
+      ? "you"
+      : actor.handle
+        ? `member-${actor.handle}`
+        : "team-member",
+  actor,
+  escalatedAt: e.escalatedAt?.toISOString() ?? null,
   resolvedAt: e.resolvedAt?.toISOString() ?? null,
   escalationLevel: e.escalationLevel,
 });

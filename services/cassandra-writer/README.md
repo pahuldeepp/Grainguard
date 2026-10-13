@@ -46,6 +46,24 @@ not establish RF3 multi-node failover or production capacity behavior.
 
 ## Outage behavior
 
+## Cold-history repair
+
+If verification finds a missing Cassandra row, repair can replay the immutable
+canonical event retained in `greenguard_read.consumer_inbox`. Apply the
+projection-builder migration first, then run the explicit repair command with
+the dedicated history-maintainer URL, Cassandra credentials, and matching hot
+window. It is idempotent, validates each event with the normal writer schema,
+and **does not** issue proof receipts or prune PostgreSQL:
+
+```sh
+go run . backfill-read-history --confirm
+go run ./cmd/verify-read-history
+```
+
+Only run `cmd/maintain` after verification succeeds. If the inbox lacks an event
+or repair cannot reproduce a complete partition, PostgreSQL remains the
+retained copy and pruning stays blocked.
+
 The writer never exits because Cassandra is unavailable. The session is opened
 lazily (`history.Reconnecting`): a worker that starts while Cassandra is down
 waits in `Run` with bounded exponential backoff and equal jitter (base 1 s,
@@ -67,3 +85,21 @@ startup-while-down and long-outage (`CASSANDRA_OUTAGE_SECONDS`, default 130)
 cases.
 
 Implement the linked requirements in the main coverage matrix and backlog. Completion requires runtime wiring, meaningful tests, relevant failure/tenant isolation evidence, and reproducible local/CI commands. Existing source reference archives live outside this fresh project.
+
+## ADR-0027 additive telemetry history
+
+The writer consumes both telemetry v1 and v2 topics and enforces topic/version,
+key, headers, JSON Schema and v2 finite/unit/identity semantics. v2 writes retain
+nullable CO2 and grain moisture independently plus explicit units and the full
+immutable sensor observation provenance. Retry/replay uses the same primary key
+and values; missing measurements stay null. v1 writes retain their existing CQL
+path. Queries expose the new nullable fields after the schema upgrade.
+
+Run the existing owner migration command before enabling v2 writers. It creates
+the new nullable columns for fresh installations and introspects
+`system_schema.columns` before explicit `ALTER TABLE ... ADD` statements for
+existing `readings_by_device_day` tables. Repeated migration skips existing
+columns. Run one migrator per deployment; schema errors abort the migration.
+Cold history does not infer sensor layout or agronomic calibration. Live
+Cassandra upgrade/replay evidence is still required before enabling production
+v2 emission.

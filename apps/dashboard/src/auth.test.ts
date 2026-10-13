@@ -18,6 +18,9 @@ afterEach(() => vi.unstubAllEnvs());
 test("requires complete OIDC configuration and uses code flow", () => {
   vi.stubEnv("VITE_OIDC_AUTHORITY", "https://idp.example.test");
   vi.stubEnv("VITE_OIDC_CLIENT_ID", "dashboard");
+  // The workspace .env contains a real local IdP config; this test exercises
+  // the incomplete-config branch and must not inherit that value.
+  vi.stubEnv("VITE_OIDC_AUDIENCE", "");
   expect(oidcConfiguration()).toBeNull();
   vi.stubEnv("VITE_OIDC_AUDIENCE", "greenguard-api");
   expect(oidcConfiguration()).toMatchObject({
@@ -25,7 +28,26 @@ test("requires complete OIDC configuration and uses code flow", () => {
     client_id: "dashboard",
     response_type: "code",
     extraQueryParams: { audience: "greenguard-api" },
+    loadUserInfo: false,
   });
+});
+
+test("Cognito mode uses the public client and optional resource binding", () => {
+  vi.stubEnv("VITE_OIDC_AUTHORITY", "https://issuer.example.test/pool");
+  vi.stubEnv("VITE_OIDC_CLIENT_ID", "web-client");
+  vi.stubEnv("VITE_OIDC_AUDIENCE", "");
+  vi.stubEnv("VITE_OIDC_TOKEN_MODE", "cognito-access");
+  expect(oidcConfiguration()).toMatchObject({
+    client_id: "web-client",
+    extraQueryParams: {},
+    scope: "openid profile email",
+  });
+  vi.stubEnv("VITE_OIDC_RESOURCE", "https://api.example.test");
+  expect(oidcConfiguration()?.extraQueryParams).toEqual({
+    resource: "https://api.example.test",
+  });
+  vi.stubEnv("VITE_OIDC_AUDIENCE", "legacy-api");
+  expect(oidcConfiguration()).toBeNull();
 });
 
 test("uses the IdP session and clears tenant-scoped browser state", () => {

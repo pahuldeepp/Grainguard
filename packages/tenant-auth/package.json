@@ -29,6 +29,10 @@
     "./testing": {
       "types": "./dist/testing/issuer.d.ts",
       "default": "./dist/testing/issuer.js"
+    },
+    "./delegated": {
+      "types": "./dist/delegated.d.ts",
+      "default": "./dist/delegated.js"
     }
   },
   "scripts": {

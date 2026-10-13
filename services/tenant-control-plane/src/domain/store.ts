@@ -1,9 +1,12 @@
 import { assertSeatCapacity } from "./entitlements.js";
 import { randomBytes } from "node:crypto";
+import { suggestInitialShard } from "@greenguard/membership-client";
+import { PlacementUnavailableError } from "./placement.js";
 import type { Db, Tx } from "../db/client.js";
 import { inScope, UUID } from "../db/session.js";
 import {
   AmbiguousMembershipError,
+  MembershipLookupLimitError,
   IdempotencyConflictError,
   InvalidInputError,
   InvitationEmailMismatchError,
@@ -15,6 +18,7 @@ import {
 } from "./errors.js";
 import { identityIdOf, nameId, sha256Hex } from "./ids.js";
 import { appendEvent, type Command } from "./outbox.js";
+import { enqueueTenantBootstrap } from "../tenant-bootstrap/jobs.js";
 
 export type { Command } from "./outbox.js";
 
@@ -56,14 +60,11 @@ const INVITATION_HOURS = 72;
 const ADMIN = "admin";
 const ACTIVE = "active";
 
-const canonical = (value: unknown) => {
-  const keys = Object.keys(value as object).sort((left, right) => {
-    if (left < right) return -1;
-    if (left > right) return 1;
-    return 0;
-  });
-  return JSON.stringify(value, keys);
-};
+const canonical = (value: unknown) =>
+  JSON.stringify(
+    value,
+    Object.keys(value as object).sort((a, b) => Number(a > b) - Number(a < b)),
+  );
 
 export const toDto = (row: MemberRow): MemberDto => ({
   identityId: row.identity_id,
@@ -85,8 +86,7 @@ async function replayed(
   cmd: Command,
   request: object,
 ) {
-  const lockKey = `${tenantId}|${type}|${cmd.idempotencyKey}`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${tenantId}|${type}|${cmd.idempotencyKey}`}, 0))`;
   const [receipt] = await tx.$queryRaw<
     { normalized_request: object; response_body: Record<string, unknown> }[]
   >`
@@ -132,7 +132,7 @@ export async function once(
 
 // ---- authorization: the verified identity's active membership in this tenant ----
 
-async function ensureIdentity(tx: Tx, actor: Actor): Promise<string> {
+export async function ensureIdentity(tx: Tx, actor: Actor): Promise<string> {
   const identityId = identityIdOf(actor.issuer, actor.subject);
   await tx.$executeRaw`INSERT INTO identities (identity_id, issuer, subject)
     VALUES (${identityId}::uuid, ${actor.issuer}, ${actor.subject}) ON CONFLICT DO NOTHING`;
@@ -206,6 +206,27 @@ async function audit(
       ${entry.fromRole ?? null}, ${entry.toRole}, ${entry.version ?? null}, ${cmd.correlationId}::uuid)`;
 }
 
+async function auditProvisioningRequested(
+  tx: Tx,
+  tenantId: string,
+  actorId: string,
+  cmd: Command,
+) {
+  const auditId = nameId(
+    "audit",
+    tenantId,
+    actorId,
+    "organization_created",
+    "0",
+  );
+  // No membership exists yet: membership activation is part of trusted
+  // all-owner bootstrap, so record the actor without manufacturing a grant.
+  await tx.$executeRaw`INSERT INTO membership_events (tenant_id, audit_id, identity_id, action, actor_identity_id,
+      from_role, to_role, membership_version, correlation_id)
+    VALUES (${tenantId}::uuid, ${auditId}::uuid, NULL, 'organization_created', ${actorId}::uuid,
+      NULL, ${ADMIN}, NULL, ${cmd.correlationId}::uuid)`;
+}
+
 // One audit row and one membership.changed outbox row per membership change (M09).
 async function recordChange(
   tx: Tx,
@@ -265,36 +286,64 @@ async function insertMembership(
   return (await memberRow(tx, tenantId, identityId)) as MemberRow;
 }
 
-// Exported for the seed: organization row plus its tenant.created event.
+// Persist a new organization as provisioning. The tenant.created event is emitted
+// only by the trusted bootstrap activation workflow after every shard owner has
+// acknowledged ownership. No currently deployed owner adapters exist, so callers
+// must not make this tenant routable as a side effect of inserting the row.
 export async function insertOrganization(
   tx: Tx,
   tenantId: string,
   name: string,
   createdBy: string,
   cmd: Command,
+  trustedPlacementOverride?: { shardId: string },
 ) {
-  const inserted =
-    await tx.$executeRaw`INSERT INTO organizations (tenant_id, name, created_by)
-    VALUES (${tenantId}::uuid, ${name}, ${createdBy}::uuid) ON CONFLICT DO NOTHING`;
-  if (inserted === 0) return false;
-  await appendEvent(
-    tx,
+  const existing = await tx.$queryRaw<
+    unknown[]
+  >`SELECT 1 FROM organizations WHERE tenant_id=${tenantId}::uuid`;
+  if (existing.length) return false;
+  const [policy] = await tx.$queryRaw<
     {
-      tenantId,
-      aggregateType: "organization",
-      aggregateId: tenantId,
-      version: 1n,
-      eventType: "tenant.created",
-      payload: {
-        tenant_id: tenantId,
-        organization_version: "1",
-        name,
-        state: ACTIVE,
-        home_region: "local",
-      },
-    },
-    cmd,
-  );
+      ring_version: bigint;
+      algorithm: "sha256-v1";
+      virtual_nodes: number;
+      shard_ids: string[];
+    }[]
+  >`
+    SELECT r.ring_version,r.algorithm,r.virtual_nodes,r.shard_ids FROM placement_policy p
+      JOIN placement_ring_versions r ON r.ring_version=p.ring_version WHERE p.policy_id='default'`;
+  if (!policy)
+    throw new PlacementUnavailableError(
+      "initial placement policy is unavailable",
+    );
+  if (!trustedPlacementOverride) {
+    const activeMembers = await tx.$queryRaw<
+      { shard_id: string }[]
+    >`SELECT shard_id FROM shard_registry WHERE shard_id=ANY(${policy.shard_ids}::text[]) AND state='active'`;
+    if (activeMembers.length !== policy.shard_ids.length)
+      throw new PlacementUnavailableError(
+        "initial placement ring is not ready",
+      );
+  }
+  const shardId =
+    trustedPlacementOverride?.shardId ??
+    suggestInitialShard(tenantId, {
+      version: policy.ring_version.toString(),
+      algorithm: policy.algorithm,
+      virtualNodes: policy.virtual_nodes,
+      shardIds: policy.shard_ids,
+    });
+  const registered = await tx.$queryRaw<
+    unknown[]
+  >`SELECT 1 FROM shard_registry WHERE shard_id=${shardId} AND state='active'`;
+  if (!registered.length)
+    throw new PlacementUnavailableError(
+      "initial placement target is unavailable",
+    );
+  const inserted =
+    await tx.$executeRaw`INSERT INTO organizations (tenant_id, name, created_by, shard_id, state, initial_placement_ring_version, initial_placement_method)
+    VALUES (${tenantId}::uuid, ${name}, ${createdBy}::uuid, ${shardId}, 'provisioning', ${trustedPlacementOverride ? null : policy.ring_version}, ${trustedPlacementOverride ? "override" : "ring"}) ON CONFLICT DO NOTHING`;
+  if (inserted === 0) return false;
   return true;
 }
 
@@ -337,26 +386,140 @@ export async function createOrganization(
       { name: input.name, actorId: identityIdOf(actor.issuer, actor.subject) },
       async () => {
         const actorId = identityIdOf(actor.issuer, actor.subject);
-        await insertOrganization(tx, tenantId, input.name, actorId, cmd);
-        await grantFirstMembership(tx, tenantId, actor, ADMIN, actorId, cmd);
-        await audit(
+        await ensureIdentity(tx, actor);
+        const created = await insertOrganization(
           tx,
           tenantId,
-          {
-            identityId: actorId,
-            action: "organization_created",
-            actorId,
-            toRole: ADMIN,
-          },
+          input.name,
+          actorId,
           cmd,
         );
+        if (created) await enqueueTenantBootstrap(tx, tenantId, actorId, cmd);
+        await auditProvisioningRequested(tx, tenantId, actorId, cmd);
+        // No owner-specific bootstrap adapters are deployed yet. Persist the
+        // request and identity/audit records, but report it as pending. A
+        // bootstrap worker may retry idempotent ownership preparation later;
+        // active membership and routing are denied until trusted activation.
         return {
-          status: 201,
-          body: { tenantId, name: input.name, version: "1" },
+          status: 202,
+          body: {
+            tenantId,
+            name: input.name,
+            version: "1",
+            state: "provisioning",
+          },
         };
       },
     ),
   );
+}
+
+/**
+ * Internal bootstrap finalization step. This must only be called from the
+ * trusted worker after exact owner readback proofs are durable in the claimed
+ * job. It binds first-admin membership, tenant activation and tenant.created
+ * publication to one control-plane transaction.
+ */
+export async function activateProvisioningOrganization(
+  tx: Tx,
+  input: {
+    tenantId: string;
+    requestedAdminIdentityId: string;
+    shardId: string;
+    shardIncarnation: string;
+    placementEpoch: string;
+    command: Command;
+  },
+): Promise<void> {
+  const [organization] = await tx.$queryRaw<
+    {
+      tenant_id: string;
+      name: string;
+      state: string;
+      created_by: string;
+      shard_id: string;
+      shard_incarnation: string;
+      routing_epoch: bigint;
+      placement_state: string;
+      shard_state: string;
+      version: bigint;
+      home_region: string;
+    }[]
+  >`
+    SELECT o.tenant_id::text,o.name,o.state,o.created_by::text,o.shard_id,
+      s.shard_incarnation::text,o.routing_epoch,o.placement_state,s.state AS shard_state,
+      o.version,o.home_region
+      FROM organizations o JOIN shard_registry s ON s.shard_id=o.shard_id
+     WHERE o.tenant_id=${input.tenantId}::uuid
+     FOR UPDATE OF o FOR SHARE OF s`;
+  if (
+    !organization ||
+    organization.state !== "provisioning" ||
+    organization.created_by !== input.requestedAdminIdentityId ||
+    organization.shard_id !== input.shardId ||
+    organization.shard_incarnation !== input.shardIncarnation ||
+    organization.routing_epoch.toString() !== input.placementEpoch ||
+    organization.placement_state !== "active" ||
+    organization.shard_state !== "active"
+  )
+    throw new Error("tenant bootstrap placement changed before activation");
+
+  const existing = await memberRow(
+    tx,
+    input.tenantId,
+    input.requestedAdminIdentityId,
+  );
+  let initialAdmin: MemberRow | undefined;
+  if (existing) {
+    if (existing.role !== ADMIN || existing.state !== ACTIVE)
+      throw new Error(
+        "requested bootstrap administrator conflicts with membership",
+      );
+  } else {
+    initialAdmin = await insertMembership(
+      tx,
+      input.tenantId,
+      input.requestedAdminIdentityId,
+      ADMIN,
+      input.requestedAdminIdentityId,
+    );
+  }
+
+  const updated = await tx.$executeRaw`
+    UPDATE organizations SET state='active',updated_at=clock_timestamp()
+     WHERE tenant_id=${input.tenantId}::uuid AND state='provisioning'
+       AND created_by=${input.requestedAdminIdentityId}::uuid
+       AND shard_id=${input.shardId} AND routing_epoch=${BigInt(input.placementEpoch)}`;
+  if (updated !== 1)
+    throw new Error("tenant bootstrap activation lost its organization row");
+  await appendEvent(
+    tx,
+    {
+      tenantId: input.tenantId,
+      aggregateType: "organization",
+      aggregateId: input.tenantId,
+      version: organization.version,
+      eventType: "tenant.created",
+      payload: {
+        tenant_id: input.tenantId,
+        organization_version: organization.version.toString(),
+        name: organization.name,
+        state: "active",
+        home_region: organization.home_region,
+      },
+    },
+    input.command,
+  );
+  if (initialAdmin)
+    await recordChange(
+      tx,
+      input.tenantId,
+      initialAdmin,
+      "granted",
+      input.requestedAdminIdentityId,
+      undefined,
+      input.command,
+    );
 }
 
 export async function inviteMember(
@@ -715,6 +878,8 @@ export async function listMembersPage(
   });
 }
 
+export const MEMBERSHIP_LOOKUP_CANDIDATE_LIMIT = 100;
+
 // Verifier lookup: (issuer, subject) -> the single active membership. Two active
 // tenants are ambiguous until tenant selection exists (ADR-0017); never guess.
 export async function lookupMembership(
@@ -726,13 +891,43 @@ export async function lookupMembership(
   const rows = await inScope(
     db,
     { identityId },
-    (tx) =>
-      tx.$queryRaw<
-        { tenant_id: string; role: string; state: string; version: bigint }[]
-      >`
-      SELECT tenant_id::text, role, state, version FROM memberships
-       WHERE identity_id = ${identityId}::uuid
-       ORDER BY (state = 'active') DESC, updated_at DESC LIMIT 2`,
+    async (tx) => {
+      // Organization rows require tenant scope. Discover only this verified
+      // identity's candidates first; an identity-scoped organization JOIN is
+      // denied by forced RLS. Filtering organizations before a LIMIT also keeps
+      // suspended/provisioning candidates from masking eligible memberships.
+      const candidates = await tx.$queryRaw<{ tenant_id: string }[]>`
+        SELECT tenant_id::text FROM memberships
+        WHERE identity_id = ${identityId}::uuid
+        ORDER BY (state='active') DESC, updated_at DESC, tenant_id
+        LIMIT ${MEMBERSHIP_LOOKUP_CANDIDATE_LIMIT + 1}`;
+      if (candidates.length > MEMBERSHIP_LOOKUP_CANDIDATE_LIMIT)
+        throw new MembershipLookupLimitError();
+      const eligible: {
+        tenant_id: string;
+        role: string;
+        state: string;
+        version: bigint;
+      }[] = [];
+      for (const candidate of candidates) {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${candidate.tenant_id}, true),
+          set_config('app.identity_id', '', true)`;
+        const [row] = await tx.$queryRaw<
+          { tenant_id: string; role: string; state: string; version: bigint }[]
+        >`
+          SELECT m.tenant_id::text,m.role,m.state,m.version FROM memberships m
+          JOIN organizations o ON o.tenant_id=m.tenant_id
+          WHERE m.tenant_id=${candidate.tenant_id}::uuid
+            AND m.identity_id=${identityId}::uuid AND o.state='active'`;
+        if (row) eligible.push(row);
+        if (eligible.filter((member) => member.state === ACTIVE).length > 1)
+          throw new AmbiguousMembershipError();
+      }
+      return eligible;
+    },
+    // Candidate discovery and tenant checks see one database snapshot, matching
+    // the original single-query contract even during membership/org changes.
+    { isolationLevel: "RepeatableRead" },
   );
   const active = rows.filter((row) => row.state === ACTIVE);
   if (active.length > 1) throw new AmbiguousMembershipError();
@@ -752,4 +947,29 @@ export async function lookupMembership(
         state: "revoked" as const,
       }
     : null;
+}
+
+// Delegated receivers hold the stable control-plane identity UUID, not the raw
+// IdP subject. Scope both tenant and identity; no cross-tenant discovery.
+export async function lookupDelegatedMembership(
+  db: Db,
+  tenantId: string,
+  identityId: string,
+) {
+  if (!UUID.test(identityId))
+    throw new InvalidInputError("invalid identity ID");
+  return inScope(db, { tenantId }, async (tx) => {
+    const rows = await tx.$queryRaw<{ role: string; version: bigint }[]>`
+      SELECT m.role,m.version FROM memberships m JOIN organizations o USING(tenant_id)
+      WHERE m.tenant_id=${tenantId}::uuid AND m.identity_id=${identityId}::uuid
+        AND m.state='active' AND o.state='active'`;
+    if (!rows[0]) return null;
+    return {
+      tenantId,
+      identityId,
+      roles: [rows[0].role],
+      version: rows[0].version.toString(),
+      state: "active" as const,
+    };
+  });
 }

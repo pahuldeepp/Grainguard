@@ -1,0 +1,11 @@
+misconfigurations:
+  - id: KSV-0109
+    paths:
+      - infra/gitops/disposable/cassandra-chart/templates/bootstrap-scripts.yaml
+    statement: Scripts only read passwords from mounted Secret files and environment variables; the ConfigMap holds no secret values.
+  - id: KSV-0014
+    paths:
+      - infra/kubernetes/disposable-data/kafka.yaml
+      - infra/kubernetes/disposable-data/rabbitmq.yaml
+      - infra/kubernetes/disposable-data/registry/schema-registry.yaml
+    statement: Upstream Kafka, RabbitMQ and Schema Registry images generate their configuration into the container filesystem at start. They run non-root with a RuntimeDefault seccomp profile and no service account token; data lives on PVCs.

@@ -75,6 +75,37 @@ test("env verifier requires issuer, audience and JWKS URL", () => {
   );
 });
 
+test("Cognito env mode requires allowed clients and a trusted membership mapper", () => {
+  const env: Record<string, string> = {
+    AUTH_ISSUER: issuer.issuer,
+    AUTH_JWKS_URL: "http://127.0.0.1:1/keys",
+    AUTH_TOKEN_MODE: "cognito-access",
+  };
+  assert.throws(
+    () =>
+      createTokenVerifierFromEnv(
+        (key) => env[key],
+        () => membershipJson,
+      ),
+    /AUTH_COGNITO_CLIENT_IDS/,
+  );
+  env.AUTH_COGNITO_CLIENT_IDS = "web-client,ios-client";
+  assert.throws(
+    () =>
+      createTokenVerifierFromEnv(
+        (key) => env[key],
+        () => membershipJson,
+      ),
+    /mapped identity/,
+  );
+  env.AUTH_MEMBERSHIP_FILE = "/memberships.json";
+  const verifier = createTokenVerifierFromEnv(
+    (key) => env[key],
+    () => membershipJson,
+  );
+  verifier.close();
+});
+
 test("env verifier rejects negative tuning values", () => {
   const env: Record<string, string> = {
     AUTH_ISSUER: issuer.issuer,

@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -16,14 +21,18 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	otelnoop "go.opentelemetry.io/otel/trace/noop"
+	common "greenguard.local/go-common"
 )
 
 const (
-	attrURLPath    = "url.path"
-	attrMethod     = "http.request.method"
-	attrStatusCode = "http.response.status_code"
-	placeholderID  = ":id"
+	attrURLPath          = "url.path"
+	attrMethod           = "http.request.method"
+	attrStatusCode       = "http.response.status_code"
+	placeholderID        = ":id"
+	httpErrorLogInterval = 30 * time.Second
 )
+
+var httpErrorLogs = newHTTPErrorLogLimiter(httpErrorLogInterval)
 
 // idInPath matches UUIDs and 2+-digit numbers so span names stay low-cardinality.
 var idInPath = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9]{2,}`)
@@ -40,10 +49,12 @@ type TracingConfig struct {
 type Tracing struct {
 	Tracer   trace.Tracer
 	provider *sdktrace.TracerProvider
+	logs     bool
 }
 
 // InitTracing builds the provider, registers it and the W3C TraceContext propagator globally.
 func InitTracing(cfg TracingConfig) (*Tracing, error) {
+	var logsEnabled bool
 	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRatio))),
 		sdktrace.WithResource(resource.NewSchemaless(
@@ -60,6 +71,11 @@ func InitTracing(cfg TracingConfig) (*Tracing, error) {
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return nil, fmt.Errorf("invalid OTLP endpoint %q", cfg.OTLPEndpoint)
 		}
+		_, err = common.InitOTelLogging(cfg.ServiceName, cfg.OTLPEndpoint)
+		if err != nil {
+			return nil, err
+		}
+		logsEnabled = true
 		// Unstarted: the HTTP client needs no Start, and this avoids an unreachable error path.
 		// WithEndpointURL posts to the URL path as given, so the traces path is added here.
 		exp := otlptracehttp.NewUnstarted(otlptracehttp.WithEndpointURL(u.JoinPath("v1", "traces").String()))
@@ -68,12 +84,17 @@ func InitTracing(cfg TracingConfig) (*Tracing, error) {
 	provider := sdktrace.NewTracerProvider(opts...)
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
-	return &Tracing{Tracer: provider.Tracer(cfg.ServiceName), provider: provider}, nil
+	return &Tracing{Tracer: provider.Tracer(cfg.ServiceName), provider: provider, logs: logsEnabled}, nil
 }
 
 // Shutdown flushes spans and resets the globals so InitTracing can run again.
 func (t *Tracing) Shutdown(ctx context.Context) error {
 	err := t.provider.Shutdown(ctx)
+	if t.logs {
+		if logErr := common.ShutdownOTelLogging(ctx); err == nil {
+			err = logErr
+		}
+	}
 	otel.SetTracerProvider(otelnoop.NewTracerProvider())
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
 	return err
@@ -105,9 +126,65 @@ func (t *Tracing) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r.WithContext(ctx))
 		span.SetAttributes(attribute.Int(attrStatusCode, rec.status))
 		if rec.status >= http.StatusInternalServerError {
+			route := boundedRoute(r.Method, r.URL.Path)
+			if emit, suppressed := httpErrorLogs.allow(time.Now(), route, rec.status); emit {
+				slog.ErrorContext(ctx, "http request failed", "method", r.Method, "route", route, "status_code", rec.status, "suppressed_count", suppressed)
+			}
+		}
+		if rec.status >= http.StatusInternalServerError {
 			span.SetStatus(codes.Error, http.StatusText(rec.status))
 		}
 	})
+}
+
+// boundedRoute avoids putting arbitrary path segments into log fields or limiter keys.
+func boundedRoute(method, path string) string {
+	parts := strings.Split(path, "/")
+	if method == http.MethodPost && len(parts) == 5 && parts[1] == "v1" && parts[2] == "devices" && parts[4] == "readings" {
+		return "POST /v1/devices/:id/readings"
+	}
+	switch path {
+	case "/healthz":
+		return method + " /healthz"
+	case "/readyz":
+		return method + " /readyz"
+	case "/metrics":
+		return method + " /metrics"
+	default:
+		return method + " /other"
+	}
+}
+
+type httpErrorLogState struct {
+	lastEmitted time.Time
+	suppressed  uint64
+}
+
+type httpErrorLogLimiter struct {
+	mu       sync.Mutex
+	interval time.Duration
+	states   map[string]httpErrorLogState
+}
+
+func newHTTPErrorLogLimiter(interval time.Duration) *httpErrorLogLimiter {
+	return &httpErrorLogLimiter{interval: interval, states: make(map[string]httpErrorLogState)}
+}
+
+// allow emits once per route/status interval and reports how many repeats were
+// suppressed since the previous emitted record.
+func (l *httpErrorLogLimiter) allow(now time.Time, route string, status int) (emit bool, suppressed uint64) {
+	key := route + "|" + strconv.Itoa(status)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	state, ok := l.states[key]
+	if ok && now.Sub(state.lastEmitted) < l.interval {
+		state.suppressed++
+		l.states[key] = state
+		return false, 0
+	}
+	suppressed = state.suppressed
+	l.states[key] = httpErrorLogState{lastEmitted: now}
+	return true, suppressed
 }
 
 // ActiveTraceparent formats the span in ctx as W3C traceparent with only the sampled flag kept.

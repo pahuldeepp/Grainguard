@@ -10,10 +10,12 @@ import { inScope, UUID } from "../db/session.js";
 import { identityIdOf, nameId } from "./ids.js";
 import {
   IdempotencyConflictError,
+  DomainConflictError,
   InvalidInputError,
   NotFoundError,
   RoleForbiddenError,
 } from "./errors.js";
+import { isUniqueViolation } from "./db-conflict.js";
 import type { Actor, Command } from "./store.js";
 
 export type ServiceContext = {
@@ -113,8 +115,7 @@ async function reserveCommand(
   request: object,
   response: Stored,
 ): Promise<Stored | undefined> {
-  const lockKey = `${tenantId}|${type}|${cmd.idempotencyKey}`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey},0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${tenantId}|${type}|${cmd.idempotencyKey}`},0))`;
   const [prior] = await tx.$queryRaw<
     { same: boolean; response_body: Stored }[]
   >`SELECT normalized_request = ${JSON.stringify(request)}::jsonb AS same, response_body FROM command_receipts WHERE tenant_id=${tenantId}::uuid AND command_type=${type} AND idempotency_key=${cmd.idempotencyKey}`;
@@ -271,7 +272,15 @@ export async function registerOAuthClient(
       { principalId },
     );
     if (prior) return prior as { principalId: string };
-    await tx.$executeRaw`INSERT INTO service_principals (tenant_id,principal_id,name,kind,issuer,client_id,allowed_scopes,created_by) VALUES (${tenantId}::uuid,${principalId}::uuid,${input.name},'oauth_client',${input.issuer},${input.clientId},${input.scopes}::text[],${creator}::uuid)`;
+    try {
+      await tx.$executeRaw`INSERT INTO service_principals (tenant_id,principal_id,name,kind,issuer,client_id,allowed_scopes,created_by) VALUES (${tenantId}::uuid,${principalId}::uuid,${input.name},'oauth_client',${input.issuer},${input.clientId},${input.scopes}::text[],${creator}::uuid)`;
+    } catch (error) {
+      if (isUniqueViolation(error))
+        throw new DomainConflictError(
+          "OAuth client is already registered for this tenant",
+        );
+      throw error;
+    }
     await changed(
       tx,
       tenantId,
@@ -329,10 +338,9 @@ export async function rotateApiKey(
   tenantId: string,
   oldKeyId: string,
   cmd: Command,
-  options: { overlapHours?: number; environment?: string } = {},
+  overlapHours = 24,
+  environment = "dev",
 ): Promise<IssuedKey | ReplayedKey> {
-  const overlapHours = options.overlapHours ?? 24;
-  const environment = options.environment ?? "dev";
   if (
     !UUID.test(tenantId) ||
     !UUID.test(oldKeyId) ||
@@ -423,7 +431,8 @@ export async function verifyApiKey(
     >`SELECT k.tenant_id::text,k.principal_id::text,k.kind,k.device_id::text,k.digest,k.scopes,k.expires_at,k.revoked_at,p.state,k.created_by::text,m.state AS creator_state,m.role AS creator_role FROM api_keys k JOIN service_principals p ON p.tenant_id=k.tenant_id AND p.principal_id=k.principal_id JOIN organizations o ON o.tenant_id=k.tenant_id AND o.state='active' LEFT JOIN memberships m ON m.tenant_id=k.tenant_id AND m.identity_id=k.created_by WHERE k.tenant_id=${resolved.tenant_id}::uuid AND k.key_id=${keyId}::uuid`;
     const candidate = keyDigest(secret!, pepper);
     if (
-      row?.kind !== kind ||
+      !row ||
+      row.kind !== kind ||
       row.digest.length !== candidate.length ||
       !timingSafeEqual(Buffer.from(row.digest), candidate) ||
       row.expires_at <= now ||
@@ -481,7 +490,8 @@ export async function lookupOAuthClient(
         creator_role: string | null;
       }[]
     >`SELECT p.tenant_id::text,p.principal_id::text,p.allowed_scopes,p.state,m.state AS creator_state,m.role AS creator_role FROM service_principals p LEFT JOIN memberships m ON m.tenant_id=p.tenant_id AND m.identity_id=p.created_by JOIN organizations o ON o.tenant_id=p.tenant_id WHERE p.tenant_id=${tenantId}::uuid AND p.issuer=${issuer} AND p.client_id=${clientId} AND p.kind='oauth_client' AND o.state='active'`;
-    if (row?.state !== "active" || row.creator_state !== "active") return;
+    if (!row || row.state !== "active" || row.creator_state !== "active")
+      return;
     const scopes = effectiveScopes(row.allowed_scopes, row.creator_role);
     if (!scopes.length) return;
     return { tenant_id: row.tenant_id, principal_id: row.principal_id, scopes };

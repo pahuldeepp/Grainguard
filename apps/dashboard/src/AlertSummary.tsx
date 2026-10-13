@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import type { AlertsApi } from "./alerts-api";
 import { relativeTime, formatTimestamp } from "./format";
+import { binLabel } from "./bin-label";
 import { severityMarker, sortAlerts } from "./severity";
 import { EmptyState, ErrorState, Loading, StatusMarker } from "./ui";
 
@@ -66,7 +67,12 @@ function OpenAlerts({
                   <span className="sep" aria-hidden="true">
                     {" · "}
                   </span>
-                  <span className="mono">Bin {alert.binId}</span>
+                  <span className="mono">
+                    {binLabel(alert.binId, alert.binName)}
+                  </span>
+                  {alert.siteName?.trim() && (
+                    <span className="site-name">{alert.siteName.trim()}</span>
+                  )}
                 </Link>
                 <span className="meta">
                   Score <span className="num">{alert.score}</span>

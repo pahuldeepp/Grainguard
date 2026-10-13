@@ -12,7 +12,8 @@ from risk_engine.consumer import Consumer, DatabaseSink, LotFeed, payload_digest
 from risk_engine.events import Checkpoint
 from risk_engine.health import Metrics, serve
 from risk_engine.kafka_source import KafkaError, KafkaSource
-from test_fakes import FakeDatabase, FakeSink, FakeSource, lot_changed, new_id, record, registered, telemetry
+from test_fakes import (FakeDatabase, FakeSink, FakeSource, TEST_POLICIES, lot_changed, new_id,
+                        record, registered, telemetry)
 
 UTC = timezone.utc
 
@@ -31,7 +32,7 @@ def build(records=(), gate=False, sink=None, max_wait=10.0):
     feed = LotFeed(enabled=gate)
     metrics = Metrics()
     clock = Clock()
-    applier = Applier(db, "risk-test", feed.value, retry=RetryPolicy(attempts=1))
+    applier = Applier(db, "risk-test", feed.value, policies=TEST_POLICIES, retry=RetryPolicy(attempts=1))
     consumer = Consumer(source, sink or FakeSink(), applier, feed, metrics, max_wait_s=max_wait,
                         backoff_s=1.0, monotonic=clock)
     return SimpleNamespace(db=db, source=source, feed=feed, metrics=metrics, clock=clock, consumer=consumer)
@@ -328,6 +329,14 @@ class MainTest(unittest.TestCase):
                     {**self.ENV, "RISK_NOT_READY_MAX_WAIT_S": "0"}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 main.load_config(bad.get)
+        with self.subTest("required shard registry cannot fall back to central URL"), self.assertRaisesRegex(
+                ValueError, "SHARD_REGISTRY_FILE is required"):
+            main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "true"}.get)
+        with self.subTest("invalid shard routing mode fails closed"), self.assertRaisesRegex(
+                ValueError, "SHARD_ROUTING_REQUIRED must be true or false"):
+            main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "yes"}.get)
+        # Explicit local legacy mode remains supported.
+        main.load_config({**self.ENV, "SHARD_ROUTING_REQUIRED": "false"}.get)
 
     def test_run_wires_collaborators_and_shuts_down(self):
         stop = threading.Event()
@@ -346,7 +355,7 @@ class MainTest(unittest.TestCase):
         databases = iter((db, probe))
         code = main.run({**self.ENV, "RISK_LOT_FEED_GATE": "off"}.get, stop, database=lambda url: next(databases),
                         source=lambda *args: source,
-                        start_health=lambda port, metrics, ready: (ready_probe.append(ready), started.append((port, ready())), server)[2])
+                        start_health=lambda port, metrics, ready, **kwargs: (ready_probe.append(ready), started.append((port, ready())), server)[2])
         self.assertEqual((code, steps, started), (0, [1.0], [(8086, False)]))
         self.assertTrue(ready_probe[0]())
         from unittest import mock

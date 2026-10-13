@@ -1,11 +1,12 @@
+import { adminTenantQuery } from "../testing/fixtures.js";
+import { fixtureDb } from "../testing/fixtures.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createDb } from "../db/client.js";
 import { adminQuery, createTenant } from "../testing/fixtures.js";
 import { applyEntitlement, applyHeartbeat } from "./projector.js";
 import type { Envelope } from "@greenguard/entitlements";
-const db = createDb(process.env.INVENTORY_PROJECTOR_DIRECT_URL!);
+const db = fixtureDb(process.env.INVENTORY_PROJECTOR_DIRECT_URL!);
 after(() => db.$disconnect());
 function event(tenant: string, version: string, max: number): Envelope {
   return {
@@ -54,10 +55,12 @@ test("ENT-12 heartbeat is monotonic, capped at the clock and leaves plan rows an
   await createTenant(db, b, "B");
   await applyEntitlement(db, event(a, "5", 7));
   await applyEntitlement(db, event(b, "3", 9));
-  await adminQuery(
-    "UPDATE tenant_entitlements SET applied_at=now()-interval '2 hours' WHERE tenant_id IN ($1,$2)",
-    [a, b],
-  );
+  for (const tenantId of [a, b])
+    await adminTenantQuery(
+      tenantId,
+      "UPDATE tenant_entitlements SET applied_at=now()-interval '2 hours' WHERE tenant_id=$1",
+      [tenantId],
+    );
   const before = await adminQuery<{
     tenant_id: string;
     v: string;

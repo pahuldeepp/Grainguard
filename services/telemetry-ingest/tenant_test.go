@@ -174,6 +174,7 @@ func TestWithTenantDoesNotLeakOnPooledConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.MaxConns = 1
+	configureFixturePlacement(t, config)
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)

@@ -56,6 +56,30 @@ test("enforces roles before any upstream request", async () => {
   assert.equal(called, false);
 });
 
+test("rejects invalid provisioning idempotency keys before an upstream call", () => {
+  let called = false;
+  const client = new ProvisioningClient("http://127.0.0.1:8092", async () => {
+    called = true;
+    return Response.json({});
+  });
+  for (const key of ["", "contains spaces", "x".repeat(201)])
+    assert.throws(
+      () =>
+        client.start(
+          principal(["operator"]),
+          "Bearer t",
+          "device",
+          "asset",
+          key,
+        ),
+      (error) =>
+        error instanceof UpstreamError &&
+        error.status === 400 &&
+        error.code === "invalid_idempotency_key",
+    );
+  assert.equal(called, false);
+});
+
 test("preserves owner not-found for a foreign saga", async () => {
   const client = new ProvisioningClient("http://127.0.0.1:8092", async () =>
     Response.json({ code: "not_found" }, { status: 404 }),
@@ -67,6 +91,31 @@ test("preserves owner not-found for a foreign saga", async () => {
       error.status === 404 &&
       error.code === "not_found",
   );
+});
+
+test("rejects dot-segment saga IDs before constructing owner paths", async () => {
+  const paths: string[] = [];
+  const client = new ProvisioningClient(
+    "http://127.0.0.1:8092",
+    async (url) => {
+      paths.push(new URL(url.toString()).pathname);
+      return Response.json({ saga: {}, history: [] });
+    },
+  );
+  const admin = principal(["admin"]);
+  for (const id of [".", ".."]) {
+    assert.throws(
+      () => client.status(admin, "Bearer t", id),
+      (error) =>
+        error instanceof UpstreamError && error.code === "invalid_saga_id",
+    );
+    assert.throws(
+      () => client.redrive(admin, "Bearer t", id, "reason"),
+      (error) =>
+        error instanceof UpstreamError && error.code === "invalid_saga_id",
+    );
+  }
+  assert.deepEqual(paths, []);
 });
 
 test("rejects cleartext upstream except loopback", () => {

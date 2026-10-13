@@ -4,18 +4,14 @@
 export class ConsumerLag {
   private behindSince: number | undefined;
 
-  // The first behind observation starts the clock; subsequent observations preserve it.
-  markBehind(now = Date.now()): void {
-    this.behindSince ??= now;
-  }
-
-  markCaughtUp(): void {
-    this.behindSince = undefined;
+  // `caughtUp` is true when the batch's last offset reached the partition high watermark.
+  // The first not-caught-up observation starts the clock; catching up clears it.
+  observe(caughtUp: boolean, now = Date.now()): void {
+    if (caughtUp) this.behindSince = undefined;
+    else this.behindSince ??= now;
   }
 
   lagMs(now = Date.now()): number {
-    return this.behindSince === undefined
-      ? 0
-      : Math.max(0, now - this.behindSince);
+    return this.behindSince === undefined ? 0 : Math.max(0, now - this.behindSince);
   }
 }

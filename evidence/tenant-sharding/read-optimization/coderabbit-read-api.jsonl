@@ -1,0 +1,12 @@
+{"type":"review_context","reviewType":"uncommitted","currentBranch":"codex/greenguard-domain-product","baseBranch":"main","workingDirectory":"/Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/read-api"}
+{"type":"status","phase":"connecting","status":"connecting_to_review_service"}
+{"type":"status","phase":"analyzing","status":"setting_up","message":"pahuldeepp/Grainguard is not connected to a CodeRabbit organization you can access, so this review will use the free CLI allowance.\n\nIf you expected an org plan here, check your signed-in account with coderabbit auth status, or install CodeRabbit for pahuldeepp/Grainguard at https://app.coderabbit.ai"}
+{"type":"status","phase":"setup","status":"setting_up"}
+{"type":"status","phase":"analyzing","status":"summarizing"}
+{"type":"status","phase":"analyzing","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"heartbeat","status":"reviewing"}
+{"type":"complete","status":"review_completed","findings":0,"reviewedFiles":["services/read-api/src/app.test.ts","services/read-api/src/app.ts","services/read-api/src/backends.test.ts","services/read-api/src/backends.ts","services/read-api/src/bulkhead.test.ts","services/read-api/src/bulkhead.ts","services/read-api/src/cache.test.ts","services/read-api/src/cache.ts","services/read-api/src/entitlements/postgres.ts","services/read-api/src/main.ts","services/read-api/src/cache-policy.test.ts","services/read-api/src/cache-policy.ts","services/read-api/src/consistency.test.ts","services/read-api/src/consistency.ts","services/read-api/src/device-current.test.ts","services/read-api/src/entitlements/postgres.test.ts","services/read-api/src/read-metrics.test.ts","services/read-api/src/read-metrics.ts","services/read-api/src/replicas.live.test.ts","services/read-api/src/replicas.test.ts","services/read-api/src/replicas.ts","services/read-api/src/shards.test.ts","services/read-api/src/shards.ts","services/read-api/src/watermark-cache.live.test.ts","services/read-api/src/watermark-cache.test.ts","services/read-api/src/watermark-cache.ts"],"outcome":"completed","message":"Review completed"}

@@ -93,3 +93,78 @@ represent those transitions safely.
 Run `make db-migrate`, then `npm test -w services/device-service` with the
 repository's local `.env` loaded. The importer consumer, Kafka offset commits,
 DLQ/redrive and MySQL connector are separate Stage 10c tasks.
+
+## Cable and sensor inventory (ADR-0027)
+
+The owner API adds `POST /v1/cables`, `GET /v1/cables/{id}`,
+`PATCH /v1/cables/{id}`, `DELETE /v1/cables/{id}`, and
+`GET /v1/bins/{id}/cables?limit&after`. Viewer/operator/admin can read;
+operator/admin can mutate. Creation requires `Idempotency-Key`. Edits and
+removals require `If-Match: "<cableVersion>"`; missing preconditions return 428,
+stale versions return 412 with the current ETag. Every response includes the
+cable version; deleted cable GETs expose the owner tombstone.
+
+Create/edit bodies are `{binId, deviceId, label, sensors}`. Each sensor has
+`{label, position, depthM}`: position is a distinct positive integer, depth is
+nullable finite nonnegative **meters**, and missing depth remains null. Edits
+retain sensor IDs by including `sensorId`; an entry without an ID creates a new
+owner-assigned ID, and omitted IDs are retired permanently. IDs from another
+cable, tenant or removed sensor cannot be claimed. The API caps each cable at
+100 current sensors and each cable-list page at 20 cables to bound transaction
+and response work; these are API bounds, not hardware or agronomic thresholds.
+
+A cable requires an active device with a completed agricultural binding to its
+bin/site. `assetId` continues to identify physical hardware and is never accepted
+as a cable's bin binding. Devices and cables are locked in that order (device
+IDs sorted on reassignment), then cable edits compare and increment the supplied
+optimistic version. Device moves carry their cables to the new bin; unbinding,
+soft deletion and explicit cable removal revoke the layout. Import moves/deletes
+use the same owner-event path. Forced RLS, tenant predicates and composite tenant
+foreign keys cover both `bin_cables` and `cable_sensors`; runtime identity rewrites
+and physical deletes are not granted.
+
+Each change writes `cable.layout_changed` v1, audit and owner state atomically.
+The event uses aggregate `cable`, `cable_version`, `operation: upsert|deleted`,
+and the complete ordered current sensor list with `depth_m`. Deleted snapshots
+contain an empty list. It routes to `greenguard.inventory.sensor-layout.v1`.
+The immutable outbox preserves old layout snapshots and their sensor identities;
+retired sensor rows remain in the owner database. Telemetry ingest resolves the
+snapshot's tenant/device/sensor association and captures layout provenance at
+acceptance; projection and telemetry consumers are separate deployment gates.
+
+Focused checks after build:
+`node --test dist/inventory/cable-validation.test.js dist/inventory/cables.live.test.js dist/api/cables.http.test.js`.
+Run live tests against a migrated disposable database through `inventory_app`.
+
+`GG_MESH_INTERNAL_HTTP=1` permits `CONTROL_LOOKUP_URL` to use HTTP only at a
+Kubernetes Service DNS name; JWKS remains HTTPS outside loopback. Enable it
+only with injected Istio sidecars, STRICT mTLS, source-specific
+AuthorizationPolicy, and default-deny NetworkPolicy that allows the control
+lookup peer. Prove plaintext and unauthorized pod traffic is denied in the
+live cluster before accepting the deployment.
+
+For Cognito user access tokens, set `AUTH_TOKEN_MODE=cognito-access`,
+`AUTH_COGNITO_CLIENT_IDS`, `AUTH_ISSUER`, and `AUTH_JWKS_URL`. The runtime
+requires `AUTH_MEMBERSHIP_SOURCE=control-plane`, `CONTROL_PLANE_URL`,
+`CONTROL_LOOKUP_TOKEN`, and the membership Redis/Kafka settings used by the
+shared membership client. The token's issuer and subject are mapped to tenant
+roles by the control plane; tokens with no membership are denied. The default
+Dex audience mode remains unchanged.
+
+## Tenant placement routing
+
+Set `SHARD_REGISTRY_FILE` to a private version 1 registry for `service: device-service`, `database: greenguard_inventory`, with all four `s1`–`s4` primaries and their incarnation UUIDs. Set `CONTROL_PLANE_URL` and `CONTROL_LOOKUP_TOKEN` for authenticated placement lookup. Production endpoints require `sslmode=verify-full` and `sslrootcert`; local loopback registries require explicit `SHARD_LOCAL_LOOPBACK=true`. The enabled runtime allocates no legacy database pool and fails closed on missing, stale, inactive or mismatched ownership.
+
+API and saga manifests must use `inventory_app`. Tenant and entitlement projector manifests must use `inventory_projector`; each projector deployment supplies its own private registry through `SHARD_REGISTRY_FILE`. `INVENTORY_DATABASE_URL` / `INVENTORY_PROJECTOR_DIRECT_URL` remain the legacy configuration only when the registry is absent.
+
+Every tenant transaction resolves the verified tenant, sets transaction-local tenant/shard/incarnation/epoch settings and calls `greenguard_internal.admit_tenant_placement` before business SQL. Commands, imports, projections, receipt IDs and outbox IDs retain their existing semantics. Saga result discovery fans out only the existing ID-only SECURITY DEFINER selector, then resolves and admits each tenant before reading/publishing a result. Quiescing tenants retain pending results. Verified entitlement heartbeats update tenant-free feed metadata on every owner primary. Health probes cover all primaries; pool shutdown waits at most five seconds.
+
+### Exact device serial lookup
+
+Authenticated `GET /v1/devices/lookup?serial=<serialNumber>` resolves an exact
+serial label to `{deviceId, serialNumber}` using the verified principal's tenant.
+Viewer/operator/admin reads are allowed. The owner transaction retains placement
+admission and tenant RLS; the application also filters tenant and excludes deleted
+records. Serials are bounded to 128 characters, with control characters and extra
+query fields rejected. Missing/deleted devices return 404; ambiguity returns 409.
+The lookup runs before the UUID route and does not alter bindings or inventory.

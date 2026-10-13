@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/twmb/franz-go/pkg/kerr"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	transport "greenguard.local/kafka-transport"
 )
 
 // franz-go provides idempotent production (enabled by default), synchronous
@@ -22,23 +25,37 @@ type bindingKafkaClient interface {
 	Ping(context.Context) error
 	CloseAllowingRebalance()
 }
-type BindingKafka struct{ client bindingKafkaClient }
+type BindingKafka struct {
+	client      bindingKafkaClient
+	topicPrefix string
+}
 
 var makeBindingClient = func(options ...kgo.Opt) (bindingKafkaClient, error) { return kgo.NewClient(options...) }
 
 func newBindingKafka(brokers []string, group string) (*BindingKafka, error) {
-	client, err := makeBindingClient(kgo.SeedBrokers(brokers...), kgo.ConsumerGroup(group),
-		kgo.ConsumeTopics(bindingTopic), kgo.DisableAutoCommit(),
+	prefix := os.Getenv("BINDING_KAFKA_TOPIC_PREFIX")
+	if len(prefix+bindingTopic) > 249 || len(prefix+sensorLayoutTopic) > 249 || len(prefix+quarantineTopic) > 249 || strings.IndexFunc(prefix, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+	}) >= 0 || strings.Contains(prefix, "..") {
+		return nil, errors.New("invalid BINDING_KAFKA_TOPIC_PREFIX")
+	}
+	security, err := transport.SecurityOptions(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	options := []kgo.Opt{kgo.SeedBrokers(brokers...), kgo.ConsumerGroup(group),
+		kgo.ConsumeTopics(prefix+bindingTopic, prefix+sensorLayoutTopic), kgo.DisableAutoCommit(),
 		// New group: log start. Expired commit: fatal (NoResetOffset), never a silent skip.
 		kgo.ConsumeStartOffset(kgo.NewOffset().AtStart()), kgo.ConsumeResetOffset(kgo.NoResetOffset()),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.RequiredAcks(kgo.AllISRAcks()), kgo.RebalanceTimeout(time.Minute),
-		kgo.RecordDeliveryTimeout(15*time.Second), kgo.ProducerLinger(0),
-		kgo.FetchMaxBytes(4*1024*1024), kgo.FetchMaxPartitionBytes(1024*1024))
+		kgo.RecordDeliveryTimeout(15 * time.Second), kgo.ProducerLinger(0),
+		kgo.FetchMaxBytes(4 * 1024 * 1024), kgo.FetchMaxPartitionBytes(1024 * 1024)}
+	client, err := makeBindingClient(append(options, security...)...)
 	if err != nil {
 		return nil, err
 	}
-	return &BindingKafka{client: client}, nil
+	return &BindingKafka{client: client, topicPrefix: prefix}, nil
 }
 
 func (k *BindingKafka) Next(ctx context.Context) (BindingMessage, error) {
@@ -53,13 +70,17 @@ func (k *BindingKafka) Next(ctx context.Context) (BindingMessage, error) {
 			continue
 		}
 		record := records[0]
-		return BindingMessage{Topic: record.Topic, Partition: record.Partition, Offset: record.Offset, Key: record.Key, Value: record.Value,
+		canonical := strings.TrimPrefix(record.Topic, k.topicPrefix)
+		if !strings.HasPrefix(record.Topic, k.topicPrefix) || (canonical != bindingTopic && canonical != sensorLayoutTopic) {
+			return BindingMessage{}, fmt.Errorf("unexpected binding transport topic %q", record.Topic)
+		}
+		return BindingMessage{Topic: canonical, TransportTopic: record.Topic, Partition: record.Partition, Offset: record.Offset, Key: record.Key, Value: record.Value,
 			Commit: func(ctx context.Context) error { return k.client.CommitRecords(ctx, record) }}, nil
 	}
 }
 
 func (k *BindingKafka) PublishQuarantine(ctx context.Context, record BindingRecord) error {
-	return k.client.ProduceSync(ctx, &kgo.Record{Topic: record.Topic, Key: record.Key, Value: record.Value}).FirstErr()
+	return k.client.ProduceSync(ctx, &kgo.Record{Topic: k.topicPrefix + record.Topic, Key: record.Key, Value: record.Value}).FirstErr()
 }
 func (k *BindingKafka) Close()                         { k.client.CloseAllowingRebalance() }
 func (k *BindingKafka) Ping(ctx context.Context) error { return k.client.Ping(ctx) }

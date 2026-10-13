@@ -51,7 +51,9 @@ export function controlClientLookup(
   clientId: string,
   tenantHint?: string,
 ) => Promise<ClientBinding | undefined> {
-  const url = new URL("/v1/internal/credentials/oauth-client/lookup", endpoint);
+  const base = new URL(endpoint);
+  if (!base.pathname.endsWith("/")) base.pathname += "/";
+  const url = new URL("v1/internal/credentials/oauth-client/lookup", base);
   return async (issuer, clientId, tenantHint) => {
     // The control plane requires a tenant hint to disambiguate clients. This
     // claim comes from the signed client-credentials token, never request JSON.

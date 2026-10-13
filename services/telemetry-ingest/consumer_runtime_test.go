@@ -122,7 +122,7 @@ func TestBindingRunWorkerFailureAndCancellation(t *testing.T) {
 func TestBindingHTTPReadinessMetricsAndRetryAfter(t *testing.T) {
 	consumer, _ := consumerFixture(t)
 	feed, _ := feedFixture()
-	feed.DB = failingDB{}
+	feed.DB = scriptDB{steps: []step{feedStep(6, &ingNow, &ingNow)}}
 	app := App{Ping: func(context.Context) error { return nil }, Consumer: consumer, Feed: feed, Metrics: NewMetrics(), Recorder: NewRejectionRecorder(scriptDB{}, NewMetrics(), nil)}
 	handler := newHandler(app)
 	for _, ready := range []bool{false, true} {
@@ -137,7 +137,15 @@ func TestBindingHTTPReadinessMetricsAndRetryAfter(t *testing.T) {
 			t.Fatal(w.Code)
 		}
 	}
+	old := ingNow.Add(-6 * time.Minute)
+	feed.DB = scriptDB{steps: []step{feedStep(6, &old, &old)}}
 	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("stale binding feed readiness = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	feed.DB = failingDB{}
+	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "binding_feed_age_seconds +Inf") {
 		t.Fatal(w.Body.String())
@@ -149,7 +157,7 @@ func TestBindingHTTPReadinessMetricsAndRetryAfter(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	App{}.metricsHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if w.Body.Len() != 0 {
+	if !strings.Contains(w.Body.String(), "# HELP http_server_requests_total") {
 		t.Fatal(w.Body.String())
 	}
 }
@@ -189,5 +197,20 @@ func TestBindingWorkerResultDuringShutdown(t *testing.T) {
 	}
 	if !errors.Is(bindingWorkerResult(context.Background(), errBoom), errBoom) {
 		t.Fatal("worker failure hidden")
+	}
+}
+
+func TestBindingRuntimeUsesExplicitEnvironmentGroup(t *testing.T) {
+	old := createBindingKafka
+	t.Cleanup(func() { createBindingKafka = old })
+	createBindingKafka = func(_ []string, group string) (*BindingKafka, error) {
+		if group != "local-provisioning-test" {
+			t.Fatalf("wrong environment group: %s", group)
+		}
+		return nil, errBoom
+	}
+	_, err := startBindingConsumer(context.Background(), nil, ingestConfig{}, cfgEnv(map[string]string{"KAFKA_BROKERS": "127.0.0.1:59092", "BINDING_KAFKA_GROUP": "local-provisioning-test"}), &App{})
+	if !errors.Is(err, errBoom) {
+		t.Fatal(err)
 	}
 }

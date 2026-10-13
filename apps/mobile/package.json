@@ -10,5 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "coverage": "npm run build && c8 --all --src dist --extension .js --exclude \"**/*.test.js\" --reporter lcov --reporter text node --test \"dist/**/*.test.js\""
+  },
+  "dependencies": {
+    "@greenguard/membership-client": "0.1.0"
   }
 }

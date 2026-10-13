@@ -18,6 +18,12 @@
     "@opentelemetry/resources": "2.11.0",
     "@opentelemetry/sdk-trace-node": "2.11.0"
   },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  },
+  "peerDependencies": {
+    "pg": "^8.23.0"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

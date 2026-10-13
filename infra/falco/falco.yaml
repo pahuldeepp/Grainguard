@@ -1,0 +1,9 @@
+rules_files:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml
+  - /etc/falco/rules.d
+
+json_output: true
+json_include_output_property: true
+stdout_output:
+  enabled: true

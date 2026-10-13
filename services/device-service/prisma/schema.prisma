@@ -52,6 +52,7 @@ model Bin {
   site        Site           @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
   devices     Device[]
   occupancies BinOccupancy[]
+  cables      BinCable[]
 
   @@id([tenantId, binId])
   @@unique([tenantId, siteId, binId])
@@ -104,10 +105,48 @@ model Device {
   site           Site     @relation(fields: [tenantId, siteId], references: [tenantId, siteId], onDelete: Restrict, onUpdate: Restrict)
   // Composite key keeps the bin in the same tenant and the same site as the device.
   bin            Bin?     @relation(fields: [tenantId, siteId, binId], references: [tenantId, siteId, binId], onDelete: Restrict, onUpdate: Restrict)
+  cables         BinCable[]
 
   @@id([tenantId, deviceId])
   @@unique([tenantId, serialNumber])
   @@map("devices")
+}
+
+// Layout versions are immutable in owner events. Removed identities are retained.
+model BinCable {
+  tenantId String @map("tenant_id") @db.Uuid
+  cableId String @map("cable_id") @db.Uuid
+  binId String @map("bin_id") @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+  label String
+  version BigInt @default(1)
+  status String @default("active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  bin Bin @relation(fields: [tenantId, binId], references: [tenantId, binId], onDelete: Restrict, onUpdate: Restrict)
+  device Device @relation(fields: [tenantId, deviceId], references: [tenantId, deviceId], onDelete: Restrict, onUpdate: Restrict)
+  sensors CableSensor[]
+
+  @@id([tenantId, cableId])
+  @@index([tenantId, binId, cableId])
+  @@index([tenantId, deviceId, cableId])
+  @@map("bin_cables")
+}
+
+model CableSensor {
+  tenantId String @map("tenant_id") @db.Uuid
+  sensorId String @map("sensor_id") @db.Uuid
+  cableId String @map("cable_id") @db.Uuid
+  label String
+  position Int
+  depthM Float? @map("depth_m")
+  status String @default("active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  cable BinCable @relation(fields: [tenantId, cableId], references: [tenantId, cableId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([tenantId, sensorId])
+  @@index([tenantId, cableId, position])
+  @@map("cable_sensors")
 }
 
 model CommandReceipt {

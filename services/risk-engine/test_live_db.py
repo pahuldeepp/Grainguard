@@ -1,6 +1,7 @@
 """Live PostgreSQL tests for greenguard_risk (run `make risk-migrate` first).
 
-They run when RISK_DIRECT_URL and RISK_MIGRATION_URL are set (`set -a; . ./.env`).
+They run when RISK_DIRECT_URL, RISK_MIGRATION_URL and POSTGRES_ADMIN_URL are set.
+The admin URL registers fresh fixture ownership; runtime writes use real admission.
 Every test uses fresh random tenant IDs, so no cleanup (and no DELETE) is needed.
 """
 
@@ -8,21 +9,25 @@ import json
 import os
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from risk_engine import events
 from risk_engine.apply import APPLIED, DUPLICATE, STALE, Applier
 from risk_engine.consumer import DatabaseSink
 from risk_engine.store import PgDatabase, StoreError
+from risk_engine.policy import PolicyVersion
+from risk_engine.policy_service import PolicyService, VerifiedPrincipal
 from test_apply import validate
 from test_fakes import binding_changed, lot_changed, new_id, record, registered, telemetry
 
 APP_URL = os.environ.get("RISK_DIRECT_URL")
 POOLED_URL = os.environ.get("RISK_DATABASE_URL")
 OWNER_URL = os.environ.get("RISK_MIGRATION_URL")
+ADMIN_URL = os.environ.get("POSTGRES_ADMIN_URL")
+FIXTURE_PLACEMENTS = {}
 LATE = datetime(2030, 1, 1, tzinfo=timezone.utc)
 TENANT_TABLES = ("consumer_inbox", "device_bindings", "bin_lot_intervals", "device_risk_streams",
-                 "risk_assessments", "outbox_events")
+                 "risk_assessments", "outbox_events", "grain_policies")
 
 try:
     import psycopg
@@ -30,10 +35,39 @@ except ImportError:  # the pinned dev requirements provide it
     psycopg = None
 
 
+
+def fixture_placement(tenant):
+    """Register only fresh test tenants through the privileged bootstrap connection."""
+    if tenant not in FIXTURE_PLACEMENTS:
+        placement = {"tenantId": tenant, "shardId": "s2",
+                     "shardIncarnation": str(uuid.uuid4()), "placementEpoch": "1", "state": "active"}
+        from urllib.parse import urlsplit, urlunsplit
+        admin = urlsplit(ADMIN_URL)
+        risk = urlsplit(OWNER_URL)
+        risk_admin = urlunsplit((admin.scheme, admin.netloc, risk.path, admin.query, admin.fragment))
+        with psycopg.connect(risk_admin, autocommit=True) as conn:
+            conn.execute("INSERT INTO greenguard_internal.tenant_ownership"
+                         "(tenant_id,shard_id,shard_incarnation,placement_epoch,state)"
+                         " VALUES(%s,%s,%s,1,'active')",
+                         (tenant, placement["shardId"], placement["shardIncarnation"]))
+        FIXTURE_PLACEMENTS[tenant] = placement
+    return dict(FIXTURE_PLACEMENTS[tenant],
+                expiresAt=(datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat())
+
+
+class FixtureDatabase(PgDatabase):
+    """Supply trusted fixture routing metadata through the real transaction API."""
+    def transaction(self, tenant_id, placement=None):
+        return super().transaction(tenant_id, placement or fixture_placement(tenant_id))
+
 def sql(url, statement, params=(), tenant=None):
     with psycopg.connect(url, autocommit=True, prepare_threshold=None) as conn, conn.transaction():
         if tenant:
-            conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+            placement = fixture_placement(tenant)
+            for name, value in (("app.tenant_id", tenant), ("app.shard_id", placement["shardId"]),
+                                ("app.shard_incarnation", placement["shardIncarnation"]),
+                                ("app.placement_epoch", placement["placementEpoch"])):
+                conn.execute("SELECT set_config(%s, %s, true)", (name, value))
         cur = conn.execute(statement, params)
         return cur.fetchall() if cur.description else None
 
@@ -57,14 +91,34 @@ class _Expect:
         return True
 
 
-@unittest.skipUnless(APP_URL and OWNER_URL and psycopg, "live risk database not configured")
+@unittest.skipUnless(APP_URL and OWNER_URL and ADMIN_URL and psycopg, "live risk database not configured")
 class LiveRiskDatabaseTest(unittest.TestCase):
     def setUp(self):
-        self.db = PgDatabase(APP_URL)
+        self.db = FixtureDatabase(APP_URL)
         self.addCleanup(self.db.close)
         self.applier = Applier(self.db, "risk-live", lambda: LATE)
         self.tenant, self.site, self.bin, self.device = new_id(), new_id(), new_id(), new_id()
         self.wheat, self.canola = new_id(), new_id()
+        self.policy_service = PolicyService(self.db)
+        self.admin = VerifiedPrincipal(self.tenant, "live-admin", frozenset({"admin"}))
+        self.publish_test_policy("wheat", {"temperature_c": (25, 35, "Cel"),
+                                           "relative_humidity_percent": (65, 80, "%")})
+        self.publish_test_policy("canola", {"temperature_c": (22, 30, "Cel"),
+                                             "relative_humidity_percent": (60, 75, "%")})
+
+    def publish_test_policy(self, grain, thresholds, tenant=None):
+        tenant = tenant or self.tenant
+        principal = VerifiedPrincipal(tenant, "live-admin", frozenset({"admin"}))
+        policy_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"test-policy:{tenant}:{grain}"))
+        measurement_thresholds = {
+            metric: {"warning": warning, "critical": critical, "unit": unit}
+            for metric, (warning, critical, unit) in thresholds.items()
+        }
+        self.policy_service.publish(principal, PolicyVersion(
+            tenant, policy_id, 1, grain, None, datetime(2026, 1, 1, tzinfo=timezone.utc), None,
+            measurement_thresholds, {"warning_score": 50, "critical_score": 75},
+            True, "active", {"source": "live-test-fixture"},
+            "TEST-CALIBRATION", "live-admin", datetime(2026, 1, 1, tzinfo=timezone.utc)))
 
     def apply(self, event, applier=None):
         rec = record(event)
@@ -97,7 +151,11 @@ class LiveRiskDatabaseTest(unittest.TestCase):
             event["occurred_at"] = events.format_time(event["occurred_at"].astimezone(timezone.utc))
             event["aggregate_version"] = str(event["aggregate_version"])
             result.append(event)
-        return result
+        return [event for event in result if event["event_type"] != "risk.policy_changed"]
+
+    def risk_outbox_count(self, tenant):
+        return sql(OWNER_URL, "SELECT count(*) FROM outbox_events WHERE tenant_id = %s"
+                   " AND event_type <> 'risk.policy_changed'", (tenant,), tenant)[0][0]
 
     def test_event_time_join_and_contract_valid_outbox(self):
         self.seed()
@@ -115,6 +173,27 @@ class LiveRiskDatabaseTest(unittest.TestCase):
             validate(event)
         self.assertEqual(published[0]["causation_id"], late["event_id"])
         self.assertEqual(published[0]["traceparent"], late["traceparent"])
+
+    def test_policy_versions_select_by_bin_and_event_time_without_rewriting_history(self):
+        policy_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"test-policy:{self.tenant}:wheat"))
+        next_policy = PolicyVersion(
+            self.tenant, policy_id, 2, "wheat", None, datetime(2027, 1, 1, tzinfo=timezone.utc), None,
+            {"temperature_c": {"warning": 26.0, "critical": 36.0, "unit": "Cel"},
+             "relative_humidity_percent": {"warning": 66.0, "critical": 81.0, "unit": "%"}},
+            {"warning_score": 50, "critical_score": 75}, True, "active",
+            {"source": "live-test-fixture-v2"}, "TEST-CALIBRATION-V2", "live-admin",
+            datetime(2026, 12, 1, tzinfo=timezone.utc))
+        self.policy_service.publish(self.admin, next_policy)
+        before = self.policy_service.effective(
+            self.admin, self.bin, "wheat", datetime(2026, 10, 1, tzinfo=timezone.utc))
+        after = self.policy_service.effective(
+            self.admin, self.bin, "wheat", datetime(2027, 2, 1, tzinfo=timezone.utc))
+        self.assertEqual(before.version, 1)
+        self.assertEqual(after.version, 2)
+        self.assertEqual(before.effective_to, datetime(2027, 1, 1, tzinfo=timezone.utc))
+        other_tenant = VerifiedPrincipal(new_id(), "other-admin", frozenset({"admin"}))
+        self.assertIsNone(self.policy_service.effective(
+            other_tenant, self.bin, "wheat", datetime(2027, 2, 1, tzinfo=timezone.utc)))
 
     def test_duplicate_crash_and_replay(self):
         self.seed()
@@ -138,17 +217,17 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.apply(reading)
         self.db.transaction = original
-        self.assertEqual([self.count(t, self.tenant) for t in ("risk_assessments", "outbox_events")], [0, 0])
+        self.assertEqual([self.count("risk_assessments", self.tenant), self.risk_outbox_count(self.tenant)], [0, 0])
         self.assertEqual(sql(OWNER_URL, "SELECT count(*) FROM consumer_inbox WHERE event_id = %s",
                              (reading["event_id"],), self.tenant)[0][0], 0)
         first = self.apply(reading)
         self.assertEqual(first.outcome, APPLIED)
         self.assertEqual(self.apply(reading).outcome, DUPLICATE)  # crash after commit: redelivery
-        pooled = PgDatabase(POOLED_URL or APP_URL)  # replay through PgBouncer when configured
+        pooled = FixtureDatabase(POOLED_URL or APP_URL)  # replay through PgBouncer when configured
         self.addCleanup(pooled.close)
         replay = self.apply(reading, Applier(pooled, "risk-replay", lambda: LATE))
         self.assertEqual((replay.outcome, replay.event_id), (DUPLICATE, first.event_id))
-        self.assertEqual(self.count("outbox_events", self.tenant), 1)
+        self.assertEqual(self.risk_outbox_count(self.tenant), 1)
 
     def test_stale_inventory_cannot_regress(self):
         other_bin = new_id()
@@ -192,7 +271,7 @@ class LiveRiskDatabaseTest(unittest.TestCase):
         self.assertEqual(self.apply(change).late_assessments, 1)
         self.assertEqual(self.apply(change).outcome, DUPLICATE)
         self.assertEqual(self.count("risk_assessment_invalidations", self.tenant), 1)
-        self.assertEqual(self.count("outbox_events", self.tenant), 3)
+        self.assertEqual(self.risk_outbox_count(self.tenant), 3)
         invalidation = [e for e in self.outbox(self.tenant)
                         if e["event_type"] == "risk.assessment_invalidated"]
         self.assertEqual(len(invalidation), 1)
@@ -255,11 +334,13 @@ class LiveRiskDatabaseTest(unittest.TestCase):
                    " AND source_topic = %s AND slot = %s", (rec.topic, offset % 1000))
         self.assertEqual(rows, [(offset, "invalid_measurements")])
 
-    def copy_to(self, table, where, params, intruder):
+    def copy_to(self, table, where, params, intruder, policy_id=None):
         """Insert tenant A's row into `table` again for `intruder`, keeping every identifier."""
         row = sql(OWNER_URL, f"SELECT to_jsonb(t) FROM {table} t WHERE tenant_id = %s AND {where}",
                   (self.tenant, *params), self.tenant)[0][0]
         row["tenant_id"] = intruder
+        if policy_id is not None:
+            row["policy_id"] = policy_id
         sql(OWNER_URL, f"INSERT INTO {table} SELECT * FROM jsonb_populate_record(NULL::{table}, %s::jsonb)",
             (json.dumps(row),), intruder)
 
@@ -270,7 +351,11 @@ class LiveRiskDatabaseTest(unittest.TestCase):
                                       " WHERE tenant_id = %s", (self.tenant,), self.tenant)[0]
         intruder = new_id()
         self.seed(intruder)  # same device/bin/lot ids, now owned by the second tenant
-        self.copy_to("risk_assessments", "assessment_id = %s", (assessment_id,), intruder)
+        self.publish_test_policy("wheat", {"temperature_c": (25, 35, "Cel"),
+                                            "relative_humidity_percent": (65, 80, "%")}, intruder)
+        second_policy = sql(OWNER_URL, "SELECT policy_id FROM grain_policies WHERE tenant_id = %s"
+                            " AND grain_type = 'wheat'", (intruder,), intruder)[0][0]
+        self.copy_to("risk_assessments", "assessment_id = %s", (assessment_id,), intruder, str(second_policy))
         self.copy_to("outbox_events", "event_id = %s", (event_id,), intruder)
         for tenant in (self.tenant, intruder):
             with self.subTest(tenant=tenant):

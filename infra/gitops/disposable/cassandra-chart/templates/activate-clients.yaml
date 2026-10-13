@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: greenguard-cassandra-activator
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: greenguard-cassandra-activator
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    resourceNames: [greenguard-cassandra-0]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: greenguard-cassandra-activator
+subjects:
+  - kind: ServiceAccount
+    name: greenguard-cassandra-activator
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: greenguard-cassandra-activator
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenguard-cassandra-activate-clients
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app: greenguard-cassandra-activator
+        greenguard.io/cassandra-job: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: greenguard-cassandra-activator
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: activate
+          image: {{ .Values.cassandraImage | quote }}
+          command: ["python3", "/bootstrap/activate.py"]
+          env:
+            - { name: CASSANDRA_EXPECTED_IMAGE, value: {{ .Values.cassandraImage | quote }} }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: bootstrap, mountPath: /bootstrap, readOnly: true }
+            - { name: tls, mountPath: /cql-tls, readOnly: true }
+            - { name: auth, mountPath: /auth, readOnly: true }
+      volumes:
+        - name: bootstrap
+          configMap: { name: greenguard-cassandra-bootstrap }
+        - name: tls
+          secret:
+            secretName: {{ .Values.tlsSecret | quote }}
+            items:
+              - { key: ca.crt, path: ca.crt }
+        - name: auth
+          secret:
+            secretName: {{ .Values.authSecret | quote }}
+            items:
+              - { key: admin-password, path: admin-password }

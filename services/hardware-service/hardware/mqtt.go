@@ -8,12 +8,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	common "greenguard.local/go-common"
 	"log"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/jackc/pgx/v5"
 )
+
+var ErrPermanentMQTTAck = errors.New("permanent invalid device acknowledgement")
+
+func permanentMQTTAck(err error) error {
+	return fmt.Errorf("%w: %v", ErrPermanentMQTTAck, err)
+}
 
 const mqttTopicPrefix = "greenguard/"
 
@@ -110,11 +118,22 @@ func (d MQTTDispatcher) PublishPending(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		token := d.Client.Publish(commandTopic(item.Command), 1, false, data)
-		if !token.WaitTimeout(5 * time.Second) {
-			return errors.New("MQTT publish timeout; configuration remains pending")
+		err = d.Store.WithExternalAdmission(ctx, item.Command.TenantID, func() error {
+			token := d.Client.Publish(commandTopic(item.Command), 1, false, data)
+			if !token.WaitTimeout(5 * time.Second) {
+				log.Printf("MQTT publish timed out for pending hardware command=%s; it remains pending", item.Command.CommandID)
+				return nil
+			}
+			if err = token.Error(); err != nil {
+				log.Printf("MQTT publish failed for pending hardware command=%s: %v", item.Command.CommandID, err)
+				return nil
+			}
+			return nil
+		})
+		if errors.Is(err, common.ErrTenantQuiescing) {
+			continue
 		}
-		if err = token.Error(); err != nil {
+		if err != nil {
 			return err
 		}
 	}
@@ -126,33 +145,43 @@ func (d MQTTDispatcher) PublishPending(ctx context.Context) error {
 func (d MQTTDispatcher) HandleAck(ctx context.Context, topic string, data []byte) (Result, error) {
 	var m ConfigureMessage
 	if err := json.Unmarshal(data, &m); err != nil {
-		return Result{}, err
+		return Result{}, permanentMQTTAck(err)
 	}
 	if m.Status != "configured" || !strings.HasPrefix(topic, mqttTopicPrefix) {
-		return Result{}, errors.New("unsupported device acknowledgement")
+		return Result{}, permanentMQTTAck(errors.New("unsupported device acknowledgement"))
 	}
 	if !strings.EqualFold(topic, mqttTopicPrefix+m.TenantID+"/"+m.AssetID+"/ack") {
-		return Result{}, errors.New("ack topic identity mismatch")
+		return Result{}, permanentMQTTAck(errors.New("ack topic identity mismatch"))
 	}
 	if !validIdentity(m) {
-		return Result{}, ErrInvalidCommand
+		return Result{}, permanentMQTTAck(ErrInvalidCommand)
 	}
 	c, err := d.Store.PendingCommand(ctx, m.TenantID, m.CommandID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Result{}, permanentMQTTAck(errors.New("no pending command matches acknowledgement"))
+		}
 		return Result{}, err
 	}
 	expected := messageFor(c, "configured")
 	if m.TenantID != expected.TenantID || m.AssetID != expected.AssetID || m.DeviceID != expected.DeviceID || m.SagaID != expected.SagaID || m.SagaVersion != expected.SagaVersion || m.FencingToken != expected.FencingToken {
-		return Result{}, errors.New("ack command identity mismatch")
+		return Result{}, permanentMQTTAck(errors.New("ack command identity mismatch"))
 	}
 	secret, err := d.Store.ConfigureSecret(ctx, c)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrMissingAckSecret) {
+			return Result{}, permanentMQTTAck(errors.New("device acknowledgement key is unavailable"))
+		}
 		return Result{}, err
 	}
 	if !m.Verify(secret) {
-		return Result{}, errors.New("invalid device attestation")
+		return Result{}, permanentMQTTAck(errors.New("invalid device attestation"))
 	}
-	return d.Store.ConfirmConfiguration(ctx, c, secret)
+	result, err := d.Store.ConfirmConfiguration(ctx, c, secret)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrInvalidCommand) || errors.Is(err, ErrStaleCommand) {
+		return Result{}, permanentMQTTAck(err)
+	}
+	return result, err
 }
 func validIdentity(m ConfigureMessage) bool {
 	return valid(Command{TenantID: m.TenantID, SagaID: m.SagaID, CommandID: m.CommandID, Step: hardwareStepConfigure, SagaVersion: m.SagaVersion, FencingToken: m.FencingToken, Payload: struct {

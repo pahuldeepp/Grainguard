@@ -1,0 +1,77 @@
+{{- if and .Values.enabled .Values.networkPolicy.enabled }}
+{{- if eq (len .Values.networkPolicy.healthProbeNamespaces) 0 }}
+{{- fail "networkPolicy.healthProbeNamespaces must contain at least one selector when NetworkPolicy is enabled" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ml-scoring.name" . }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ml-scoring.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- toYaml .Values.networkPolicy.operationsSources | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.health.port }}
+    - from:
+        {{- range .Values.networkPolicy.healthProbeNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .selector | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.health.port }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.connectivity.kafka.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.connectivity.kafka.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.connectivity.kafka.port }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.connectivity.postgres.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.connectivity.postgres.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.connectivity.postgres.port }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.connectivity.dns.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.connectivity.dns.podSelector | nindent 14 }}
+      ports:
+        {{- range .Values.connectivity.dns.ports }}
+        - protocol: UDP
+          port: {{ . }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- if .Values.connectivity.otel.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.connectivity.otel.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.connectivity.otel.podSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.connectivity.otel.port }}
+    {{- end }}
+{{- end }}

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import { AlertsApi, type AlertPage, type AlertView } from "./alerts-api";
 import { formatTimestamp, relativeTime } from "./format";
+import { binLabel } from "./bin-label";
 import {
   alertStateMarker,
   nextOpenAlert,
@@ -18,15 +19,48 @@ import {
   PageHeader,
   StatusMarker,
 } from "./ui";
+import type { ProvisioningApi } from "./provisioning";
 
 const filters = [
   { value: "open", label: "Open" },
   { value: "acknowledged", label: "Acknowledged" },
-  { value: "resolved", label: "Resolved" },
   { value: "all", label: "All" },
 ] as const;
 type Filter = (typeof filters)[number]["value"];
 const countable = ["open", "acknowledged", "resolved"] as const;
+
+function selectedAlertFor(
+  alertId: string | undefined,
+  acknowledgedHere: ReadonlySet<string>,
+  items: AlertView[],
+  seen: ReadonlyMap<string, AlertView>,
+): AlertView | undefined {
+  if (!alertId) return undefined;
+  if (acknowledgedHere.has(alertId)) return seen.get(alertId);
+  return items.find((alert) => alert.alertId === alertId) ?? seen.get(alertId);
+}
+
+function emptyAlertsTitle(state: Filter): string {
+  if (state === "open") return "No open alerts. Bins are within limits.";
+  const qualifier = state === "all" ? "" : `${state} `;
+  return `No ${qualifier}alerts in this view.`;
+}
+
+function historyWarning(status: string, reasonCode?: string | null): string {
+  if (reasonCode === "incomplete_lifecycle")
+    return "Some alert lifecycle transitions are missing from the stored history. The transitions still available are shown below.";
+  const reason = reasonCode ? ` (${reasonCode})` : "";
+  return `History is ${status}${reason}.`;
+}
+
+function historyActorLabel(actor: {
+  isYou: boolean;
+  handle?: string | null;
+}): string {
+  if (actor.isYou) return " · You";
+  if (actor.handle) return ` · ${actor.handle}`;
+  return " · Team member";
+}
 
 function isFilter(value: string | null): value is Filter {
   return filters.some((f) => f.value === value);
@@ -71,156 +105,19 @@ function When({ iso }: Readonly<{ iso: string }>) {
 interface Confirmation {
   alertId: string;
   binId: string;
+  binName?: string | null;
   nextId: string | null;
-}
-
-function emptyListCopy(state: Filter) {
-  if (state === "open") {
-    return {
-      title: "No open alerts. Bins are within limits.",
-      message: "New alerts appear here when a bin crosses a risk limit.",
-    };
-  }
-  if (state === "all") {
-    return { title: "No alerts in this view.", message: "Try another state." };
-  }
-  return {
-    title: `No ${state} alerts in this view.`,
-    message: "Try another state.",
-  };
-}
-
-function AlertDetailResult({
-  alert,
-  pending,
-  failed,
-  onRetry,
-  onAcknowledge,
-}: Readonly<{
-  alert?: AlertView;
-  pending: boolean;
-  failed: boolean;
-  onRetry: () => void;
-  onAcknowledge: (alert: AlertView, primary?: boolean) => ReactNode;
-}>) {
-  if (alert) {
-    return (
-      <AlertDetail
-        alert={alert}
-        action={alert.state === "open" ? onAcknowledge(alert, true) : null}
-      />
-    );
-  }
-  if (pending) return <Loading label="Loading alert…" rows={2} />;
-  if (failed) {
-    return (
-      <ErrorState
-        message="Alerts are temporarily unavailable."
-        onRetry={onRetry}
-      />
-    );
-  }
-  return (
-    <>
-      <PageHeader id="alerts-title" title="Alert not found" />
-      <EmptyState title="This alert is not in the current list.">
-        It may have been resolved or be on another page. Go back to the list to
-        find it.
-      </EmptyState>
-    </>
-  );
-}
-
-function AlertListResult({
-  items,
-  state,
-  after,
-  onRemember,
-  onAcknowledge,
-}: Readonly<{
-  items: AlertView[];
-  state: Filter;
-  after?: string;
-  onRemember: (id: string) => void;
-  onAcknowledge: (alert: AlertView, primary?: boolean) => ReactNode;
-}>) {
-  if (items.length === 0) {
-    const copy = emptyListCopy(state);
-    return <EmptyState title={copy.title}>{copy.message}</EmptyState>;
-  }
-  return (
-    <ul className="rows">
-      {items.map((alert) => {
-        const severity = severityMarker(alert.severity);
-        const titleId = `alert-title-${alert.alertId}`;
-        const stateClass = alert.state === "open" ? severity.kind : "closed";
-        return (
-          <li
-            key={alert.alertId}
-            className={`alert-row alert-${stateClass} sev-${severity.kind}`}
-          >
-            <div className="alert-main">
-              <Link
-                id={`alert-link-${alert.alertId}`}
-                to={alertUrl(state, after, alert.alertId)}
-                className="alert-title row-title"
-                onClick={() => onRemember(alert.alertId)}
-              >
-                <span id={titleId} className="alert-title-text">
-                  <StatusMarker marker={severity} />
-                  <span className="sep" aria-hidden="true">
-                    {" · "}
-                  </span>
-                  <span className="bin-id">Bin {alert.binId}</span>
-                </span>
-              </Link>
-              <span className="meta">
-                Opened <When iso={alert.openedAt} />
-              </span>
-            </div>
-            <div className="alert-side">
-              <span className="score">
-                <span className="meta">Score</span>{" "}
-                <span className="num data">{alert.score}</span>
-              </span>
-              {state !== "open" && (
-                <StatusMarker marker={alertStateMarker(alert.state)} />
-              )}
-              {alert.state === "open" && onAcknowledge(alert)}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function AlertPager({
-  state,
-  after,
-  nextCursor,
-}: Readonly<{ state: Filter; after?: string; nextCursor?: string | null }>) {
-  if (!after && !nextCursor) return null;
-  return (
-    <div className="pager">
-      {after && (
-        <Link className="btn btn-secondary" to={listUrl(state)}>
-          First page
-        </Link>
-      )}
-      {nextCursor && (
-        <Link className="btn btn-secondary" to={listUrl(state, nextCursor)}>
-          Next page
-        </Link>
-      )}
-    </div>
-  );
 }
 
 export function AlertsView({
   api,
+  provisioningApi,
   sessionId,
-}: Readonly<{ api: AlertsApi | null; sessionId?: string }>) {
+}: Readonly<{
+  api: AlertsApi | null;
+  provisioningApi?: ProvisioningApi | null;
+  sessionId?: string;
+}>) {
   const [params, setParams] = useSearchParams();
   const stateParam = params.get("state");
   const state: Filter = isFilter(stateParam) ? stateParam : "open";
@@ -301,6 +198,7 @@ export function AlertsView({
       setConfirmation({
         alertId: alert.alertId,
         binId: alert.binId,
+        binName: alert.binName,
         nextId: next?.alertId ?? null,
       });
     },
@@ -312,13 +210,12 @@ export function AlertsView({
   });
 
   const items = sortAlerts(page.data?.items ?? []);
-  let selected: AlertView | undefined;
-  if (alertId) {
-    selected = seen.current.get(alertId);
-    if (!acknowledgedHere.current.has(alertId)) {
-      selected = items.find((item) => item.alertId === alertId) ?? selected;
-    }
-  }
+  const selected = selectedAlertFor(
+    alertId,
+    acknowledgedHere.current,
+    items,
+    seen.current,
+  );
   const inDetail = Boolean(alertId);
 
   // Bring the confirmation into view: the button that caused it may be far down the page.
@@ -376,7 +273,9 @@ export function AlertsView({
     >
       {confirmation && (
         <Banner kind="ok">
-          <span>Acknowledged Bin {confirmation.binId}.</span>
+          <span>
+            Acknowledged {binLabel(confirmation.binId, confirmation.binName)}.
+          </span>
           <span className="banner-actions">
             {inDetail && (
               <Link to={listUrl(state, after)} className="banner-link">
@@ -419,13 +318,37 @@ export function AlertsView({
             <span>{error}</span>
           </p>
         )}
-        <AlertDetailResult
-          alert={selected}
-          pending={page.isPending}
-          failed={page.isError}
-          onRetry={() => void page.refetch()}
-          onAcknowledge={acknowledgeButton}
-        />
+        {selected && (
+          <AlertDetail
+            alert={selected}
+            api={api}
+            provisioningApi={provisioningApi ?? null}
+            sessionId={sessionId}
+            action={
+              selected.state === "open"
+                ? acknowledgeButton(selected, true)
+                : null
+            }
+          />
+        )}
+        {!selected && page.isPending && (
+          <Loading label="Loading alert…" rows={2} />
+        )}
+        {!selected && !page.isPending && page.isError && (
+          <ErrorState
+            message="Alerts are temporarily unavailable."
+            onRetry={() => void page.refetch()}
+          />
+        )}
+        {!selected && !page.isPending && !page.isError && (
+          <>
+            <PageHeader id="alerts-title" title="Alert not found" />
+            <EmptyState title="This alert is not in the current list.">
+              It may have been resolved or be on another page. Go back to the
+              list to find it.
+            </EmptyState>
+          </>
+        )}
       </section>
     );
   }
@@ -452,25 +375,22 @@ export function AlertsView({
       </PageHeader>
       {confirmationBanner}
       <div className="toolbar">
-        <div className="field">
-          <label htmlFor="alert-state">State</label>
-          <select
-            id="alert-state"
-            className="select"
-            value={state}
-            onChange={(event) => {
-              setConfirmation(null);
-              const next = event.target.value as Filter;
-              setParams(listUrl(next).search.replace(/^\?/, ""));
-            }}
-          >
-            {filters.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-                {countFor(f.value)}
-              </option>
-            ))}
-          </select>
+        <div className="segmented" role="group" aria-label="Alert state">
+          {filters.map((filter) => (
+            <button
+              key={filter.value}
+              type="button"
+              className="segment"
+              aria-pressed={state === filter.value}
+              onClick={() => {
+                setConfirmation(null);
+                setParams(listUrl(filter.value).search.replace(/^\?/, ""));
+              }}
+            >
+              {filter.label}
+              {countFor(filter.value)}
+            </button>
+          ))}
         </div>
       </div>
       {page.isPending && <Loading label="Loading alerts…" />}
@@ -486,21 +406,76 @@ export function AlertsView({
           <span>{error}</span>
         </p>
       )}
-      {page.isSuccess && (
-        <AlertListResult
-          items={items}
-          state={state}
-          after={after}
-          onRemember={rememberPosition}
-          onAcknowledge={acknowledgeButton}
-        />
-      )}
-      {page.isSuccess && (
-        <AlertPager
-          state={state}
-          after={after}
-          nextCursor={page.data.nextCursor}
-        />
+      {page.isSuccess &&
+        (items.length === 0 ? (
+          <EmptyState title={emptyAlertsTitle(state)}>
+            {state === "open"
+              ? "New alerts appear here when a bin crosses a risk limit."
+              : "Try another state."}
+          </EmptyState>
+        ) : (
+          <ul className="rows">
+            {items.map((alert) => {
+              const severity = severityMarker(alert.severity);
+              const titleId = `alert-title-${alert.alertId}`;
+              return (
+                <li
+                  key={alert.alertId}
+                  className={`alert-row alert-${alert.state === "open" ? severity.kind : "closed"} sev-${severity.kind}`}
+                >
+                  <div className="alert-main">
+                    <Link
+                      id={`alert-link-${alert.alertId}`}
+                      to={alertUrl(state, after, alert.alertId)}
+                      className="alert-title row-title"
+                      onClick={() => rememberPosition(alert.alertId)}
+                    >
+                      <span id={titleId} className="alert-title-text">
+                        <StatusMarker marker={severity} />
+                        <span className="sep" aria-hidden="true">
+                          {" · "}
+                        </span>
+                        <span className="bin-id">
+                          {binLabel(alert.binId, alert.binName)}
+                        </span>
+                      </span>
+                    </Link>
+                    {alert.siteName?.trim() && (
+                      <span className="site-name">{alert.siteName.trim()}</span>
+                    )}
+                    <span className="meta">
+                      Opened <When iso={alert.openedAt} />
+                    </span>
+                  </div>
+                  <div className="alert-side">
+                    <span className="score">
+                      <span className="meta">Score</span>{" "}
+                      <span className="num data">{alert.score}</span>
+                    </span>
+                    <StatusMarker marker={alertStateMarker(alert.state)} />
+                    {alert.state === "open" && acknowledgeButton(alert)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ))}
+      {page.isSuccess && (after || page.data.nextCursor) && (
+        <div className="pager">
+          {after && (
+            <Link className="btn btn-secondary" to={listUrl(state)}>
+              First page
+            </Link>
+          )}
+          {page.data.nextCursor && (
+            <Link
+              className="btn btn-secondary"
+              to={listUrl(state, page.data.nextCursor)}
+            >
+              Next page
+            </Link>
+          )}
+        </div>
       )}
     </section>
   );
@@ -508,8 +483,52 @@ export function AlertsView({
 
 function AlertDetail({
   alert,
+  api,
+  provisioningApi,
+  sessionId,
   action,
-}: Readonly<{ alert: AlertView; action: ReactNode }>) {
+}: Readonly<{
+  alert: AlertView;
+  api: AlertsApi;
+  provisioningApi: ProvisioningApi | null;
+  sessionId: string;
+  action: ReactNode;
+}>) {
+  const [historyCursor, setHistoryCursor] = useState<string | undefined>();
+  const history = useQuery({
+    queryKey: ["alerts", sessionId, "history", alert.alertId, historyCursor],
+    queryFn: () => api.history(alert.alertId, historyCursor),
+    retry: false,
+    gcTime: 0,
+    staleTime: 0,
+  });
+  const session = useQuery({
+    queryKey: ["alerts", sessionId, "notification-role"],
+    queryFn: () => provisioningApi!.session(),
+    enabled: Boolean(provisioningApi),
+    retry: false,
+    gcTime: 0,
+  });
+  const mayViewNotifications = Boolean(
+    session.data?.roles.some((role) => role === "operator" || role === "admin"),
+  );
+  const [notificationCursor, setNotificationCursor] = useState<
+    string | undefined
+  >();
+  const notifications = useQuery({
+    queryKey: [
+      "alerts",
+      sessionId,
+      "notifications",
+      alert.alertId,
+      notificationCursor,
+    ],
+    queryFn: () => api.notifications(alert.alertId, notificationCursor),
+    enabled: mayViewNotifications,
+    retry: false,
+    gcTime: 0,
+    staleTime: 0,
+  });
   const severity = severityMarker(alert.severity);
   return (
     <>
@@ -517,7 +536,12 @@ function AlertDetail({
         <StatusMarker marker={alertStateMarker(alert.state)} />
       </PageHeader>
       <p className="bin-line">
-        Bin <span className="mono">{alert.binId}</span>
+        <Link to={`/bins/${encodeURIComponent(alert.binId)}`}>
+          {binLabel(alert.binId, alert.binName)}
+        </Link>
+        {alert.siteName?.trim() && (
+          <span className="site-name">{alert.siteName.trim()}</span>
+        )}
       </p>
       {action && <div className="form-actions detail-actions">{action}</div>}
       <section className="section" aria-labelledby="alert-facts">
@@ -533,30 +557,192 @@ function AlertDetail({
           <dd>{alert.ruleId}</dd>
           <dt>Escalation level</dt>
           <dd className="num">{alert.escalationLevel}</dd>
-          <dt>Version</dt>
-          <dd className="num">{alert.version}</dd>
-          <dt>Alert ID</dt>
-          <dd className="mono">{alert.alertId}</dd>
         </dl>
       </section>
+      <details className="technical-details section">
+        <summary>Technical identifiers</summary>
+        <dl className="kv facts">
+          <dt>Alert ID</dt>
+          <dd className="mono">{alert.alertId}</dd>
+          <dt>Version</dt>
+          <dd className="num">{alert.version}</dd>
+        </dl>
+      </details>
       <section className="section" aria-labelledby="alert-history">
         <h2 id="alert-history">History</h2>
-        <ol className="timeline">
-          <li>
-            <span className="action">Opened</span>
-            <span className="when">
-              <When iso={alert.openedAt} />
-            </span>
-          </li>
-          {alert.acknowledgedAt && (
-            <li>
-              <span className="action">Acknowledged</span>
-              <span className="when">
-                <When iso={alert.acknowledgedAt} />
-              </span>
-            </li>
-          )}
-        </ol>
+        {history.isPending && <Loading label="Loading alert history…" />}
+        {history.isError && (
+          <ErrorState
+            message="Alert history is temporarily unavailable."
+            onRetry={() => void history.refetch()}
+          />
+        )}
+        {history.isSuccess && (
+          <>
+            {history.data.source.status !== "ok" &&
+              history.data.source.status !== "empty" && (
+                <Banner kind="warning">
+                  {historyWarning(
+                    history.data.source.status,
+                    history.data.source.reasonCode,
+                  )}
+                </Banner>
+              )}
+            {!history.data.complete && (
+              <p className="meta">
+                This alert’s current state is available, but its stored
+                transition history has gaps. Missing events are not
+                reconstructed from current state.
+              </p>
+            )}
+            {history.data.items.length ? (
+              <ol className="timeline">
+                {history.data.items.map((transition) => (
+                  <li key={transition.transitionId}>
+                    <span className="action">
+                      {transition.type
+                        .replaceAll("_", " ")
+                        .replace(/^./, (first) => first.toUpperCase())}
+                      {historyActorLabel(transition.actor)}
+                    </span>
+                    <span className="when">
+                      <When iso={transition.occurredAt} />
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <EmptyState
+                title={
+                  history.data.complete
+                    ? "No transitions were recorded."
+                    : "No lifecycle transitions are available for this alert."
+                }
+              />
+            )}
+            {history.data.nextCursor && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() =>
+                  setHistoryCursor(history.data.nextCursor ?? undefined)
+                }
+              >
+                Load older transitions
+              </button>
+            )}
+          </>
+        )}
+      </section>
+      <section className="section" aria-labelledby="delivery-history-title">
+        <h2 id="delivery-history-title">Notification delivery history</h2>
+        {!provisioningApi && (
+          <p className="meta">
+            Notification history is not configured in this dashboard session.
+          </p>
+        )}
+        {provisioningApi && session.isPending && (
+          <Loading label="Checking notification history access…" />
+        )}
+        {provisioningApi && session.isError && (
+          <ErrorState
+            message="Could not verify access to notification history."
+            onRetry={() => void session.refetch()}
+          />
+        )}
+        {provisioningApi && session.isSuccess && !mayViewNotifications && (
+          <p className="meta">
+            Operator or administrator access is required to view notification
+            delivery history.
+          </p>
+        )}
+        {mayViewNotifications && notifications.isPending && (
+          <Loading label="Loading notification history…" />
+        )}
+        {mayViewNotifications && notifications.isError && (
+          <ErrorState
+            message="Notification history is temporarily unavailable."
+            onRetry={() => void notifications.refetch()}
+          />
+        )}
+        {mayViewNotifications && notifications.isSuccess && (
+          <>
+            <dl className="kv facts">
+              <dt>Warning channel</dt>
+              <dd>
+                {notifications.data.sources.warning.status}
+                {notifications.data.sources.warning.reasonCode
+                  ? ` · ${notifications.data.sources.warning.reasonCode}`
+                  : ""}
+              </dd>
+              <dt>Critical channel</dt>
+              <dd>
+                {notifications.data.sources.critical.status === "not_configured"
+                  ? "Not configured"
+                  : notifications.data.sources.critical.status}
+                {notifications.data.sources.critical.reasonCode
+                  ? ` · ${notifications.data.sources.critical.reasonCode}`
+                  : ""}
+              </dd>
+              <dt>Intent source</dt>
+              <dd>{notifications.data.sources.intents.status}</dd>
+            </dl>
+            {notifications.data.items.length ? (
+              <ul className="rows">
+                {notifications.data.items.map((item) => (
+                  <li
+                    className="service-row"
+                    key={`${item.intentId}:${item.deliveryGeneration}`}
+                  >
+                    <div>
+                      <h3>
+                        {item.channel} · {item.state.replaceAll("_", " ")}
+                      </h3>
+                      <p className="meta">
+                        {item.transition.replaceAll("_", " ")} ·{" "}
+                        {item.severity ?? "severity unavailable"} · generation{" "}
+                        {item.deliveryGeneration}
+                      </p>
+                      {item.queuedAt && (
+                        <p className="meta">
+                          Queued <When iso={item.queuedAt} />
+                        </p>
+                      )}
+                      {item.reasonCode && (
+                        <p className="meta">Reason: {item.reasonCode}</p>
+                      )}
+                      {item.events.length > 0 && (
+                        <p className="meta">
+                          {item.events
+                            .map((event) => `${event.kind}: ${event.outcome}`)
+                            .join(" · ")}
+                          {item.attemptsTruncated
+                            ? " · some attempts omitted"
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState title="No notification attempts are available from the configured sources." />
+            )}
+            {notifications.data.nextCursor && (
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() =>
+                  setNotificationCursor(
+                    notifications.data.nextCursor ?? undefined,
+                  )
+                }
+              >
+                Load older attempts
+              </button>
+            )}
+          </>
+        )}
       </section>
     </>
   );

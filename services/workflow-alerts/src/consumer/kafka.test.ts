@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import kafkaJs from "kafkajs";
-import { handleConsumerCrash, registerSnappyCodec } from "./kafka.js";
+import {
+  handleConsumerCrash,
+  registerSnappyCodec,
+  RISK_TOPICS,
+} from "./kafka.js";
 
 const { CompressionCodecs, CompressionTypes } = kafkaJs;
+
+test("subscribes to both risk assessment contract versions and invalidations", () => {
+  assert.deepEqual(RISK_TOPICS, [
+    "greenguard.risk.assessment.v1",
+    "greenguard.risk.assessment.v2",
+    "greenguard.risk.assessment_invalidated.v1",
+  ]);
+});
 
 test("Snappy codec decodes raw and Kafka Xerial-framed batches", async () => {
   registerSnappyCodec();
@@ -36,4 +48,18 @@ test("a non-restartable consumer crash removes readiness", () => {
   assert.equal(ready, true);
   handleConsumerCrash(false, fail);
   assert.equal(ready, false);
+});
+
+test("risk transport namespace isolates subscriptions and quarantine", async () => {
+  const { riskTransportTopics, RISK_TOPICS } = await import("./kafka.js");
+  assert.deepEqual(riskTransportTopics().risk, [...RISK_TOPICS]);
+  assert.deepEqual(riskTransportTopics("provisioning-demo."), {
+    risk: RISK_TOPICS.map((topic) => "provisioning-demo." + topic),
+    quarantine: "provisioning-demo.greenguard.quarantine.v1",
+  });
+  for (const invalid of ["bad space.", "é.", "..", "a".repeat(249)])
+    assert.throws(
+      () => riskTransportTopics(invalid),
+      /invalid KAFKA_TOPIC_PREFIX/,
+    );
 });

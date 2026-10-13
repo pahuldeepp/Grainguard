@@ -65,10 +65,8 @@ async function queue(
     "billing_command",
     commandId,
     1n,
-    {
-      type: "billing.command_requested",
-      payload: { command_id: commandId, kind },
-    },
+    "billing.command_requested",
+    { command_id: commandId, kind },
     ctx,
   );
   await audit(

@@ -1,0 +1,93 @@
+
+> @greenguard/bff@0.1.0 test
+> npm run build && node --test "dist/**/*.test.js"
+
+
+> @greenguard/bff@0.1.0 build
+> npm run build -w @greenguard/membership-client && tsc
+
+
+> @greenguard/membership-client@0.1.0 build
+> npm run build:deps && tsc
+
+
+> @greenguard/membership-client@0.1.0 build:deps
+> npm run build -w @greenguard/tenant-auth
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+✔ alert list and acknowledgement forward bearer, cursor and concurrency headers without tenant override (15.066917ms)
+✔ GraphQL acknowledge accepts the owner command receipt after commit (34.884458ms)
+✔ viewer cannot acknowledge and invalid cursors never reach the owner (0.2315ms)
+✔ alert transition history forwards only the owner cursor and rejects malformed cursors (2.495792ms)
+✔ alert notifications enforce operator role and verify alert ownership before notification owners (7.694167ms)
+✔ GraphQL alert page maps owner data and carries an opaque cursor (5.684792ms)
+✔ request loader batches distinct IDs, deduplicates repeats, and never reuses a tenant result (18.472167ms)
+✔ batch response cannot inject an unrequested device (0.571875ms)
+✔ ENT-06 GraphQL preserves Read API entitlement denial (50.882042ms)
+✔ live feed validates scope and reports Redis health (3.48775ms)
+✔ cluster connection events restore live feed subscriptions after reconnect (0.683083ms)
+✔ a still-valid JWT loses BFF access after membership.changed (58.44275ms)
+✔ HTTP GraphQL verifies the bearer before executing a tenant-scoped query (19.755958ms)
+✔ HTTP GraphQL carries a valid caller trace into the saga start request (9.443709ms)
+BFF rate limiter unavailable Error: rate_check_timeout
+    at Timeout.<anonymous> (file:///Users/pahuldeepsingh/Documents/Codex/2026-09-26/greenguard-domain-product/services/bff/dist/rate-limit.js:9:49)
+    at listOnTimeout (node:internal/timers:685:17)
+    at process.processTimers (node:internal/timers:618:7)
+✔ readiness is separate from liveness and a stalled rate check is bounded (27.503125ms)
+✔ notification history composes owner APIs, binds alert and intent generation, and keeps critical explicitly unconfigured (16.887458ms)
+✔ notification history retains owner intents with explicit partial delivery coverage (1.197542ms)
+✔ notification history maps owner network failures to a controlled unavailable result (0.176833ms)
+✔ notification history drops malformed intents and reports partial coverage (0.419208ms)
+✔ notification history rejects viewer access and malformed owner pages (0.427416ms)
+✔ forwards bearer and idempotency key without accepting a caller tenant (15.562583ms)
+✔ enforces roles before any upstream request (0.226ms)
+✔ rejects invalid provisioning idempotency keys before an upstream call (1.024667ms)
+✔ preserves owner not-found for a foreign saga (0.677042ms)
+✔ rejects dot-segment saga IDs before constructing owner paths (0.262375ms)
+✔ rejects cleartext upstream except loopback (0.101125ms)
+✔ forwards only a valid incoming traceparent to the saga API (0.797084ms)
+✔ status and redrive forward only a valid traceparent (0.777666ms)
+✔ only registered, untampered persisted operations execute (2.117333ms)
+✔ cost gate bounds aliases, nesting, fragments, and operation count (1.116791ms)
+✔ all shipped operation documents fit the resolver budget and new hashes stay pinned (1.57675ms)
+✔ rate limit checks have a bounded wait (5.830375ms)
+✔ operation costs separate cheap, history, search, and provisioning traffic (0.657459ms)
+✔ alert acknowledgements and provisioning use separate rate buckets (0.21675ms)
+✔ two replicas use tenant-scoped shared Redis keys and opaque user identifiers (0.224ms)
+✔ machine API keys get a separate tenant-scoped Redis bucket (0.135458ms)
+✔ machine principal may use telemetry reads but cannot run mutations or session (44.481041ms)
+✔ BFF rejects exhausted requests before reaching GraphQL with Retry-After (10.975333ms)
+✔ ReadClient forwards bearer and maps each owning store's records (20.029458ms)
+✔ ReadClient preserves opaque upstream errors and rejects unsafe URL (154.423583ms)
+✔ ReadClient rejects dot-segment IDs before URL normalization (0.437041ms)
+✔ reading versions preserve large wire strings and reject ambiguous objects (0.52975ms)
+✔ site cursor and rollup queries preserve owner routing and bearer (0.704083ms)
+✔ bin latest and trend preserve sensor, policy, freshness and range metadata (0.865541ms)
+✔ safe GET retries transient failures at most three times (4.246333ms)
+✔ safe GET does not retry an owner authorization failure (0.296958ms)
+✔ read timeout obeys one overall deadline and never retries POST batches (62.290584ms)
+✔ a prompt header with a stalled body uses the per-attempt deadline (38.910333ms)
+✔ breaker rejects without upstream calls then recovers after a successful probe (8.95875ms)
+✔ a failed recovery probe reopens the breaker for another cooldown (4.303083ms)
+✔ a pre-trip success cannot close an open breaker or clear its recovery probe (4.165834ms)
+✔ saga mTLS is opt-in and rejects partial or cleartext configuration (0.581916ms)
+✔ GraphQL aliases use one request batch and reading(id) preserves projection freshness (52.219208ms)
+✔ GraphQL rejects oversized history and search before the Read API (9.773125ms)
+✔ GraphQL status maps saga and history from the owning API (5.624833ms)
+✔ GraphQL does not turn a foreign-tenant saga into data (4.158667ms)
+✔ GraphQL mutations call the owning command API (6.009875ms)
+✔ GraphQL composes current PostgreSQL, Cassandra history, and Elasticsearch search through Read API (4.843125ms)
+✔ session returns only the verified principal (3.055958ms)
+✔ bin readings persisted roots map real metrics and trend coverage through the BFF (4.400208ms)
+✔ subscription verifies bearer, scopes reads and catches up after reconnect (691.217583ms)
+ℹ tests 61
+ℹ suites 0
+ℹ pass 61
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 817.618334

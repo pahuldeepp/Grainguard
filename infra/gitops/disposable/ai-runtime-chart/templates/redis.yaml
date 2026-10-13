@@ -1,0 +1,97 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-redis
+  labels: {app.kubernetes.io/name: ai-redis, greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {argocd.argoproj.io/sync-wave: "15"}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: ai-redis}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ai-redis, greenguard.io/cell: {{ .Values.cell | quote }}}
+      # Redis itself verifies TLS; it has no plain listener and no mesh opt-out
+      # for the AI HTTP APIs. Memory state is disposable; Postgres owns quotas.
+      annotations: {sidecar.istio.io/inject: "false", greenguard.io/secret-sync-epoch: {{ .Values.secretSyncEpoch | quote }}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+{{ include "ai.security" . | indent 8 }}
+      initContainers:
+        - name: private-config
+          image: {{ .Values.images.knowledge | quote }}
+          command:
+            - python
+            - -c
+            - |
+              import os,pathlib,re
+              src=pathlib.Path('/source'); dst=pathlib.Path('/private')
+              for key in ('server.crt','server.key','ca.pem'):
+                  p=dst/key; p.write_bytes((src/key).read_bytes()); os.chmod(p,0o600)
+              password=(src/'password').read_text()
+              if not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', password): raise SystemExit('invalid Redis credential')
+              p=dst/'redis.conf'
+              p.write_text('port 0\ntls-port 6379\nbind 0.0.0.0\nprotected-mode yes\ntls-cert-file /private/server.crt\ntls-key-file /private/server.key\ntls-ca-cert-file /private/ca.pem\ntls-auth-clients no\nsave ""\nappendonly no\nmaxmemory 128mb\nmaxmemory-policy noeviction\nrequirepass '+password+'\n')
+              os.chmod(p,0o600)
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          volumeMounts:
+            - {name: source, mountPath: /source, readOnly: true}
+            - {name: private, mountPath: /private}
+      containers:
+        - name: redis
+          image: {{ .Values.images.redis | quote }}
+          command: [redis-server, /private/redis.conf]
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom: {secretKeyRef: {name: greenguard-ai-redis, key: password}}
+          securityContext:
+{{ include "ai.containerSecurity" . | indent 12 }}
+          resources: {requests: {cpu: 100m, memory: 192Mi}, limits: {cpu: 500m, memory: 256Mi}}
+          ports: [{name: tls, containerPort: 6379}]
+          startupProbe:
+            exec: {command: [sh, -c, 'test "$(redis-cli --tls --cacert /private/ca.pem --sni ai-redis.greenguard.svc.cluster.local -h 127.0.0.1 ping)" = PONG']}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec: {command: [sh, -c, 'test "$(redis-cli --tls --cacert /private/ca.pem --sni ai-redis.greenguard.svc.cluster.local -h 127.0.0.1 ping)" = PONG']}
+            timeoutSeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            exec: {command: [sh, -c, 'test "$(redis-cli --tls --cacert /private/ca.pem --sni ai-redis.greenguard.svc.cluster.local -h 127.0.0.1 ping)" = PONG']}
+            timeoutSeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            - {name: private, mountPath: /private, readOnly: true}
+            - {name: data, mountPath: /data}
+      volumes:
+        - {name: source, secret: {secretName: greenguard-ai-redis, defaultMode: 0440}}
+        - {name: private, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+        - {name: data, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ai-redis, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  selector: {app.kubernetes.io/name: ai-redis}
+  ports: [{name: tls, port: 6379, targetPort: tls}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ai-redis-boundary, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: ai-redis}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: knowledge-service}}}, {podSelector: {matchLabels: {app.kubernetes.io/name: model-gateway}}}, {podSelector: {matchLabels: {app.kubernetes.io/name: ai-redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+  egress:
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: ai-redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+{{- end }}

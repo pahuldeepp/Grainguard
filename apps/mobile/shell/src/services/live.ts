@@ -3,16 +3,35 @@
 // redirect returns through the greenguard:// URL scheme (Info.plist and
 // SceneDelegate). Tokens go only to the Keychain-backed SecureStore.
 import { Linking } from 'react-native';
-import { AckQueue, AlertsClient, MobileSession } from '@greenguard/mobile-core';
+import { AckQueue, AlertsClient, GraphqlClient, GraphqlError, MobileSession, OidcError } from '@greenguard/mobile-core';
 import { keychainStore, netInfoConnectivity, queueStorage } from './adapters';
-import { waitForCallback } from './callback';
+import { consumeInitialCallback, waitForCallback } from './callback';
 import { LIVE_CONFIG, liveConfigured } from './config';
 import { shellCrypto } from './polyfills';
 import type { AppServices } from './types';
 
 export function createLiveServices(): AppServices {
   const crypto = shellCrypto();
-  const deps = { fetch, now: Date.now, crypto };
+  // The BFF maps the verified OIDC subject to a tenant. Cognito access tokens
+  // do not carry tenant_id, so never scope offline ACKs by a token guess.
+  const resolveMembership = async (accessToken: string) => {
+    const client = new GraphqlClient(LIVE_CONFIG.bffEndpoint, {
+      getAccessToken: async () => ({ accessToken, tenantId: '', subject: '' }),
+    }, { fetch, crypto });
+    let result: { session: { subject: string; tenantId: string } };
+    try {
+      result = await client.execute<{ session: { subject: string; tenantId: string } }>(
+        'query Session { session { subject tenantId roles } }', {},
+      );
+    } catch (error) {
+      if (error instanceof GraphqlError &&
+          (error.status === 0 || error.status === 429 || error.status >= 500))
+        throw new OidcError('Membership service temporarily unavailable', true);
+      throw error;
+    }
+    return result.session;
+  };
+  const deps = { fetch, now: Date.now, crypto, resolveMembership };
   const session = new MobileSession(LIVE_CONFIG, keychainStore, deps);
   const alerts = new AlertsClient(LIVE_CONFIG.bffEndpoint, session, deps);
   const connectivity = netInfoConnectivity();
@@ -26,6 +45,24 @@ export function createLiveServices(): AppServices {
   });
 
   let pendingWait: ReturnType<typeof waitForCallback> | null = null;
+  let initialCallback: Promise<void> | null = null;
+  let initialCallbackChecked = false;
+  const restoreInitialCallback = () => {
+    if (initialCallbackChecked) return Promise.resolve();
+    initialCallback ??= consumeInitialCallback(
+      Linking,
+      LIVE_CONFIG.redirectUri,
+      url => session.completeSignIn(url),
+    ).then(() => {
+      initialCallbackChecked = true;
+    }).catch(error => {
+      // Surface the failed redirect on the sign-in screen, then let a fresh
+      // sign-in start. Replaying the launch URL would consume new PKCE state.
+      initialCallbackChecked = true;
+      throw error;
+    });
+    return initialCallback;
+  };
   const openBrowser = async (url: string) => {
     // Listen before opening so a fast redirect cannot be missed.
     pendingWait?.cancel();
@@ -48,7 +85,10 @@ export function createLiveServices(): AppServices {
     queue,
     connectivity,
     session: {
-      identity: () => session.identity(),
+      identity: async () => {
+        await restoreInitialCallback();
+        return session.identity();
+      },
       async signIn() {
         if (!liveConfigured())
           throw new Error(

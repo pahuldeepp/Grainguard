@@ -1,0 +1,22 @@
+nameOverride: notification-service
+networkPolicy:
+  ingressSources:
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
+  egressPods:
+    - { namespace: greenguard, selector: { app: rabbitmq }, port: 5672 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+  egressServices:
+    - { name: tenant-control-plane, namespace: greenguard, release: tenant-control-plane, port: 3010 }
+service:
+  port: 8096
+  containerPort: 8096
+container:
+  name: notification-service
+  envFrom:
+    - secretRef:
+        name: notification-service-config
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz/notification-history, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

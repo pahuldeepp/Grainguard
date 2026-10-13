@@ -38,6 +38,9 @@ type Reading struct {
 	TenantID, DeviceID, ReadingID, EventID, SiteID, BinID string
 	ObservedAt, ReceivedAt                                time.Time
 	StreamVersion                                         int64
+	SchemaVersion                                         int
+	CO2PPM, GrainMoisturePercent                          *float64
+	MeasurementUnits, SensorObservations                  string
 	TemperatureC, RelativeHumidityPercent                 *float64
 }
 
@@ -71,11 +74,16 @@ func ValidID(id string) bool { return uuidPattern.MatchString(id) }
 const (
 	insertReading        = `INSERT INTO readings_by_device_day (tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
 	insertUnboundReading = `INSERT INTO readings_by_device_day (tenant_id, device_id, day, observed_at, reading_id, event_id, stream_version, received_at, site_id, temperature_c, relative_humidity_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL ?`
-	selectDay            = `SELECT tenant_id, device_id, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ? AND observed_at >= ? AND observed_at <= ?`
+	selectDay            = `SELECT tenant_id, device_id, observed_at, reading_id, event_id, stream_version, received_at, site_id, bin_id, temperature_c, relative_humidity_percent, co2_ppm, grain_moisture_percent, measurement_units, sensor_observations, schema_version FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ? AND observed_at >= ? AND observed_at <= ?`
 	upsertMark           = `INSERT INTO history_watermark (tenant_id, device_id, source_topic, source_partition, last_confirmed_offset, last_confirmed_observed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	selectMark           = `SELECT last_confirmed_offset, last_confirmed_observed_at FROM history_watermark WHERE tenant_id = ? AND device_id = ? AND source_topic = ? AND source_partition = ?`
+	selectDayIdentities  = `SELECT reading_id, event_id, sensor_observations FROM readings_by_device_day WHERE tenant_id = ? AND device_id = ? AND day = ?`
 	day                  = 24 * time.Hour
 )
+
+// Identity is the durable source identity needed to prove a read-model copy
+// exists in Cassandra before PostgreSQL expires that projected row.
+type Identity struct{ ReadingID, EventID, SensorObservations string }
 
 // Store writes and reads history through a Session.
 type Store struct {
@@ -95,6 +103,9 @@ func Day(t time.Time) time.Time { return t.UTC().Truncate(day) }
 func (s *Store) Write(ctx context.Context, r Reading) error {
 	if !ValidID(r.TenantID) {
 		return ErrInvalidTenant
+	}
+	if r.SchemaVersion == 2 {
+		return s.writeV2(ctx, r)
 	}
 	if r.BinID == "" {
 		// A new unbound reading has no bin column. Omitting it avoids a null
@@ -125,6 +136,29 @@ func (s *Store) ReadWatermark(ctx context.Context, tenant, device, topic string,
 	return w, found, rows.Close()
 }
 
+// DayIdentities returns Cassandra's confirmed row identities for one tenant,
+// device, and UTC day. The partition key is always fully specified.
+func (s *Store) DayIdentities(ctx context.Context, tenant, device string, bucket time.Time) ([]Identity, error) {
+	if !ValidID(tenant) {
+		return nil, ErrInvalidTenant
+	}
+	if !ValidID(device) {
+		return nil, ErrInvalidDevice
+	}
+	rows := s.Session.Iter(ctx, LocalQuorum, selectDayIdentities, tenant, device, Day(bucket))
+	identities := make([]Identity, 0)
+	for {
+		var id Identity
+		if !rows.Scan(&id.ReadingID, &id.EventID, &id.SensorObservations) {
+			if err := rows.Close(); err != nil {
+				return nil, err
+			}
+			return identities, nil
+		}
+		identities = append(identities, id)
+	}
+}
+
 // Query returns one tenant's device history in [from, to], newest first. The
 // tenant argument is mandatory and becomes part of every partition key read.
 func (s *Store) Query(ctx context.Context, tenant, device string, from, to time.Time) (Result, error) {
@@ -151,7 +185,7 @@ func (s *Store) readDay(ctx context.Context, result *Result, tenant, device stri
 	rows := s.Session.Iter(ctx, LocalQuorum, selectDay, tenant, device, bucket, from.UTC(), to.UTC())
 	for {
 		var r Reading
-		if !rows.Scan(&r.TenantID, &r.DeviceID, &r.ObservedAt, &r.ReadingID, &r.EventID, &r.StreamVersion, &r.ReceivedAt, &r.SiteID, &r.BinID, &r.TemperatureC, &r.RelativeHumidityPercent) {
+		if !rows.Scan(&r.TenantID, &r.DeviceID, &r.ObservedAt, &r.ReadingID, &r.EventID, &r.StreamVersion, &r.ReceivedAt, &r.SiteID, &r.BinID, &r.TemperatureC, &r.RelativeHumidityPercent, &r.CO2PPM, &r.GrainMoisturePercent, &r.MeasurementUnits, &r.SensorObservations, &r.SchemaVersion) {
 			return false, rows.Close()
 		}
 		if len(result.Readings) == s.MaxRows {

@@ -33,6 +33,8 @@ const (
 	fieldAggregateType            = "aggregate_type"
 	fieldDevice                   = "device_id"
 	typeTelemetry                 = "telemetry.recorded"
+	typeCableLayout               = "cable.layout_changed"
+	topicSensorLayout             = "greenguard.inventory.sensor-layout.v1"
 	typeRegistered                = "device.registered"
 	typeBinding                   = "device.binding_changed"
 	typeStatus                    = "device.status_changed"
@@ -40,6 +42,7 @@ const (
 	typeBinChanged                = "bin.changed"
 	typeLotChanged                = "lot.changed"
 	typeRiskAssessed              = "risk.assessed"
+	typeRiskPolicyChanged         = "risk.policy_changed"
 	typeRiskInvalidated           = "risk.assessment_invalidated"
 	typeAlertOpened               = "alert.opened"
 	typeAlertUpdated              = "alert.updated"
@@ -70,11 +73,14 @@ const (
 	rawProjection                 = "greenguard.raw.projection.notifications"
 	topicProjection               = "greenguard.projection.notification.v1"
 	topicTelemetry                = "greenguard.telemetry.recorded.v1"
+	topicTelemetryV2              = "greenguard.telemetry.recorded.v2"
 	topicInventory                = "greenguard.inventory.device.v1"
 	topicTenant                   = "greenguard.inventory.tenant.v1"
 	topicBilling                  = "greenguard.billing.lifecycle.v1"
 	topicPlatformConfig           = "greenguard.platform.config.v1"
 	topicRisk                     = "greenguard.risk.assessment.v1"
+	topicRiskV2                   = "greenguard.risk.assessment.v2"
+	topicRiskPolicy               = "greenguard.risk.policy.v1"
 	topicRiskInvalidated          = "greenguard.risk.assessment_invalidated.v1"
 	topicAlerts                   = "greenguard.alerts.lifecycle.v1"
 	topicQuarantine               = "greenguard.quarantine.v1"
@@ -206,7 +212,12 @@ func occurredAt(value any) (string, *failure) {
 
 func route(event map[string]any) (string, *failure) {
 	switch event[fieldType] {
+	case typeCableLayout:
+		return topicSensorLayout, nil
 	case typeTelemetry:
+		if fmt.Sprint(event[fieldSchema]) == "2" {
+			return topicTelemetryV2, nil
+		}
 		return topicTelemetry, nil
 	case typeRegistered, typeBinding, typeStatus:
 		return topicInventory, nil
@@ -221,7 +232,19 @@ func route(event map[string]any) (string, *failure) {
 	case typeLotChanged:
 		return topicLot, nil
 	case typeRiskAssessed:
-		return topicRisk, nil
+		switch fmt.Sprint(event[fieldSchema]) {
+		case "1":
+			return topicRisk, nil
+		case "2":
+			return topicRiskV2, nil
+		default:
+			return "", fail(reasonUnknown, "risk.assessed schema version is not allowlisted")
+		}
+	case typeRiskPolicyChanged:
+		if fmt.Sprint(event[fieldSchema]) != "1" {
+			return "", fail(reasonUnknown, "risk.policy_changed schema version is not allowlisted")
+		}
+		return topicRiskPolicy, nil
 	case typeRiskInvalidated:
 		return topicRiskInvalidated, nil
 	case typeAlertOpened, typeAlertUpdated, typeAlertAcked, typeAlertEscalated, typeAlertResolved:
@@ -239,64 +262,54 @@ func routingKey(event map[string]any) string {
 
 func semantic(event map[string]any) *failure {
 	payload := event[fieldPayload].(map[string]any) // schema validated before semantics
-	checks := []func(map[string]any, map[string]any) *failure{
-		identityAndBillingSemantic,
-		organizationAndMembershipSemantic,
-		principalSemantic,
-		domainPayloadSemantic,
-		traceSemantic,
-	}
-	for _, check := range checks {
-		if err := check(event, payload); err != nil {
-			return err
+	if event[fieldType] == typeTelemetry && fmt.Sprint(event[fieldSchema]) == "2" {
+		if err := common.ValidateTelemetryV2(payload); err != nil {
+			return fail(reasonSchema, err.Error())
 		}
 	}
-	return nil
-}
-
-func identityAndBillingSemantic(event, payload map[string]any) *failure {
 	if isBillingOrFlag(event[fieldType]) {
-		return billingOrFlagSemantic(event, payload)
+		if err := billingOrFlagSemantic(event, payload); err != nil {
+			return err
+		}
+	} else if err := identitySemantic(event); err != nil {
+		return err
 	}
-	return identitySemantic(event)
-}
-
-func organizationAndMembershipSemantic(event, payload map[string]any) *failure {
+	if event[fieldType] == typeCableLayout {
+		if err := common.ValidateCableLayout(payload); err != nil {
+			return fail(reasonSchema, err.Error())
+		}
+	}
 	if event[fieldType] == typeTenantCreated && event[fieldAggregate] != event[fieldTenant] {
 		return fail(reasonSchema, "organization aggregate must equal tenant")
 	}
 	if event[fieldType] == typeMembershipChanged && (payload["state"] == "revoked") != (payload["action"] == "revoked") {
 		return fail(reasonSchema, "membership revoked state and action disagree")
 	}
-	return nil
-}
-
-func principalSemantic(event, payload map[string]any) *failure {
-	if event[fieldAggregateType] != "service_principal" {
-		return nil
+	if event[fieldAggregateType] == "service_principal" {
+		if payload["tenant_id"] != event[fieldTenant] || (event[fieldType] == typeServicePrincipalRevoked) != (payload["state"] == "revoked") {
+			return fail(reasonSchema, "service principal tenant or state mismatch")
+		}
 	}
-	if payload["tenant_id"] != event[fieldTenant] || (event[fieldType] == typeServicePrincipalRevoked) != (payload["state"] == "revoked") {
-		return fail(reasonSchema, "service principal tenant or state mismatch")
+	if event[fieldType] == typeLotChanged {
+		if err := lotSemantic(payload); err != nil {
+			return err
+		}
 	}
-	return nil
-}
-
-func domainPayloadSemantic(event, payload map[string]any) *failure {
-	switch event[fieldType] {
-	case typeLotChanged:
-		return lotSemantic(payload)
-	case typeRiskAssessed:
-		return riskSemantic(event, payload)
-	case typeProjection:
-		return notificationSemantic(event, payload)
+	if event[fieldType] == typeRiskAssessed {
+		if err := riskSemantic(event, payload); err != nil {
+			return err
+		}
 	}
 	if event[fieldAggregateType] == "alert_episode" {
-		return alertSemantic(event, payload)
+		if err := alertSemantic(event, payload); err != nil {
+			return err
+		}
 	}
-	return nil
-}
-
-func traceSemantic(event, _ map[string]any) *failure {
+	if event[fieldType] == typeProjection {
+		if err := notificationSemantic(event, payload); err != nil {
+			return err
+		}
+	}
 	parent := event[fieldTrace].(string)
 	if strings.HasPrefix(parent, "00-"+strings.Repeat("0", 32)+"-") || strings.Split(parent, "-")[2] == strings.Repeat("0", 16) {
 		return fail(reasonSchema, "trace and parent IDs must not be zero")
@@ -315,64 +328,35 @@ func isBillingOrFlag(eventType any) bool {
 }
 
 func billingOrFlagSemantic(event, payload map[string]any) *failure {
+	version := event[fieldVersion]
 	switch event[fieldType] {
 	case typeSubscriptionChanged:
-		return subscriptionSemantic(event, payload)
+		if payload["version"] != version {
+			return fail(reasonSchema, "subscription version mismatch")
+		}
 	case typeEntitlementsChanged:
-		return entitlementSemantic(event, payload)
+		if payload["tenant_id"] != event[fieldTenant] || payload["source_version"] != version || event[fieldAggregate] != event[fieldTenant] {
+			return fail(reasonSchema, "entitlement tenant or version mismatch")
+		}
 	case typeUsageAccepted:
-		return usageSemantic(event, payload)
+		if payload["tenant_id"] != event[fieldTenant] || payload["version"] != version {
+			return fail(reasonSchema, "usage tenant or version mismatch")
+		}
 	case typeBillingReconciliation:
-		return reconciliationSemantic(event, payload)
+		if payload["tenant_id"] != event[fieldTenant] || payload["finding_id"] != event[fieldAggregate] {
+			return fail(reasonSchema, "reconciliation tenant or finding mismatch")
+		}
 	case typeBillingCommandRequested:
-		return billingCommandSemantic(event, payload)
+		if payload["command_id"] != event[fieldAggregate] {
+			return fail(reasonSchema, "billing command identity mismatch")
+		}
 	case typeFlagConfigurationChanged:
-		return flagSemantic(event, payload)
-	}
-	return nil
-}
-
-func subscriptionSemantic(event, payload map[string]any) *failure {
-	if payload["version"] != event[fieldVersion] {
-		return fail(reasonSchema, "subscription version mismatch")
-	}
-	return nil
-}
-
-func entitlementSemantic(event, payload map[string]any) *failure {
-	if payload["tenant_id"] != event[fieldTenant] || payload["source_version"] != event[fieldVersion] || event[fieldAggregate] != event[fieldTenant] {
-		return fail(reasonSchema, "entitlement tenant or version mismatch")
-	}
-	return nil
-}
-
-func usageSemantic(event, payload map[string]any) *failure {
-	if payload["tenant_id"] != event[fieldTenant] || payload["version"] != event[fieldVersion] {
-		return fail(reasonSchema, "usage tenant or version mismatch")
-	}
-	return nil
-}
-
-func reconciliationSemantic(event, payload map[string]any) *failure {
-	if payload["tenant_id"] != event[fieldTenant] || payload["finding_id"] != event[fieldAggregate] {
-		return fail(reasonSchema, "reconciliation tenant or finding mismatch")
-	}
-	return nil
-}
-
-func billingCommandSemantic(event, payload map[string]any) *failure {
-	if payload["command_id"] != event[fieldAggregate] {
-		return fail(reasonSchema, "billing command identity mismatch")
-	}
-	return nil
-}
-
-func flagSemantic(event, payload map[string]any) *failure {
-	if payload["config_version"] != event[fieldVersion] {
-		return fail(reasonSchema, "flag configuration version mismatch")
-	}
-	if (payload["scope"] == "global") != (event[fieldTenant] == "00000000-0000-4000-8000-000000000001") {
-		return fail(reasonSchema, "flag scope and tenant mismatch")
+		if payload["config_version"] != version {
+			return fail(reasonSchema, "flag configuration version mismatch")
+		}
+		if (payload["scope"] == "global") != (event[fieldTenant] == "00000000-0000-4000-8000-000000000001") {
+			return fail(reasonSchema, "flag scope and tenant mismatch")
+		}
 	}
 	return nil
 }
@@ -390,7 +374,8 @@ func identitySemantic(event map[string]any) *failure {
 			return err
 		}
 	}
-	if payload[identity] != event[fieldAggregate] || (event[fieldType] != typeTelemetry && payload[version] != event[fieldVersion]) {
+	versionIsEnvelopeSequence := event[fieldType] != typeTelemetry && event[fieldType] != typeRiskAssessed
+	if payload[identity] != event[fieldAggregate] || (versionIsEnvelopeSequence && payload[version] != event[fieldVersion]) {
 		return fail(reasonSchema, "payload identity and version must match aggregate")
 	}
 	return nil
@@ -403,6 +388,10 @@ func riskSemantic(event, payload map[string]any) *failure {
 	insufficient := payload["severity"] == "insufficient_data"
 	if (payload["score"] == nil) != insufficient {
 		return fail(reasonSchema, "risk score must be null exactly when data is insufficient")
+	}
+	if event[fieldSchema] == json.Number("2") && payload["policy_calibrated"] == false &&
+		(payload["score"] != nil || payload["severity"] != "insufficient_data" || payload["alert_eligible"] != false) {
+		return fail(reasonSchema, "uncalibrated risk policy must not produce an alertable assessment")
 	}
 	eligible := payload["severity"] == "warning" || payload["severity"] == "critical"
 	if payload["alert_eligible"] != eligible {
@@ -474,6 +463,8 @@ func lotSemantic(payload map[string]any) *failure {
 // Schemas establish the aggregate kind before selecting its semantic fields.
 func payloadFields(event map[string]any) (string, string) {
 	switch event[fieldAggregateType] {
+	case "cable":
+		return "cable_id", "cable_version"
 	case "site":
 		return "site_id", "site_version"
 	case "bin":
@@ -482,6 +473,8 @@ func payloadFields(event map[string]any) (string, string) {
 		return "bin_id", "occupancy_version"
 	case "device_risk_stream":
 		return "device_id", "assessment_version"
+	case "grain_policy":
+		return "policy_id", "version"
 	case "alert_episode":
 		return "episode_id", "episode_version"
 	case "projection_notification":

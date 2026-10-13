@@ -159,3 +159,14 @@ func TestCommandTraceIsSanitizedAndExcludedFromRequestHash(t *testing.T) {
 		t.Fatal("trace context must not change the command identity hash")
 	}
 }
+
+func TestKafkaClientAllowsAnIsolatedConsumerGroup(t *testing.T) {
+	if _, err := KafkaClientForGroupWithReadiness([]string{"127.0.0.1:59092"}, " ", nil); err == nil {
+		t.Fatal("blank consumer group accepted")
+	}
+	client, err := KafkaClientForGroupWithReadiness([]string{"127.0.0.1:59092"}, "local-provisioning-test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Close()
+}

@@ -66,14 +66,11 @@ async function withRetry<T>(
       return await run();
     } catch (error) {
       if (attempt >= attempts || !isTransientStorageError(error)) throw error;
-      await sleep(base * 2 ** (attempt - 1) + retryJitter(base));
+      await sleep(
+        base * 2 ** (attempt - 1) + randomInt(Math.max(1, Math.ceil(base / 2))),
+      );
     }
   }
-}
-
-function retryJitter(baseDelayMs: number): number {
-  if (baseDelayMs <= 0) return 0;
-  return randomInt(Math.ceil(baseDelayMs / 2));
 }
 
 export interface PublishOptions {

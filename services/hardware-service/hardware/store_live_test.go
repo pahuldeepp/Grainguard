@@ -36,7 +36,15 @@ func pool(t *testing.T) *pgxpool.Pool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureFixturePlacement(t, cfg)
+	// Match the sharded/PgBouncer runtime: parameter types are inferred from
+	// their Go values, so JSON must be bound as text rather than []byte.
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

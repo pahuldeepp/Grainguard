@@ -545,15 +545,20 @@ as telemetry does). Live-stack scripts are separate Make targets.
 
 - Tier 1: 20k/s normal, 50k/s peak, p95 commit→projection < 1 s (CAPACITY_MODEL
   l.16–20).
-- Canonical telemetry has 6 partitions (kafka-topics.mjs l.8). One handler per
-  partition means each projection-builder partition worker must sustain
-  3,333/s normal, 8,333/s peak (CAPACITY_MODEL l.55–56). A per-record transaction
-  at ~1–2 ms cannot reach that. Stage 05 therefore:
-  - designs the processor so a **batch of records from one partition** can be
-    applied in one transaction (inbox multi-row insert, history `COPY`/multi-row
-    insert, per-device latest computed in memory then one upsert per device), then
-    commits the contiguous frontier — implemented behind a config flag with
-    batch size 1 as the default until P01/P05 pass with batching on;
+- Canonical telemetry has 6 partitions (kafka-topics.mjs l.8). The Tier 1 target
+  implies 3,333/s normal and 8,333/s peak per partition if evenly distributed
+  (CAPACITY_MODEL l.55–56); skew makes the hottest partition the governing case.
+  The planned optimization is a **batch of records from one partition** applied
+  in one transaction (inbox multi-row insert, history `COPY`/multi-row insert,
+  per-device latest computed in memory then one upsert per device), followed by
+  commit of the contiguous frontier. This is **not implemented in the current
+  code**: `packages/kafka-transport/transport.go` polls one record at a time and
+  `projection-builder` applies one record per transaction; there is no batch-size
+  flag. Treat batch size 1 as current behavior, not as a configurable batch
+  implementation. Add and benchmark the batch path in Stage 13 before changing
+  defaults. The historical 1–2 ms per-record transaction estimate makes the
+  target implausible for one sequential handler, but must be measured on the
+  end-to-end pipeline;
   - does **not** change partition count in Stage 05 (changing it rehashes keys and
     breaks per-aggregate order for in-flight data; that is Stage 13 work with a
     migration plan). **OPEN DECISION D4** records the target (recommend planning

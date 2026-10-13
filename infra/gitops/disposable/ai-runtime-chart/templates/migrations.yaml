@@ -1,0 +1,62 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+{{- range $owner := list "knowledge" "advisor" "model-gateway" }}
+{{- $image := index $.Values.images (ternary "gateway" $owner (eq $owner "model-gateway")) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-{{ $owner }}-migrate-{{ trunc 8 (sha256sum (printf "%s:%s:%s" $.Values.revision $.Values.secretSyncEpoch $image)) }}
+  labels: {greenguard.io/cell: {{ $.Values.cell | quote }}, app.kubernetes.io/part-of: ai-runtime, greenguard.io/ai-gate: {{ printf "%s-migrate" $owner }}}
+  annotations: {argocd.argoproj.io/sync-wave: "10"}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ai-migration, app.kubernetes.io/part-of: ai-runtime, greenguard.io/cell: {{ $.Values.cell | quote }}}
+      annotations: {sidecar.istio.io/inject: "false"}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+{{ include "ai.security" $ | indent 8 }}
+      initContainers:
+        - name: private-dsn
+          image: {{ $.Values.images.knowledge | quote }}
+          command: [python, -c, "import os,pathlib; p=pathlib.Path('/private/database-url'); p.write_bytes(pathlib.Path('/source/database-url').read_bytes()); os.chmod(p,0o600)"]
+          securityContext:
+{{ include "ai.containerSecurity" $ | indent 12 }}
+          resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 100m, memory: 64Mi}}
+          volumeMounts:
+            - {name: source, mountPath: /source, readOnly: true}
+            - {name: private, mountPath: /private}
+      containers:
+        - name: migrate
+          image: {{ $image | quote }}
+{{- if eq $owner "knowledge" }}
+          command: [python, migrate_rds.py]
+{{- else if eq $owner "advisor" }}
+          command: [python, services/grain-advisor/migrate_rds.py]
+{{- else }}
+          command: [/model-gateway-migrate]
+{{- end }}
+          env:
+            - {name: AI_MIGRATION_DATABASE_URL_FILE, value: /private/database-url}
+            - {name: AI_RDS_HOST, value: {{ $.Values.rdsHost | quote }}}
+          securityContext:
+{{ include "ai.containerSecurity" $ | indent 12 }}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+          volumeMounts:
+            - {name: private, mountPath: /private, readOnly: true}
+            - {name: rds-ca, mountPath: /rds-ca, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+      volumes:
+        - name: source
+          secret: {secretName: greenguard-{{ $owner }}-migrator, defaultMode: 0440, items: [{key: database-url, path: database-url}]}
+        - {name: private, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+        - {name: scratch, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - name: rds-ca
+          secret: {secretName: greenguard-rds-ca, defaultMode: 0440, items: [{key: ca.pem, path: ca.pem}]}
+{{- end }}
+{{- end }}

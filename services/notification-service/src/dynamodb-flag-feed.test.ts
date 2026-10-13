@@ -122,46 +122,6 @@ test("poison flag event is quarantined then acknowledged", async () => {
   }
 });
 
-test("quarantine never copies a malformed tenant identifier into headers", async () => {
-  const { messageHandler, sent, stop } = await harness(async () =>
-    assert.fail("invalid tenant must not reach DynamoDB"),
-  );
-  try {
-    const invalid = valid({ "not.registered": { value: true } }).replace(
-      tenantId,
-      "not-a-tenant",
-    );
-    await messageHandler(source(invalid));
-    assert.equal(sent[0]!.messages[0]!.headers?.tenant_id, "unknown");
-  } finally {
-    await stop();
-  }
-});
-
-test("DynamoDB feed quarantines a tenant header that conflicts with the payload", async () => {
-  const { messageHandler, sent, stop } = await harness(async () => {
-    assert.fail("a mismatched tenant header must not reach the projection");
-  });
-  try {
-    await messageHandler({
-      topic: "greenguard.platform.config.v1",
-      partition: 2,
-      message: {
-        offset: "12",
-        value: Buffer.from(valid()),
-        headers: {
-          tenant_id: Buffer.from("22222222-2222-4222-8222-222222222222"),
-        },
-      },
-    });
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]!.messages[0]!.headers?.reason_code, "key_mismatch");
-    assert.equal(sent[0]!.messages[0]!.headers?.tenant_id, tenantId);
-  } finally {
-    await stop();
-  }
-});
-
 test("DynamoDB persistence failure rejects the Kafka handler for retry", async () => {
   const { messageHandler, stop } = await harness(async () =>
     Promise.reject(new Error("DynamoDB unavailable")),

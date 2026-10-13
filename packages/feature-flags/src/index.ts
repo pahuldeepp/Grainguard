@@ -110,7 +110,7 @@ function validateSnapshot(snapshot: FlagSnapshot): FlagSnapshot {
 
 function bucket(tenantId: string, key: string): number {
   const digest = createHash("sha256").update(`${key}\0${tenantId}`).digest();
-  return (digest.readUInt32BE(0) / 2 ** 32) * 100;
+  return (digest.readUInt32BE(0) / 0x1_0000_0000) * 100;
 }
 
 export class VersionedFlagStore {
@@ -183,7 +183,7 @@ export class VersionedFlagStore {
         ? this.global
         : this.tenants.get(change.tenantId ?? "");
     if (previous && change.version < previous.version) return false;
-    if (previous?.version === change.version) {
+    if (previous && change.version === previous.version) {
       const checked = validateSnapshot({
         version: change.version,
         flags: change.flags,
@@ -207,55 +207,32 @@ export class VersionedFlagStore {
     expectedType: string,
   ): { value: FlagValue; version: number } | undefined {
     if (this.unavailable) return undefined;
-    const globalRule = this.freshGlobalRule(key);
-    if (globalRule?.locked)
-      return this.resolveSnapshot(
-        this.global,
-        "global",
-        tenantId,
-        key,
-        expectedType,
-      ).value;
-
-    const tenantSnapshot = this.touchTenant(tenantId);
-    const tenantResult = this.resolveSnapshot(
-      tenantSnapshot,
-      tenantId,
-      tenantId,
-      key,
-      expectedType,
-    );
-    if (tenantResult.matched) return tenantResult.value;
-
-    return this.resolveSnapshot(
-      this.global,
-      "global",
-      tenantId,
-      key,
-      expectedType,
-    ).value;
-  }
-
-  private freshGlobalRule(key: string): FlagRule | undefined {
-    if (!this.global || !this.fresh("global", this.global)) return undefined;
-    return this.global.flags[key];
-  }
-
-  private resolveSnapshot(
-    snapshot: FlagSnapshot | undefined,
-    scope: string,
-    tenantId: string,
-    key: string,
-    expectedType: string,
-  ): { matched: boolean; value?: { value: FlagValue; version: number } } {
-    if (!snapshot) return { matched: false };
-    if (!this.fresh(scope, snapshot)) return { matched: scope === tenantId };
-
-    const rule = snapshot.flags[key];
-    if (!rule) return { matched: false };
-    if (typeof rule.value !== expectedType) return { matched: true };
-    const value = resolveRuleValue(rule, tenantId, key);
-    return { matched: true, value: { value, version: snapshot.version } };
+    const locked =
+      this.global && this.fresh("global", this.global)
+        ? this.global.flags[key]
+        : undefined;
+    const order: [string, FlagSnapshot | undefined][] = locked?.locked
+      ? [["global", this.global]]
+      : [
+          [tenantId, this.touchTenant(tenantId)],
+          ["global", this.global],
+        ];
+    for (const [scope, snapshot] of order) {
+      if (!snapshot) continue;
+      if (!this.fresh(scope, snapshot)) {
+        if (scope === tenantId) return undefined;
+        continue;
+      }
+      const rule = snapshot.flags[key];
+      if (!rule) continue;
+      if (typeof rule.value !== expectedType) return undefined;
+      const value =
+        rule.rolloutPercent === undefined
+          ? rule.value
+          : rule.value && bucket(tenantId, key) < rule.rolloutPercent;
+      return { value, version: snapshot.version };
+    }
+    return undefined;
   }
 
   private touchTenant(tenantId: string): FlagSnapshot | undefined {
@@ -341,12 +318,16 @@ export function createFlagEvaluator<const D extends FlagDefinitions>(
         ...(context.cell ? { cell: context.cell } : {}),
         ...(context.role ? { role: context.role } : {}),
       };
-      const details = await evaluateDefinedFlag(
-        client,
-        key,
-        fallback,
-        evaluationContext,
-      );
+      const details =
+        typeof fallback === "boolean"
+          ? await client.getBooleanDetails(key, fallback, evaluationContext)
+          : typeof fallback === "string"
+            ? await client.getStringDetails(key, fallback, evaluationContext)
+            : await client.getNumberDetails(
+                key,
+                fallback as number,
+                evaluationContext,
+              );
       const configured =
         details.reason !== "ERROR" &&
         details.reason !== "DEFAULT" &&
@@ -364,28 +345,6 @@ export function createFlagEvaluator<const D extends FlagDefinitions>(
       await OpenFeature.close();
     },
   };
-}
-
-function resolveRuleValue(
-  rule: FlagRule,
-  tenantId: string,
-  key: string,
-): FlagValue {
-  if (rule.rolloutPercent === undefined) return rule.value;
-  return rule.value && bucket(tenantId, key) < rule.rolloutPercent;
-}
-
-async function evaluateDefinedFlag(
-  client: ReturnType<typeof OpenFeature.getClient>,
-  key: string,
-  fallback: FlagValue,
-  context: EvaluationContext,
-): Promise<ResolutionDetails<boolean | string | number>> {
-  if (typeof fallback === "boolean")
-    return client.getBooleanDetails(key, fallback, context);
-  if (typeof fallback === "string")
-    return client.getStringDetails(key, fallback, context);
-  return client.getNumberDetails(key, fallback, context);
 }
 
 /** Development fixture provider; production wiring must feed audited control-plane changes. */

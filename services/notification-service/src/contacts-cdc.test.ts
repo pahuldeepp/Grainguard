@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { rootCertificates } from "node:tls";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Consumer, Producer } from "kafkajs";
 import { SchemaRegistry } from "@kafkajs/confluent-schema-registry";
 import { PutCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
@@ -7,6 +11,7 @@ import {
   CONTACTS_CDC_TOPICS,
   CONTACTS_FEED_CHECKPOINT,
   contactsProjectorReady,
+  contactsRegistryConfig,
   decodeContactsWire,
   startContactsProjector,
   DynamoContactsProjectionStore,
@@ -18,6 +23,51 @@ import {
   type ContactsProjectionStore,
   type NotificationContact,
 } from "./contacts-cdc.js";
+
+test("Schema Registry uses verified HTTPS and Basic auth in AWS profile", () => {
+  const dir = mkdtempSync(join(tmpdir(), "registry-ca-"));
+  const caFile = join(dir, "ca.crt");
+  writeFileSync(caFile, rootCertificates[0]!);
+  const values: Record<string, string> = {
+    KAFKA_REQUIRE_TLS: "true",
+    SCHEMA_REGISTRY_USERNAME: "registry-user",
+    SCHEMA_REGISTRY_PASSWORD: "secret",
+    SCHEMA_REGISTRY_TLS_CA_FILE: caFile,
+  };
+  const env = (key: string) => values[key];
+  try {
+    assert.throws(
+      () => contactsRegistryConfig("http://registry:8081", env),
+      /requires HTTPS/,
+    );
+    const config = contactsRegistryConfig("https://registry:8081", env);
+    assert.deepEqual(config.auth, {
+      username: "registry-user",
+      password: "secret",
+    });
+    assert.ok(config.agent);
+    assert.equal(
+      (config.agent as { options?: { minVersion?: string } }).options
+        ?.minVersion,
+      "TLSv1.2",
+    );
+    assert.deepEqual(
+      contactsRegistryConfig("http://localhost:8081", () => undefined),
+      { host: "http://localhost:8081" },
+    );
+    assert.throws(
+      () =>
+        contactsRegistryConfig("https://registry:8081", (key) =>
+          key === "KAFKA_REQUIRE_TLS" ? "true" : undefined,
+        ),
+      /requires HTTPS/,
+    );
+    writeFileSync(caFile, "not a certificate");
+    assert.throws(() => contactsRegistryConfig("https://registry:8081", env));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const tenantA = "8a8b5bb6-cc18-4f31-966b-6931d24d95df";
 const tenantB = "3925f2f9-3f87-46b5-a43a-3f59a1ca57bb";

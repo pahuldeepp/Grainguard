@@ -1,0 +1,14 @@
+name: ""
+shard: ""
+image: ""
+verifierImage: ""
+rdsHost: ""
+rdsCIDRs: []
+credentialSecret: ""
+caSecret: greenguard-rds-ca
+cassandraAuthSecret: greenguard-cassandra-auth
+cassandraTlsSecret: greenguard-cassandra-tls
+schedule: "*/10 * * * *"
+hotWindow: 24h
+aheadDays: 3
+schema: public

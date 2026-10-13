@@ -1,14 +1,14 @@
+import { fixtureDb } from "./fixtures.js";
 import { randomUUID } from "node:crypto";
-import { createDb } from "../db/client.js";
 import { applyEntitlement, applyHeartbeat } from "../entitlements/projector.js";
 import { adminQuery, env } from "./fixtures.js";
 
 // Test seeding goes through the production projector (ADR-0022), so the plan row and the
 // feed-health heartbeat are written by the same code the consumers rely on.
 const withProjector = async <T>(
-  run: (db: ReturnType<typeof createDb>) => Promise<T>,
+  run: (db: ReturnType<typeof fixtureDb>) => Promise<T>,
 ) => {
-  const db = createDb(env("INVENTORY_PROJECTOR_DIRECT_URL"), 2);
+  const db = fixtureDb(env("INVENTORY_PROJECTOR_DIRECT_URL"), 2);
   try {
     return await run(db);
   } finally {

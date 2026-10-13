@@ -27,7 +27,7 @@ test("unknown severities stay visible as a notice with their own word", () => {
 });
 
 test("alert state and device status use shared markers", () => {
-  expect(alertStateMarker("open")).toEqual({ kind: "notice", word: "Open" });
+  expect(alertStateMarker("open")).toEqual({ kind: "open", word: "Open" });
   expect(alertStateMarker("acknowledged")).toEqual({
     kind: "ok",
     word: "Acknowledged",

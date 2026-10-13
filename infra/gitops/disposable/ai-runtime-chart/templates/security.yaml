@@ -1,0 +1,249 @@
+{{- if .Values.enabled }}
+{{- include "ai.validate" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-runtime
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: knowledge-api
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {greenguard.io/pod-identity-role: {{ .Values.knowledgeAPIRoleArn | quote }}}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: knowledge-indexer
+  labels: {greenguard.io/cell: {{ .Values.cell | quote }}}
+  annotations: {greenguard.io/pod-identity-role: {{ .Values.knowledgeIndexerRoleArn | quote }}}
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: mcp-gateway, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+automountServiceAccountToken: false
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata: {name: ai-runtime-strict, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/part-of: ai-runtime}}
+  mtls: {mode: STRICT}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ai-runtime-egress, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/part-of: ai-runtime, greenguard.io/ai-role: runtime}
+    matchExpressions: [{key: app.kubernetes.io/name, operator: NotIn, values: [mcp-gateway]}]
+  policyTypes: [Egress]
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+{{- range .Values.rdsCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+{{- range .Values.externalHTTPSCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    # EKS Pod Identity agent link-local endpoint; no node-wide egress.
+    - to: [{ipBlock: {cidr: 169.254.170.23/32}}]
+      ports: [{protocol: TCP, port: 80}]
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: istio-system}}, podSelector: {matchLabels: {app: istiod}}}]
+      ports: [{protocol: TCP, port: 15012}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: model-gateway}}}]
+      ports: [{protocol: TCP, port: 8080}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: tenant-control-plane}}}]
+      ports: [{protocol: TCP, port: 3010}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: workflow-alerts}}}]
+      ports: [{protocol: TCP, port: 3004}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: ai-redis}}}]
+      ports: [{protocol: TCP, port: 6379}]
+    - to: [{podSelector: {matchLabels: {app: kafka}}}]
+      ports: [{protocol: TCP, port: 29092}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: clamav}}}]
+      ports: [{protocol: TCP, port: 3310}]
+---
+# Workers and internal runtime components do not accept inbound traffic. Keep
+# ingress isolation explicit while the egress policy owns only outbound rules.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ai-runtime-ingress-deny, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/part-of: ai-runtime, greenguard.io/ai-role: runtime}
+    matchExpressions: [{key: app.kubernetes.io/name, operator: NotIn, values: [mcp-gateway]}]
+  policyTypes: [Ingress]
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: knowledge-indexer-api, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchExpressions: [{key: app.kubernetes.io/name, operator: In, values: [knowledge-indexer, ai-parser-gate, ai-parser-janitor]}]}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+{{- range .Values.kubernetesAPICIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: ai-migration-boundary, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: ai-migration}}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+{{- range .Values.rdsCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 5432}]
+{{- range $service := list (dict "name" "knowledge-service" "port" 8080) (dict "name" "grain-advisor" "port" 8088) (dict "name" "model-gateway" "port" 8080) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ $service.name }}-ingress, labels: {greenguard.io/cell: {{ $.Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: {{ $service.name }}}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{- if eq $service.name "model-gateway" }}
+        - podSelector: {matchLabels: {app.kubernetes.io/part-of: ai-runtime}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: greenguard-bff}}
+{{- else }}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: greenguard-bff}}
+{{- if or (eq $service.name "knowledge-service") (eq $service.name "grain-advisor") }}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: mcp-gateway}}
+{{- end }}
+{{- end }}
+      ports: [{protocol: TCP, port: {{ $service.port }}}]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: {{ $service.name }}-callers, labels: {greenguard.io/cell: {{ $.Values.cell | quote }}}}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: {{ $service.name }}}}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+{{- if eq $service.name "model-gateway" }}
+              - cluster.local/ns/greenguard/sa/bff-greenguard-bff
+              - cluster.local/ns/greenguard/sa/ai-runtime
+              - cluster.local/ns/greenguard/sa/knowledge-api
+              - cluster.local/ns/greenguard/sa/knowledge-indexer
+{{- else }}
+              - cluster.local/ns/greenguard/sa/bff-greenguard-bff
+{{- if or (eq $service.name "knowledge-service") (eq $service.name "grain-advisor") }}
+              - cluster.local/ns/greenguard/sa/mcp-gateway
+{{- end }}
+{{- end }}
+      to: [{operation: {ports: [{{ $service.port | quote }}]}}]
+{{- end }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: greenguard-parser
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+    istio-injection: disabled
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: knowledge-parser, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+automountServiceAccountToken: false
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: parser-deny-all, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec: {podSelector: {}, policyTypes: [Ingress, Egress], ingress: [], egress: []}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: knowledge-parser-launcher, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+rules:
+  - {apiGroups: [""], resources: [pods], verbs: [create, get, list, watch, delete]}
+  - {apiGroups: [""], resources: [pods/exec], verbs: [create]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: knowledge-parser-launcher, namespace: greenguard-parser, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: knowledge-parser-launcher}
+subjects: [{kind: ServiceAccount, name: knowledge-indexer, namespace: greenguard}]
+{{- end }}
+
+{{- if .Values.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: mcp-gateway-egress, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: mcp-gateway}}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: istio-system}}, podSelector: {matchLabels: {app: istiod}}}]
+      ports: [{protocol: TCP, port: 15012}]
+    - to:
+{{- range .Values.externalHTTPSCIDRs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+{{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: tenant-control-plane}}}]
+      ports: [{protocol: TCP, port: 3010}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: knowledge-service}}}]
+      ports: [{protocol: TCP, port: 8080}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: read-api}}}]
+      ports: [{protocol: TCP, port: 4001}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: workflow-alerts}}}]
+      ports: [{protocol: TCP, port: 3004}]
+    - to: [{podSelector: {matchLabels: {app.kubernetes.io/name: grain-advisor}}}]
+      ports: [{protocol: TCP, port: 8088}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: mcp-gateway-ingress, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: mcp-gateway}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app.kubernetes.io/name: greenguard-bff}}}]
+      ports: [{protocol: TCP, port: 8090}]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: {name: mcp-gateway-callers, labels: {greenguard.io/cell: {{ .Values.cell | quote }}}}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: mcp-gateway}}
+  action: ALLOW
+  rules:
+    - from: [{source: {principals: [cluster.local/ns/greenguard/sa/bff-greenguard-bff]}}]
+      to: [{operation: {ports: ["8090"]}}]
+
+{{- end }}

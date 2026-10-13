@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createTestIssuer } from "@greenguard/tenant-auth/testing";
 import { createControlPlaneApp } from "../app.js";
-import { runtimeDb, uniqueSubject } from "../testing/fixtures.js";
+import {
+  runtimeDb,
+  uniqueSubject,
+  activateTenantFixture,
+} from "../testing/fixtures.js";
 
 async function goAdmission(env: Record<string, string>) {
   const cwd = fileURLToPath(
@@ -63,15 +67,16 @@ test(
     await app.listen(0, "127.0.0.1");
     try {
       const base = await app.getUrl();
-      const actor = await issuer.sign({
-        sub: uniqueSubject("machine-live-admin"),
-      });
-      async function call(path: string, body: object) {
+      const actorSubject = uniqueSubject("machine-live-admin");
+      const actor = await issuer.sign({ sub: actorSubject });
+      const otherSubject = uniqueSubject("machine-live-other-admin");
+      const otherActor = await issuer.sign({ sub: otherSubject });
+      async function call(path: string, body: object, token = actor) {
         const response = await fetch(new URL(path, base), {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            authorization: `Bearer ${actor}`,
+            authorization: `Bearer ${token}`,
             "idempotency-key": randomUUID(),
           },
           body: JSON.stringify(body),
@@ -82,8 +87,35 @@ test(
       }
       const a = (await call("/v1/organizations", { name: "Machine tenant A" }))
         .tenantId as string;
-      const b = (await call("/v1/organizations", { name: "Machine tenant B" }))
-        .tenantId as string;
+      const b = (
+        await call(
+          "/v1/organizations",
+          { name: "Machine tenant B" },
+          otherActor,
+        )
+      ).tenantId as string;
+      await activateTenantFixture(
+        db,
+        { issuer: issuer.issuer, subject: actorSubject },
+        a,
+        {
+          idempotencyKey: randomUUID(),
+          correlationId: randomUUID(),
+          traceparent:
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        },
+      );
+      await activateTenantFixture(
+        db,
+        { issuer: issuer.issuer, subject: otherSubject },
+        b,
+        {
+          idempotencyKey: randomUUID(),
+          correlationId: randomUUID(),
+          traceparent:
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        },
+      );
       const device = randomUUID(),
         otherDevice = randomUUID();
       const key = await call(`/v1/organizations/${a}/credentials/api-keys`, {

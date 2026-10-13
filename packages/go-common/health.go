@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -18,8 +19,13 @@ func HealthHandler(ready func() bool, ping func(context.Context) error, metrics 
 		}
 		_, _ = w.Write([]byte("ready\n"))
 	})
-	mux.HandleFunc("GET /metrics", metrics)
-	return mux
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		if metrics != nil {
+			metrics(w, r)
+		}
+		_, _ = fmt.Fprint(w, RenderREDMetrics())
+	})
+	return REDMetrics(mux)
 }
 func HTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: time.Minute}

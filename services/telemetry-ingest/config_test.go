@@ -26,6 +26,21 @@ func TestConfigDefaultsLeaveTheEndpointDisabled(t *testing.T) {
 	}
 }
 
+func TestTrustedProxyCIDRConfiguration(t *testing.T) {
+	cfg, err := loadIngestConfig(cfgEnv(map[string]string{"INGEST_TRUSTED_PROXY_CIDRS": "10.0.0.0/8, 192.0.2.0/24"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 || cfg.TrustedProxyCIDRs[0].String() != "10.0.0.0/8" || cfg.TrustedProxyCIDRs[1].String() != "192.0.2.0/24" {
+		t.Fatalf("trusted proxy prefixes = %v", cfg.TrustedProxyCIDRs)
+	}
+	for _, raw := range []string{"10.0.0.1", "10.0.0.0/8,", "not-a-cidr", "0.0.0.0/0", "::/0"} {
+		if _, err := loadIngestConfig(cfgEnv(map[string]string{"INGEST_TRUSTED_PROXY_CIDRS": raw})); err == nil || !strings.Contains(err.Error(), "INGEST_TRUSTED_PROXY_CIDRS") {
+			t.Errorf("invalid trusted proxy value %q: error = %v", raw, err)
+		}
+	}
+}
+
 func TestConfigReadsEveryOverride(t *testing.T) {
 	cfg, err := loadIngestConfig(cfgEnv(map[string]string{
 		"AUTH_ISSUER": "https://idp.example", "AUTH_AUDIENCE": "greenguard", "AUTH_JWKS_URL": "https://idp.example/jwks",

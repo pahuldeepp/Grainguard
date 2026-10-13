@@ -1,0 +1,179 @@
+{{- if not (regexMatch "^[^[:space:]@]+@sha256:[a-f0-9]{64}$" .Values.image) }}{{ fail "MQTT image must be an immutable OCI digest" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.credentialSecret) }}{{ fail "credentialSecret must be a Kubernetes Secret name" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.workerNamespace) }}{{ fail "workerNamespace must be a Kubernetes namespace" }}{{ end }}
+{{- if not (regexMatch "^[1-9][0-9]*Gi$" .Values.storageSize) }}{{ fail "storageSize must be a positive Gi value" }}{{ end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" .Values.storageClassName) }}{{ fail "storageClassName must be a Kubernetes StorageClass name" }}{{ end }}
+{{- if not (deepEqual .Values.workerLabels (dict "app.kubernetes.io/name" "hardware-service-worker" "app.kubernetes.io/instance" "hardware-service-worker")) }}{{ fail "workerLabels must select exactly the hardware-service-worker release" }}{{ end }}
+{{- if .Values.external.enabled }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" .Values.external.hostname) }}{{ fail "external hostname must be a concrete DNS name" }}{{ end }}
+{{- if not (contains "." .Values.external.hostname) }}{{ fail "external hostname must be a concrete DNS name" }}{{ end }}
+{{- if or (empty .Values.external.sourceCIDRs) (empty .Values.external.nlbSubnetCIDRs) }}{{ fail "external MQTT needs client source CIDRs and private NLB subnet CIDRs" }}{{ end }}
+{{- range .Values.external.sourceCIDRs }}
+{{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/(2[4-9]|3[0-2])$" .) }}{{ fail "external MQTT client source CIDRs must be IPv4 /24-/32" }}{{ end }}
+{{- range (splitList "." (first (splitList "/" .))) }}{{- if gt (int .) 255 }}{{ fail "external MQTT source CIDR has invalid IPv4 octet" }}{{ end }}{{- end }}
+{{- end }}
+{{- range .Values.external.nlbSubnetCIDRs }}
+{{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/(1[6-9]|2[0-9]|3[0-2])$" .) }}{{ fail "external MQTT NLB subnet CIDRs must be bounded IPv4 /16-/32" }}{{ end }}
+{{- $octets := splitList "." (first (splitList "/" .)) }}
+{{- range $octets }}{{- if gt (int .) 255 }}{{ fail "external MQTT NLB CIDR has invalid IPv4 octet" }}{{ end }}{{- end }}
+{{- $first := int (index $octets 0) }}{{- $second := int (index $octets 1) }}
+{{- if not (or (eq $first 10) (and (eq $first 172) (ge $second 16) (le $second 31)) (and (eq $first 192) (eq $second 168))) }}{{ fail "external MQTT NLB CIDR must be private RFC1918 address space" }}{{ end }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenguard-mqtt-config
+  labels: {greenguard.io/lifecycle: disposable}
+data:
+  mosquitto.conf: |
+    listener 8883 0.0.0.0
+    protocol mqtt
+    allow_anonymous false
+    password_file /run/mqtt-auth/passwords
+    acl_file /run/mqtt-auth/acl
+    cafile /run/mqtt-auth/ca.crt
+    certfile /run/mqtt-auth/tls.crt
+    keyfile /run/mqtt-auth/tls.key
+    require_certificate false
+    persistence true
+    persistence_location /mosquitto/data/
+    autosave_interval 30
+    max_queued_messages 1000
+    max_inflight_messages 20
+    message_size_limit 1048576
+    log_dest stdout
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt
+  labels: {greenguard.io/lifecycle: disposable}
+spec:
+  type: ClusterIP
+  selector: {app: greenguard-mqtt}
+  ports:
+    - {name: mqtts, port: 8883, targetPort: mqtts}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: greenguard-mqtt
+  labels: {app: greenguard-mqtt, greenguard.io/lifecycle: disposable}
+spec:
+  serviceName: mqtt
+  replicas: 1
+  selector:
+    matchLabels: {app: greenguard-mqtt}
+  template:
+    metadata:
+      labels: {app: greenguard-mqtt, greenguard.io/lifecycle: disposable}
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1883
+        runAsGroup: 1883
+        fsGroup: 1883
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: mosquitto
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["mosquitto", "-c", "/etc/mosquitto/mosquitto.conf"]
+          ports: [{name: mqtts, containerPort: 8883}]
+          startupProbe:
+            tcpSocket: {port: mqtts}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: {port: mqtts}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: mqtts}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/mosquitto/mosquitto.conf, subPath: mosquitto.conf, readOnly: true}
+            - {name: credentials, mountPath: /run/mqtt-auth, readOnly: true}
+            - {name: data, mountPath: /mosquitto/data}
+      volumes:
+        - name: config
+          configMap: {name: greenguard-mqtt-config}
+        - name: credentials
+          secret: {secretName: {{ .Values.credentialSecret | quote }}, defaultMode: 0440}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {greenguard.io/lifecycle: disposable}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClassName | quote }}
+        resources:
+          requests: {storage: {{ .Values.storageSize | quote }}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenguard-mqtt-private
+  labels: {greenguard.io/lifecycle: disposable}
+spec:
+  podSelector:
+    matchLabels: {app: greenguard-mqtt}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.workerNamespace | quote }}}
+          podSelector:
+            matchLabels:
+{{ toYaml .Values.workerLabels | indent 14 }}
+      ports: [{protocol: TCP, port: 8883}]
+  egress: []
+{{- if .Values.external.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-device-ingress
+  labels: {greenguard.io/lifecycle: disposable}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "preserve_client_ip.enabled=false"
+    service.beta.kubernetes.io/load-balancer-source-ranges: {{ join "," .Values.external.sourceCIDRs | quote }}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: service.k8s.aws/nlb
+  loadBalancerSourceRanges:
+{{ toYaml .Values.external.sourceCIDRs | indent 4 }}
+  selector: {app: greenguard-mqtt}
+  ports:
+    - {name: mqtts, protocol: TCP, port: 8883, targetPort: mqtts}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenguard-mqtt-nlb-ingress
+  labels: {greenguard.io/lifecycle: disposable}
+spec:
+  podSelector:
+    matchLabels: {app: greenguard-mqtt}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{- range .Values.external.nlbSubnetCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{- end }}
+      ports: [{protocol: TCP, port: 8883}]
+{{- end }}

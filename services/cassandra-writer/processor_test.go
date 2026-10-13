@@ -59,6 +59,10 @@ type testSink struct {
 	err   error
 }
 
+type oneMessageSource struct{ message Message }
+
+func (s oneMessageSource) Next(context.Context) (Message, error) { return s.message, nil }
+
 func (s testSink) Publish(context.Context, Record) error {
 	*s.steps = append(*s.steps, "quarantine")
 	return s.err
@@ -137,5 +141,26 @@ func TestProcessorOversizedPoisonHoldsOffset(t *testing.T) {
 	}
 	if len(steps) != 0 {
 		t.Fatalf("oversized record was published or committed: %v", steps)
+	}
+}
+
+func TestRunDoesNotRepublishQuarantineAfterCommitDeadline(t *testing.T) {
+	steps := []string{}
+	p := &Processor{
+		Source:         oneMessageSource{message: Message{Topic: topicTelemetry, Value: []byte("{"), Commit: func(context.Context) error { steps = append(steps, "commit"); return context.DeadlineExceeded }}},
+		Sink:           testSink{steps: &steps},
+		Attempts:       1,
+		RetryDelay:     time.Millisecond,
+		ProcessTimeout: time.Second,
+		Rejected:       func(error) bool { return false },
+	}
+	if err := p.Run(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run error = %v, want commit deadline", err)
+	}
+	if got := strings.Join(steps, ","); got != "quarantine,commit" {
+		t.Fatalf("quarantine was repeated after commit failure: %s", got)
+	}
+	if got := p.Quarantined.Load(); got != 1 {
+		t.Fatalf("Quarantined = %d, want one acknowledged publish", got)
 	}
 }

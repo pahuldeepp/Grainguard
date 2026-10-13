@@ -69,7 +69,7 @@ export function decodeHeartbeat(raw: Buffer): Date | null {
   const at =
     typeof candidate.emitted_at === "string"
       ? new Date(candidate.emitted_at)
-      : new Date(Number.NaN);
+      : new Date(NaN);
   if (!Number.isFinite(at.getTime()))
     throw new InvalidEntitlementEvent("invalid heartbeat");
   return at;

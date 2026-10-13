@@ -16,6 +16,7 @@ runs as UID/GID 65532.
 | --- | --- |
 | `KAFKA_BROKERS` | Required, comma-separated Kafka bootstrap addresses |
 | `KAFKA_GROUP_ID` | `greenguard-cdc-transformer-v1`; keep stable across restarts |
+| `KAFKA_TOPIC_PREFIX` | Empty by default; optional namespace ending in a dot (for example `provisioning-demo.`), applied to every raw input and canonical/quarantine output. Use matching source connectors and consumers with a fresh group for an isolated replay. Event contracts retain canonical topic validation; quarantine coordinates retain the actual transport topic. |
 | `EVENT_SCHEMA_DIR` | `../../contracts/events` relative to working directory; `/contracts/events` in the image |
 | `HTTP_ADDR` | `127.0.0.1:8081`; `0.0.0.0:8081` in the image |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP base URL; unset means no export |
@@ -35,9 +36,11 @@ Input topics are `greenguard.raw.inventory.outbox`, `greenguard.raw.control.outb
 `greenguard.raw.alerts.outbox`, and `greenguard.raw.projection.notifications`.
 Each event type is accepted only from its owning source topic. Control-plane
 `tenant.created`, `membership.changed` and `service_principal.*` route to
-`greenguard.inventory.tenant.v1`. Risk assessments route to
-`greenguard.risk.assessment.v1`, invalidation to
-`greenguard.risk.assessment_invalidated.v1`, alert lifecycle events to
+`greenguard.inventory.tenant.v1`. `risk.assessed@1` routes to
+`greenguard.risk.assessment.v1`, `risk.assessed@2` routes to
+`greenguard.risk.assessment.v2`, and `risk.policy_changed@1` routes to
+`greenguard.risk.policy.v1`. Risk invalidation routes to
+`greenguard.risk.assessment_invalidated.v1`; alert lifecycle events to
 `greenguard.alerts.lifecycle.v1`, and `projection.notification` to
 `greenguard.projection.notification.v1`. Accept both the direct JSON envelope emitted by
 `schemas.enable=false` and an envelope under `payload`. Require
@@ -148,3 +151,12 @@ Debezium, database rollback, real rebalances, replicated broker durability, or
 E01–E05 deployment evidence. Go's coverage report measures statements, not branch
 coverage; branch cases are tested explicitly but no separate branch instrumenter
 is included. Sonar's actual quality gate must still run in CI.
+
+ADR-0027 adds allowlisted `telemetry.recorded@2` on
+`greenguard.telemetry.recorded.v2` and `cable.layout_changed@1` on
+`greenguard.inventory.sensor-layout.v1`. Telemetry v1 keeps its schema and topic.
+The transformer validates units, finite values, unique sample identities and
+owner layout snapshot semantics against the shared contracts, while keeping
+canonical event IDs/bytes stable across create/snapshot replay. Production
+telemetry v2 emission remains disabled at ingest until all consumers and the
+registry release gate support v2.

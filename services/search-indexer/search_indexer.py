@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from datetime import datetime
 import hashlib
 import json
 import os
+import re
 import signal
+import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from worker_health import WorkerHealth, start_health_server
 
 ALIAS = os.getenv("SEARCH_ALIAS", "greenguard-inventory")
-TOPICS = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+def inventory_topics(prefix: str) -> tuple[str, str]:
+    names = ("greenguard.inventory.device.v1", "greenguard.inventory.facility.v1")
+    if (prefix and not re.fullmatch(r"[A-Za-z0-9._-]+", prefix)) or any(len(prefix + name) > 249 for name in names):
+        raise ValueError("invalid KAFKA_TOPIC_PREFIX")
+    return tuple(prefix + name for name in names)
+
+TOPICS = inventory_topics(os.getenv("KAFKA_TOPIC_PREFIX", ""))
 CHECKPOINT_FIELDS = {"event_type", "schema_version", "source_time", "source_position", "raw_position", "partitions"}
 MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "tenant_id": {"type": "keyword"}, "resource_type": {"type": "keyword"},
@@ -25,6 +35,14 @@ MAPPING = {"mappings": {"dynamic": "strict", "properties": {
     "site_id": {"type": "keyword"}, "bin_id": {"type": "keyword"},
     "updated_at": {"type": "date"},
 }}}
+HEALTH = WorkerHealth()
+HEALTH_SERVER = None
+
+
+def ensure_health_server() -> None:
+    global HEALTH_SERVER
+    if HEALTH_SERVER is None:
+        HEALTH_SERVER = start_health_server(HEALTH, port=int(os.getenv("HEALTH_PORT", "8080")))
 
 
 def document_hash(document: dict[str, Any]) -> str:
@@ -43,18 +61,36 @@ def transient_bulk_error(error: SearchError | urllib.error.URLError | TimeoutErr
     return not isinstance(error, SearchError) or error.status in (429, 500, 502, 503, 504)
 
 
+def verified_tls_context(ca_file: str | None = None) -> ssl.SSLContext:
+    context = ssl.create_default_context(cafile=ca_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 class Elastic:
-    def __init__(self, url: str):
+    def __init__(self, url: str, username: str | None = None, password: str | None = None,
+                 ca_file: str | None = None):
         self.url = url.rstrip("/")
+        parsed = urllib.parse.urlsplit(self.url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("invalid search URL")
+        if parsed.scheme == "https" and (not username or not password or not ca_file):
+            raise ValueError("HTTPS search requires username, password and CA file")
+        if parsed.scheme == "http" and (username or password or ca_file):
+            raise ValueError("search credentials require HTTPS")
+        self.context = verified_tls_context(ca_file) if ca_file else None
+        self.authorization = ("Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()) if username else None
 
     def request(self, method: str, path: str, body: Any = None, ndjson: bool = False) -> Any:
         data = None
         if body is not None:
             data = body if ndjson else json.dumps(body).encode()
-        req = urllib.request.Request(self.url + path, data=data, method=method,
-                                     headers={"Content-Type": "application/x-ndjson" if ndjson else "application/json"})
+        headers = {"Content-Type": "application/x-ndjson" if ndjson else "application/json"}
+        if self.authorization:
+            headers["Authorization"] = self.authorization
+        req = urllib.request.Request(self.url + path, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=20) as response:
+            with urllib.request.urlopen(req, timeout=20, context=self.context) as response:
                 content = response.read()
                 return json.loads(content) if content else {}
         except urllib.error.HTTPError as exc:
@@ -70,6 +106,13 @@ class Elastic:
         except SearchError as exc:
             if exc.status != 400 or "resource_already_exists_exception" not in str(exc.body):
                 raise
+
+    def bootstrap_index(self, index: str) -> None:
+        self.create_index(index)
+        actual = self.request("GET", f"/{index}/_mapping")
+        mapping = actual.get(index, {}).get("mappings", {})
+        if mapping.get("dynamic") != "strict" or mapping.get("properties") != MAPPING["mappings"]["properties"]:
+            raise RuntimeError("inventory index mapping mismatch")
 
     def bulk(self, actions: list[dict[str, Any]]) -> dict[str, Any]:
         lines = []
@@ -92,7 +135,7 @@ class Elastic:
             raise ValueError("tenant_id required")
         return self.request("POST", f"/{index}/_search", {"query": {"bool": {
             "filter": [{"term": {"tenant_id": tenant_id}}],
-            "must": [{"multi_match": {"query": query, "fields": ["name", "serial_number"]}}]
+            "must": [{"multi_match": {"query": query, "fields": ["name", "serial_number", "resource_id"]}}]
         }}})
 
     def count_by_tenant(self, index: str) -> dict[str, int]:
@@ -332,10 +375,29 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
             offset_reset: str = "earliest") -> None:
     from confluent_kafka import Consumer, TopicPartition  # imported only by the live runner
 
+    ensure_health_server()
+    HEALTH.set_ready(False)
+    HEALTH.heartbeat()
+
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "").strip().upper()
+    mechanism = os.getenv("KAFKA_SASL_MECHANISM", "").strip().upper()
+    user, password, ca_file = (os.getenv(name, "") for name in
+                               ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_TLS_CA_FILE"))
+    required = os.getenv("KAFKA_REQUIRE_TLS", "").lower() == "true"
+    security = {}
+    if any((required, protocol, mechanism, user, password, ca_file)):
+        if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
+            raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
+        verified_tls_context(ca_file)
+        security = {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
+                    "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
+                    "enable.ssl.certificate.verification": True}
     index = index_name(version)
-    elastic.create_index(index)
+    # Existing indices must have the expected strict mapping before the worker
+    # becomes ready to consume and commit offsets.
+    elastic.bootstrap_index(index)
     consumer = Consumer({"bootstrap.servers": bootstrap, "group.id": group,
-                         "enable.auto.commit": False, "auto.offset.reset": offset_reset})
+                         "enable.auto.commit": False, "auto.offset.reset": offset_reset, **security})
     consumer.subscribe(list(TOPICS))
     indexer = Indexer(elastic, index, quarantine)
     stopping = False
@@ -348,6 +410,8 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
     try:
         while not stopping:
             message = consumer.poll(1)
+            HEALTH.heartbeat()
+            HEALTH.set_ready(bool(consumer.assignment()))
             if message is None:
                 continue
             if message.error():
@@ -357,7 +421,9 @@ def consume(elastic: Elastic, version: int, group: str, bootstrap: str, quaranti
             committed = consumer.commit(offsets=[TopicPartition(record.topic, record.partition, record.offset + 1)], asynchronous=False)
             if not committed or any(item.error for item in committed):
                 raise RuntimeError(f"Kafka offset commit failed: {committed}")
+            HEALTH.heartbeat()
     finally:
+        HEALTH.set_ready(False)
         consumer.close()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
@@ -375,10 +441,16 @@ def main() -> None:
     promote = commands.add_parser("promote")
     promote.add_argument("--version", type=int, required=True)
     promote.add_argument("--expected-manifest", required=True, help="JSON document-ID-to-version map from trusted inventory source")
+    bootstrap = commands.add_parser("bootstrap")
+    bootstrap.add_argument("--version", type=int, required=True)
     args = parser.parse_args()
-    elastic = Elastic(os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:19200"))
+    elastic = Elastic(os.getenv("ELASTICSEARCH_URL", "http://127.0.0.1:19200"),
+                      os.getenv("OPENSEARCH_USERNAME"), os.getenv("OPENSEARCH_PASSWORD"),
+                      os.getenv("OPENSEARCH_CA_FILE"))
     if args.command == "consume":
         consume(elastic, args.version, args.group, args.bootstrap, args.quarantine, args.offset_reset)
+    elif args.command == "bootstrap":
+        elastic.bootstrap_index(index_name(args.version))
     else:
         elastic.promote(index_name(args.version), json.loads(open(args.expected_manifest, encoding="utf-8").read()))
 

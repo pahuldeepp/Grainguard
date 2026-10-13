@@ -1,0 +1,1 @@
+DROP POLICY summary_discovery_owner ON assistant_summary_jobs;

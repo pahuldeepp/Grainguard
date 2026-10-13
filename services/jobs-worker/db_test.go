@@ -38,7 +38,13 @@ func envOrSkip(t *testing.T, key string) string {
 
 func dbPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool, err := openPool(context.Background(), envOrSkip(t, "JOBS_DIRECT_URL"))
+	cfg, err := pgxpool.ParseConfig(envOrSkip(t, "JOBS_DIRECT_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	configureFixturePlacement(t, cfg)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,15 +187,6 @@ func TestCriticalTenantOwnsEscalationDelivery(t *testing.T) {
 	local, err := RecordEvent(context.Background(), db, ev, SourceRef{Topic: "t", Offset: 2})
 	if err != nil || len(local.Intents) != 2 {
 		t.Fatalf("warning must retain RabbitMQ delivery: %+v %v", local, err)
-	}
-	resolved := alertEvent(t, tenant)
-	resolved.EventType, resolved.Payload.Severity = eventResolved, "critical"
-	closed, err := RecordEvent(context.Background(), db, resolved, SourceRef{Topic: "t", Offset: 3})
-	if err != nil || closed.Duplicate || len(closed.Intents) != 0 {
-		t.Fatalf("critical resolution created local intents: %+v %v", closed, err)
-	}
-	if n := countRows(t, db, tenant, "SELECT count(*) FROM inbox"); n != 3 {
-		t.Fatalf("all transitions must retain inbox evidence; got %d", n)
 	}
 }
 

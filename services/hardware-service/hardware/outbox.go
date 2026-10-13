@@ -3,6 +3,8 @@ package hardware
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	common "greenguard.local/go-common"
 	transport "greenguard.local/kafka-transport"
 	"time"
 )
@@ -41,7 +43,12 @@ func (p OutboxPublisher) PublishPending(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err = transport.Publish(ctx, p.Client, ResultTopic, []byte(r.TenantID+":"+r.SagaID), data, resultHeaders(r)); err != nil {
+		if err = p.Store.WithExternalAdmission(ctx, r.TenantID, func() error {
+			return transport.Publish(ctx, p.Client, ResultTopic, []byte(r.TenantID+":"+r.SagaID), data, resultHeaders(r))
+		}); err != nil {
+			if errors.Is(err, common.ErrTenantQuiescing) {
+				continue
+			}
 			return err
 		}
 		if err = p.Store.MarkPublished(ctx, r); err != nil {

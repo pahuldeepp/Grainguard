@@ -1,0 +1,10 @@
+confluent-kafka==2.13.2
+numpy==2.5.3
+opentelemetry-api==1.45.0
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-grpc==1.45.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
+pyarrow==25.0.1
+torch==2.14.0

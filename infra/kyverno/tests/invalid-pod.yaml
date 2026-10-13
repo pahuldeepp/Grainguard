@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: invalid-api
+  namespace: greenguard
+spec:
+  containers:
+    - name: app
+      image: registry.example.invalid/greenguard/api:latest
+      securityContext:
+        privileged: true
+      resources: {}

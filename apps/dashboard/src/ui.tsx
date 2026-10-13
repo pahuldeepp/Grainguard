@@ -106,6 +106,21 @@ const glyphs: Record<MarkerKind | "check" | "arrow-left", ReactNode> = {
       />
     </>
   ),
+  open: (
+    <>
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        rx="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <circle cx="12" cy="12" r="2" fill="currentColor" />
+    </>
+  ),
   check: (
     <path
       d="m5 12.5 4.5 4.5L19 7.5"
@@ -145,13 +160,19 @@ export function Glyph({
 
 export function NavIcon({
   name,
-}: Readonly<{ name: "overview" | "provisioning" | "devices" | "alerts" }>) {
+}: Readonly<{
+  name:
+    "overview" | "provisioning" | "devices" | "alerts" | "rag" | "assistant";
+}>) {
   const paths: Record<typeof name, string> = {
     overview: "M4 13h6V4H4zm10 7h6V11h-6zM4 20h6v-4H4zm10-12h6V4h-6z",
     provisioning: "M12 5v14M5 12h14",
     devices: "M6 4h12v16H6zm3 4h6m-6 4h6m-6 4h3",
     alerts:
       "M12 4a5 5 0 0 0-5 5v3.5L5 16h14l-2-3.5V9a5 5 0 0 0-5-5zm-2 14a2 2 0 0 0 4 0",
+    rag: "M4 5h16v14H4zm0 4h16m-10 0v10m5-7h2m-2 3h2",
+    assistant:
+      "M12 3a8 8 0 0 0-6.9 12.1L4 21l5.9-1.1A8 8 0 1 0 12 3zm-4 8h8m-8 4h5",
   };
   return (
     <svg

@@ -1,0 +1,23 @@
+test_additive_and_causal_masks_jointly_mask_query_rows (ml.deep_learning.test_sequence_models.SequenceModelTests.test_additive_and_causal_masks_jointly_mask_query_rows) ... ok
+test_causal_convolution_prefix_does_not_depend_on_future (ml.deep_learning.test_sequence_models.SequenceModelTests.test_causal_convolution_prefix_does_not_depend_on_future) ... ok
+test_duplicate_sequence_rows_fail_closed (ml.deep_learning.test_sequence_models.SequenceModelTests.test_duplicate_sequence_rows_fail_closed) ... ok
+test_five_models_share_purged_temporal_frozen_cohorts (ml.deep_learning.test_sequence_models.SequenceModelTests.test_five_models_share_purged_temporal_frozen_cohorts) ... ok
+test_frozen_contract_rejects_rehashed_corpus_mutation_before_training (ml.deep_learning.test_sequence_models.SequenceModelTests.test_frozen_contract_rejects_rehashed_corpus_mutation_before_training) ... ok
+test_models_emit_one_logit_per_sequence_and_train_on_cpu (ml.deep_learning.test_sequence_models.SequenceModelTests.test_models_emit_one_logit_per_sequence_and_train_on_cpu) ... ok
+test_normalizer_fits_only_supplied_training_examples (ml.deep_learning.test_sequence_models.SequenceModelTests.test_normalizer_fits_only_supplied_training_examples) ... ok
+test_parquet_adapter_and_fixed_group_experiment (ml.deep_learning.test_sequence_models.SequenceModelTests.test_parquet_adapter_and_fixed_group_experiment) ... ok
+test_same_split_classical_baselines_run_in_isolated_process (ml.deep_learning.test_sequence_models.SequenceModelTests.test_same_split_classical_baselines_run_in_isolated_process) ... ok
+test_shared_metrics_are_float64_and_reject_invalid_predictions (ml.deep_learning.test_sequence_models.SequenceModelTests.test_shared_metrics_are_float64_and_reject_invalid_predictions) ... ok
+test_split_keeps_seeds_disjoint_and_requires_exact_coverage (ml.deep_learning.test_sequence_models.SequenceModelTests.test_split_keeps_seeds_disjoint_and_requires_exact_coverage) ... ok
+test_temporal_contract_rejects_utc_horizon_and_seed_leakage (ml.deep_learning.test_sequence_models.SequenceModelTests.test_temporal_contract_rejects_utc_horizon_and_seed_leakage) ... ok
+test_temporal_split_purges_context_and_horizon_and_keeps_run_cohorts_disjoint (ml.deep_learning.test_sequence_models.SequenceModelTests.test_temporal_split_purges_context_and_horizon_and_keeps_run_cohorts_disjoint) ... ok
+test_transformer_attention_matches_torch_reference_masks (ml.deep_learning.test_sequence_models.SequenceModelTests.test_transformer_attention_matches_torch_reference_masks) ... ok
+test_transformer_handles_variable_sensor_counts_and_fully_masked_bins (ml.deep_learning.test_sequence_models.SequenceModelTests.test_transformer_handles_variable_sensor_counts_and_fully_masked_bins) ... ok
+test_transformer_multihead_matches_torch_with_copied_weights (ml.deep_learning.test_sequence_models.SequenceModelTests.test_transformer_multihead_matches_torch_with_copied_weights) ... ok
+test_transformer_positional_encoding_matches_closed_form (ml.deep_learning.test_sequence_models.SequenceModelTests.test_transformer_positional_encoding_matches_closed_form) ... ok
+test_transformer_trains_and_is_batch_invariant_in_eval (ml.deep_learning.test_sequence_models.SequenceModelTests.test_transformer_trains_and_is_batch_invariant_in_eval) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 1.821s
+
+OK

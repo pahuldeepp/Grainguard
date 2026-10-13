@@ -74,7 +74,7 @@ func projectionTenants(ctx context.Context, tx pgx.Tx, schema string) ([]string,
 	if _, err := tx.Exec(ctx, `SET LOCAL row_security = off`); err != nil {
 		return nil, err
 	}
-	tables := []string{"consumer_inbox", "device_views", "reading_history", "device_latest", "projection_streams", "stream_gaps", "projection_notifications"}
+	tables := []string{"consumer_inbox", "device_views", "reading_history", "device_latest", "projection_streams", "stream_gaps", "projection_notifications", "site_views", "bin_views", "cable_layout_versions", "cable_layout_sensors", "sensor_reading_history", "risk_policy_versions", "risk_assessments", "risk_assessment_invalidations"}
 	parts := make([]string, 0, len(tables))
 	for _, table := range tables {
 		parts = append(parts, fmt.Sprintf("SELECT tenant_id FROM %s.%s", schema, table))

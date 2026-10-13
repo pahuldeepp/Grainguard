@@ -1,10 +1,17 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Link, NavLink, Route, Routes } from "react-router";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router";
 import { checkHealth } from "./health";
 import { ProvisioningApi, type AccessTokenProvider } from "./provisioning";
 import { ReadApi } from "./read-api";
 import { AlertsApi } from "./alerts-api";
+import { MlApi } from "./ml-api";
+import { BillingApi } from "./billing-api";
+import {
+  RagOperationsApi,
+  type RagOperationsSection,
+} from "./rag-operations-api";
+import { AssistantApi } from "./assistant-api";
 import { type DashboardState, uiActions } from "./dashboard-state";
 import { AlertSummary } from "./AlertSummary";
 import { useOnline } from "./online";
@@ -29,6 +36,21 @@ const DeviceHistory = lazy(() =>
 const DeviceRollups = lazy(() =>
   import("./ReadViews").then((m) => ({ default: m.DeviceRollups })),
 );
+const BinReadings = lazy(() =>
+  import("./BinReadings").then((m) => ({ default: m.BinReadings })),
+);
+const MlOperationsView = lazy(() =>
+  import("./MlOperationsView").then((m) => ({ default: m.MlOperationsView })),
+);
+const BillingView = lazy(() =>
+  import("./BillingView").then((m) => ({ default: m.BillingView })),
+);
+const RagOperationsView = lazy(() =>
+  import("./RagOperationsView").then((m) => ({ default: m.RagOperationsView })),
+);
+const AssistantView = lazy(() =>
+  import("./AssistantView").then((m) => ({ default: m.AssistantView })),
+);
 const services = [
   {
     name: "Device service",
@@ -43,45 +65,27 @@ const services = [
     stack: "Go · PostgreSQL",
   },
 ];
-function serviceStatus(ready: boolean | null) {
-  if (ready === null) {
-    return { glyph: "notice" as const, style: "", text: "Checking…" };
-  }
-  if (ready) return { glyph: "ok" as const, style: "ready", text: "Ready" };
-  return {
-    glyph: "critical" as const,
-    style: "offline",
-    text: "Unavailable",
-  };
+function statusGlyph(ready: boolean | null) {
+  if (ready === null) return "notice";
+  return ready ? "ok" : "critical";
 }
-
-function ServiceStatus({
-  name,
-  ready,
-}: Readonly<{ name: string; ready: boolean | null }>) {
-  const status = serviceStatus(ready);
-  return (
-    <output
-      className={`service-status status ${status.style}`}
-      aria-label={`${name}: ${status.text}`}
-    >
-      <Glyph name={status.glyph} />
-      {status.text}
-    </output>
-  );
+function statusStyle(ready: boolean | null) {
+  if (ready === null) return "";
+  return ready ? "ready" : "offline";
 }
-
-function readinessMessage(serviceCount: number) {
-  const verb = serviceCount === 1 ? "is" : "are";
-  const pronoun = serviceCount === 1 ? "it" : "they";
-  const suffix = serviceCount === 1 ? "s" : "";
-  return `${verb} unavailable. Readings and provisioning can fail until ${pronoun} recover${suffix}.`;
+function statusText(ready: boolean | null) {
+  if (ready === null) return "Checking…";
+  return ready ? "Ready" : "Unavailable";
 }
 const navItems = [
   { to: "/", label: "Overview", icon: "overview", end: true },
   { to: "/provisioning", label: "Provisioning", icon: "provisioning" },
   { to: "/devices", label: "Devices", icon: "devices" },
   { to: "/alerts", label: "Alerts", icon: "alerts" },
+  { to: "/ml", label: "ML operations", icon: "overview" },
+  { to: "/billing", label: "Billing", icon: "overview" },
+  { to: "/assistant", label: "Assistant", icon: "assistant" },
+  { to: "/rag/overview", label: "RAG admin", icon: "rag" },
 ] as const;
 
 function Overview({
@@ -124,7 +128,10 @@ function Overview({
                   </p>
                 )}
               </div>
-              <ServiceStatus name={s.name} ready={health[i]} />
+              <output className={`status ${statusStyle(health[i])}`}>
+                <Glyph name={statusGlyph(health[i])} />
+                {statusText(health[i])}
+              </output>
             </li>
           ))}
         </ul>
@@ -148,10 +155,26 @@ export function App({
   );
   const readApi = useMemo(
     () => (getAccessToken ? new ReadApi(getAccessToken) : null),
-    [getAccessToken],
+    [getAccessToken, sessionId],
   );
   const alertsApi = useMemo(
     () => (getAccessToken ? new AlertsApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const mlApi = useMemo(
+    () => (getAccessToken ? new MlApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const billingApi = useMemo(
+    () => (getAccessToken ? new BillingApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const ragOperationsApi = useMemo(
+    () => (getAccessToken ? new RagOperationsApi(getAccessToken) : null),
+    [getAccessToken],
+  );
+  const assistantApi = useMemo(
+    () => (getAccessToken ? new AssistantApi(getAccessToken) : null),
     [getAccessToken],
   );
   const [health, setHealth] = useState<(boolean | null)[]>([null, null]);
@@ -231,7 +254,7 @@ export function App({
         </div>
       </header>
       <main id="main" className="page" tabIndex={-1}>
-        <output className="banner-slot" aria-live="polite">
+        <div role="status" className="banner-slot">
           {!online && (
             <Banner kind="offline">
               Offline. Data on screen may be out of date, and acknowledgements
@@ -241,10 +264,12 @@ export function App({
           {online && down.length > 0 && (
             <Banner kind="warning">
               {down.map((s) => s.name).join(" and ")}{" "}
-              {readinessMessage(down.length)}
+              {down.length === 1 ? "is" : "are"} unavailable. Readings and
+              provisioning can fail until {down.length === 1 ? "it" : "they"}{" "}
+              recover{down.length === 1 ? "s" : ""}.
             </Banner>
           )}
-        </output>
+        </div>
         <Suspense fallback={<Loading label="Loading…" rows={3} />}>
           <Routes>
             <Route
@@ -269,7 +294,14 @@ export function App({
             />
             <Route
               path="/alerts"
-              element={<AlertsView api={alertsApi} sessionId={sessionId} />}
+              element={
+                <AlertsView
+                  key={sessionId}
+                  api={alertsApi}
+                  provisioningApi={provisioning}
+                  sessionId={sessionId}
+                />
+              }
             />
             <Route
               path="/devices/:deviceId"
@@ -283,6 +315,71 @@ export function App({
               path="/devices/:deviceId/rollups"
               element={<DeviceRollups api={readApi} sessionId={sessionId} />}
             />
+            <Route
+              path="/bins/:binId"
+              element={<BinReadings api={readApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/drift"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/performance"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/models"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/ml/retraining"
+              element={<MlOperationsView api={mlApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/billing"
+              element={<BillingView api={billingApi} sessionId={sessionId} />}
+            />
+            <Route
+              path="/assistant"
+              element={
+                <AssistantView
+                  key={sessionId}
+                  api={assistantApi}
+                  sessionId={sessionId}
+                  getAccessToken={getAccessToken}
+                />
+              }
+            />
+            <Route
+              path="/rag"
+              element={<Navigate to="/rag/overview" replace />}
+            />
+            {(
+              [
+                "overview",
+                "retrieval",
+                "documents",
+                "evaluations",
+                "cache",
+                "traces",
+              ] as RagOperationsSection[]
+            ).map((section) => (
+              <Route
+                key={section}
+                path={`/rag/${section}`}
+                element={
+                  <RagOperationsView
+                    api={ragOperationsApi}
+                    sessionId={sessionId}
+                    section={section}
+                  />
+                }
+              />
+            ))}
           </Routes>
         </Suspense>
       </main>

@@ -1,0 +1,8 @@
+# Pinned chart version 1.14.0 is specified at install time, not in this file.
+# clusterName, region and vpcId must be set from the exact Terraform cell.
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+enableBackendSecurityGroup: false
+enableManageBackendSecurityGroupRules: false
+replicaCount: 2

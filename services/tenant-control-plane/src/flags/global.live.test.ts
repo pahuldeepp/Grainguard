@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { validateEvent } from "@greenguard/contracts";
 import { LOOKUP_TOKEN, startApi } from "../testing/api.js";
-import { adminQuery, asRuntime, outboxEvents } from "../testing/fixtures.js";
+import {
+  adminQuery,
+  asRuntime,
+  outboxEvents,
+  activateTenantFixture,
+} from "../testing/fixtures.js";
 import { GLOBAL_FLAG_TENANT } from "./store.js";
 
 const OPERATOR_TOKEN = "stage-09f-platform-operator-token-unique";
@@ -21,7 +26,18 @@ test("global writes require platform credential and audit configured actor", asy
     body: { name: "Global guard tenant" },
     headers: { "idempotency-key": randomUUID() },
   });
-  assert.equal(org.status, 201);
+  assert.equal(org.status, 202);
+  assert.equal(org.json.state, "provisioning");
+  await activateTenantFixture(
+    api.db,
+    { issuer: api.issuer.issuer, subject: tenantAdmin.subject },
+    org.json.tenantId as string,
+    {
+      idempotencyKey: randomUUID(),
+      correlationId: randomUUID(),
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    },
+  );
   const tenantId = org.json.tenantId as string;
   const path = "/v1/internal/flags/global";
   const snapshotPath = `/v1/internal/flags/${GLOBAL_FLAG_TENANT}`;

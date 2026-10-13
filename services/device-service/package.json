@@ -11,12 +11,13 @@
     "migrate": "prisma migrate deploy",
     "saga:worker": "npm run build && node dist/saga/main.js",
     "tenant:projector": "npm run build && node dist/tenant-projection/main.js",
-    "build:deps": "npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-runtime -w @greenguard/entitlements",
+    "build:deps": "npm run build -w @greenguard/membership-client -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts -w @greenguard/kafka-security -w @greenguard/entitlements",
     "entitlements:projector": "npm run build && node dist/entitlements/projector.js"
   },
   "dependencies": {
+    "@greenguard/entitlements": "0.1.0",
+    "@greenguard/membership-client": "0.1.0",
     "@greenguard/otel": "0.1.0",
-    "@greenguard/kafka-runtime": "0.1.0",
     "@greenguard/tenant-auth": "0.1.0",
     "@nestjs/common": "12.0.4",
     "@nestjs/core": "12.0.4",
@@ -28,10 +29,11 @@
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "@greenguard/entitlements": "0.1.0"
+    "@greenguard/kafka-security": "0.1.0"
   },
   "devDependencies": {
     "@greenguard/contracts": "0.1.0",
+    "@types/express": "^5.0.6",
     "@types/pg": "8.23.1",
     "prisma": "7.10.0"
   }

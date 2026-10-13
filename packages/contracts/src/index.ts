@@ -52,7 +52,11 @@ const SCHEMA_FILES: Record<string, string> = {
   "bin.changed@1": "bin-changed.v1.schema.json",
   "lot.changed@1": "lot-changed.v1.schema.json",
   "telemetry.recorded@1": "telemetry-recorded.v1.schema.json",
+  "telemetry.recorded@2": "telemetry-recorded.v2.schema.json",
+  "cable.layout_changed@1": "cable-layout-changed.v1.schema.json",
   "risk.assessed@1": "risk-assessed.v1.schema.json",
+  "risk.assessed@2": "risk-assessed.v2.schema.json",
+  "risk.policy_changed@1": "risk-policy-changed.v1.schema.json",
   "risk.assessment_invalidated@1": "risk-assessment-invalidated.v1.schema.json",
   "device.registered@1": "device-registered.v1.schema.json",
   "device.binding_changed@1": "device-binding-changed.v1.schema.json",
@@ -112,6 +116,9 @@ const validators = new Map<string, ValidateFunction>(
 );
 
 function payloadFields(event: DomainEvent): [string, string] {
+  if (event.aggregate_type === "grain_policy") return ["policy_id", "version"];
+  if (event.event_type === "cable.layout_changed")
+    return ["cable_id", "cable_version"];
   if (event.event_type === "lot.changed") {
     return ["bin_id", "occupancy_version"];
   }
@@ -167,6 +174,15 @@ function riskErrors(event: DomainEvent, errors: string[]): void {
   }
   if (eligible !== (severity === "warning" || severity === "critical")) {
     errors.push("risk alert_eligible must match severity");
+  }
+  if (
+    event.schema_version === 2 &&
+    event.payload["policy_calibrated"] === false &&
+    (score !== null || severity !== "insufficient_data" || eligible !== false)
+  ) {
+    errors.push(
+      "uncalibrated risk policy must not produce an alertable assessment",
+    );
   }
 }
 
@@ -269,7 +285,7 @@ function notificationErrors(event: DomainEvent, errors: string[]): void {
   }
 }
 
-function commonIdentityErrors(event: DomainEvent, errors: string[]): void {
+function identityErrors(event: DomainEvent, errors: string[]): void {
   for (const field of ID_FIELDS) {
     if (event[field] === NIL_UUID) {
       errors.push(`${field} must not be the all-zero UUID`);
@@ -277,55 +293,55 @@ function commonIdentityErrors(event: DomainEvent, errors: string[]): void {
   }
   if (BigInt(event.aggregate_version) > MAX_BIGINT)
     errors.push("aggregate_version exceeds 9223372036854775807");
-}
-
-function subscriptionIdentityErrors(event: DomainEvent, errors: string[]) {
-  if (event.payload["version"] !== event.aggregate_version)
-    errors.push("payload.version must equal aggregate_version");
-}
-
-function flagIdentityErrors(event: DomainEvent, errors: string[]) {
-  if (event.payload["config_version"] !== event.aggregate_version)
-    errors.push("payload.config_version must equal aggregate_version");
+  if (event.event_type === "subscription.changed") {
+    if (event.payload["version"] !== event.aggregate_version)
+      errors.push("payload.version must equal aggregate_version");
+    return;
+  }
+  if (event.event_type === "flag.configuration_changed") {
+    if (event.payload["config_version"] !== event.aggregate_version)
+      errors.push("payload.config_version must equal aggregate_version");
+    if (
+      (event.payload["scope"] === "global") !==
+      (event.tenant_id === "00000000-0000-4000-8000-000000000001")
+    )
+      errors.push("flag scope and tenant_id mismatch");
+    return;
+  }
+  if (event.event_type === "entitlements.changed") {
+    if (
+      event.payload["tenant_id"] !== event.tenant_id ||
+      event.aggregate_id !== event.tenant_id
+    )
+      errors.push("entitlement tenant identity mismatch");
+    if (event.payload["source_version"] !== event.aggregate_version)
+      errors.push("payload.source_version must equal aggregate_version");
+    return;
+  }
+  if (event.event_type === "usage.accepted") {
+    if (
+      event.payload["tenant_id"] !== event.tenant_id ||
+      event.payload["version"] !== event.aggregate_version
+    )
+      errors.push("usage identity or version mismatch");
+    return;
+  }
   if (
-    (event.payload["scope"] === "global") !==
-    (event.tenant_id === "00000000-0000-4000-8000-000000000001")
-  )
-    errors.push("flag scope and tenant_id mismatch");
-}
-
-function entitlementIdentityErrors(event: DomainEvent, errors: string[]) {
-  if (
-    event.payload["tenant_id"] !== event.tenant_id ||
-    event.aggregate_id !== event.tenant_id
-  )
-    errors.push("entitlement tenant identity mismatch");
-  if (event.payload["source_version"] !== event.aggregate_version)
-    errors.push("payload.source_version must equal aggregate_version");
-}
-
-function usageIdentityErrors(event: DomainEvent, errors: string[]) {
-  if (
-    event.payload["tenant_id"] !== event.tenant_id ||
-    event.payload["version"] !== event.aggregate_version
-  )
-    errors.push("usage identity or version mismatch");
-}
-
-function billingIdentityErrors(event: DomainEvent, errors: string[]) {
-  const field =
+    event.event_type === "billing.reconciliation_required" ||
     event.event_type === "billing.command_requested"
-      ? "command_id"
-      : "finding_id";
-  if (
-    event.payload[field] !== event.aggregate_id ||
-    (event.payload["tenant_id"] &&
-      event.payload["tenant_id"] !== event.tenant_id)
-  )
-    errors.push("billing aggregate identity mismatch");
-}
-
-function aggregateIdentityErrors(event: DomainEvent, errors: string[]) {
+  ) {
+    const field =
+      event.event_type === "billing.command_requested"
+        ? "command_id"
+        : "finding_id";
+    if (
+      event.payload[field] !== event.aggregate_id ||
+      (event.payload["tenant_id"] &&
+        event.payload["tenant_id"] !== event.tenant_id)
+    )
+      errors.push("billing aggregate identity mismatch");
+    return;
+  }
   const [identityField, versionField] = payloadFields(event);
   const payloadVersion = event.payload[versionField] as string;
   for (const [name, value] of [
@@ -341,33 +357,10 @@ function aggregateIdentityErrors(event: DomainEvent, errors: string[]) {
   }
   if (
     event.event_type !== "telemetry.recorded" &&
+    !(event.event_type === "risk.assessed" && event.schema_version === 2) &&
     payloadVersion !== event.aggregate_version
   ) {
     errors.push(`payload.${versionField} must equal aggregate_version`);
-  }
-}
-
-function identityErrors(event: DomainEvent, errors: string[]): void {
-  commonIdentityErrors(event, errors);
-  switch (event.event_type) {
-    case "subscription.changed":
-      subscriptionIdentityErrors(event, errors);
-      return;
-    case "flag.configuration_changed":
-      flagIdentityErrors(event, errors);
-      return;
-    case "entitlements.changed":
-      entitlementIdentityErrors(event, errors);
-      return;
-    case "usage.accepted":
-      usageIdentityErrors(event, errors);
-      return;
-    case "billing.reconciliation_required":
-    case "billing.command_requested":
-      billingIdentityErrors(event, errors);
-      return;
-    default:
-      aggregateIdentityErrors(event, errors);
   }
 }
 
@@ -396,9 +389,71 @@ function controlPlaneErrors(event: DomainEvent, errors: string[]): void {
   }
 }
 
+function telemetryErrors(event: DomainEvent, errors: string[]): void {
+  if (event.event_type !== "telemetry.recorded" || event.schema_version !== 2)
+    return;
+  const measurements = event.payload["measurements"] as Record<string, number>;
+  const units = event.payload["measurement_units"] as Record<string, string>;
+  const expected: Record<string, string> = {
+    temperature_c: "Cel",
+    relative_humidity_percent: "%",
+    co2_ppm: "ppm",
+    grain_moisture_percent: "%",
+  };
+  if (Object.keys(measurements).length !== Object.keys(units).length)
+    errors.push("measurement units must match actual measurements");
+  for (const [metric, value] of Object.entries(measurements)) {
+    if (!Number.isFinite(value) || units[metric] !== expected[metric])
+      errors.push("measurement must be finite and carry its physical unit");
+  }
+  const identities = new Set<string>();
+  for (const observation of (event.payload["sensor_observations"] ??
+    []) as Record<string, unknown>[]) {
+    const identity = `${String(observation["sensor_id"])}:${String(observation["metric"])}`;
+    if (
+      identities.has(identity) ||
+      observation["sensor_id"] === NIL_UUID ||
+      observation["cable_id"] === NIL_UUID
+    )
+      errors.push("sensor/metric identities must be unique and non-nil");
+    identities.add(identity);
+    if (
+      !Number.isFinite(observation["value"]) ||
+      (observation["depth_m"] !== null &&
+        !Number.isFinite(observation["depth_m"]))
+    )
+      errors.push("sensor value/depth must be finite");
+    if (BigInt(observation["layout_version"] as string) > MAX_BIGINT)
+      errors.push("layout_version exceeds 9223372036854775807");
+  }
+}
+
+function cableLayoutErrors(event: DomainEvent, errors: string[]): void {
+  if (event.event_type !== "cable.layout_changed") return;
+  for (const field of ["device_id", "bin_id", "cable_id"])
+    if (event.payload[field] === NIL_UUID)
+      errors.push(`payload.${field} must not be nil`);
+  const ids = new Set<unknown>();
+  const positions = new Set<unknown>();
+  for (const sensor of event.payload["sensors"] as Record<string, unknown>[]) {
+    if (
+      ids.has(sensor["sensor_id"]) ||
+      positions.has(sensor["position"]) ||
+      sensor["sensor_id"] === NIL_UUID
+    )
+      errors.push("sensor identities and positions must be unique and non-nil");
+    ids.add(sensor["sensor_id"]);
+    positions.add(sensor["position"]);
+    if (sensor["depth_m"] !== null && !Number.isFinite(sensor["depth_m"]))
+      errors.push("depth must be finite");
+  }
+}
+
 function semanticErrors(event: DomainEvent): string[] {
   const errors: string[] = [];
   identityErrors(event, errors);
+  telemetryErrors(event, errors);
+  cableLayoutErrors(event, errors);
   controlPlaneErrors(event, errors);
   if (event.event_type === "risk.assessed") {
     riskErrors(event, errors);

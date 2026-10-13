@@ -10,6 +10,8 @@ import { AuthError } from "@greenguard/tenant-auth";
 import { ResourceLockedError } from "../db/session.js";
 import {
   AmbiguousMembershipError,
+  MembershipLookupLimitError,
+  DomainConflictError,
   IdempotencyConflictError,
   InvalidInputError,
   InvitationEmailMismatchError,
@@ -22,6 +24,7 @@ import {
 import { type ControlRequest, PreconditionRequiredError } from "./http.js";
 import { FlagPolicyError } from "../flags/store.js";
 import { RateLimitedError } from "./rate-limited.js";
+import { PlacementUnavailableError } from "../domain/placement.js";
 
 export interface Problem {
   status: number;
@@ -33,6 +36,8 @@ type ErrorClass = abstract new (...args: never[]) => Error;
 
 const STATUS = new Map<ErrorClass, [number, string]>([
   [InvalidInputError, [400, "invalid_request"]],
+  [PlacementUnavailableError, [503, "placement_unavailable"]],
+  [DomainConflictError, [409, "resource_conflict"]],
   [FlagPolicyError, [422, "flag_not_allowed"]],
   [SeatLimitError, [409, "seat_limit"]],
   [ApiKeyLimitError, [403, "entitlement_exceeded"]],
@@ -41,6 +46,7 @@ const STATUS = new Map<ErrorClass, [number, string]>([
   [IdempotencyConflictError, [409, "idempotency_conflict"]],
   [LastAdminError, [409, "last_admin"]],
   [AmbiguousMembershipError, [409, "ambiguous_membership"]],
+  [MembershipLookupLimitError, [503, "membership_lookup_unavailable"]],
   [ResourceLockedError, [409, "resource_locked"]],
   [InvitationEmailMismatchError, [403, "invitation_email_mismatch"]],
   [InvitationUnusableError, [410, "invitation_unusable"]],

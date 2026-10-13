@@ -1,0 +1,53 @@
+ok - prod is refused before any AWS call
+ok - deletes CDK stack, Kubernetes LB owners and PVCs, then waits for load balancers
+ok - Argo CRD errors fail before destructive cleanup
+ok - unlabeled GreenGuard Argo Application blocks before CDK cleanup
+ok - absent Argo CRD skips Argo cleanup
+ok - skips stack and Kubernetes cleanup when absent
+ok - retry after EKS deletion retains exact EBS PV IDs
+ok - pre-EKS cleanup records an empty PV inventory
+ok - retry with remaining EKS merges saved PV IDs
+ok - cross-namespace PVC cleanup records claimed and released EBS volumes
+ok - a load balancer that never goes away stops the destroy
+ok - a different AWS account is refused before any deletion
+ok - inventory permission denial stops before AWS cleanup
+ok - delete permission denial stops before AWS cleanup
+ok - unreachable EKS API stops before destructive cleanup
+ok - post-destroy check passes on a clean account
+ok - exact RDS lookup treats only DBInstanceNotFound as absent
+ok - exact RDS lookup fails closed on other errors
+ok - exact RDS, snapshot, and S3 leftovers are reported
+ok - only an exact saved PV volume is reported
+ok - missing PV inventory fails closed
+ok - RDS-managed master secret leftover is reported
+ok - exact global edge and identity leftovers are reported
+ok - CloudFront inventory errors fail closed
+ok - missing Cognito hosted domain is a clean inventory
+ok - deleted RDS-managed master secret passes
+ok - post-destroy check ignores a neighboring environment log group
+ok - post-destroy check reports leftovers and ignores pending KMS keys
+ok - inventory refuses a different account before listing resources
+ok - inventory reports an exact VPC flow log
+ok - tagging API failure cannot pass as an empty inventory
+ok - KMS inventory denial stops before AWS cleanup
+ok - partial apply recovers EKS scope and pre-cleans before destroy
+ok - pre-EKS partial apply uses saved cell scope
+ok - pre-cleanup failure preserves Terraform state/resources
+ok - partial state preserves RDS secret inventory requirement
+ok - invalid saved identity refuses partial-state fallback
+ok - verified wrapper fails when inventory finds a resource
+ok - verified wrapper retains and checks RDS master secret ARN
+ok - verified wrapper refuses mismatched RDS secret ARN
+ok - verified wrapper refuses an empty present RDS secret output
+ok - verified wrapper rejects region mismatches before destroy
+ok - verified wrapper refuses missing state identity
+ok - verified wrapper fails closed on state output read error
+teardown tests: 44 passed
+ok - shard primary/replica and manual snapshot leftovers are reported without tags
+ok - captured shard master secret leftovers are reported
+ok - foreign shard secret ARN refuses inventory
+ok - verified wrapper retains and checks all four managed shard master secrets
+ok - verified wrapper rejects foreign shard secret registry before deletion
+four-shard teardown tests: 49 passed
+ok - failed update shards are inventoried from state despite stale root outputs
+four-shard teardown tests: 50 passed

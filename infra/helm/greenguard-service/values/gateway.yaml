@@ -1,0 +1,57 @@
+nameOverride: gateway
+mesh:
+  enabled: true
+  strictMtls: true
+appMetrics:
+  enabled: true
+  port: 9464
+  allowedPrincipals:
+    - cluster.local/ns/greenguard/sa/greenguard-prometheus
+observability:
+  prometheus:
+    enabled: true
+    namespace: greenguard
+    selector: { app: prometheus }
+    mergeMetrics: true
+    scrapePort: 15020
+autoscaling:
+  hpa: { enabled: true }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: redis-cluster }, port: 6379 }
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+  ingressSources:
+    - namespace: istio-system
+      selector: { app: istio-ingressgateway }
+    - namespace: greenguard
+      selector: { app.kubernetes.io/name: greenguard-dashboard, app.kubernetes.io/instance: dashboard }
+  egressServices:
+    - name: greenguard-bff
+      namespace: greenguard
+      release: bff
+      port: 4000
+    - name: read-api
+      namespace: greenguard
+      release: read-api
+      port: 4001
+    - name: saga-orchestrator
+      namespace: greenguard
+      release: saga-api
+      port: 8092
+    - name: tenant-control-plane
+      namespace: greenguard
+      release: tenant-control-plane
+      port: 3010
+service:
+  port: 4002
+  containerPort: 4002
+container:
+  name: gateway
+  env:
+    # Prometheus scrapes the pod IP directly, so this deployment explicitly
+    # opts into a pod-reachable metrics listener. The application default stays loopback-only.
+    - { name: GATEWAY_METRICS_HOST, value: "0.0.0.0" }
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }

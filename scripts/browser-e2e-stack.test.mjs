@@ -1,132 +1,93 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
-  describeError,
-  fetchWithRetry,
-  isReadOnlyOperation,
+  dashboardServer,
+  placementSessionSettings,
 } from "./browser-e2e-stack.mjs";
 
-function serve(handler) {
-  return new Promise((resolve) => {
-    const server = createServer(handler);
-    server.listen(0, "127.0.0.1", () =>
-      resolve({
-        server,
-        url: `http://127.0.0.1:${server.address().port}/`,
-      }),
-    );
-  });
+async function withDashboard(config, run) {
+  const root = mkdtempSync(path.join(tmpdir(), "greenguard-dashboard-server-"));
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, "index.html"), "<main>dashboard</main>");
+  const { server } = dashboardServer(root, 1, config);
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert(address && typeof address === "object");
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
-test("a connection reset before any response is retried and then succeeds", async () => {
-  let calls = 0;
-  const { server, url } = await serve((req, res) => {
-    calls += 1;
-    if (calls === 1) {
-      req.socket.destroy();
-      return;
-    }
-    res.end("ok");
+test("dashboard server serves explicit public OIDC config without caching", async () => {
+  const config = {
+    authority: "http://127.0.0.1:5556/dex",
+    clientId: "greenguard-dashboard",
+    audience: "greenguard-dashboard",
+    tokenMode: "audience",
+  };
+  await withDashboard(config, async (base) => {
+    const response = await fetch(`${base}/config.json`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.match(response.headers.get("content-type"), /application\/json/);
+    assert.deepEqual(await response.json(), config);
   });
-  try {
-    const response = await fetchWithRetry(url, { method: "POST", body: "x" });
-    assert.equal(await response.text(), "ok");
-    assert.equal(calls, 2);
-  } finally {
-    server.close();
-  }
 });
 
-test("an HTTP error status is returned, never retried", async () => {
-  let calls = 0;
-  const { server, url } = await serve((_req, res) => {
-    calls += 1;
-    res.statusCode = 503;
-    res.end("busy");
+test("dashboard server fails closed when runtime OIDC config is absent", async () => {
+  await withDashboard(undefined, async (base) => {
+    const response = await fetch(`${base}/config.json`);
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get("cache-control"), "no-store");
   });
-  try {
-    const response = await fetchWithRetry(url, { method: "POST", body: "x" });
-    assert.equal(response.status, 503);
-    assert.equal(calls, 1);
-  } finally {
-    server.close();
-  }
 });
 
-test("a refused connection is not retried: the service is down, not stale", async () => {
-  const { server, url } = await serve(() => undefined);
-  server.close();
-  await assert.rejects(fetchWithRetry(url, { method: "GET" }), TypeError);
+test("tenant-scoped E2E SQL receives the complete trusted placement fence", () => {
+  assert.deepEqual(
+    placementSessionSettings({
+      shardId: "s1",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 1,
+    }),
+    [
+      ["app.shard_id", "s1"],
+      ["app.shard_incarnation", "20000000-0000-4000-8000-000000000001"],
+      ["app.placement_epoch", "1"],
+    ],
+  );
 });
 
-test("retries stop after the attempt limit", async () => {
-  let calls = 0;
-  const { server, url } = await serve((req) => {
-    calls += 1;
-    req.socket.destroy();
-  });
-  try {
-    await assert.rejects(
-      fetchWithRetry(url, { method: "POST", body: "x" }, { attempts: 3 }),
-      TypeError,
+test("tenant-scoped E2E SQL rejects missing, malformed, or nonlocal placement", () => {
+  for (const placement of [
+    undefined,
+    {
+      shardId: "s2",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 1,
+    },
+    {
+      shardId: "s1",
+      shardIncarnation: "not-a-uuid",
+      placementEpoch: 1,
+    },
+    {
+      shardId: "s1",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 0,
+    },
+  ]) {
+    assert.throws(
+      () => placementSessionSettings(placement),
+      /invalid trusted fixture placement context/,
     );
-    assert.equal(calls, 3);
-  } finally {
-    server.close();
   }
-});
-
-test("attempts: 1 sends the request exactly once, even after a reset", async () => {
-  let calls = 0;
-  const { server, url } = await serve((req) => {
-    calls += 1;
-    req.socket.destroy();
-  });
-  try {
-    await assert.rejects(
-      fetchWithRetry(url, { method: "POST", body: "x" }, { attempts: 1 }),
-      TypeError,
-    );
-    assert.equal(calls, 1);
-  } finally {
-    server.close();
-  }
-});
-
-test("only a provably read-only GraphQL document is retryable", () => {
-  assert.equal(
-    isReadOnlyOperation("query Q($id: ID!) { a(id: $id) { b } }"),
-    true,
-  );
-  assert.equal(isReadOnlyOperation("  \n query Q { a }"), true);
-  assert.equal(isReadOnlyOperation("{ a }"), true);
-  assert.equal(isReadOnlyOperation("# note\nquery Q { a }"), true);
-  assert.equal(isReadOnlyOperation("mutation M { a }"), false);
-  assert.equal(
-    isReadOnlyOperation("# leading comment\nmutation M { a }"),
-    false,
-  );
-  assert.equal(
-    isReadOnlyOperation("\n  # one\n  # two\n  mutation M { a }"),
-    false,
-  );
-  assert.equal(isReadOnlyOperation("subscription S { a }"), false);
-  assert.equal(
-    isReadOnlyOperation("fragment F on T { a }\nmutation M { ...F }"),
-    false,
-  );
-  assert.equal(isReadOnlyOperation(""), false);
-  assert.equal(isReadOnlyOperation(undefined), false);
-});
-
-test("describeError includes the underlying cause code", () => {
-  const cause = Object.assign(new Error("other side closed"), {
-    code: "UND_ERR_SOCKET",
-  });
-  const error = new TypeError("fetch failed", { cause });
-  const text = describeError(error);
-  assert.match(text, /fetch failed/);
-  assert.match(text, /UND_ERR_SOCKET/);
-  assert.match(text, /other side closed/);
 });

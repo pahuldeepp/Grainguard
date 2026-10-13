@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: search-indexer-quarantine
+  namespace: greenguard
+  labels:
+    app.kubernetes.io/part-of: greenguard
+    greenguard.io/lifecycle: disposable
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: greenguard-disposable-gp3
+  resources:
+    requests:
+      storage: 8Gi

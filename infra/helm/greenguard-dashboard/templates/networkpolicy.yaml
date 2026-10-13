@@ -1,0 +1,87 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "greenguard-dashboard.fullname" . | quote }}
+  labels:
+    {{- include "greenguard-dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "greenguard-dashboard.name" . | quote }}
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.containerPort }}
+    {{- if .Values.observability.prometheus.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.prometheus.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.observability.prometheus.selector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.observability.prometheus.scrapePort }}
+    {{- end }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- range .Values.networkPolicy.egressServices }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | default $.Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .name | quote }}
+              app.kubernetes.io/instance: {{ .release | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+    {{- if .Values.mesh.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.mesh.controlPlaneNamespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.mesh.controlPlaneSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.mesh.controlPlanePort }}
+    {{- end }}
+    {{- if .Values.observability.collector.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.collector.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.observability.collector.selector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.observability.collector.otlpPort }}
+    {{- end }}
+{{- end }}

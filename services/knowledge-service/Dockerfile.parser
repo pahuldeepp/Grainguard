@@ -1,0 +1,13 @@
+FROM python:3.12.10-slim-bookworm@sha256:fd95fa221297a88e1cf49c55ec1828edd7c5a428187e67b5d1805692d11588db
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr=5.3.0-2 tesseract-ocr-eng=1:4.1.0-2 && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir pypdfium2==5.13.0 && useradd --uid 10001 --create-home parser
+COPY services/knowledge-service/knowledge_extensions/__init__.py ./knowledge_extensions/__init__.py
+COPY services/knowledge-service/knowledge_extensions/pdf_parser.py ./knowledge_extensions/pdf_parser.py
+COPY services/knowledge-service/knowledge_extensions/outline.py ./knowledge_extensions/outline.py
+COPY services/knowledge-service/knowledge_extensions/pdf_ocr.py ./knowledge_extensions/pdf_ocr.py
+COPY services/knowledge-service/knowledge_extensions/parser_sandbox.py ./knowledge_extensions/parser_sandbox.py
+COPY services/knowledge-service/parser_worker.py ./parser_worker.py
+USER 10001
+CMD ["python", "parser_worker.py"]

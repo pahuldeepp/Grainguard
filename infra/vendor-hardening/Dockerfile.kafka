@@ -1,0 +1,9 @@
+# Review candidate: Kafka 3.9.2, retaining all upstream Java/runtime functionality.
+FROM apache/kafka@sha256:05b4616e0702ef2729327705d54ad6b50ea70b271c4b730fabd2320789fb7b02
+USER root
+# Supplied by fetch-apks.py from exact signed Alpine package versions and hashes.
+COPY apks/ /tmp/greenguard-apks/
+RUN set -eu; cd /tmp/greenguard-apks; sha256sum -c SHA256SUMS; \
+    apk --repositories-file /dev/null --no-network --no-cache add --upgrade ./*.apk; \
+    rm -rf /tmp/greenguard-apks
+USER 1000:1000

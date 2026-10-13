@@ -16,12 +16,15 @@ export function sagaTrace(value: unknown): string | null {
 export function resultHeaders(
   value: string,
 ): Record<string, string> | undefined {
-  let result: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    result = JSON.parse(value) as Record<string, unknown>;
+    parsed = JSON.parse(value) as unknown;
   } catch {
     return undefined;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return undefined;
+  const result = parsed as Record<string, unknown>;
   const traceparent = sagaTrace(result.traceparent);
   if (!traceparent) return undefined;
   return {

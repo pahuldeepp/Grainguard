@@ -64,7 +64,6 @@ test('every screen exposes labelled controls; list rows are one phrase', async (
   await press('back-to-alerts');
   await press('queue-button');
   dump.queue = labels(tree);
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify(dump, null, 2));
   expect(dump.list).toContain('tab: Open, 3');
   expect(

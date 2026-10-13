@@ -55,7 +55,12 @@ func (r *Reconnecting) current(open bool) (Conn, error) {
 	}
 	c, err := r.Open()
 	if err != nil {
-		return nil, errors.Join(ErrNotConnected, err)
+		// Only network/no-host failures are recoverable. Preserve authentication,
+		// TLS, configuration and schema errors so startup fails visibly.
+		if Transient(err) {
+			return nil, errors.Join(ErrNotConnected, err)
+		}
+		return nil, err
 	}
 	r.conn, r.failures = c, 0
 	r.Reconnects.Add(1)

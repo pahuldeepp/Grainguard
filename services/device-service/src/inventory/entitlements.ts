@@ -7,6 +7,13 @@ export class EntitlementExceededError extends Error {
   }
 }
 
+export class TenantProjectionUnavailableError extends Error {
+  readonly code = "tenant_projection_unavailable";
+  constructor() {
+    super("Tenant provisioning is still converging");
+  }
+}
+
 // Called inside the same transaction as the device insert. The tenant row lock
 // serializes distinct idempotency keys before the count, including saga reserve.
 export async function assertDeviceCapacity(
@@ -15,7 +22,7 @@ export async function assertDeviceCapacity(
 ): Promise<string> {
   const tenant = await tx.$queryRaw<{ locked: boolean }[]>`
     SELECT inventory_lock_tenant_for_quota(${tenantId}::uuid) AS locked`;
-  if (tenant[0]?.locked !== true) throw new Error("tenant_projection_missing");
+  if (tenant[0]?.locked !== true) throw new TenantProjectionUnavailableError();
   const rows = await tx.$queryRaw<{ limit: number; plan_version: bigint }[]>`
     SELECT COALESCE(
       CASE WHEN entitlement_feed_fresh()

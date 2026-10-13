@@ -1,7 +1,10 @@
+import { requireShardRegistry } from "@greenguard/membership-client/owner-db";
+
 export interface AuthConfig {
   issuer: string;
-  audience: string;
+  audience?: string;
   jwksUrl: string;
+  tokenMode: "audience" | "cognito-access";
 }
 export interface OtelConfig {
   otlpEndpoint: string;
@@ -27,6 +30,19 @@ export interface Config {
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+function meshServiceHttp(url: URL, env: NodeJS.ProcessEnv): boolean {
+  return (
+    env.GG_MESH_INTERNAL_HTTP === "1" &&
+    url.protocol === "http:" &&
+    !url.username &&
+    !url.password &&
+    !url.hash &&
+    /^(?:[a-z0-9](?:[-a-z0-9]*[a-z0-9])?\.){2}svc(?:\.cluster\.local)?$/.test(
+      url.hostname,
+    )
+  );
+}
+
 // The API is mounted only when all three AUTH_* settings are present; a partial
 // set is a deployment mistake and must not silently leave the API disabled.
 function readAuth(env: NodeJS.ProcessEnv): AuthConfig | undefined {
@@ -35,10 +51,33 @@ function readAuth(env: NodeJS.ProcessEnv): AuthConfig | undefined {
     AUTH_AUDIENCE: audience,
     AUTH_JWKS_URL: jwksUrl,
   } = env;
-  if (!issuer && !audience && !jwksUrl) return undefined;
-  if (!issuer || !audience || !jwksUrl)
+  const tokenMode = env.AUTH_TOKEN_MODE || "audience";
+  if (tokenMode !== "audience" && tokenMode !== "cognito-access")
+    throw new Error("AUTH_TOKEN_MODE must be audience or cognito-access");
+  if (tokenMode === "audience" && env.AUTH_COGNITO_CLIENT_IDS)
+    throw new Error("AUTH_COGNITO_CLIENT_IDS requires cognito-access mode");
+  if (
+    !issuer &&
+    !audience &&
+    !jwksUrl &&
+    tokenMode === "audience" &&
+    !env.AUTH_COGNITO_CLIENT_IDS
+  )
+    return undefined;
+  if (!issuer || !jwksUrl || (tokenMode === "audience" && !audience))
     throw new Error(
-      "AUTH_ISSUER, AUTH_AUDIENCE and AUTH_JWKS_URL must be set together",
+      "AUTH_ISSUER, AUTH_JWKS_URL and AUTH_AUDIENCE in audience mode must be set together",
+    );
+  if (tokenMode === "cognito-access" && !env.AUTH_COGNITO_CLIENT_IDS)
+    throw new Error("cognito-access requires AUTH_COGNITO_CLIENT_IDS");
+  if (
+    tokenMode === "cognito-access" &&
+    (env.AUTH_MEMBERSHIP_SOURCE !== "control-plane" ||
+      !env.CONTROL_PLANE_URL ||
+      !env.CONTROL_LOOKUP_TOKEN)
+  )
+    throw new Error(
+      "cognito-access requires control-plane membership and lookup configuration",
     );
   const url = new URL(jwksUrl);
   if (
@@ -48,7 +87,7 @@ function readAuth(env: NodeJS.ProcessEnv): AuthConfig | undefined {
     throw new Error(
       "AUTH_JWKS_URL must use https (http is allowed only for loopback)",
     );
-  return { issuer, audience, jwksUrl };
+  return { issuer, audience, jwksUrl, tokenMode };
 }
 function readImportAuth(env: NodeJS.ProcessEnv): ImportAuthConfig | undefined {
   const importNames = [
@@ -79,7 +118,8 @@ function readImportAuth(env: NodeJS.ProcessEnv): ImportAuthConfig | undefined {
   for (const url of [jwksUrl, controlUrl])
     if (
       url.protocol !== "https:" &&
-      !(url.protocol === "http:" && LOOPBACK.has(url.hostname))
+      !(url.protocol === "http:" && LOOPBACK.has(url.hostname)) &&
+      !(url === controlUrl && meshServiceHttp(url, env))
     )
       throw new Error(
         "import JWKS and control lookup must use https (loopback http allowed)",
@@ -97,9 +137,9 @@ function readImportAuth(env: NodeJS.ProcessEnv): ImportAuthConfig | undefined {
     );
   if (Buffer.byteLength(env.CONTROL_LOOKUP_TOKEN!) < 32)
     throw new Error("CONTROL_LOOKUP_TOKEN must hold at least 32 bytes");
-  if (!/^[A-Za-z_]\w{0,63}$/.test(env.IMPORT_AUTH_TENANT_CLAIM!))
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(env.IMPORT_AUTH_TENANT_CLAIM!))
     throw new Error("IMPORT_AUTH_TENANT_CLAIM is invalid");
-  if (!/^[A-Za-z\d][\w.:-]{0,127}$/.test(env.IMPORT_SOURCE_ID!))
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(env.IMPORT_SOURCE_ID!))
     throw new Error("IMPORT_SOURCE_ID is invalid");
   return {
     sourceId: env.IMPORT_SOURCE_ID!,
@@ -125,8 +165,9 @@ function readOtel(env: NodeJS.ProcessEnv): OtelConfig | undefined {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv): Config {
-  const databaseUrl = env.INVENTORY_DATABASE_URL;
-  if (!databaseUrl)
+  requireShardRegistry(env);
+  const databaseUrl = env.INVENTORY_DATABASE_URL ?? "";
+  if (!databaseUrl && !env.SHARD_REGISTRY_FILE)
     throw new Error(
       "INVENTORY_DATABASE_URL is required. Run make bootstrap and make dev.",
     );

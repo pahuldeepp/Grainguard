@@ -63,7 +63,7 @@ func TestQuarantineReasons(t *testing.T) {
 		{"bad json", reasonEnvelope, func(m *Message, e map[string]any) { m.Value = []byte("{") }, nil},
 		{"not object", reasonEnvelope, func(m *Message, e map[string]any) { m.Value = []byte("null") }, nil},
 		{"unknown", reasonUnknown, func(m *Message, e map[string]any) { e[fieldType] = "future"; *m = message(e) }, nil},
-		{"schema version", reasonUnknown, func(m *Message, e map[string]any) { e[fieldSchema] = 2; *m = message(e) }, nil},
+		{"schema version", reasonUnknown, func(m *Message, e map[string]any) { e[fieldSchema] = 3; *m = message(e) }, nil},
 		{"schema", reasonSchema, func(m *Message, e map[string]any) { e["extra"] = true; *m = message(e) }, nil},
 		{"bigint", reasonBigint, func(m *Message, e map[string]any) { e[fieldVersion] = "9223372036854775808"; *m = message(e) }, nil},
 		{"identity", reasonSchema, func(m *Message, e map[string]any) { e[fieldAggregate] = testTenant; *m = message(e) }, nil},

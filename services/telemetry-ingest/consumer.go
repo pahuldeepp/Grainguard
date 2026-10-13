@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	common "greenguard.local/go-common"
 )
 
 const (
@@ -29,11 +30,12 @@ const (
 )
 
 type BindingMessage struct {
-	Topic      string
-	Partition  int32
-	Offset     int64
-	Key, Value []byte
-	Commit     func(context.Context) error
+	Topic          string
+	TransportTopic string
+	Partition      int32
+	Offset         int64
+	Key, Value     []byte
+	Commit         func(context.Context) error
 }
 type BindingRecord struct {
 	Topic      string
@@ -75,12 +77,15 @@ func (c *BindingConsumer) Run(ctx context.Context) error {
 		err = c.process(work, message)
 		cancel()
 		if err != nil {
-			return err
+			return fmt.Errorf("binding source %s partition %d offset %d: %w", message.Topic, message.Partition, message.Offset, err)
 		}
 	}
 }
 
 func bindingReason(m BindingMessage) string {
+	if m.Topic == sensorLayoutTopic {
+		return layoutReason(m)
+	}
 	if m.Topic != bindingTopic || !json.Valid(m.Value) {
 		return reasonEnvelope
 	}
@@ -104,7 +109,7 @@ func bindingReason(m BindingMessage) string {
 }
 
 func (c *BindingConsumer) process(ctx context.Context, m BindingMessage) error {
-	if string(m.Key) == bindingHeartbeatKey {
+	if m.Topic == bindingTopic && string(m.Key) == bindingHeartbeatKey {
 		return c.checkpoint(ctx, m)
 	}
 	reason := bindingReason(m)
@@ -129,6 +134,10 @@ func (c *BindingConsumer) process(ctx context.Context, m BindingMessage) error {
 }
 
 func bindingQuarantine(m BindingMessage, reason string) BindingRecord {
+	topic := m.TransportTopic
+	if topic == "" {
+		topic = m.Topic
+	}
 	raw := m.Value
 	truncated := len(raw) > bindingMaxRaw
 	if truncated {
@@ -141,8 +150,8 @@ func bindingQuarantine(m BindingMessage, reason string) BindingRecord {
 		Offset    int64  `json:"source_offset"`
 		Raw       []byte `json:"raw_base64"`
 		Truncated bool   `json:"truncated"`
-	}{reason, m.Topic, m.Partition, m.Offset, raw, truncated})
-	return BindingRecord{Topic: quarantineTopic, Key: []byte(fmt.Sprintf("%s:%d:%d", m.Topic, m.Partition, m.Offset)), Value: body}
+	}{reason, topic, m.Partition, m.Offset, raw, truncated})
+	return BindingRecord{Topic: quarantineTopic, Key: []byte(fmt.Sprintf("%s:%d:%d", topic, m.Partition, m.Offset)), Value: body}
 }
 
 func permanentBindingError(err error) bool {
@@ -225,6 +234,12 @@ func checkpointFailureReason(err error) string {
 }
 
 func bindingDatabaseReason(err error) string {
+	// A placement 404 is not an event validation failure. Keep the source
+	// offset blocked until a trusted owner reconciles the tenant; the Kafka
+	// stream may contain tenants from a different local authority cell.
+	if errors.Is(err, common.ErrTenantPlacementNotFound) {
+		return ""
+	}
 	if errors.Is(err, ErrEventConflict) {
 		return reasonConflict
 	}

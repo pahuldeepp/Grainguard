@@ -1,0 +1,4 @@
+apiVersion: v2
+name: greenguard-karpenter-nodepools
+description: Karpenter EC2NodeClass and workload-class NodePools for one disposable GreenGuard cell.
+version: 0.1.0

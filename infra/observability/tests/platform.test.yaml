@@ -1,0 +1,71 @@
+rule_files:
+  - ../rules/platform.yaml
+evaluation_interval: 1m
+tests:
+  - name: API server-error alert fires after sustained error ratio
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_total{job="device-service",method="POST",route="/v1/devices",status_code="500"}'
+        values: '0+60x10'
+      - series: 'http_server_requests_total{job="device-service",method="POST",route="/v1/devices",status_code="201"}'
+        values: '0+10x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: APIHighServerErrorRate
+        exp_alerts:
+          - exp_labels:
+              job: device-service
+              method: POST
+              route: /v1/devices
+              severity: page
+            exp_annotations:
+              summary: Unexpected API server errors are elevated
+              description: More than 5% of requests are 5xx for device-service /v1/devices.
+              runbook_url: docs/runbooks/api-errors.md
+  - name: PostgreSQL pool waiters alert fires
+    interval: 1m
+    input_series:
+      - series: 'postgres_pool_waiting_requests{pool="device_service"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PostgresClientPoolWaiters
+        exp_alerts:
+          - exp_labels:
+              pool: device_service
+              severity: page
+            exp_annotations:
+              summary: Application requests are waiting for a PostgreSQL connection
+              description: The device_service client pool has waiting requests. Check pool use, database activity, and query latency.
+              runbook_url: docs/runbooks/database-saturation.md
+  - name: slow query rate alert fires
+    interval: 1m
+    input_series:
+      - series: 'postgres_slow_queries_total'
+        values: '0+180x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PostgresSlowQueryRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+            exp_annotations:
+              summary: PostgreSQL client queries are frequently exceeding 500ms
+              description: Instrumented application clients observed more than two slow queries per second; SQL text is intentionally not exported as a metric label.
+              runbook_url: docs/runbooks/database-saturation.md
+  - name: Go PostgreSQL pool no-idle acquisition alert fires
+    interval: 1m
+    input_series:
+      - series: 'postgres_pool_empty_acquire_total{pool="jobs_worker"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PostgresPoolExhaustion
+        exp_alerts:
+          - exp_labels:
+              pool: jobs_worker
+              severity: ticket
+            exp_annotations:
+              summary: PostgreSQL pool had acquisitions with no idle connections
+              description: The jobs_worker pool was saturated during the last five minutes; inspect acquired/idle counts and acquisition wait time.
+              runbook_url: docs/runbooks/database-saturation.md

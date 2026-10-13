@@ -4,10 +4,10 @@ import { InvalidInputError } from "../inventory/errors.js";
 
 const ENTITY_NAMESPACE = "409d1c3b-a7ed-5fc4-830f-20373fb7e663";
 const EVENT_NAMESPACE = "a00f2290-bf1c-5eb9-b19a-54f3acb29355";
-const IDENTIFIER = /^[A-Za-z\d][\w.:-]{0,127}$/;
-const TOPIC = /^[A-Za-z\d][\w.:-]{0,511}$/;
-const OFFSET = /^(0|[1-9]\d{0,18})$/;
-const SHA256 = /^[\da-f]{64}$/;
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const TOPIC = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
+const OFFSET = /^(0|[1-9][0-9]{0,18})$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_OFFSET = 9223372036854775807n;
 const FIELDS = [
   "contract_version",
@@ -60,9 +60,6 @@ function exact(record: Record<string, unknown>, keys: string[]): void {
 function identifier(value: unknown): value is string {
   return typeof value === "string" && IDENTIFIER.test(value);
 }
-function topic(value: unknown): value is string {
-  return typeof value === "string" && TOPIC.test(value);
-}
 function text(value: unknown, max: number): value is string {
   return (
     typeof value === "string" &&
@@ -82,11 +79,8 @@ export function stableUuid(
   namespace: string,
   parts: (string | number | bigint)[],
 ): string {
-  const encoded = `[${parts.map(encodeUuidPart).join(",")}]`;
-  // UUIDv5 is defined with SHA-1. These are deterministic identifiers, not
-  // authentication tokens or integrity/signature digests; changing this breaks
-  // persisted IDs shared with the MySQL normalizer.
-  const digest = createHash("sha1") // NOSONAR - UUIDv5 mandates SHA-1; this is identity derivation, not security hashing.
+  const encoded = `[${parts.map((part) => (typeof part === "bigint" ? part.toString() : JSON.stringify(part))).join(",")}]`;
+  const digest = createHash("sha1") // NOSONAR — UUIDv5 mandates SHA-1 for cross-language stable IDs; this is not a security digest.
     .update(Buffer.from(namespace.replaceAll("-", ""), "hex"))
     .update(encoded)
     .digest();
@@ -94,11 +88,6 @@ export function stableUuid(
   digest[8] = (digest[8]! & 0x3f) | 0x80;
   const h = digest.subarray(0, 16).toString("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
-function encodeUuidPart(part: string | number | bigint): string {
-  if (typeof part === "bigint") return part.toString();
-  return JSON.stringify(part);
 }
 export function canonicalId(
   source: string,
@@ -109,59 +98,30 @@ export function canonicalId(
   return stableUuid(ENTITY_NAMESPACE, [source, tenant, entity, external]);
 }
 
-function expectedPayloadKeys(entity: ImportEntity): string[] {
-  const idName = `${entity}_id`;
-  switch (entity) {
-    case "site":
-      return [idName, "name"];
-    case "bin":
-      return [idName, "site_id", "name"];
-    case "device":
-      return [idName, "site_id", "bin_id", "serial_number", "status"];
-  }
-}
-
 export function parseImportChange(
   value: unknown,
   tenantId: string,
 ): ImportChange {
   const raw = object(value);
   exact(raw, FIELDS);
-  const entity = validateImportIdentity(raw, tenantId);
-  const coordinate = validateCoordinate(raw.source_coordinate);
-  validateSourceIdentity(raw, tenantId, entity, coordinate);
-  validatePayload(raw, entity);
-  return raw as unknown as ImportChange;
-}
-
-function validateImportIdentity(
-  raw: Record<string, unknown>,
-  tenantId: string,
-): ImportEntity {
   if (
     raw.contract_version !== 1 ||
     !identifier(raw.source_id) ||
     !identifier(raw.external_id) ||
-    typeof raw.tenant_id !== "string" ||
-    !isUuid(raw.tenant_id) ||
+    !isUuid(String(raw.tenant_id)) ||
     raw.tenant_id !== tenantId ||
-    (raw.entity_type !== "site" &&
-      raw.entity_type !== "bin" &&
-      raw.entity_type !== "device") ||
-    (raw.operation !== "upsert" && raw.operation !== "delete") ||
+    !["site", "bin", "device"].includes(String(raw.entity_type)) ||
+    !["upsert", "delete"].includes(String(raw.operation)) ||
     typeof raw.payload_sha256 !== "string" ||
     !SHA256.test(raw.payload_sha256)
   )
     throw new InvalidInputError("invalid import identity or version");
-  return raw.entity_type as ImportEntity;
-}
-
-function validateCoordinate(value: unknown): Record<string, unknown> {
-  const coordinate = object(value);
+  const entity = raw.entity_type as ImportEntity;
+  const coordinate = object(raw.source_coordinate);
   exact(coordinate, ["connector_generation", "topic", "partition", "offset"]);
   if (
     !identifier(coordinate.connector_generation) ||
-    !topic(coordinate.topic) ||
+    !TOPIC.test(String(coordinate.topic)) ||
     !Number.isSafeInteger(coordinate.partition) ||
     (coordinate.partition as number) < 0 ||
     typeof coordinate.offset !== "string" ||
@@ -169,73 +129,51 @@ function validateCoordinate(value: unknown): Record<string, unknown> {
     BigInt(coordinate.offset) > MAX_OFFSET
   )
     throw new InvalidInputError("invalid source coordinate");
-  return coordinate;
-}
-
-function validateSourceIdentity(
-  raw: Record<string, unknown>,
-  tenantId: string,
-  entity: ImportEntity,
-  coordinate: Record<string, unknown>,
-): void {
   if (
     raw.entity_id !==
-    canonicalId(
-      raw.source_id as string,
-      tenantId,
-      entity,
-      raw.external_id as string,
-    )
+    canonicalId(raw.source_id, tenantId, entity, raw.external_id)
   )
     throw new InvalidInputError(
       "canonical entity ID does not match source identity",
     );
   if (
-    typeof raw.event_id !== "string" ||
-    !isUuid(raw.event_id) ||
+    !isUuid(String(raw.event_id)) ||
     raw.event_id !==
       stableUuid(EVENT_NAMESPACE, [
-        raw.source_id as string,
+        raw.source_id,
         coordinate.connector_generation as string,
         coordinate.topic as string,
         coordinate.partition as number,
-        BigInt(coordinate.offset as string),
+        BigInt(coordinate.offset),
       ])
   ) {
     throw new InvalidInputError("source event ID does not match coordinate");
   }
-}
-
-function validatePayload(
-  raw: Record<string, unknown>,
-  entity: ImportEntity,
-): void {
   const payload = object(raw.payload);
   const idName = `${entity}_id`;
-  exact(payload, expectedPayloadKeys(entity));
+  const keys =
+    entity === "site"
+      ? [idName, "name"]
+      : entity === "bin"
+        ? [idName, "site_id", "name"]
+        : [idName, "site_id", "bin_id", "serial_number", "status"];
+  exact(payload, keys);
   if (payload[idName] !== raw.entity_id)
     throw new InvalidInputError("payload entity ID mismatch");
   if (entity === "site" || entity === "bin") {
     if (!text(payload.name, 200))
       throw new InvalidInputError("invalid facility name");
   }
-  if (
-    entity !== "site" &&
-    (typeof payload.site_id !== "string" || !isUuid(payload.site_id))
-  )
+  if (entity !== "site" && !isUuid(String(payload.site_id)))
     throw new InvalidInputError("invalid site reference");
   if (entity === "device") {
-    if (
-      payload.bin_id !== null &&
-      (typeof payload.bin_id !== "string" || !isUuid(payload.bin_id))
-    )
+    if (payload.bin_id !== null && !isUuid(String(payload.bin_id)))
       throw new InvalidInputError("invalid bin reference");
     if (
       !text(payload.serial_number, 128) ||
-      (payload.status !== "active" &&
-        payload.status !== "disabled" &&
-        payload.status !== "deleted")
+      !["active", "disabled", "deleted"].includes(String(payload.status))
     )
       throw new InvalidInputError("invalid device payload");
   }
+  return raw as unknown as ImportChange;
 }

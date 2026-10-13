@@ -1,0 +1,40 @@
+nameOverride: entitlement-heartbeat
+replicaCount: 1
+pdb: { enabled: false }
+service:
+  enabled: false
+  port: 8090
+  containerPort: 8090
+networkPolicy:
+  ingressEnabled: false
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+container:
+  name: entitlement-heartbeat
+  command: ["node"]
+  args: ["packages/entitlements/dist/heartbeat.js"]
+  envFrom:
+    - secretRef:
+        name: entitlement-heartbeat-config
+  env:
+    - { name: WORKER_HEALTH_PORT, value: "8090" }
+probes:
+  startup:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/readyz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 5
+  liveness:
+    enabled: true
+    type: exec
+    command: [node, -e, 'fetch("http://127.0.0.1:8090/healthz").then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))']
+    periodSeconds: 10
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }

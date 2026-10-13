@@ -53,6 +53,18 @@ function demo() {
   return createDemoServices({ queueStorage: memoryStore() });
 }
 
+test('a failed cold-start OAuth callback is visible and sign-in can be retried', async () => {
+  const services = demo();
+  const identity = services.session.identity.bind(services.session);
+  services.session.identity = jest.fn()
+    .mockRejectedValueOnce(new Error('Sign-in callback expired. Try again.'))
+    .mockImplementation(identity);
+  const app = await mount(services);
+  expect(app.text()).toContain('Sign-in callback expired. Try again.');
+  await app.press('signin-button');
+  expect(await services.session.identity()).not.toBeNull();
+});
+
 test('alert list renders severity, bin, site and state, labelled as demo data', async () => {
   const app = await mount(demo());
   const text = app.text();

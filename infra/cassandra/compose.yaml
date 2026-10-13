@@ -7,6 +7,9 @@ services:
     ports: ["127.0.0.1:59042:9042"]
     environment:
       CASSANDRA_CLUSTER_NAME: greenguard-local
+      # Cassandra 5 no longer supplies a usable single-node seed implicitly.
+      # The local RF1 node is its own seed; multi-node environments override this.
+      CASSANDRA_SEEDS: cassandra
       CASSANDRA_DC: datacenter1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       CASSANDRA_NUM_TOKENS: 16

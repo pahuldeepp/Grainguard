@@ -1,10 +1,11 @@
+import { withTenant } from "./tenant.js";
 import type { Pool } from "pg";
 import type { ProviderAdapter } from "./adapters.js";
 import type { Broker, IncomingTask, Settlement } from "./broker.js";
 import {
   beginDelivery,
+  expireOptionalHold,
   finishDelivery,
-  expireDeliveryHold,
   isTerminal,
   type Outcome,
   type Plan,
@@ -56,13 +57,20 @@ function providerCall<T>(
   deps: Deps,
   fn: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  return deps.providers.run(() =>
-    withTimeout(deps.policy.providerTimeoutMs, fn),
-  );
+  return withTimeout(deps.policy.providerTimeoutMs, fn);
 }
 
 /** One provider send with the intent ID as idempotency key; timeout => unknown. */
-export async function attemptSend(
+export function attemptSend(
+  deps: Deps,
+  task: Task,
+  attempt: number,
+): Promise<Outcome> {
+  return deps.providers.run(() => sendUnderPermit(deps, task, attempt));
+}
+
+/** Private call site: caller owns capacity through owner admission and finish. */
+async function sendUnderPermit(
   deps: Deps,
   task: Task,
   attempt: number,
@@ -87,10 +95,11 @@ export async function attemptSend(
 }
 
 /** Asks the provider whether the idempotency key was delivered. */
-export async function attemptReconcile(
-  deps: Deps,
-  task: Task,
-): Promise<Outcome> {
+export function attemptReconcile(deps: Deps, task: Task): Promise<Outcome> {
+  return deps.providers.run(() => reconcileUnderPermit(deps, task));
+}
+
+async function reconcileUnderPermit(deps: Deps, task: Task): Promise<Outcome> {
   try {
     const result = await providerCall(deps, (signal) =>
       deps.adapter(task.channel).reconcile(task.intent_id, signal),
@@ -126,100 +135,78 @@ function attemptOf(task: IncomingTask): number {
 }
 
 /**
- * Handles one RabbitMQ task: begin (locked, committed) -> provider call outside any
- * transaction -> record outcome (committed) -> broker follow-up with confirms -> ack.
+ * Handles one RabbitMQ task: begin (locked, committed) -> provider call under a separate owner admission
+ * -> record outcome (committed) -> broker follow-up with confirms -> ack.
  */
 export async function handleTask(
   deps: Deps,
   incoming: IncomingTask,
 ): Promise<Settlement> {
   deps.metrics.observeLag(incoming.timestamp);
-  const task = parseWarningTask(deps, incoming);
-  if (!task) return "reject";
-  if (await holdIfOptionalSendingDisabled(deps, incoming, task)) return "ack";
-  return deliverTask(deps, incoming, task);
-}
-
-function parseWarningTask(
-  deps: Deps,
-  incoming: IncomingTask,
-): Task | undefined {
   let task: Task;
   try {
     task = parseTask(incoming.body, incoming.messageId);
   } catch (error) {
     if (!(error instanceof InvalidTaskError)) throw error;
     deps.metrics.inc("tasks_rejected");
-    return undefined;
+    console.warn("notification task rejected", {
+      reason: error.message.slice(0, 120),
+    });
+    return "reject";
   }
   // Severity ownership is unconditional, including stale/forged RabbitMQ tasks.
   // Reject before flag lookup, ledger claims or provider calls; critical is AWS-only.
   if (task.severity !== "warning") {
     deps.metrics.inc("tasks_rejected");
-    return undefined;
+    console.warn("notification task rejected", {
+      reason: "severity_not_owned_by_rabbit_worker",
+      severity: task.severity,
+    });
+    return "reject";
   }
-  return task;
-}
-
-async function holdIfOptionalSendingDisabled(
-  deps: Deps,
-  incoming: IncomingTask,
-  task: Task,
-): Promise<boolean> {
-  if (!deps.optionalSendEnabled) {
-    deps.metrics.resetHeld();
-    return false;
+  if (deps.optionalSendEnabled) {
+    let enabled = false;
+    try {
+      enabled = await deps.optionalSendEnabled(task.tenant_id);
+    } catch {
+      /* fail closed */
+    }
+    if (!enabled) {
+      const now = Date.now();
+      const priorHeld = Number(incoming.headers[FIRST_HELD_HEADER]);
+      const firstHeld =
+        Number.isFinite(priorHeld) && priorHeld >= 0 && priorHeld <= now
+          ? priorHeld
+          : now;
+      const priorAttempts = Number(
+        incoming.headers[OPTIONAL_HOLD_ATTEMPT_HEADER] ?? 0,
+      );
+      const attempt =
+        (Number.isSafeInteger(priorAttempts) && priorAttempts >= 0
+          ? priorAttempts
+          : 0) + 1;
+      const headers = {
+        ...incoming.headers,
+        [FIRST_HELD_HEADER]: firstHeld,
+        [OPTIONAL_HOLD_ATTEMPT_HEADER]: attempt,
+      };
+      deps.metrics.observeHeld(firstHeld, now);
+      deps.metrics.inc("optional_held");
+      if (attempt >= deps.policy.maxAttempts) {
+        if (await expireHold(deps, task, headers))
+          deps.metrics.inc("optional_held_parked");
+      } else {
+        await deps.broker.publish({
+          key: RETRY_KEY,
+          messageId: task.intent_id,
+          body: incoming.body,
+          headers,
+          expirationMs: deps.policy.maxBackoffMs,
+        });
+      }
+      return "ack";
+    }
   }
-  let enabled = false;
-  try {
-    enabled = await deps.optionalSendEnabled(task.tenant_id);
-  } catch {
-    // Fail closed when the trusted flag source is unavailable.
-  }
-  if (enabled) {
-    deps.metrics.resetHeld();
-    return false;
-  }
-  const now = Date.now();
-  const priorHeld = Number(incoming.headers[FIRST_HELD_HEADER]);
-  const firstHeld =
-    Number.isFinite(priorHeld) && priorHeld >= 0 && priorHeld <= now
-      ? priorHeld
-      : now;
-  const priorAttempts = Number(
-    incoming.headers[OPTIONAL_HOLD_ATTEMPT_HEADER] ?? 0,
-  );
-  const attempt =
-    (Number.isSafeInteger(priorAttempts) && priorAttempts >= 0
-      ? priorAttempts
-      : 0) + 1;
-  const headers = {
-    ...incoming.headers,
-    [FIRST_HELD_HEADER]: firstHeld,
-    [OPTIONAL_HOLD_ATTEMPT_HEADER]: attempt,
-  };
-  deps.metrics.observeHeld(firstHeld, now);
-  deps.metrics.inc("optional_held");
-  if (attempt >= deps.policy.maxAttempts) {
-    if (await expireHold(deps, task, headers))
-      deps.metrics.inc("optional_held_parked");
-    return true;
-  }
-  await deps.broker.publish({
-    key: RETRY_KEY,
-    messageId: task.intent_id,
-    body: incoming.body,
-    headers,
-    expirationMs: deps.policy.maxBackoffMs,
-  });
-  return true;
-}
-
-async function deliverTask(
-  deps: Deps,
-  incoming: IncomingTask,
-  task: Task,
-): Promise<Settlement> {
   const plan = await beginDelivery(deps.pool, task);
   if (plan.action === "stale") return "ack";
   if (plan.action === "receipt") {
@@ -228,11 +215,25 @@ async function deliverTask(
     deps.metrics.inc("duplicates");
     return "ack";
   }
-  const outcome =
-    plan.action === "send"
-      ? await attemptSend(deps, task, plan.attempt)
-      : await attemptReconcile(deps, task);
-  const final = await finishDelivery(deps.pool, task, outcome);
+  // The intent remains committed before the call. This separate admission holds
+  // the owner fence through the external effect and ledger completion, so a move
+  // must wait for an admitted provider call to finish. Redelivery keeps intent_id.
+  // Queued provider work waits without a pinned database connection. Keep the
+  // acquired permit and owner fence through the effect and ledger completion.
+  const final = await deps.providers.run(() =>
+    withTenant(
+      deps.pool,
+      task.tenant_id,
+      async (client) => {
+        const outcome =
+          plan.action === "send"
+            ? await sendUnderPermit(deps, task, plan.attempt)
+            : await reconcileUnderPermit(deps, task);
+        return finishDelivery(deps.pool, task, outcome, client);
+      },
+      { freshPlacement: true },
+    ),
+  );
   if (final === "stale") return "ack";
   deps.metrics.inc(`outcome_${final}`);
   await route(deps, incoming, task, final, plan);
@@ -246,20 +247,22 @@ async function expireHold(
   task: Task,
   headers: Record<string, unknown>,
 ): Promise<boolean> {
-  const plan = await expireDeliveryHold(deps.pool, task);
-  if (plan.action === "stale") return false;
-  if (plan.action === "receipt") {
-    await sendReceipt(deps, task, plan.outcome);
-    if (plan.park) await park(deps, task, headers);
-    return plan.park === true;
+  const result = await expireOptionalHold(deps.pool, task);
+  if (result.action === "stale") return false;
+  if (result.action === "receipt") {
+    await sendReceipt(deps, task, result.outcome);
+    if (result.park) await park(deps, task, headers);
+    return result.park;
   }
-  if (plan.action === "reconcile") {
+  if (result.action === "uncertain") {
     // A prior provider call may have succeeded. Never convert uncertainty to
     // failed because an optional-send flag is disabled; operators reconcile it.
     await park(deps, task, headers);
     return true;
   }
-  return false;
+  await sendReceipt(deps, task, "failed");
+  await park(deps, task, headers);
+  return true;
 }
 
 async function route(

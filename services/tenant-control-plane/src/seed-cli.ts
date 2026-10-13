@@ -10,7 +10,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<string> {
   const db = createDb(url, 2);
   try {
     const file =
-      env.AUTH_MEMBERSHIP_FILE ?? "../../infra/oidc/memberships.json";
+      env.AUTH_MEMBERSHIP_FILE?.trim() || "../../infra/oidc/memberships.json";
     const result = await seedFromMembershipFile(db, readFileSync(file, "utf8"));
     return `seeded memberships: created=${result.created} existing=${result.existing}`;
   } finally {

@@ -568,3 +568,57 @@ test("H6: facility commands require valid keys and replay stable responses", asy
     assert.equal(conflict.status, 409);
   }
 });
+
+test("exact serial lookup is authenticated, tenant-scoped and excludes deleted devices", async () => {
+  const own = await tenant();
+  const foreign = await tenant();
+  const serial = `LOOKUP-${randomUUID()}`;
+  const created = await api.call("POST", "/v1/devices", {
+    token: own.operator,
+    headers: { "idempotency-key": randomUUID() },
+    body: { serialNumber: serial, siteId: own.siteId, binId: own.binId },
+  });
+  assert.equal(created.status, 201);
+  const path = `/v1/devices/lookup?serial=${encodeURIComponent(serial)}`;
+  assert.equal((await api.call("GET", path, { token: null })).status, 401);
+  const result = await api.call("GET", path, { token: own.viewer });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.json, {
+    deviceId: created.json?.deviceId,
+    serialNumber: serial,
+  });
+  assert.equal(
+    (await api.call("GET", path, { token: foreign.viewer })).status,
+    404,
+  );
+  assert.equal(
+    (
+      await api.call("GET", `${path}&tenantId=${own.tenantId}`, {
+        token: foreign.viewer,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await api.call("GET", "/v1/devices/lookup?serial=" + "x".repeat(129), {
+        token: own.viewer,
+      })
+    ).status,
+    400,
+  );
+  const deleted = await api.call(
+    "POST",
+    `/v1/devices/${created.json?.deviceId}/status`,
+    {
+      token: own.operator,
+      headers: { "idempotency-key": randomUUID(), "if-match": '"1"' },
+      body: { status: "deleted" },
+    },
+  );
+  assert.equal(deleted.status, 200);
+  assert.equal(
+    (await api.call("GET", path, { token: own.viewer })).status,
+    404,
+  );
+});

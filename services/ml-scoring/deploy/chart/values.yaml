@@ -1,0 +1,106 @@
+# Opt-in only. The cluster-synthetic runtime requires isolated endpoints and verified TLS.
+enabled: false
+image:
+  repository: greenguard/ml-scoring-synthetic
+  # Root/disposable GitOps should supply an immutable sha256 digest. This
+  # local synthetic tag fallback is available only through explicit opt-in.
+  allowTagFallback: false
+  digest: ""
+  tag: i4-transformer-bcf286ab98d45f8c
+  pullPolicy: IfNotPresent
+replicaCount: 1
+environment: cluster-synthetic
+cell: ""
+syntheticTenantId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+model:
+  name: greenguard.hotspot-transition.classifier
+  version: i4-transformer-bcf286ab98d45f8c
+health:
+  port: 8080
+  bind: 0.0.0.0
+secretRefs:
+  database:
+    name: ml-scoring-runtime
+    key: database-url
+    caSecretName: ml-synthetic-postgres-auth
+    # The Secret key is ca.crt; the pod volume projects it as root.crt to match
+    # libpq's sslrootcert path.
+    caKey: ca.crt
+  migrator:
+    # Generated with the isolated sandbox bundle helper. This credential must
+    # own only greenguard_ml and must never be the scorer runtime login.
+    name: ml-scoring-migrator
+    key: database-url
+  kafka:
+    name: ml-scoring-runtime
+    usernameKey: kafka-username
+    passwordKey: kafka-password
+    caSecretName: ml-synthetic-kafka-tls
+    caKey: ca.crt
+  fixture:
+    name: ml-scoring-fixture
+    usernameKey: kafka-username
+    passwordKey: kafka-password
+  operations:
+    name: ml-scoring-runtime
+    tokenKey: operations-token
+connectivity:
+  kafka:
+    bootstrapServers: kafka.ml-synthetic.svc.cluster.local:9093
+    securityProtocol: SASL_SSL
+    saslMechanism: SCRAM-SHA-512
+    namespace: ml-synthetic
+    podSelector:
+      app.kubernetes.io/name: ml-synthetic-kafka
+    port: 9093
+  postgres:
+    namespace: ml-synthetic
+    podSelector:
+      app.kubernetes.io/name: ml-synthetic-postgres
+    port: 5432
+  serviceName: postgres
+  otel:
+    enabled: true
+    # Use the shared GreenGuard Stage 11 collector; it forwards metrics to the
+    # existing Prometheus/Grafana stack and traces/logs to Tempo/Loki.
+    endpoint: http://otel-collector.greenguard.svc.cluster.local:4317
+    namespace: greenguard
+    podSelector:
+      app: otel-collector
+    port: 4317
+  dns:
+    namespace: kube-system
+    podSelector:
+      k8s-app: kube-dns
+    ports: [53]
+networkPolicy:
+  enabled: true
+  operationsSources:
+    - namespaceSelector:
+        kubernetes.io/metadata.name: greenguard
+      podSelector:
+        app.kubernetes.io/name: greenguard-bff
+  healthProbeNamespaces:
+    - selector:
+        kubernetes.io/metadata.name: observability
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    cpu: "2"
+    memory: 3Gi
+terminationGracePeriodSeconds: 90
+tmpSizeLimit: 64Mi
+migration:
+  enabled: true
+  activeDeadlineSeconds: 300
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+syntheticFixtureSeed:
+  # Operator opt-in only. The Job writes synthetic events to the isolated
+  # synthetic topic after the scorer is healthy; it cannot reach production.
+  enabled: false
+  count: 384
+  activeDeadlineSeconds: 180
+  backoffLimit: 0

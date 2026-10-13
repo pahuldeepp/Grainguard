@@ -9,8 +9,8 @@ import (
 	"greenguard.local/projection-builder/history"
 )
 
-const migrationURL = "PROJECTION_MIGRATION_URL"
-const testURL = "postgres://nobody@127.0.0.1:1/none"
+const maintenanceURL = "PROJECTION_MAINTENANCE_URL"
+const testURL = "postgres://projection_history_maintainer@127.0.0.1:1/greenguard_read"
 
 func values(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 func TestRun(t *testing.T) {
@@ -27,17 +27,19 @@ func TestRun(t *testing.T) {
 		return failure
 	}
 	for _, env := range []map[string]string{
-		{}, {history.WindowEnv: "bad"}, {history.AheadEnv: "bad"}, {migrationURL: "not a url"},
+		{}, {history.WindowEnv: "bad"}, {history.AheadEnv: "bad"}, {maintenanceURL: "not a url"},
+		{maintenanceURL: "postgres://projection_migrator@127.0.0.1/greenguard_read"},
+		{maintenanceURL: "postgres://projection_history_maintainer@127.0.0.1/greenguard_inventory"},
 	} {
 		if err := run(context.Background(), values(env)); err == nil {
 			t.Fatal(env)
 		}
 	}
-	if err := run(context.Background(), values(map[string]string{migrationURL: testURL})); !errors.Is(err, failure) {
+	if err := run(context.Background(), values(map[string]string{maintenanceURL: testURL})); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
 	maintain = func(context.Context, history.Starter, time.Duration, int, ...string) error { return nil }
-	if err := run(context.Background(), values(map[string]string{migrationURL: testURL})); err != nil {
+	if err := run(context.Background(), values(map[string]string{maintenanceURL: testURL})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -46,7 +48,7 @@ func TestMain(t *testing.T) {
 	t.Cleanup(func() { exit = oldExit; maintain = oldMaintain })
 	t.Setenv(history.WindowEnv, "")
 	t.Setenv(history.AheadEnv, "")
-	t.Setenv(migrationURL, "")
+	t.Setenv(maintenanceURL, "")
 	called := 0
 	exit = func(code int) {
 		called++
@@ -58,7 +60,7 @@ func TestMain(t *testing.T) {
 	if called != 1 {
 		t.Fatal(called)
 	}
-	t.Setenv(migrationURL, testURL)
+	t.Setenv(maintenanceURL, testURL)
 	maintain = func(context.Context, history.Starter, time.Duration, int, ...string) error { return nil }
 	main()
 	if called != 1 {

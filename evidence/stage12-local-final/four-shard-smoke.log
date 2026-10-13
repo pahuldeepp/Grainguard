@@ -1,0 +1,4 @@
+s1: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s2: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s3: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed
+s4: schema parity, owner credentials, physical isolation, tenant RLS, read-only standby and replay pause/recovery passed

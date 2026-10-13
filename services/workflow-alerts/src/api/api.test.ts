@@ -205,7 +205,11 @@ describe("row-level security at the SQL layer", () => {
          VALUES ($1::uuid, 'k', 'alert.acknowledge', gen_random_uuid(), '{}', '{}', now())`,
         [a.tenantId],
       ),
-      /row-level security/,
+      (error: unknown) =>
+        (error as { code?: string }).code === "42501" &&
+        /row-level security|tenant context does not match row tenant/.test(
+          String(error),
+        ),
     );
     for (const table of [
       "alert_episodes",

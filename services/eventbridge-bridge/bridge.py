@@ -6,11 +6,12 @@ import logging
 import os
 import re
 import signal
+import ssl
 import time
 import uuid
+from worker_health import WorkerHealth, start_health_server
 
 import boto3
-from confluent_kafka import Consumer, KafkaError
 
 log = logging.getLogger("eventbridge-bridge")
 log.setLevel(os.getenv("LOG_LEVEL", "INFO"))
@@ -23,6 +24,14 @@ EVENT_TYPES = {
 }
 UUID_FIELDS = ("event_id", "tenant_id", "aggregate_id", "correlation_id", "causation_id")
 TRACEPARENT = re.compile(r"^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$")
+HEALTH = WorkerHealth()
+HEALTH_SERVER = None
+
+
+def ensure_health_server() -> None:
+    global HEALTH_SERVER
+    if HEALTH_SERVER is None:
+        HEALTH_SERVER = start_health_server(HEALTH, port=int(os.getenv("HEALTH_PORT", "8080")))
 
 
 
@@ -102,22 +111,43 @@ def forward_record(events, quarantine, *, bus_name: str, quarantine_url: str,
         }))
 
 
-def run() -> bool:
+def run(consumer_factory=None, kafka_error=None, aws_client=None) -> bool:
+    ensure_health_server()
+    HEALTH.set_ready(False)
+    HEALTH.heartbeat()
     required = ("KAFKA_BROKERS", "EVENT_BUS_NAME", "BRIDGE_QUARANTINE_QUEUE_URL")
     missing = [name for name in required if not os.getenv(name)]
     if missing:
         raise RuntimeError("missing required configuration: " + ", ".join(missing))
     topic = os.getenv("ALERTS_LIFECYCLE_TOPIC", "greenguard.alerts.lifecycle.v1")
-    consumer = Consumer({
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "").strip().upper()
+    mechanism = os.getenv("KAFKA_SASL_MECHANISM", "").strip().upper()
+    user, password, ca_file = (os.getenv(name, "") for name in
+                               ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "KAFKA_TLS_CA_FILE"))
+    required = os.getenv("KAFKA_REQUIRE_TLS", "").lower() == "true"
+    security = {}
+    if any((required, protocol, mechanism, user, password, ca_file)):
+        if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
+            raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
+        ssl.create_default_context(cafile=ca_file)
+        security = {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
+                    "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
+                    "enable.ssl.certificate.verification": True}
+    if consumer_factory is None or kafka_error is None:
+        from confluent_kafka import Consumer, KafkaError  # imported only by the live runner
+        consumer_factory, kafka_error = Consumer, KafkaError
+    consumer = consumer_factory({
         "bootstrap.servers": os.environ["KAFKA_BROKERS"],
         "group.id": os.getenv("KAFKA_GROUP", "greenguard-eventbridge-bridge-v1"),
         "enable.auto.commit": False,
         "auto.offset.reset": "earliest",
         "isolation.level": "read_committed",
+        **security,
     })
     consumer.subscribe([topic])
-    events = boto3.client("events")
-    quarantine = boto3.client("sqs")
+    aws_client = aws_client or boto3.client
+    events = aws_client("events")
+    quarantine = aws_client("sqs")
     running = True
 
     def stop(_signum, _frame):
@@ -129,10 +159,12 @@ def run() -> bool:
     try:
         while running:
             message = consumer.poll(1.0)
+            HEALTH.heartbeat()
+            HEALTH.set_ready(bool(consumer.assignment()))
             if message is None:
                 continue
             if message.error():
-                if message.error().code() == KafkaError._PARTITION_EOF:
+                if message.error().code() == kafka_error._PARTITION_EOF:
                     continue
                 raise RuntimeError(f"Kafka consume failed: {message.error()}")
             forward_record(events, quarantine,
@@ -143,7 +175,9 @@ def run() -> bool:
             # Commit only after EventBridge accepted all applicable events or the poison
             # record was durably quarantined. A crash before this point safely replays.
             consumer.commit(message=message, asynchronous=False)
+            HEALTH.heartbeat()
     finally:
+        HEALTH.set_ready(False)
         consumer.close()
     return running
 

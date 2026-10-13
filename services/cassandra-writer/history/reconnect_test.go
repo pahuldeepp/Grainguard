@@ -2,7 +2,9 @@ package history
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
+	"net"
 	"testing"
 
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
@@ -36,7 +38,7 @@ func (o *opener) open() (Conn, error) {
 }
 
 func TestReconnectingStartsWhileDownThenConnects(t *testing.T) {
-	o := &opener{err: errors.New("connection refused")}
+	o := &opener{err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}
 	r := &Reconnecting{Open: o.open}
 	ctx := context.Background()
 	if err := r.Connect(); !errors.Is(err, ErrNotConnected) || !Transient(err) {
@@ -66,6 +68,24 @@ func TestReconnectingStartsWhileDownThenConnects(t *testing.T) {
 	}
 	if err := r.Iter(ctx, LocalQuorum, "q").Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReconnectingPreservesPermanentOpenErrors(t *testing.T) {
+	permanent := errors.New("authentication failed")
+	o := &opener{err: permanent}
+	r := &Reconnecting{Open: o.open}
+	if err := r.Connect(); !errors.Is(err, permanent) || errors.Is(err, ErrNotConnected) || Transient(err) {
+		t.Fatalf("permanent open error was hidden as transient: %v", err)
+	}
+}
+
+func TestReconnectingPreservesTLSVerificationErrors(t *testing.T) {
+	permanent := &net.OpError{Op: "remote error", Net: "tcp", Err: x509.UnknownAuthorityError{Cert: &x509.Certificate{}}}
+	o := &opener{err: permanent}
+	r := &Reconnecting{Open: o.open}
+	if err := r.Connect(); !errors.Is(err, permanent) || errors.Is(err, ErrNotConnected) || Transient(err) {
+		t.Fatalf("TLS verification error was hidden as transient: %v", err)
 	}
 }
 
@@ -148,5 +168,28 @@ func TestTransientClassifiesReconnectErrors(t *testing.T) {
 	}
 	if Transient(errors.New("invalid query")) {
 		t.Fatal("permanent error classified transient")
+	}
+}
+
+func TestTransientClassifiesWrappedGocqlStartupDialFailures(t *testing.T) {
+	if Transient(nil) {
+		t.Fatal("nil error classified transient")
+	}
+	for _, message := range []string{
+		"connect cassandra: gocql: unable to discover protocol version: dial tcp 127.0.0.1:9042: connect: connection refused",
+		"connect cassandra: gocql: unable to create session: dial tcp 10.0.0.2:9042: i/o timeout",
+		"connect cassandra: gocql: unable to discover protocol version: EOF",
+	} {
+		if !Transient(errors.New(message)) {
+			t.Errorf("network startup failure must be retried: %s", message)
+		}
+	}
+	for _, message := range []string{
+		"connect cassandra: gocql: unable to discover protocol version: unsupported protocol version",
+		"connect cassandra: authentication failed",
+	} {
+		if Transient(errors.New(message)) {
+			t.Errorf("permanent Cassandra failure must not be retried: %s", message)
+		}
 	}
 }

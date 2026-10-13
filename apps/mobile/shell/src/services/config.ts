@@ -1,18 +1,17 @@
-// Live-mode endpoints for the LOCAL development stack only (Stage 10e, ADR-0014).
-// Nothing here is secret: Dex client `greenguard-mobile` is a public PKCE client
-// registered in infra/oidc/dex.yaml.tpl, and the password is typed by the person
-// signing in, never stored in source. In a release bundle every value is empty,
-// so live sign-in reports "not configured" instead of contacting localhost.
-//
-// The scope line carries Dex's cross-client audience request: the BFF accepts
-// the single audience `greenguard-dashboard`, so the mobile token must list it.
-const DEV_LIVE_CONFIG = {
+// Public build-time endpoints. `deployment.generated.ts` is created by the
+// configure script and ignored by Git. Release builds have no localhost fallback.
+import { DEPLOYMENT_CONFIG } from './deployment.generated';
+
+// Dex's audience is a cross-client PKCE scope. The shared PKCE client builds
+// this special scope from audienceMode/audience and does not send `audience=`.
+export const LOCAL_DEV_CONFIG = {
   authorizationEndpoint: 'http://127.0.0.1:5556/dex/auth',
   tokenEndpoint: 'http://127.0.0.1:5556/dex/token',
   clientId: 'greenguard-mobile',
   redirectUri: 'greenguard://auth/callback',
-  scope:
-    'openid profile offline_access audience:server:client_id:greenguard-dashboard',
+  scope: 'openid profile offline_access',
+  audience: 'greenguard-dashboard',
+  audienceMode: 'scope' as const,
   bffEndpoint: 'http://127.0.0.1:4400/graphql',
 };
 
@@ -22,13 +21,29 @@ const EMPTY_LIVE_CONFIG = {
   clientId: '',
   redirectUri: '',
   scope: '',
+  audience: undefined,
+  audienceMode: undefined,
   bffEndpoint: '',
 };
 
-export const LIVE_CONFIG: typeof DEV_LIVE_CONFIG = __DEV__
-  ? DEV_LIVE_CONFIG
-  : EMPTY_LIVE_CONFIG;
+export type MobileLiveConfig = Omit<typeof LOCAL_DEV_CONFIG, 'audience' | 'audienceMode'> & {
+  audience?: string;
+  audienceMode?: 'scope' | 'query-param';
+};
+
+export function resolveLiveConfig(
+  deployment: MobileLiveConfig | null,
+  development: boolean,
+): MobileLiveConfig {
+  return deployment ?? (development ? LOCAL_DEV_CONFIG : EMPTY_LIVE_CONFIG);
+}
+
+export const LIVE_CONFIG: MobileLiveConfig = resolveLiveConfig(
+  DEPLOYMENT_CONFIG,
+  __DEV__,
+);
 
 export function liveConfigured(): boolean {
-  return Object.values(LIVE_CONFIG).every(value => value.length > 0);
+  return Boolean(LIVE_CONFIG.authorizationEndpoint && LIVE_CONFIG.tokenEndpoint &&
+    LIVE_CONFIG.clientId && LIVE_CONFIG.redirectUri && LIVE_CONFIG.scope && LIVE_CONFIG.bffEndpoint);
 }

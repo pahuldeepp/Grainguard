@@ -41,4 +41,6 @@ test("result headers echo the stored trace or carry none", () => {
   });
   assert.equal(resultHeaders(JSON.stringify({ saga_id: saga })), undefined);
   assert.equal(resultHeaders("not json"), undefined);
+  for (const primitive of ["null", "false", "42", '"text"', "[]"])
+    assert.equal(resultHeaders(primitive), undefined, primitive);
 });

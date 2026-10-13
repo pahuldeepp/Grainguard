@@ -1,0 +1,480 @@
+"""Offline contract checks for the disposable secret preflight."""
+
+import base64
+import contextlib
+import importlib.util
+import io
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+
+MODULE_PATH = Path(__file__).with_name("check-secrets-ready.py")
+SPEC = importlib.util.spec_from_file_location("check_secrets_ready", MODULE_PATH)
+preflight = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(preflight)
+
+
+class PreflightTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        root = Path(self.directory.name)
+        self.contract = root / "contract.json"
+        self.contract.write_text(json.dumps({"releases": [
+            {"name": "dashboard", "secret": "dashboard-public-config"},
+            {"name": "bff", "secret": "bff-config"},
+            {"name": "read-api", "secret": "read-api-config"},
+            {"name": "search-indexer", "secret": "search-indexer-config"},
+            {"name": "cassandra-writer", "secret": "cassandra-writer-config"},
+            {"name": "notification-service", "secret": "notification-service-config"},
+            {"name": "notification-contacts-projector", "secret": "notification-contacts-projector-config", "kafkaPrincipal": "notification-service"},
+            {"name": "tenant-control-plane", "secret": "tenant-control-plane-config"},
+            {"name": "audit-export-worker", "secret": "audit-export-worker-config", "kafka": False},
+            {"name": "billing-service", "secret": "billing-service-config"},
+            {"name": "entitlement-heartbeat", "secret": "entitlement-heartbeat-config", "kafkaPrincipal": "billing-service"},
+        ], "scheduledTasks": [
+            {"name": "projection-history-s1", "secret": "greenguard-s1-projection-history-maintenance-config"}
+        ]}))
+        self.sql = root / "init.sql"
+        self.sql.write_text("\\getenv role_password ROLE_PASSWORD\n\\getenv other_password OTHER_PASSWORD\n\\getenv cdc_password CDC_DB_PASSWORD\n")
+        lookup_token = "c" * 32
+        self.values = {
+            "greenguard-data-credentials": {"REDIS_PASSWORD": "r" * 48, "RABBITMQ_DEFAULT_USER": "greenguard", "RABBITMQ_DEFAULT_PASS": "q" * 48, "RABBITMQ_ERLANG_COOKIE": "c" * 48},
+            "bff-config": {"BFF_TOKEN": "dummy-token", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "bff", "KAFKA_SASL_PASSWORD": "dummy"},
+            "read-api-config": {"READ_HISTORY_CURSOR_SECRET": "h" * 32, "ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_SASL_USERNAME": "read-api", "KAFKA_SASL_PASSWORD": "dummy"},
+            "search-indexer-config": {"ELASTICSEARCH_URL": "https://greenguard-opensearch.greenguard.svc.cluster.local:9200", "KAFKA_SASL_USERNAME": "search-indexer", "KAFKA_SASL_PASSWORD": "dummy"},
+            "cassandra-writer-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "cassandra-writer", "KAFKA_SASL_PASSWORD": "dummy"},
+            "notification-service-config": {"CONTROL_LOOKUP_TOKEN": lookup_token, "KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy"},
+            "notification-contacts-projector-config": {"KAFKA_BROKERS": "kafka:29092", "KAFKA_SASL_USERNAME": "notification-service", "KAFKA_SASL_PASSWORD": "dummy", "SCHEMA_REGISTRY_URL": "https://schema-registry.greenguard.svc.cluster.local:8081", "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "NOTIFICATION_STATE_TABLE": "greenguard-cell-state", "AWS_REGION": "us-east-1"},
+            "tenant-control-plane-config": {
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
+                "KAFKA_SASL_USERNAME": "tenant-control-plane", "KAFKA_SASL_PASSWORD": "dummy",
+                "AUDIT_EXPORT_S3_BUCKET": "cell-audit-bucket", "AUDIT_EXPORT_S3_REGION": "ca-central-1",
+                "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
+                "AUDIT_EXPORT_LINK_SECRET": "l" * 32,
+                "BILLING_DATABASE_URL": "postgresql://billing_app:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+            },
+            "billing-service-config": {
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
+                "BILLING_DATABASE_URL": "postgresql://billing_app:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "KAFKA_BROKERS": "kafka.greenguard.svc.cluster.local:29092",
+                "KAFKA_SASL_USERNAME": "billing-service", "KAFKA_SASL_PASSWORD": "dummy-kafka-password",
+                "STRIPE_API_KEY": "sk_test_fixture", "STRIPE_WEBHOOK_SECRETS": "whsec_fixture",
+                "BILLING_INBOX_ENCRYPTION_KEY": base64.b64encode(b"x" * 32).decode(),
+                "BILLING_RETURN_ORIGINS": "https://greenguard.example.com",
+            },
+            "entitlement-heartbeat-config": {
+                "KAFKA_BROKERS": "kafka.greenguard.svc.cluster.local:29092",
+                "KAFKA_SASL_USERNAME": "billing-service", "KAFKA_SASL_PASSWORD": "dummy-kafka-password",
+            },
+            "audit-export-worker-config": {
+                "CONTROL_AUDIT_DATABASE_URL": "postgresql://control_audit_worker:secret@db.example.rds.amazonaws.com:5432/greenguard_control?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "BILLING_AUDIT_DATABASE_URL": "postgresql://billing_audit_reader:secret@db.example.rds.amazonaws.com:5432/greenguard_billing?sslmode=verify-full&sslrootcert=%2Fetc%2Fgreenguard%2Frds%2Fca.pem",
+                "CONTROL_LOOKUP_TOKEN": lookup_token,
+                "AUDIT_EXPORT_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----\nprivate-key\n-----END PRIVATE KEY-----",
+                "AUDIT_EXPORT_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\npublic-key\n-----END PUBLIC KEY-----",
+                "AUDIT_EXPORT_PUBLIC_KEY_ID": "audit-key-v1",
+                "AUDIT_EXPORT_S3_BUCKET": "cell-audit-bucket", "AUDIT_EXPORT_S3_REGION": "ca-central-1",
+            },
+            "greenguard-rds-bootstrap": {
+                "ROLE_PASSWORD": "dummy-role-password",
+                "OTHER_PASSWORD": "dummy-other-password",
+                "CDC_DB_PASSWORD": "dummy-cdc-password",
+            },
+            "greenguard-rds-ca": {"ca.pem": "-----BEGIN CERTIFICATE-----\ndummy\n-----END CERTIFICATE-----"},
+            "grafana-admin": {"GF_SECURITY_ADMIN_USER": "test-admin", "GF_SECURITY_ADMIN_PASSWORD": "dummy-grafana-password"},
+            "greenguard-pgbouncer-auth": {"userlist.txt": "\"inventory_app\" \"dummy-hash\""},
+            "greenguard-cdc-credentials": {"CDC_DB_PASSWORD": "dummy-cdc-password"},
+            "greenguard-opensearch-admin": {"password": "dummy-search-admin"},
+            "greenguard-opensearch-clients": {"writer-password": "dummy-search-writer", "reader-password": "dummy-search-reader", "acceptance-writer-password": "dummy-acceptance-writer", "acceptance-reader-password": "dummy-acceptance-reader"},
+            "greenguard-opensearch-tls": {"ca.crt": "dummy-ca", "node.crt": "dummy-node-cert", "node.key": "dummy-node-key", "admin.crt": "dummy-admin-cert", "admin.key": "dummy-admin-key"},
+            "greenguard-opensearch-ca": {"ca.crt": "-----BEGIN CERTIFICATE-----\ndummy\n-----END CERTIFICATE-----"},
+            "greenguard-cassandra-auth": {"admin-password": "dummy-admin", "reader-password": "dummy-reader", "writer-password": "dummy-writer"},
+            "greenguard-cassandra-tls": {"server.p12": base64.b64encode(b"dummy-p12").decode(), "keystore-password": "dummy-keystore", "ca.crt": "dummy-ca"},
+            "greenguard-kafka-auth": {
+                **{key: base64.b64encode(b"dummy-p12").decode() for key in preflight.KAFKA_BINARY_KEYS},
+                "acceptance-client-jaas": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="acceptance-probe" password="' + "a" * 48 + '";',
+                "broker-jaas": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"broker\" password=\"dummy\" user_broker=\"dummy\";",
+                "registry-kafka-jaas": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"registry\" password=\"dummy\";",
+                "keystore-password": "dummy", "key-password": "dummy", "truststore-password": "dummy",
+                "registry-keystore-password": "dummy", "registry-key-password": "dummy",
+                "registry-jaas.conf": "SchemaRegistry-Props { org.eclipse.jetty.security.jaas.spi.PropertyFileLoginModule required file=\"/etc/greenguard/registry/registry-users.properties\"; };",
+                "registry-users.properties": "registry: hashed,registry-user",
+            },
+            "greenguard-kafka-ca": {"ca.crt": "-----BEGIN CERTIFICATE-----dummy", "registry-ca.crt": "-----BEGIN CERTIFICATE-----dummy"},
+            "greenguard-kafka-connect-auth": {"KAFKA_SASL_USERNAME": "connect", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="connect" password="dummy";', "SCHEMA_REGISTRY_USERNAME": "registry", "SCHEMA_REGISTRY_PASSWORD": "dummy", "SCHEMA_REGISTRY_BASIC_USER_INFO": "registry:dummy"},
+            "greenguard-kafka-admin-auth": {"KAFKA_SASL_USERNAME": "admin", "KAFKA_SASL_PASSWORD": "dummy", "KAFKA_SASL_JAAS_CONFIG": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="dummy";'},
+            "greenguard-mqtt-broker": {"tls.crt": "-----BEGIN CERTIFICATE-----dummy", "tls.key": "-----BEGIN PRIVATE KEY-----dummy", "ca.crt": "-----BEGIN CERTIFICATE-----dummy", "passwords": "greenguard-hardware-worker:$7$dummy-hash", "acl": "user greenguard-hardware-worker\ntopic write greenguard/+/+/command\ntopic read greenguard/+/+/ack"},
+            "greenguard-s1-projection-history-maintenance-config": {
+                "PROJECTION_MAINTENANCE_URL": "postgresql://projection_history_maintainer:dummy@shard1.example.rds.amazonaws.com:5432/greenguard_read?sslmode=verify-full&sslrootcert=/rds-ca/ca.pem",
+                "PROJECTION_HISTORY_SCHEMA": "public", "PROJECTION_HISTORY_HOT_WINDOW": "24h", "PROJECTION_HISTORY_AHEAD_DAYS": "3",
+            },
+        }
+        clients = ("bff", "read-api", "search-indexer", "cassandra-writer", "notification-service", "tenant-control-plane", "billing-service", "connect", "admin")
+        self.values["greenguard-kafka-auth"]["broker-jaas"] += " " + " ".join(
+            f'user_{name}="dummy"' for name in clients
+        )
+        self.values["greenguard-kafka-auth"]["broker-jaas"] += ' user_billing-service="dummy-kafka-password" user_acceptance-probe="' + 'a' * 48 + '"'
+        self.missing = set()
+        self.kubernetes_overrides = {}
+        self.account = "123456789012"
+
+    def stub_command(self, *args):
+        if args[:3] == ("aws", "sts", "get-caller-identity"):
+            return {"Account": self.account}
+        if args[:3] == ("aws", "eks", "describe-cluster"):
+            return "https://eks.example"
+        if args[:3] == ("kubectl", "config", "view"):
+            return {"clusters": [{"cluster": {"server": "https://eks.example"}}]}
+        if args[:3] == ("aws", "rds", "describe-db-instances"):
+            return {"DBInstances": [{"Endpoint": {"Address": "db.example.rds.amazonaws.com"},
+                                      "MasterUserSecret": {"SecretArn": "arn:master"}}]}
+        if args[:3] == ("aws", "secretsmanager", "get-secret-value"):
+            secret_id = args[args.index("--secret-id") + 1]
+            if secret_id == "arn:master":
+                return {"SecretString": json.dumps({"password": "dummy-master-password"}),
+                        "VersionId": "master-v1", "VersionStages": ["AWSCURRENT"]}
+            name = secret_id.rsplit("/", 1)[-1]
+            if name in self.missing:
+                raise RuntimeError("secret unavailable")
+            return {"Name": secret_id, "VersionStages": ["AWSCURRENT"], "VersionId": "source-v1",
+                    "SecretString": json.dumps(self.values[name])}
+        if args[:3] == ("kubectl", "get", "secret"):
+            name = args[3]
+            values = self.kubernetes_overrides.get(name, self.values[name])
+            if name == "greenguard-rds-bootstrap" and name not in self.kubernetes_overrides:
+                values = {**values, "PGHOST": "db.example.rds.amazonaws.com",
+                          "PGPASSWORD": "dummy-master-password"}
+            annotations = {"greenguard.io/aws-version-id": "source-v1"}
+            if name == "greenguard-rds-bootstrap":
+                annotations["greenguard.io/rds-master-version-id"] = "master-v1"
+            return {"type": "Opaque", "metadata": {"annotations": annotations}, "data": {
+                key: base64.b64encode(preflight.secret_bytes(name, {key: value})[key]).decode() for key, value in values.items()
+            }}
+        raise AssertionError(f"unexpected command: {args}")
+
+    def run_preflight(self):
+        argv = ["check-secrets-ready.py", "--account-id", "123456789012",
+                "--region", "ca-central-1", "--environment", "disposable",
+                "--cluster", "test-cluster", "--rds-instance", "test-db"]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(preflight, "CONTRACT", self.contract), \
+             patch.object(preflight, "SQL", self.sql), \
+             patch.object(preflight, "command", self.stub_command), \
+             patch.object(sys, "argv", argv), \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                status = preflight.main()
+            except (RuntimeError, ValueError) as error:
+                status = 1
+                print(f"FAIL {error}", file=sys.stderr)
+        output = stdout.getvalue() + stderr.getvalue()
+        for value in ("dummy-token", "dummy-master-password", "dummy-role-password", "dummy-other-password", "dummy-cdc-password", "dummy-grafana-password", "dummy-search-admin", "dummy-search-writer", "dummy-search-reader"):
+            self.assertNotIn(value, output)
+        return status, output
+
+    def test_complete_secrets_pass(self):
+        status, output = self.run_preflight()
+        self.assertEqual(status, 0)
+        self.assertIn("PASS 28 Secrets", output)
+
+    def test_billing_requires_a_stripe_test_api_key(self):
+        self.values["billing-service-config"]["STRIPE_API_KEY"] = "sk_live_fixture"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("Stripe test-mode API key is required", output)
+        self.assertNotIn("sk_live_fixture", output)
+
+    def test_billing_requires_one_or_two_webhook_secrets(self):
+        self.values["billing-service-config"]["STRIPE_WEBHOOK_SECRETS"] = "whsec_one,whsec_two,whsec_three"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("one or two Stripe webhook signing secrets are required", output)
+
+    def test_billing_requires_a_base64_32_byte_inbox_key(self):
+        self.values["billing-service-config"]["BILLING_INBOX_ENCRYPTION_KEY"] = base64.b64encode(b"short").decode()
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("base64 32-byte inbox encryption key is required", output)
+
+    def test_billing_return_origins_must_be_deployed_https_origins(self):
+        for origin in ("http://greenguard.example.com", "https://localhost", "https://greenguard.example.com/path"):
+            with self.subTest(origin=origin):
+                self.values["billing-service-config"]["BILLING_RETURN_ORIGINS"] = origin
+                status, output = self.run_preflight()
+                self.assertEqual(status, 1)
+                self.assertIn("return origins must be deployed HTTPS origins", output)
+
+    def test_billing_webhook_rotation_accepts_two_signing_secrets(self):
+        self.values["billing-service-config"]["STRIPE_WEBHOOK_SECRETS"] = "whsec_current, whsec_next"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 0)
+
+    def test_heartbeat_secret_contains_only_and_matches_its_scoped_kafka_keys(self):
+        self.assertEqual(
+            set(self.values["entitlement-heartbeat-config"]),
+            {"KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"},
+        )
+        self.assertFalse(set(self.values["entitlement-heartbeat-config"]) & {
+            "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRETS", "BILLING_INBOX_ENCRYPTION_KEY", "BILLING_DATABASE_URL",
+        })
+        self.values["entitlement-heartbeat-config"]["KAFKA_SASL_PASSWORD"] = "wrong-scoped-secret"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("scoped Kafka settings must match billing-service-config", output)
+
+    def test_audit_worker_secret_is_validated_without_broad_kafka_credentials(self):
+        status, output = self.run_preflight()
+        self.assertEqual(status, 0)
+        self.assertNotIn("audit-export-worker-config: scoped Kafka", output)
+
+    def test_audit_worker_requires_control_plane_secret(self):
+        contract = json.loads(self.contract.read_text())
+        contract["releases"] = [
+            release for release in contract["releases"]
+            if release["name"] != "tenant-control-plane"
+        ]
+        self.contract.write_text(json.dumps(contract))
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("tenant-control-plane-config is required", output)
+
+    def test_audit_api_public_key_must_match_worker_signing_key(self):
+        self.values["tenant-control-plane-config"]["AUDIT_EXPORT_PUBLIC_KEY_PEM"] = "different"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("API public key does not match", output)
+
+    def test_audit_worker_must_use_dedicated_central_roles(self):
+        self.values["audit-export-worker-config"]["CONTROL_AUDIT_DATABASE_URL"] = self.values["audit-export-worker-config"]["CONTROL_AUDIT_DATABASE_URL"].replace("control_audit_worker", "control_app")
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("dedicated central role", output)
+
+    def test_projection_maintenance_secret_is_bound_to_dedicated_shard_role_and_tls(self):
+        self.values["greenguard-s1-projection-history-maintenance-config"]["PROJECTION_MAINTENANCE_URL"] = self.values["greenguard-s1-projection-history-maintenance-config"]["PROJECTION_MAINTENANCE_URL"].replace("projection_history_maintainer", "projection_migrator")
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("dedicated role, database, TLS", output)
+
+    def test_mqtt_broker_secret_keys_must_be_exact(self):
+        del self.values["greenguard-mqtt-broker"]["tls.key"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact broker TLS", output)
+
+    def test_notification_registry_url_must_use_internal_https(self):
+        self.values["notification-service-config"]["SCHEMA_REGISTRY_URL"] = "http://schema-registry:8081"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("verified in-cluster HTTPS", output)
+
+    def test_contacts_projector_secret_excludes_notification_credentials(self):
+        self.values["notification-contacts-projector-config"]["SES_SECRET_ACCESS_KEY"] = "should-not-be-mounted"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact least-privilege Kafka, Registry and DynamoDB keys", output)
+
+    def test_connect_jaas_must_match_scoped_password(self):
+        self.values["greenguard-kafka-connect-auth"]["KAFKA_SASL_PASSWORD"] = "different"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("Kafka JAAS must match", output)
+
+    def test_runtime_kafka_credentials_must_be_scoped(self):
+        self.values["bff-config"]["KAFKA_SASL_USERNAME"] = "shared-admin"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("scoped Kafka SASL username/password", output)
+
+    def test_runtime_kafka_password_is_required(self):
+        del self.values["read-api-config"]["KAFKA_SASL_PASSWORD"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("scoped Kafka SASL username/password", output)
+
+    def test_control_plane_clients_must_share_the_canonical_lookup_token(self):
+        self.values["read-api-config"]["CONTROL_LOOKUP_TOKEN"] = "d" * 32
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("read-api-config: CONTROL_LOOKUP_TOKEN differs", output)
+
+    def test_control_plane_client_requires_a_lookup_token(self):
+        del self.values["bff-config"]["CONTROL_LOOKUP_TOKEN"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("bff-config: CONTROL_LOOKUP_TOKEN must contain at least 32 bytes", output)
+
+    def test_shared_runtime_secret_cannot_map_to_conflicting_principals(self):
+        contract = json.loads(self.contract.read_text())
+        contract["releases"].append({
+            "name": "unexpected-worker",
+            "secret": "notification-contacts-projector-config",
+            "kafkaPrincipal": "different-principal",
+        })
+        self.contract.write_text(json.dumps(contract))
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("runtime Secret is assigned to conflicting Kafka principals", output)
+
+    def test_acceptance_kafka_requires_exact_scoped_matching_jaas(self):
+        original = self.values["greenguard-kafka-auth"]["acceptance-client-jaas"]
+        for invalid in ["", original.replace('acceptance-probe', 'admin'), original.replace('a' * 48, 'b' * 48)]:
+            self.values["greenguard-kafka-auth"]["acceptance-client-jaas"] = invalid
+            with self.subTest(invalid=bool(invalid)):
+                self.assertEqual(self.run_preflight()[0], 1)
+        self.values["greenguard-kafka-auth"]["acceptance-client-jaas"] = original
+
+    def test_opensearch_acceptance_credentials_are_required_and_distinct(self):
+        original = dict(self.values["greenguard-opensearch-clients"])
+        for value in [{k: v for k, v in original.items() if k != "acceptance-reader-password"},
+                      {**original, "acceptance-reader-password": original["reader-password"]}]:
+            self.values["greenguard-opensearch-clients"] = value
+            with self.subTest(keys=set(value)):
+                self.assertEqual(self.run_preflight()[0], 1)
+        self.values["greenguard-opensearch-clients"] = original
+
+    def test_broker_jaas_must_match_runtime_client(self):
+        self.values["greenguard-kafka-auth"]["broker-jaas"] = self.values["greenguard-kafka-auth"]["broker-jaas"].replace('user_read-api="dummy"', 'user_read-api="wrong"')
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("broker JAAS does not contain", output)
+
+    def test_redis_rabbitmq_secret_rejects_extra_keys(self):
+        self.values["greenguard-data-credentials"]["UNEXPECTED"] = "extra"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("exact Redis/RabbitMQ keys", output)
+
+    def test_redis_rabbitmq_secret_rejects_short_credentials(self):
+        self.values["greenguard-data-credentials"]["REDIS_PASSWORD"] = "short"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("strong URL-safe credentials", output)
+
+    def test_redis_rabbitmq_secret_rejects_reused_credentials(self):
+        values = self.values["greenguard-data-credentials"]
+        values["RABBITMQ_DEFAULT_PASS"] = values["REDIS_PASSWORD"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("credentials must be independent", output)
+
+    def test_cassandra_pkcs12_binary_is_decoded_once(self):
+        raw = b"\x30\x82\x00\xffPKCS12-fixture"
+        source = {"server.p12": base64.b64encode(raw).decode(), "keystore-password": "private-password", "ca.crt": "certificate-pem"}
+        decoded = preflight.secret_bytes("greenguard-cassandra-tls", source)
+        self.assertEqual(raw, decoded["server.p12"])
+        self.assertEqual(b"private-password", decoded["keystore-password"])
+        self.assertEqual(b"certificate-pem", decoded["ca.crt"])
+
+    def test_cassandra_pkcs12_rejects_invalid_base64(self):
+        self.values["greenguard-cassandra-tls"]["server.p12"] = "not-base64!"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("base64 PKCS12", output)
+
+    def test_cassandra_tls_keys_must_be_exact(self):
+        del self.values["greenguard-cassandra-tls"]["server.p12"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("Cassandra TLS keys", output)
+
+    def test_runtime_cannot_override_secured_cassandra_profile(self):
+        self.values["read-api-config"]["CASSANDRA_REQUIRE_SECURE"] = "0"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("secured chart profile", output)
+
+    def test_read_cursor_secret_is_required_and_bounded(self):
+        for value in (None, "short"):
+            if value is None:
+                self.values["read-api-config"].pop("READ_HISTORY_CURSOR_SECRET", None)
+            else:
+                self.values["read-api-config"]["READ_HISTORY_CURSOR_SECRET"] = value
+            status, output = self.run_preflight()
+            self.assertEqual(status, 1)
+            self.assertIn("READ_HISTORY_CURSOR_SECRET must contain at least 32 bytes", output)
+
+    def test_search_url_must_be_internal_https(self):
+        self.values["read-api-config"]["ELASTICSEARCH_URL"] = "http://greenguard-opensearch:9200"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("verified in-cluster HTTPS", output)
+
+    def test_cdc_password_must_match_bootstrap_role(self):
+        self.values["greenguard-cdc-credentials"]["CDC_DB_PASSWORD"] = "different-cdc-password"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("CDC password differs", output)
+
+    def test_pgbouncer_auth_key_must_be_exact(self):
+        self.values["greenguard-pgbouncer-auth"] = {"wrong": "dummy-hash"}
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("PgBouncer auth keys", output)
+
+    def test_opensearch_tls_keys_must_be_exact(self):
+        del self.values["greenguard-opensearch-tls"]["node.key"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("OpenSearch TLS keys", output)
+
+    def test_wrong_account_fails(self):
+        self.account = "999999999999"
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("AWS account does not match", output)
+
+    def test_missing_role_key_fails(self):
+        del self.values["greenguard-rds-bootstrap"]["ROLE_PASSWORD"]
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("role keys are missing", output)
+
+    def test_empty_runtime_value_fails(self):
+        self.values["bff-config"]["BFF_TOKEN"] = ""
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("nonempty JSON string map", output)
+
+    def test_mismatched_kubernetes_secret_fails(self):
+        self.kubernetes_overrides["bff-config"] = {"BFF_TOKEN": "stale-token"}
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("differ from AWS AWSCURRENT", output)
+
+    def test_absent_ca_fails(self):
+        self.missing.add("greenguard-rds-ca")
+        status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("greenguard-rds-ca: source unavailable", output)
+
+    def test_malformed_kubernetes_base64_fails_without_value(self):
+        original = self.stub_command
+
+        def malformed(*args):
+            result = original(*args)
+            if args[:4] == ("kubectl", "get", "secret", "bff-config"):
+                result["data"]["BFF_TOKEN"] = "invalid-base64@@"
+            return result
+
+        with patch.object(self, "stub_command", malformed):
+            status, output = self.run_preflight()
+        self.assertEqual(status, 1)
+        self.assertIn("invalid base64", output)
+        self.assertNotIn("invalid-base64@@", output)
+
+    def test_aws_reads_force_json_output(self):
+        result = Mock(returncode=0, stdout='{"Account":"123456789012"}')
+        with patch.object(preflight.subprocess, "run", return_value=result) as run:
+            self.assertEqual(preflight.command("aws", "sts", "get-caller-identity"),
+                             {"Account": "123456789012"})
+        self.assertEqual(run.call_args.args[0][-2:], ("--output", "json"))
+
+
+if __name__ == "__main__":
+    unittest.main()

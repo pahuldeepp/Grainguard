@@ -36,6 +36,31 @@ class FakeElastic:
 
 
 class IndexerTests(unittest.TestCase):
+    def test_bootstrap_index_verifies_existing_mapping(self):
+        client = MODULE.Elastic("http://127.0.0.1:19200")
+        with patch.object(client, "create_index") as create, patch.object(client, "request", return_value={"greenguard-inventory-v1": MODULE.MAPPING}) as request:
+            client.bootstrap_index("greenguard-inventory-v1")
+        create.assert_called_once_with("greenguard-inventory-v1")
+        request.assert_called_once_with("GET", "/greenguard-inventory-v1/_mapping")
+        with patch.object(client, "create_index"), patch.object(client, "request", return_value={"greenguard-inventory-v1": {"mappings": {"dynamic": "false"}}}):
+            with self.assertRaisesRegex(RuntimeError, "mapping mismatch"):
+                client.bootstrap_index("greenguard-inventory-v1")
+
+    def test_search_transport_requires_tls_ca_and_credentials_together(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS search requires"):
+            MODULE.Elastic("https://search.example")
+        with self.assertRaisesRegex(ValueError, "credentials require HTTPS"):
+            MODULE.Elastic("http://search.example", "reader", "secret", "/ca.pem")
+        with self.assertRaisesRegex(ValueError, "invalid search URL"):
+            MODULE.Elastic("https://reader:secret@search.example", "reader", "secret", "/ca.pem")
+        context = SimpleNamespace()
+        with patch.object(MODULE.ssl, "create_default_context", return_value=context) as create_context:
+            client = MODULE.Elastic("https://search.example", "reader", "secret", "/ca.pem")
+        create_context.assert_called_once_with(cafile="/ca.pem")
+        self.assertEqual(client.context, context)
+        self.assertEqual(context.minimum_version, MODULE.ssl.TLSVersion.TLSv1_2)
+        self.assertTrue(client.authorization.startswith("Basic "))
+
     def test_binding_feed_checkpoint_is_skipped_but_malformed_marker_holds_offset(self):
         marker = {"event_type": "binding.feed_checkpoint", "schema_version": 1,
                   "source_time": "2026-09-24T10:00:00Z", "source_position": "123",
@@ -130,8 +155,11 @@ class IndexerTests(unittest.TestCase):
                     calls.append("init")
                 def subscribe(self, topics):
                     calls.append("subscribe")
+                def assignment(self):
+                    return [SimpleNamespace(topic=MODULE.TOPICS[0], partition=0)]
                 def poll(self, timeout):
                     if "polled" in calls:
+                        calls.append(MODULE.HEALTH.status("/readyz"))
                         raise RuntimeError("stop")
                     calls.append("polled")
                     return message
@@ -150,13 +178,16 @@ class IndexerTests(unittest.TestCase):
                         raise RuntimeError("write failed")
 
             kafka = SimpleNamespace(Consumer=Consumer, TopicPartition=lambda *args: args)
-            elastic = SimpleNamespace(create_index=lambda index: calls.append("index"))
-            with patch.dict(sys.modules, {"confluent_kafka": kafka}), patch.object(MODULE, "Indexer", Indexer):
+            elastic = SimpleNamespace(bootstrap_index=lambda index: calls.append("index"))
+            with patch.dict("os.environ", {"HEALTH_PORT": "0"}, clear=False), \
+                 patch.dict(sys.modules, {"confluent_kafka": kafka}), patch.object(MODULE, "Indexer", Indexer):
                 with self.assertRaises(RuntimeError):
                     MODULE.consume(elastic, 1, "test-group", "broker", "quarantine")
             self.assertIn("process", calls)
             self.assertEqual("commit" in calls, not fail_processing)
             self.assertEqual(calls[-1], "close")
+            self.assertEqual(200 in calls, not fail_processing)
+            self.assertEqual(MODULE.HEALTH.status("/readyz"), 503)
             if not fail_processing:
                 self.assertLess(calls.index("process"), calls.index("commit"))
 
@@ -219,6 +250,7 @@ class IndexerTests(unittest.TestCase):
         client = Client()
         client.search("tenant-a", "north")
         self.assertEqual(client.calls[0][2]["query"]["bool"]["filter"], [{"term": {"tenant_id": "tenant-a"}}])
+        self.assertEqual(client.calls[0][2]["query"]["bool"]["must"], [{"multi_match": {"query": "north", "fields": ["name", "serial_number", "resource_id"]}}])
         with self.assertRaises(ValueError):
             client.search("", "north")
         target_index = MODULE.index_name(2)
@@ -413,3 +445,12 @@ class IndexerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TopicNamespaceTests(unittest.TestCase):
+    def test_inventory_namespace(self):
+        module = MODULE
+        self.assertEqual(module.inventory_topics('provisioning-demo.'), ('provisioning-demo.greenguard.inventory.device.v1', 'provisioning-demo.greenguard.inventory.facility.v1'))
+        self.assertEqual(module.inventory_topics(''), ('greenguard.inventory.device.v1', 'greenguard.inventory.facility.v1'))
+        for prefix in ['bad/topic', 'bad space', '\t', 'é', 'x' * 249]:
+            with self.assertRaises(ValueError):
+                module.inventory_topics(prefix)

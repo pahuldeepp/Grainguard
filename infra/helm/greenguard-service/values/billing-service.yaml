@@ -1,0 +1,23 @@
+nameOverride: billing-service
+autoscaling:
+  hpa: { enabled: true }
+service:
+  port: 3021
+  containerPort: 3021
+container:
+  name: billing-service
+  envFrom:
+    - secretRef:
+        name: billing-service-config
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+networkPolicy:
+  ingressSources:
+    - { namespace: istio-system, selector: { app: istio-ingressgateway } }
+    - { namespace: greenguard, selector: { app.kubernetes.io/name: greenguard-bff, app.kubernetes.io/instance: bff } }
+  egressServices:
+    - { name: tenant-control-plane, namespace: greenguard, release: tenant-control-plane, port: 3010 }
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "document_id": "33333333-3333-4333-8333-333333333333",
+  "document_version": 3,
+  "blocks": [
+    {"kind": "heading", "text": "Storage conditions", "page_start": 1, "page_end": 1, "heading_level": 1},
+    {"kind": "chunk", "text": "Keep grain cool and dry. Synthetic fixture text.", "page_start": 2, "page_end": 2, "chunk_id": "44444444-4444-4444-8444-444444444444"},
+    {"kind": "heading", "text": "Moisture guidance", "page_start": 3, "page_end": 3, "heading_level": 2},
+    {"kind": "chunk", "text": "Record humidity and inspect for condensation. Synthetic fixture text.", "page_start": 3, "page_end": 4, "chunk_id": "55555555-5555-4555-8555-555555555555"}
+  ]
+}

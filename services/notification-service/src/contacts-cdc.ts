@@ -1,4 +1,8 @@
+import { kafkaSecurityFromEnv } from "@greenguard/kafka-security";
 import { createRequire } from "node:module";
+import { X509Certificate } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { Agent as HttpsAgent } from "node:https";
 import kafkaJs, { type Consumer, type Producer } from "kafkajs";
 import { SchemaRegistry } from "@kafkajs/confluent-schema-registry";
 import {
@@ -21,6 +25,41 @@ const UUID =
   /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i;
 const RESERVED_TENANT = "00000000-0000-4000-8000-000000000001";
 const RETRY_MS = 5_000;
+
+export function contactsRegistryConfig(
+  host: string,
+  getenv: (key: string) => string | undefined = (key) => process.env[key],
+): ConstructorParameters<typeof SchemaRegistry>[0] {
+  const required = (getenv("KAFKA_REQUIRE_TLS") ?? "").toLowerCase() === "true";
+  const username = getenv("SCHEMA_REGISTRY_USERNAME") ?? "";
+  const password = getenv("SCHEMA_REGISTRY_PASSWORD") ?? "";
+  const caFile =
+    getenv("SCHEMA_REGISTRY_TLS_CA_FILE") ??
+    (required ? "/etc/greenguard/kafka/registry-ca.crt" : "");
+  if (!required && !username && !password && !caFile) return { host };
+  if (!host.startsWith("https://") || !username || !password || !caFile)
+    throw new Error(
+      "Schema Registry requires HTTPS, Basic credentials, and a TLS CA file",
+    );
+  const ca = readFileSync(caFile, "utf8");
+  const certificate = new X509Certificate(ca);
+  const now = Date.now();
+  if (
+    !certificate.ca ||
+    Date.parse(certificate.validFrom) > now ||
+    Date.parse(certificate.validTo) <= now
+  )
+    throw new Error("Schema Registry TLS certificate is not a current CA");
+  return {
+    host,
+    auth: { username, password },
+    agent: new HttpsAgent({
+      ca,
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+    }),
+  };
+}
 export const CONTACTS_FEED_CHECKPOINT = {
   tenant_id: "SYSTEM#NOTIFICATION_CONTACTS_CDC",
   record_key: "CONTACTS_FEED_HEARTBEAT",
@@ -148,10 +187,7 @@ type DebeziumRow = {
  * to bigint. This keeps exact source versions without changing the CDC schema.
  */
 function parseExactJson(raw: string): unknown {
-  const safe = raw.replaceAll(
-    /("version"\s*:\s*)(-?\d+)(?=\s*[,}])/g,
-    (_match, field: string, version: string) => `${field}"${version}"`,
-  );
+  const safe = raw.replace(/("version"\s*:\s*)(-?\d+)(?=\s*[,}])/g, '$1"$2"');
   try {
     return JSON.parse(safe) as unknown;
   } catch {
@@ -192,7 +228,7 @@ function decodeKey(raw: Buffer | null): string {
 }
 
 export function parseDebeziumContact(
-  raw: unknown,
+  raw: string | unknown,
   key: Buffer | null,
 ): { contact: NotificationContact; sourceTimeMs?: number } {
   const event = object(typeof raw === "string" ? parseExactJson(raw) : raw);
@@ -234,7 +270,7 @@ export function parseDebeziumContact(
   };
 }
 
-export function isContactHeartbeat(raw: unknown): number | undefined {
+export function isContactHeartbeat(raw: string | unknown): number | undefined {
   const parsed = object(typeof raw === "string" ? parseExactJson(raw) : raw);
   const content = Buffer.isBuffer(parsed.content)
     ? parsed.content.toString("utf8")
@@ -438,11 +474,9 @@ export function createDynamoContactsProjectionStore(options: {
   region?: string;
   endpoint?: string;
   credentials?: DynamoDBClientConfig["credentials"];
-  /** Explicitly enable DynamoDB Local's placeholder credentials. */
-  localCredentials?: boolean;
 }): DynamoContactsProjectionStore & { close(): void } {
   const localCredentials =
-    options.localCredentials && !options.credentials
+    options.endpoint && !options.credentials
       ? { accessKeyId: "local", secretAccessKey: "local" }
       : undefined;
   const raw = new DynamoDBClient({
@@ -481,11 +515,12 @@ export function startContactsProjector(
   const kafka = new Kafka({
     clientId: "greenguard-notification-contacts-projector",
     brokers,
+    ...kafkaSecurityFromEnv(),
   });
   const registry =
     options.registry ??
     (options.schemaRegistryUrl
-      ? new SchemaRegistry({ host: options.schemaRegistryUrl })
+      ? new SchemaRegistry(contactsRegistryConfig(options.schemaRegistryUrl))
       : undefined);
   if (!registry)
     throw new Error(
@@ -516,10 +551,12 @@ export function startContactsProjector(
       options.createConsumer?.() ??
       kafka.consumer({ groupId: options.groupId ?? CONTACTS_GROUP });
     try {
-      producerReady ??= producer.connect().catch((error: unknown) => {
-        producerReady = undefined;
-        throw error;
-      });
+      if (!producerReady) {
+        producerReady = producer.connect().catch((error: unknown) => {
+          producerReady = undefined;
+          throw error;
+        });
+      }
       await producerReady;
       await next.connect();
       if (closed) {

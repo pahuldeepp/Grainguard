@@ -47,55 +47,25 @@ type server struct {
 	metrics http.Handler
 }
 
-const (
-	authMembershipFile          = "file"
-	authMembershipControlPlane  = "control-plane"
-	roleOperator                = "operator"
-	roleAdmin                   = "admin"
-	roleViewer                  = "viewer"
-	problemInsufficientRoleCode = "insufficient_role"
-	problemInvalidTokenCode     = "invalid_token"
-	problemInvalidJSONCode      = "invalid_json"
-	problemInvalidRolesCode     = "invalid roles"
-	jwtAlgorithmRS256           = "RS256"
-	jwtKeyIDHeader              = "kid"
-	loopbackHostname            = "localhost"
-	loopbackIP                  = "127.0.0.1"
-	provisioningPath            = "/v1/provisioning"
-	provisioningPathPrefix      = "/v1/provisioning/"
-	authIssuerEnvironment       = "AUTH_ISSUER"
-	authAudienceEnvironment     = "AUTH_AUDIENCE"
-	authJWKSURLEnvironment      = "AUTH_JWKS_URL"
-	contentTypeHeader           = "Content-Type"
-	jsonMediaType               = "application/json"
-)
-
 func main() {
+	u, err := apiEnvironment(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := context.Background()
-	auth, err := newVerifierFromEnvironment()
+	db, metrics, closeDB, err := apiDatabase(ctx, os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
-	pool, err := openSagaPool(ctx, os.Getenv("SAGA_DIRECT_URL"))
+	defer closeDB()
+	auth, err := apiVerifier(ctx, os.Getenv, u)
 	if err != nil {
 		log.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatal(err)
-	}
-	if auth.membershipSource == authMembershipControlPlane {
-		if err := initializeMembershipSource(auth, authMembershipControlPlane); err != nil {
-			log.Fatal(err)
-		}
 	}
 	if auth.membershipCache != nil {
 		defer auth.membershipCache.close()
-		if err := auth.membershipCache.startConsumer(ctx); err != nil {
-			log.Fatal(err)
-		}
 	}
-	s := server{store: saga.Store{DB: pool}, auth: auth, metrics: saga.Handler(nil, pool)}
+	s := server{store: saga.Store{DB: db}, auth: auth, metrics: metrics}
 	addr := os.Getenv("SAGA_API_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8092"
@@ -109,75 +79,7 @@ func main() {
 	}
 	httpServer := &http.Server{Addr: addr, Handler: &s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	httpServer.TLSConfig = tlsConfig
-	runHTTPServer(httpServer)
-}
-
-func openSagaPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	if dsn == "" {
-		return nil, errors.New("SAGA_DIRECT_URL is required")
-	}
-	return pgxpool.New(ctx, dsn)
-}
-
-func newVerifierFromEnvironment() (*verifier, error) {
-	for _, key := range []string{authIssuerEnvironment, authAudienceEnvironment, authJWKSURLEnvironment} {
-		if os.Getenv(key) == "" {
-			return nil, fmt.Errorf("%s is required", key)
-		}
-	}
-	jwksURL, err := validatedJWKSURL(os.Getenv(authJWKSURLEnvironment))
-	if err != nil {
-		return nil, err
-	}
-	source := os.Getenv("AUTH_MEMBERSHIP_SOURCE")
-	if source == "" {
-		source = authMembershipFile
-	}
-	if source != authMembershipFile && source != authMembershipControlPlane {
-		return nil, errors.New("AUTH_MEMBERSHIP_SOURCE must be file or control-plane")
-	}
-	auth := &verifier{issuer: os.Getenv(authIssuerEnvironment), audience: os.Getenv(authAudienceEnvironment), jwksURL: jwksURL,
-		membershipFile: os.Getenv("AUTH_MEMBERSHIP_FILE"), membershipSource: source, client: &http.Client{Timeout: 5 * time.Second}}
-	if source == authMembershipFile {
-		if err := validateMembershipFile(auth.membershipFile); err != nil {
-			return nil, err
-		}
-	}
-	return auth, nil
-}
-
-func initializeMembershipSource(auth *verifier, source string) error {
-	if source != authMembershipControlPlane {
-		return nil
-	}
-	cache, err := newControlMembershipCache(os.Getenv, auth.client)
-	if err != nil {
-		return err
-	}
-	auth.membershipCache = cache
-	return nil
-}
-
-func validatedJWKSURL(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == loopbackHostname || u.Hostname() == loopbackIP))) {
-		return "", errors.New("AUTH_JWKS_URL must be https or loopback http")
-	}
-	return u.String(), nil
-}
-
-func validateMembershipFile(path string) error {
-	if path == "" {
-		return nil
-	}
-	if _, err := loadMemberships(path); err != nil {
-		return fmt.Errorf("invalid AUTH_MEMBERSHIP_FILE: %w", err)
-	}
-	return nil
-}
-
-func runHTTPServer(httpServer *http.Server) {
-	stop, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	stop, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
@@ -189,7 +91,7 @@ func runHTTPServer(httpServer *http.Server) {
 		}
 	}()
 	var serveErr error
-	if httpServer.TLSConfig != nil {
+	if tlsConfig != nil {
 		serveErr = httpServer.ListenAndServeTLS("", "")
 	} else {
 		serveErr = httpServer.ListenAndServe()
@@ -201,12 +103,93 @@ func runHTTPServer(httpServer *http.Server) {
 	}
 }
 
+const controlPlaneMembershipSource = "control-plane"
+
+func apiEnvironment(getenv func(string) string) (*url.URL, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"SAGA_DIRECT_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL"} {
+		if key == "SAGA_DIRECT_URL" && getenv("SHARD_REGISTRY_FILE") != "" {
+			continue
+		}
+		if getenv(key) == "" {
+			return nil, fmt.Errorf("%s is required", key)
+		}
+	}
+	return apiJWKSURL(getenv("AUTH_JWKS_URL"))
+}
+
+func apiJWKSURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
+		return nil, errors.New("AUTH_JWKS_URL must be https or loopback http")
+	}
+	return u, nil
+}
+
+func apiDatabase(ctx context.Context, getenv func(string) string) (common.TxStarter, http.Handler, func(), error) {
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(getenv, "saga-orchestrator", "greenguard_sagas", "saga_app")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if err := closeOnStartupError(func() error { return shards.Ping(ctx) }, shards.Close); err != nil {
+			return nil, nil, nil, err
+		}
+		return shards, saga.ShardedHandler(nil, shards), shards.Close, nil
+	}
+	pool, err := pgxpool.New(ctx, getenv("SAGA_DIRECT_URL"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := closeOnStartupError(func() error { return pool.Ping(ctx) }, pool.Close); err != nil {
+		return nil, nil, nil, err
+	}
+	return pool, saga.Handler(nil, pool), pool.Close, nil
+}
+
+func apiVerifier(ctx context.Context, getenv func(string) string, u *url.URL) (*verifier, error) {
+	source := getenv("AUTH_MEMBERSHIP_SOURCE")
+	if source == "" {
+		source = "file"
+	}
+	if source != "file" && source != controlPlaneMembershipSource {
+		return nil, errors.New("AUTH_MEMBERSHIP_SOURCE must be file or control-plane")
+	}
+	auth := &verifier{issuer: getenv("AUTH_ISSUER"), audience: getenv("AUTH_AUDIENCE"), jwksURL: u.String(), membershipFile: getenv("AUTH_MEMBERSHIP_FILE"), membershipSource: source, client: &http.Client{Timeout: 5 * time.Second}}
+	if source == "file" && auth.membershipFile != "" {
+		if _, err := loadMemberships(auth.membershipFile); err != nil {
+			return nil, fmt.Errorf("invalid AUTH_MEMBERSHIP_FILE: %v", err)
+		}
+	}
+	if source == controlPlaneMembershipSource {
+		cache, err := newControlMembershipCache(getenv, auth.client)
+		if err != nil {
+			return nil, err
+		}
+		auth.membershipCache = cache
+		if err := closeOnStartupError(func() error { return cache.startConsumer(ctx) }, cache.close); err != nil {
+			return nil, err
+		}
+	}
+	return auth, nil
+}
+
+func closeOnStartupError(start func() error, closeResource func()) error {
+	if err := start(); err != nil {
+		closeResource()
+		return err
+	}
+	return nil
+}
+
 func validateListenAddress(addr string, tlsEnabled bool) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("invalid SAGA_API_ADDR: %w", err)
 	}
-	if tlsEnabled || strings.EqualFold(host, loopbackHostname) {
+	if tlsEnabled || strings.EqualFold(host, "localhost") {
 		return nil
 	}
 	ip := net.ParseIP(host)
@@ -216,9 +199,19 @@ func validateListenAddress(addr string, tlsEnabled bool) error {
 	return nil
 }
 
+func (s *server) healthStatus() int {
+	if s.auth == nil || s.auth.membershipCache == nil {
+		return http.StatusNoContent
+	}
+	if s.auth.membershipCache.membershipConsumerError() != nil {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusNoContent
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(s.healthStatus())
 		return
 	}
 	// Aggregate, tenant-free gauges only; the API binds loopback unless mTLS is on.
@@ -226,17 +219,21 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.metrics.ServeHTTP(w, r)
 		return
 	}
-	if r.URL.Path != provisioningPath && !strings.HasPrefix(r.URL.Path, provisioningPathPrefix) {
+	if r.URL.Path != "/v1/provisioning" && !strings.HasPrefix(r.URL.Path, "/v1/provisioning/") {
 		http.NotFound(w, r)
 		return
 	}
 	p, err := s.auth.verify(r)
 	if err != nil {
-		if errors.Is(err, errMembershipRevoked) {
-			problem(w, http.StatusForbidden, problemInsufficientRoleCode)
+		if errors.Is(err, errMembershipUnavailable) {
+			problem(w, http.StatusServiceUnavailable, "membership_unavailable")
 			return
 		}
-		problem(w, http.StatusUnauthorized, problemInvalidTokenCode)
+		if errors.Is(err, errMembershipRevoked) {
+			problem(w, http.StatusForbidden, "insufficient_role")
+			return
+		}
+		problem(w, http.StatusUnauthorized, "invalid_token")
 		return
 	}
 	s.route(w, r, p)
@@ -254,30 +251,30 @@ func hasAnyRole(p principal, roles ...string) bool {
 
 // route dispatches an authenticated provisioning request after its role check.
 func (s *server) route(w http.ResponseWriter, r *http.Request, p principal) {
-	if r.URL.Path == provisioningPath && r.Method == http.MethodPost {
-		if !hasAnyRole(p, roleOperator, roleAdmin) {
-			problem(w, 403, problemInsufficientRoleCode)
+	if r.URL.Path == "/v1/provisioning" && r.Method == http.MethodPost {
+		if !hasAnyRole(p, "operator", "admin") {
+			problem(w, 403, "insufficient_role")
 			return
 		}
 		s.start(w, r, p)
 		return
 	}
-	id, suffix := splitPath(strings.TrimPrefix(r.URL.Path, provisioningPathPrefix))
+	id, suffix := splitPath(strings.TrimPrefix(r.URL.Path, "/v1/provisioning/"))
 	if id == "" {
 		http.NotFound(w, r)
 		return
 	}
 	if suffix == "" && r.Method == http.MethodGet {
-		if !hasAnyRole(p, roleViewer, roleOperator, roleAdmin) {
-			problem(w, 403, problemInsufficientRoleCode)
+		if !hasAnyRole(p, "viewer", "operator", "admin") {
+			problem(w, 403, "insufficient_role")
 			return
 		}
 		s.status(w, r, p, id)
 		return
 	}
 	if suffix == "redrive" && r.Method == http.MethodPost {
-		if !hasAnyRole(p, roleAdmin) {
-			problem(w, 403, problemInsufficientRoleCode)
+		if !hasAnyRole(p, "admin") {
+			problem(w, 403, "insufficient_role")
 			return
 		}
 		s.redrive(w, r, p, id)
@@ -343,19 +340,19 @@ func (s *server) redrive(w http.ResponseWriter, r *http.Request, p principal, id
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if !strings.HasPrefix(r.Header.Get(contentTypeHeader), jsonMediaType) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		problem(w, 415, "unsupported_media_type")
 		return false
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		problem(w, 400, problemInvalidJSONCode)
+		problem(w, 400, "invalid_json")
 		return false
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
-		problem(w, 400, problemInvalidJSONCode)
+		problem(w, 400, "invalid_json")
 		return false
 	}
 	return true
@@ -378,7 +375,7 @@ func problem(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]any{"code": code})
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set(contentTypeHeader, jsonMediaType)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -390,7 +387,7 @@ func (v *verifier) verify(r *http.Request) (principal, error) {
 		return principal{}, errors.New("invalid bearer")
 	}
 	claims := jwt.MapClaims{}
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwtAlgorithmRS256}), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.audience), jwt.WithExpirationRequired())
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.audience), jwt.WithExpirationRequired())
 	_, err := parser.ParseWithClaims(strings.TrimPrefix(header, bearerPrefix), claims, v.key)
 	if err != nil {
 		return principal{}, err
@@ -398,7 +395,7 @@ func (v *verifier) verify(r *http.Request) (principal, error) {
 	sub, _ := claims["sub"].(string)
 	tenant, _ := claims["tenant_id"].(string)
 	var roles map[string]bool
-	if v.membershipSource == authMembershipControlPlane {
+	if v.membershipSource == controlPlaneMembershipSource {
 		tenant, roles, err = v.membershipCache.roles(r.Context(), v.issuer, sub)
 	} else if v.membershipFile != "" {
 		// The IdP proves identity only. GreenGuard's current membership overrides
@@ -414,7 +411,7 @@ func (v *verifier) verify(r *http.Request) (principal, error) {
 		return principal{}, errors.New("missing principal")
 	}
 	if len(roles) == 0 {
-		return principal{}, errors.New(problemInvalidRolesCode)
+		return principal{}, errors.New("invalid roles")
 	}
 	return principal{Tenant: tenant, Subject: sub, Roles: roles}, nil
 }
@@ -440,7 +437,7 @@ func claimRoles(claims jwt.MapClaims) (map[string]bool, error) {
 	for _, item := range items {
 		role, ok := item.(string)
 		if !ok || !validRole(role) {
-			return nil, errors.New(problemInvalidRolesCode)
+			return nil, errors.New("invalid roles")
 		}
 		roles[role] = true
 	}
@@ -458,7 +455,7 @@ type jwk struct {
 
 // parseRSAKey returns nil, nil for keys that are not RS256 signing keys.
 func parseRSAKey(item jwk) (*rsa.PublicKey, error) {
-	if item.Kid == "" || item.Kty != "RSA" || item.Alg != jwtAlgorithmRS256 || item.Use != "sig" {
+	if item.Kid == "" || item.Kty != "RSA" || item.Alg != "RS256" || item.Use != "sig" {
 		return nil, nil
 	}
 	n, err := base64.RawURLEncoding.DecodeString(item.N)
@@ -483,7 +480,7 @@ func parseRSAKey(item jwk) (*rsa.PublicKey, error) {
 }
 
 func (v *verifier) key(token *jwt.Token) (any, error) {
-	kid, _ := token.Header[jwtKeyIDHeader].(string)
+	kid, _ := token.Header["kid"].(string)
 	if kid == "" {
 		return nil, errors.New("missing kid")
 	}

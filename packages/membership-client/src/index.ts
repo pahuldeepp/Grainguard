@@ -12,6 +12,19 @@ import {
   type MembershipFetcher,
 } from "./cache.js";
 import type { MembershipVersionStore } from "./redis-versions.js";
+export {
+  createPlacementResolver,
+  httpPlacementFetcher,
+  validateTenantRoute,
+  placementEpoch,
+  PlacementError,
+  MAX_ROUTE_TTL_MS,
+  type TenantRoute,
+} from "./placement.js";
+export {
+  suggestInitialShard,
+  type InitialPlacementRing,
+} from "./placement-ring.js";
 
 export {
   createMembershipCache,
@@ -21,7 +34,7 @@ export {
   type MembershipChange,
   type MembershipFetcher,
 } from "./cache.js";
-export { identityIdOf, identityKey, nameId, sha256Hex } from "./ids.js";
+export { identityKey, nameId } from "./ids.js";
 export { startMembershipRuntime } from "./consumer.js";
 export {
   createRedisMembershipVersionStore,
@@ -167,6 +180,15 @@ export function createVerifierFromEnv(
   if (source === "file") return createTokenVerifierFromEnv(getenv, readFile);
   if (source !== "control-plane")
     throw new Error("AUTH_MEMBERSHIP_SOURCE must be file or control-plane");
+  const rawTokenMode = getenv("AUTH_TOKEN_MODE") || "audience";
+  if (rawTokenMode !== "audience" && rawTokenMode !== "cognito-access")
+    throw new Error("AUTH_TOKEN_MODE must be audience or cognito-access");
+  const cognitoClientIds = (getenv("AUTH_COGNITO_CLIENT_IDS") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (rawTokenMode === "cognito-access" && !cognitoClientIds.length)
+    throw new Error("AUTH_COGNITO_CLIENT_IDS is required for cognito-access");
   const cache = createMembershipCache({
     versionStore,
     fetch: httpMembershipFetcher({
@@ -177,7 +199,13 @@ export function createVerifierFromEnv(
   const verifier = createMembershipVerifier(
     {
       issuer: need(getenv, "AUTH_ISSUER"),
-      audience: need(getenv, "AUTH_AUDIENCE"),
+      audience:
+        rawTokenMode === "audience"
+          ? need(getenv, "AUTH_AUDIENCE")
+          : getenv("AUTH_AUDIENCE") || undefined,
+      tokenMode: rawTokenMode,
+      cognitoClientIds:
+        rawTokenMode === "cognito-access" ? cognitoClientIds : undefined,
       keys: { jwksUrl: need(getenv, "AUTH_JWKS_URL") },
     },
     cache,
@@ -188,3 +216,18 @@ export function createVerifierFromEnv(
     onMembershipChanged: membershipChangedHandler(cache),
   };
 }
+export {
+  READ_BUDGET_HEADER,
+  WATERMARK_REQUEST_HEADER,
+  WATERMARK_RESPONSE_HEADER,
+  WatermarkError,
+  parseWatermark,
+  serializeWatermark,
+  type ProjectionWatermark,
+} from "./watermark.js";
+export {
+  httpReadLeaseAuthority,
+  type ReadAdmissionLease,
+  type ReadLeaseAuthority,
+  type ReadAdmissionOptions,
+} from "./read-leases.js";

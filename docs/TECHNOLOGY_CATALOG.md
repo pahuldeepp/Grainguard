@@ -173,6 +173,7 @@ This is a declared-dependency/history index, not proof that every import runs or
 | Python distribution | `pika` | ==1.3.2 | Historical only | [GrainGuard-/apps/risk-engine/requirements.txt](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GrainGuard-/apps/risk-engine/requirements.txt) |
 | Python distribution | `prometheus-fastapi-instrumentator` | >=7.0.0 | CarePulse | [CarePulse/services/fhir-gateway/pyproject.toml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/services/fhir-gateway/pyproject.toml) |
 | Python distribution | `psycopg2-binary` | (unspecified) | GrainGuard- | [GrainGuard-/apps/risk-engine/requirements.txt](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GrainGuard-/apps/risk-engine/requirements.txt) |
+| Python distribution | `PyJWT` | ==2.15.0 | GreenGuard | [services/risk-engine/requirements.txt](../services/risk-engine/requirements.txt) |
 | Python distribution | `pydantic` | >=2.7.0 | CarePulse | [CarePulse/services/fhir-gateway/pyproject.toml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/services/fhir-gateway/pyproject.toml) |
 | Python distribution | `pytest` | ==8.2.0, >=8.2.0 | CarePulse | [CarePulse/infra/lambda/alert-escalation/requirements.txt](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/infra/lambda/alert-escalation/requirements.txt) |
 | Python distribution | `pytest-asyncio` | >=0.23.0 | CarePulse | [CarePulse/services/fhir-gateway/pyproject.toml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/services/fhir-gateway/pyproject.toml) |
@@ -250,6 +251,7 @@ This is a declared-dependency/history index, not proof that every import runs or
 | container image | `prom/blackbox-exporter` | v0.25.0 | CarePulse | [CarePulse/infra/docker/docker-compose.yml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/infra/docker/docker-compose.yml) |
 | container image | `prom/prometheus` | latest, v2.51.0 | CarePulse, GrainGuard- | [CarePulse/infra/docker/docker-compose.yml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/infra/docker/docker-compose.yml) |
 | container image | `prometheuscommunity/postgres-exporter` | v0.15.0 | CarePulse | [CarePulse/infra/docker/docker-compose.yml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/infra/docker/docker-compose.yml) |
+| container image | `danielqsj/kafka-exporter` | v1.9.0 (digest pinned in GreenGuard Stage 11) | GreenGuard | [infra/kafka/compose.yaml](../infra/kafka/compose.yaml) |
 | container image | `provectuslabs/kafka-ui` | latest | Historical only | [GrainGuard-/infra/docker/docker-compose.yml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GrainGuard-/infra/docker/docker-compose.yml) |
 | container image | `python` | 3.12-slim | GrainGuard- | [GrainGuard-/apps/risk-engine/Dockerfile](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GrainGuard-/apps/risk-engine/Dockerfile) |
 | container image | `quay.io/debezium/connect` | 2.7 | CarePulse | [CarePulse/infra/docker/docker-compose.yml](/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/CarePulse/infra/docker/docker-compose.yml) |
@@ -394,3 +396,12 @@ The feature-flag package pins `@openfeature/server-sdk@1.23.0` in
 `packages/feature-flags/package.json` and the root npm lockfile. This is a new
 rebuild dependency, not one of the 368 archived manifest entries; it supplies
 the OpenFeature evaluation API for tenant-scoped flags with safe defaults.
+
+
+### PDF citation preview
+
+Dashboard uses Mozilla `pdfjs-dist` **6.4.299** (exact dependency and lockfile) to render authorized PDF pages in an app-served worker. Preview renders graphics/text without executing PDF scripts, and disables XFA and interactive annotations; download/parse/render tasks are bounded and cleaned up. This browser viewer is separate from the server PDFium ingestion parser.
+
+### Assistant answer Markdown rendering
+
+Pinned `react-markdown` 10.1.0 and `remark-gfm` 4.0.1 render headings, lists, code, and tables. Raw HTML is skipped, remote images are disabled, and only explicit HTTP(S) links are clickable. Citation authorization remains in the source API.

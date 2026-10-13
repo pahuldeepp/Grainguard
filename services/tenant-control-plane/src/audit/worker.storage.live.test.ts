@@ -12,6 +12,12 @@ import {
   skipBackoff,
 } from "./storage-fixtures.js";
 import { processNextAuditExport } from "./worker.js";
+import {
+  claimAuditJob,
+  completeAuditJob,
+  recordAuditFailure,
+  renewAuditLease,
+} from "./store.js";
 
 const db = runtimeDb(5);
 const keys = generateKeyPairSync("ed25519");
@@ -184,4 +190,58 @@ test("S3W6 a backed-off job does not block a healthy one, and a lease that keeps
   const row = await jobRow(stuck.tenantId, stuck.jobId);
   assert.equal(row.state, "failed");
   assert.match(row.last_error ?? "", /maximum number of attempts/);
+});
+
+test("S3W7 a stale worker cannot complete, renew, or requeue a reclaimed attempt", async () => {
+  const requested = await queuedExport(db, "s3w7");
+  const first = await claimAuditJob(db);
+  assert.equal(first?.job_id, requested.jobId);
+  await adminQuery(
+    "UPDATE audit_export_jobs SET lease_until=now()-interval '1 second' WHERE tenant_id=$1 AND job_id=$2",
+    [requested.tenantId, requested.jobId],
+  );
+  const second = await claimAuditJob(db);
+  assert.equal(second?.job_id, requested.jobId);
+  assert.equal(second!.attempts, first!.attempts + 1);
+  await assert.rejects(renewAuditLease(db, first!), /claim lost/);
+  await assert.rejects(completeAuditJob(db, first!, "stale"), /claim lost/);
+  await recordAuditFailure(db, first!, new Error("stale failure"));
+  assert.equal(
+    (await jobRow(requested.tenantId, requested.jobId)).state,
+    "running",
+  );
+  await completeAuditJob(db, second!, "winner");
+  assert.equal(
+    (await jobRow(requested.tenantId, requested.jobId)).state,
+    "ready",
+  );
+});
+
+test("S3W8 a long upload renews its lease and completes", async () => {
+  const requested = await queuedExport(db, "s3w8");
+  const storage = new FaultyStorage();
+  const put = storage.put.bind(storage);
+  let delayed = false;
+  storage.put = async (key, body, meta) => {
+    if (!delayed) {
+      delayed = true;
+      await adminQuery(
+        "UPDATE audit_export_jobs SET lease_until=now()+interval '1 second' WHERE tenant_id=$1 AND job_id=$2",
+        [requested.tenantId, requested.jobId],
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1250));
+    }
+    return put(key, body, meta);
+  };
+  assert.equal(
+    await processNextAuditExport(db, {
+      ...options(storage),
+      heartbeatIntervalMs: 100,
+    }),
+    true,
+  );
+  assert.equal(
+    (await jobRow(requested.tenantId, requested.jobId)).state,
+    "ready",
+  );
 });

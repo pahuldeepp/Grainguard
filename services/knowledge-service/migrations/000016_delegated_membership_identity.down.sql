@@ -1,0 +1,2 @@
+DROP INDEX knowledge_memberships_delegated_identity_unique;
+ALTER TABLE knowledge_auth_memberships DROP COLUMN delegated_identity_id;

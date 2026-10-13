@@ -1,0 +1,41 @@
+nameOverride: cassandra-writer
+replicaCount: 1
+terminationGracePeriodSeconds: 60
+pdb: { enabled: false }
+service:
+  enabled: true
+  port: 8083
+  containerPort: 8083
+container:
+  name: cassandra-writer
+  envFrom:
+    - secretRef:
+        name: cassandra-writer-config
+  env:
+    - { name: CASSANDRA_REQUIRE_SECURE, value: "1" }
+    - { name: CASSANDRA_HOSTS, value: greenguard-cassandra }
+    - { name: CASSANDRA_KEYSPACE, value: greenguard_history }
+    - { name: CASSANDRA_DATACENTER, value: datacenter1 }
+    - { name: CASSANDRA_USERNAME, value: gg_history_writer }
+    - { name: CASSANDRA_PASSWORD, valueFrom: { secretKeyRef: { name: greenguard-cassandra-auth, key: writer-password } } }
+    - { name: CASSANDRA_TLS_CA_FILE, value: /etc/cassandra-ca/ca.crt }
+    - { name: CASSANDRA_TLS_SERVER_NAME, value: greenguard-cassandra }
+  volumeMounts:
+    - { name: cassandra-ca, mountPath: /etc/cassandra-ca, readOnly: true }
+volumes:
+  - name: cassandra-ca
+    secret:
+      secretName: greenguard-cassandra-tls
+      items: [{ key: ca.crt, path: ca.crt }]
+probes:
+  startup: { enabled: true, path: /healthz, periodSeconds: 5, failureThreshold: 30 }
+  readiness: { enabled: true, path: /readyz, periodSeconds: 5 }
+  liveness: { enabled: true, path: /healthz, periodSeconds: 10 }
+scheduling:
+  nodeSelector: { greenguard.io/workload-class: compute }
+  tolerations:
+    - { key: greenguard.io/workload-class, operator: Equal, value: compute, effect: NoSchedule }
+networkPolicy:
+  egressPods:
+    - { namespace: greenguard, selector: { app: kafka }, port: 29092 }
+    - { namespace: greenguard, selector: { app: greenguard-cassandra }, port: 9042 }

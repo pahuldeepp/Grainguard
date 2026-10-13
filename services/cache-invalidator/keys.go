@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -36,7 +37,8 @@ func deviceVersionKey(tenant, device string) string {
 
 // Target is one version bump derived from a committed read-model notification.
 type Target struct {
-	Scope, Tenant, Device string
+	Scope, Tenant, Device                 string
+	Incarnation, PlacementEpoch, Sequence string
 	// OccurredAt is the projection commit time carried by the notification.
 	OccurredAt time.Time
 }
@@ -61,6 +63,9 @@ type notification struct {
 		ResourceID      string `json:"resource_id"`
 		Purpose         string `json:"purpose"`
 		SourceEventType string `json:"source_event_type"`
+		Incarnation     string `json:"shard_incarnation"`
+		PlacementEpoch  string `json:"placement_epoch"`
+		Sequence        string `json:"projection_sequence"`
 	} `json:"payload"`
 }
 
@@ -75,6 +80,24 @@ func parseTarget(value []byte) (Target, error) {
 	if err != nil {
 		return Target{}, errInvalidNotification
 	}
+	withWatermark := func(t Target) (Target, error) {
+		p := n.Payload
+		if p.Incarnation == "" && p.PlacementEpoch == "" && p.Sequence == "" {
+			return t, nil
+		}
+		if !watermarkUUID.MatchString(n.TenantID) || !watermarkUUID.MatchString(p.Incarnation) || !watermarkDecimal.MatchString(p.PlacementEpoch) || !watermarkDecimal.MatchString(p.Sequence) {
+			return Target{}, errInvalidNotification
+		}
+		epoch, e := strconv.ParseInt(p.PlacementEpoch, 10, 64)
+		if e != nil || epoch < 1 {
+			return Target{}, errInvalidNotification
+		}
+		if _, e = strconv.ParseInt(p.Sequence, 10, 64); e != nil {
+			return Target{}, errInvalidNotification
+		}
+		t.Incarnation, t.PlacementEpoch, t.Sequence = p.Incarnation, p.PlacementEpoch, p.Sequence
+		return t, nil
+	}
 	switch n.Payload.Scope {
 	case scopeEpoch:
 		if n.TenantID != infrastructureTenant || n.Payload.Purpose != "promotion_changed" || n.Payload.SourceEventType != promotedEventType {
@@ -88,13 +111,18 @@ func parseTarget(value []byte) (Target, error) {
 		if !safeID.MatchString(n.Payload.ResourceID) {
 			return Target{}, errInvalidNotification
 		}
-		return Target{Scope: scopeDevice, Tenant: n.TenantID, Device: n.Payload.ResourceID, OccurredAt: occurred}, nil
+		return withWatermark(Target{Scope: scopeDevice, Tenant: n.TenantID, Device: n.Payload.ResourceID, OccurredAt: occurred})
 	case scopeTenant:
 		if n.Payload.Purpose == "promotion_changed" || n.Payload.SourceEventType == promotedEventType {
 			return Target{}, errInvalidNotification
 		}
-		return Target{Scope: scopeTenant, Tenant: n.TenantID, OccurredAt: occurred}, nil
+		return withWatermark(Target{Scope: scopeTenant, Tenant: n.TenantID, OccurredAt: occurred})
 	default:
 		return Target{}, errInvalidNotification
 	}
 }
+
+var watermarkUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var watermarkDecimal = regexp.MustCompile(`^(0|[1-9][0-9]{0,18})$`)
+
+func watermarkGuardKey(tenant string) string { return "gg:read:v2:" + tenantTag(tenant) + ":guard" }

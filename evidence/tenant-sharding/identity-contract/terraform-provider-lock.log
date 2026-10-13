@@ -1,0 +1,11 @@
+- Fetching hashicorp/aws 6.60.0 for linux_arm64...
+- Retrieved hashicorp/aws 6.60.0 for linux_arm64 (signed by HashiCorp)
+- Fetching hashicorp/helm 3.3.0 for linux_arm64...
+- Retrieved hashicorp/helm 3.3.0 for linux_arm64 (signed by HashiCorp)
+- Obtained hashicorp/aws checksums for linux_arm64; All checksums for this platform were already tracked in the lock file
+- Obtained hashicorp/helm checksums for linux_arm64; Additional checksums for this platform are now tracked in the lock file
+
+Success! Terraform has updated the lock file.
+
+Review the changes in .terraform.lock.hcl and then commit to your
+version control system to retain the new checksums.

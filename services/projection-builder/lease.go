@@ -97,6 +97,9 @@ func (l *writerLease) check(ctx context.Context, tx pgx.Tx) error {
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", infrastructureTenant); err != nil {
 		return err
 	}
+	if err := admitProjectionTenant(ctx, tx, infrastructureTenant); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'"); err != nil {
 		return err
 	}
@@ -106,8 +109,10 @@ func (l *writerLease) check(ctx context.Context, tx pgx.Tx) error {
 	if err != nil || !valid {
 		return ErrWriterLease
 	}
-	_, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", tenant)
-	return err
+	if _, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", tenant); err != nil {
+		return err
+	}
+	return admitProjectionTenant(ctx, tx, tenant)
 }
 
 func (l *writerLease) renew(ctx context.Context) error {

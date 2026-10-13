@@ -120,6 +120,9 @@ def cleanup_inventory(tenants, source_id):
     admin = urlsplit(os.environ["POSTGRES_ADMIN_URL"])
     url = urlunsplit((admin.scheme, admin.netloc, "/greenguard_inventory", admin.query, admin.fragment))
     with psycopg.connect(url) as conn, conn.cursor() as cursor:
+        # Fixture cleanup runs as the PostgreSQL superuser; bypass the tenant-ownership
+        # row fence for this transaction only (the importer under test keeps it enabled).
+        cursor.execute("SET LOCAL session_replication_role = replica")
         for tenant in tenants.values():
             cursor.execute("DELETE FROM inventory_import_state WHERE tenant_id=%s AND source_id=%s", (tenant, source_id))
             for table in ("audit_events", "outbox_events", "command_receipts", "devices", "bins", "sites", "tenants"):

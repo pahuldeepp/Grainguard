@@ -1,0 +1,17 @@
+{
+  "status": "proposed-configurable-local-caps",
+  "maxContainerCpuMillicores": 2000,
+  "maxContainerMemoryMi": 4096,
+  "maxReplicas": 10,
+  "maxGeneralNodes": 6,
+  "maxComputeNodes": 4,
+  "budget": {
+    "ownerRole": "environment budget owner (assign a named person before deployment)",
+    "escalationRole": "platform on-call and finance approver (assign contacts before deployment)",
+    "currency": null,
+    "monthlyAmount": null,
+    "warningFraction": 0.7,
+    "escalationFraction": 0.85,
+    "limitFraction": 1.0
+  }
+}

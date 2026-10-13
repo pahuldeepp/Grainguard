@@ -1,9 +1,9 @@
 import {
   contextFromVerifiedPrincipal,
   createFlagEvaluator,
-  type FlagChange,
   type VersionedFlagStore,
 } from "@greenguard/feature-flags";
+import type { FlagChange } from "@greenguard/feature-flags";
 
 export const OPTIONAL_SEND_FLAG = "notifications.optional_sends";
 export const GLOBAL_FLAG_TENANT = "00000000-0000-4000-8000-000000000001";
@@ -105,13 +105,10 @@ export function controlPlaneFlagSnapshot(
     /[\r\n]/.test(token)
   )
     throw new Error("invalid flag snapshot configuration");
-  let pathname = validatedUrl.pathname;
-  while (pathname.endsWith("/")) pathname = pathname.slice(0, -1);
-  validatedUrl.pathname = `${pathname}/`;
   const fetcher = options.fetch ?? fetch;
   return async (tenantId: string): Promise<FlagChange> => {
     const url = new URL(
-      `v1/internal/flags/${encodeURIComponent(tenantId)}`,
+      `/v1/internal/flags/${encodeURIComponent(tenantId)}`,
       validatedUrl,
     );
     const response = await fetcher(url, {

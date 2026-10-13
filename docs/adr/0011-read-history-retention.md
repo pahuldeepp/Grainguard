@@ -81,6 +81,13 @@ confirmation, source-retention coordination and deletion are **not built in Stag
 
 ## Consequences and review
 
+**Safety amendment (2026-10-03):** ADR-0028 supersedes the partition-drop
+schedule above. The age-only drop lacked proof that Cassandra held every
+projected reading. Migration `000026_read_history_prune_guard` preserves
+partition creation but disables destructive drops until a Cassandra coverage
+verifier and durable proof check are implemented. Existing deployments must
+apply that migration; the source change alone does not update a running database.
+
 History is bounded by time; inbox, notifications and gap bookkeeping need separate
 future lifecycle decisions. Inbox cannot simply be pruned with history because it
 owns replay idempotency and latest/notification references. Review the one-hour

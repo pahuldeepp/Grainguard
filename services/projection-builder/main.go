@@ -17,6 +17,9 @@ import (
 
 type app struct {
 	lease              *writerLease
+	dbPool             *pgxpool.Pool
+	shards             *common.ShardedDB
+	shardLeases        []*writerLease
 	processor          *Processor
 	ping               func(context.Context) error
 	close              func()
@@ -41,25 +44,50 @@ func writerTarget(schema, database, role string) (string, string, error) {
 	return schema, "greenguard.projection-builder." + schema, nil
 }
 
+// Public writers may use a separate deployment group without changing the
+// durable projection identity. Versioned writers retain their promotion group.
+func configuredWriterTarget(getenv func(string) string, database, role string) (string, string, error) {
+	schema, group, err := writerTarget(getenv("PROJECTION_WRITE_SCHEMA"), database, role)
+	if err != nil {
+		return "", "", err
+	}
+	override := getenv("KAFKA_GROUP_ID")
+	if override == "" {
+		return schema, group, nil
+	}
+	if schema != "public" || len(override) > 249 || strings.IndexFunc(override, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+	}) >= 0 {
+		return "", "", errors.New("KAFKA_GROUP_ID requires a public writer and a valid Kafka group identifier")
+	}
+	return schema, override, nil
+}
+
 func buildApp(getenv func(string) string) (*app, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, err
+	}
 	window, err := history.Window(getenv)
 	if err != nil {
 		return nil, err
 	}
 	brokers := getenv("KAFKA_BROKERS")
 	url := getenv("PROJECTION_DATABASE_URL")
-	if strings.TrimSpace(brokers) == "" || url == "" {
+	if strings.TrimSpace(brokers) == "" || (url == "" && getenv("SHARD_REGISTRY_FILE") == "") {
 		return nil, errors.New("KAFKA_BROKERS and PROJECTION_DATABASE_URL are required")
 	}
 	schemas, err := loadSchemas(eventSchemaDir(getenv))
 	if err != nil {
 		return nil, err
 	}
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		return buildShardedApp(getenv, window, brokers, schemas)
+	}
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, errors.New("invalid projection database configuration")
 	}
-	targetSchema, group, err := writerTarget(getenv("PROJECTION_WRITE_SCHEMA"), cfg.ConnConfig.Database, cfg.ConnConfig.User)
+	targetSchema, group, err := configuredWriterTarget(getenv, cfg.ConnConfig.Database, cfg.ConnConfig.User)
 	if err != nil {
 		return nil, err
 	}
@@ -78,15 +106,15 @@ func buildApp(getenv func(string) string) (*app, error) {
 		pool.Close()
 		return nil, err
 	}
-	kafka, err := newKafka(strings.Split(brokers, ","), group)
+	kafka, err := newKafkaWithPrefix(strings.Split(brokers, ","), group, getenv("KAFKA_TOPIC_PREFIX"))
 	if err != nil {
 		pool.Close()
 		shutdownTracing(provider)
 		return nil, err
 	}
-	store := &Store{DB: pool, Schema: targetSchema, HistoryWindow: window, Lease: lease}
+	store := &Store{DB: pool, TopicPrefix: getenv("KAFKA_TOPIC_PREFIX"), Schema: targetSchema, HistoryWindow: window, Lease: lease}
 	p := &Processor{Tracer: provider.Tracer(consumerName), Source: kafka, Sink: kafka, Schemas: schemas, Apply: store.Apply, Heartbeat: store.Heartbeat, Attempts: 5, RetryDelay: time.Second, ProcessTimeout: 20 * time.Second}
-	return &app{lease: lease, historyOutOfWindow: store.HistoryOutOfWindow.Load, processor: p, ping: func(ctx context.Context) error {
+	return &app{lease: lease, dbPool: pool, historyOutOfWindow: store.HistoryOutOfWindow.Load, processor: p, ping: func(ctx context.Context) error {
 		var leaseErr error
 		if lease != nil {
 			leaseErr = lease.current(ctx)
@@ -103,7 +131,7 @@ func prepareWriterSchema(pool *pgxpool.Pool, targetSchema string) (*writerLease,
 	}
 	var total, forced int
 	err := pool.QueryRow(context.Background(), `SELECT count(*),count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity) FROM pg_class WHERE relnamespace=$1::regnamespace AND relkind IN ('r','p') AND NOT relispartition`, targetSchema).Scan(&total, &forced)
-	if err != nil || total != 10 || forced != total {
+	if err != nil || total != 19 || forced != total {
 		return nil, errors.New("versioned writer schema missing or RLS incomplete")
 	}
 	return acquireWriterLease(context.Background(), pool, targetSchema)
@@ -128,7 +156,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 func serve(parent context.Context, a *app, server *http.Server, listener net.Listener) error {
 	var leaseLoop func(context.Context) <-chan error
+	leases := a.shardLeases
 	if a.lease != nil {
+		leases = append(leases, a.lease)
+	}
+	if len(leases) > 0 {
 		leaseLoop = func(ctx context.Context) <-chan error {
 			done := make(chan error, 1)
 			go func() {
@@ -141,7 +173,12 @@ func serve(parent context.Context, a *app, server *http.Server, listener net.Lis
 						return
 					case <-ticker.C:
 						bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-						err := a.lease.renew(bounded)
+						var err error
+						for _, lease := range leases {
+							if err = lease.renew(bounded); err != nil {
+								break
+							}
+						}
 						cancel()
 						if err != nil {
 							done <- err

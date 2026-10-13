@@ -8,12 +8,16 @@ also filter by tenant explicitly (defence in depth over forced RLS).
 from __future__ import annotations
 
 import json
+import threading
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any
 
 from risk_engine.join import Binding, Interval
+from risk_engine.policy import PolicyVersion, validate_policy
 
 TRANSIENT = "transient"
 REJECTED = "rejected"
@@ -89,7 +93,8 @@ _INTERVAL_COLUMNS = "bin_id, occupancy_version, lot_id, grain_type, effective_fr
 _ASSESSMENT_COLUMNS = ("assessment_id", "source_event_id", "reading_id", "device_id", "bin_id",
                        "lot_id", "occupancy_version", "grain_type", "policy_version", "score",
                        "severity", "alert_eligible", "reasons", "observed_at", "event_id",
-                       "aggregate_version", "correlation_id", "causation_id", "traceparent")
+                       "aggregate_version", "correlation_id", "causation_id", "traceparent",
+                       "policy_id", "policy_calibrated", "policy_provenance")
 
 
 class PgTx:
@@ -199,10 +204,25 @@ class PgTx:
             (self.tenant, assessment_id, event_id, replacement_lot_id,
              replacement_occupancy_version, source_event_id))
 
-    def assessment(self, source_event_id: str, lot_id: str, policy_version: int) -> Mapping[str, Any] | None:
+    def assessment(self, source_event_id: str, lot_id: str, policy_version: int,
+                   policy_id: str | None = None) -> Mapping[str, Any] | None:
+        if policy_id is None:
+            row = self._one(
+                f"SELECT {', '.join(_ASSESSMENT_COLUMNS)} FROM risk_assessments WHERE tenant_id = %s"
+                " AND source_event_id = %s AND lot_id = %s AND policy_version = %s",
+                (self.tenant, source_event_id, lot_id, policy_version))
+        else:
+            row = self._one(
+                f"SELECT {', '.join(_ASSESSMENT_COLUMNS)} FROM risk_assessments WHERE tenant_id = %s"
+                " AND source_event_id = %s AND lot_id = %s AND policy_version = %s AND policy_id = %s",
+                (self.tenant, source_event_id, lot_id, policy_version, policy_id))
+        return None if row is None else dict(zip(_ASSESSMENT_COLUMNS, row))
+
+    def legacy_assessment(self, source_event_id: str, lot_id: str,
+                          policy_version: int) -> Mapping[str, Any] | None:
         row = self._one(
             f"SELECT {', '.join(_ASSESSMENT_COLUMNS)} FROM risk_assessments WHERE tenant_id = %s"
-            " AND source_event_id = %s AND lot_id = %s AND policy_version = %s",
+            " AND source_event_id = %s AND lot_id = %s AND policy_version = %s AND policy_id IS NULL",
             (self.tenant, source_event_id, lot_id, policy_version))
         return None if row is None else dict(zip(_ASSESSMENT_COLUMNS, row))
 
@@ -216,7 +236,7 @@ class PgTx:
 
     def insert_assessment(self, values: Mapping[str, Any]) -> None:
         columns = ("tenant_id",) + _ASSESSMENT_COLUMNS
-        params = [self.tenant] + [json.dumps(values[c]) if c == "reasons" else values[c]
+        params = [self.tenant] + [json.dumps(values[c]) if c in {"reasons", "policy_provenance"} else values[c]
                                   for c in _ASSESSMENT_COLUMNS]
         self.cur.execute(
             f"INSERT INTO risk_assessments ({', '.join(columns)})"
@@ -232,12 +252,75 @@ class PgTx:
              event["occurred_at"], event["correlation_id"], event["causation_id"],
              event["traceparent"], json.dumps(event["payload"])))
 
+    def select_policy(self, bin_id: str, grain_type: str, instant: datetime) -> PolicyVersion | None:
+        """Choose the bin-specific policy, falling back to a grain-wide policy."""
+        row = self._one(
+            "SELECT policy_id, policy_version, grain_type, bin_id, effective_from, effective_to,"
+            " measurement_thresholds, risk_thresholds, calibrated, policy_status, provenance,"
+            " calibration_evidence, approved_by, approved_at"
+            " FROM grain_policies WHERE tenant_id = %s AND grain_type = %s AND policy_status = 'active'"
+            " AND (bin_id = %s OR bin_id IS NULL) AND effective_from <= %s"
+            " AND (effective_to IS NULL OR %s < effective_to)"
+            " ORDER BY (bin_id IS NOT NULL) DESC, effective_from DESC, policy_version DESC LIMIT 1",
+            (self.tenant, grain_type, bin_id, instant, instant))
+        if row is None:
+            return None
+        def mapping(value: Any) -> Mapping[str, Any]:
+            return json.loads(value) if isinstance(value, str) else value
+        policy = PolicyVersion(self.tenant, str(row[0]), int(row[1]), str(row[2]),
+                               _text(row[3]), row[4], row[5], mapping(row[6]), mapping(row[7]),
+                               bool(row[8]), str(row[9]), mapping(row[10]), _text(row[11]),
+                               _text(row[12]), row[13])
+        validate_policy(policy)
+        return policy
+
+    def create_policy(self, policy: PolicyVersion, event: Mapping[str, Any]) -> None:
+        """Insert one immutable version and its owner event atomically."""
+        validate_policy(policy)
+        self.cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 10))",
+                         (f"{self.tenant}:{policy.grain_type}:{policy.bin_id or '*'}",))
+        self.cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 11))",
+                         (f"{self.tenant}:{policy.policy_id}",))
+        superseded = None
+        if policy.status == "active":
+            self.cur.execute(
+                "SELECT policy_id, policy_version, effective_from FROM grain_policies"
+                " WHERE tenant_id = %s AND grain_type = %s AND bin_id IS NOT DISTINCT FROM %s"
+                " AND policy_status = 'active' AND effective_to IS NULL FOR UPDATE",
+                (self.tenant, policy.grain_type, policy.bin_id))
+            for old_policy_id, old_version, old_from in self.cur.fetchall():
+                if old_from >= policy.effective_from:
+                    continue
+                self.cur.execute(
+                    "UPDATE grain_policies SET effective_to = %s WHERE tenant_id = %s"
+                    " AND policy_id = %s AND policy_version = %s AND effective_to IS NULL",
+                    (policy.effective_from, self.tenant, old_policy_id, old_version))
+                superseded = {"policy_id": str(old_policy_id), "version": str(old_version)}
+        if isinstance(event, dict):
+            event["payload"]["supersedes"] = superseded
+        row = self._one("SELECT COALESCE(MAX(policy_version), 0) FROM grain_policies"
+                        " WHERE tenant_id = %s AND policy_id = %s",
+                        (self.tenant, policy.policy_id))
+        if not row or policy.version != int(row[0]) + 1:
+            raise StoreError("23514", "policy version must increase by one")
+        self.cur.execute(
+            "INSERT INTO grain_policies (tenant_id, policy_id, policy_version, grain_type, bin_id,"
+            " effective_from, effective_to, measurement_thresholds, risk_thresholds, calibrated,"
+            " policy_status, provenance, calibration_evidence, approved_by, approved_at, created_by)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (self.tenant, policy.policy_id, policy.version, policy.grain_type, policy.bin_id,
+             policy.effective_from, policy.effective_to, json.dumps(policy.measurement_thresholds),
+             json.dumps(policy.risk_thresholds), policy.calibrated, policy.status,
+             json.dumps(policy.provenance), policy.calibration_evidence, policy.approved_by,
+             policy.approved_at, str(policy.provenance.get("created_by", "risk-policy-api"))))
+        self.insert_outbox(event)
+
 
 def _connect(conninfo: str) -> Any:
     import psycopg  # imported lazily so pure-logic tests need no driver
 
     # prepare_threshold=None: no server-side prepared statements behind PgBouncer.
-    return psycopg.connect(conninfo, autocommit=True, prepare_threshold=None)
+    return psycopg.connect(conninfo, autocommit=True, prepare_threshold=None, connect_timeout=3)
 
 
 def _driver_error() -> type[BaseException]:
@@ -253,6 +336,7 @@ class PgDatabase:
                  driver_error: Callable[[], type[BaseException]] = _driver_error):
         self._conninfo, self._connect, self._driver_error = conninfo, connect, driver_error
         self._conn: Any = None
+        self._lock = threading.RLock()
 
     def _connection(self) -> Any:
         if self._conn is None or self._conn.closed:
@@ -262,20 +346,44 @@ class PgDatabase:
     @contextmanager
     def _guard(self) -> Iterator[None]:
         driver_error = self._driver_error()
-        try:
-            yield
-        except driver_error as exc:
-            state = getattr(exc, "sqlstate", None)
-            if state is None and self._conn is not None:
-                self._conn.close()
-            raise StoreError(state, str(exc).strip()) from exc
+        with self._lock:
+            try:
+                yield
+            except driver_error as exc:
+                state = getattr(exc, "sqlstate", None)
+                if state is None and self._conn is not None:
+                    self._conn.close()
+                raise StoreError(state, str(exc).strip()) from exc
 
     @contextmanager
-    def transaction(self, tenant_id: str) -> Iterator[PgTx]:
+    def transaction(self, tenant_id: str, placement: Mapping[str, str] | None = None) -> Iterator[PgTx]:
         with self._guard():
             conn = self._connection()
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
+                if placement is not None:
+                    expires = datetime.fromisoformat(placement["expiresAt"].replace("Z", "+00:00"))
+                    if expires.timestamp() <= time.time():
+                        raise StoreError(None, "placement lease expired before database admission")
+                    cur.execute("SET LOCAL statement_timeout = '4s'")
+                    cur.execute("SET LOCAL lock_timeout = '2s'")
+                    for name, value in (("app.shard_id", placement["shardId"]),
+                                        ("app.shard_incarnation", placement["shardIncarnation"]),
+                                        ("app.placement_epoch", placement["placementEpoch"])):
+                        cur.execute("SELECT set_config(%s, %s, true)", (name, value))
+                    try:
+                        cur.execute("SELECT greenguard_internal.admit_tenant_placement"
+                                    "(%s::uuid,%s::text,%s::uuid,%s::bigint)",
+                                    (tenant_id, placement["shardId"], placement["shardIncarnation"],
+                                     placement["placementEpoch"]))
+                    except self._driver_error() as exc:
+                        # Only the admission function's precise stale-owner denial
+                        # is retryable. Business RLS/permissions still stop the worker.
+                        if (getattr(exc, "sqlstate", None) == "42501"
+                                and getattr(getattr(exc, "diag", None), "message_primary", None)
+                                == "tenant placement is missing, stale, or fenced"):
+                            raise StoreError("55P03", "tenant placement changed before admission") from None
+                        raise
                 yield PgTx(cur, tenant_id)
 
     def quarantine(self, consumer_name: str, topic: str, partition: int, offset: int,
@@ -298,5 +406,6 @@ class PgDatabase:
             return False
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()

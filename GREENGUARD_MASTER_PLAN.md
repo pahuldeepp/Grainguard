@@ -490,7 +490,10 @@ Every row below is **proposed**, except the telemetry schema and fixture already
 | `greenguard.inventory.facility.v1` | Inventory: `site.changed`, `bin.changed`, `lot.changed`, `lot.retired` | Site/bin/lot; projections, risk, integrations |
 | `greenguard.inventory.device.v1` | Inventory: `device.registered`, `device.binding_changed`, `device.disabled`; versioned activation addition later | Device/binding version; ingest binding, projections, saga, search |
 | `greenguard.telemetry.recorded.v1` | Ingest: `telemetry.recorded` | Device telemetry stream; read projection, risk, Cassandra, selected indexing/usage consumers |
-| `greenguard.risk.assessment.v1` | Risk: `risk.assessed`, `risk.assessment_invalidated` | Assessment stream for tenant/bin or device; alerts, projections, search |
+| `greenguard.risk.assessment.v1` | Risk: `risk.assessed@1` | Backward-compatible assessment stream; alerts and replay consumers |
+| `greenguard.risk.assessment.v2` | Risk: `risk.assessed@2` | Provenance-carrying assessment stream; alerts, projections, search |
+| `greenguard.risk.policy.v1` | Risk: `risk.policy_changed@1` | Versioned policy owner events; projections and audit |
+| `greenguard.risk.assessment_invalidated.v1` | Risk: `risk.assessment_invalidated@1` | Assessment invalidation stream; alerts, projections, search |
 | `greenguard.alerts.lifecycle.v1` | Alerts: `alert.opened`, `alert.updated`, `alert.acknowledged`, `alert.escalated`, `alert.resolved` | Alert; projections, dispatcher, search, AWS mirror |
 | `greenguard.assets.provisioning.v1` | Asset registry: `asset.reserved`, `asset.configured`, `asset.released`, `asset.command_failed` | Provisioning reservation/configuration; saga, inventory integration |
 | `greenguard.sagas.lifecycle.v1` | Orchestrator: `provisioning.started`, `provisioning.completed`, `provisioning.compensated`, `provisioning.intervention_required` | Saga; operator views, audit, integration consumers |

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://greenguard.example/contracts/api/read-device-current.v1.schema.json",
+  "title": "Authenticated device current PostgreSQL snapshot",
+  "$comment": "GET /api/v1/read/devices/{deviceId}/current; deviceId is one UUID. Normal tenant authentication and membership precede admission. Optional x-greenguard-minimum-watermark requests a tenant-bound minimum; actual x-greenguard-watermark certifies this response. Runtime response is capped at 262144 UTF-8 bytes.",
+  "type": "object",
+  "required": ["data", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "source": { "const": "postgres" },
+    "data": {
+      "type": "object",
+      "required": ["device", "latestReading"],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["tenant_id", "device_id"],
+              "properties": {
+                "tenant_id": { "type": "string", "format": "uuid" },
+                "device_id": { "type": "string", "format": "uuid" }
+              }
+            }
+          ]
+        },
+        "latestReading": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["tenant_id", "device_id", "reading_id"],
+              "properties": {
+                "tenant_id": { "type": "string", "format": "uuid" },
+                "device_id": { "type": "string", "format": "uuid" },
+                "reading_id": { "type": "string", "format": "uuid" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -5,13 +5,15 @@ import { AuthError } from "@greenguard/tenant-auth";
 import { validateEvent } from "@greenguard/contracts";
 import {
   adminQuery,
+  createActiveTenantFixture,
   outboxEvents,
   runtimeDb,
   uniqueSubject,
 } from "../testing/fixtures.js";
 import { SeatLimitError } from "./entitlements.js";
 import { identityIdOf } from "./ids.js";
-import { createOrganization, lookupMembership, type Actor } from "./store.js";
+import { lookupMembership, type Actor } from "./store.js";
+import { DomainConflictError } from "./errors.js";
 import {
   createIdentityConnection,
   discoverIdentityConnection,
@@ -34,12 +36,7 @@ async function setup() {
     issuer: "https://first.example/dex",
     subject: uniqueSubject("sso-admin"),
   };
-  const result = await createOrganization(
-    db,
-    admin,
-    { name: "SSO test" },
-    cmd(),
-  );
+  const result = await createActiveTenantFixture(db, admin, "SSO test", cmd());
   return { admin, tenantId: result.body.tenantId as string };
 }
 const verified = async () => true;
@@ -164,6 +161,7 @@ test("S07: a connection for A cannot grant membership in B", async () => {
       verified,
       cmd(),
     ),
+    DomainConflictError,
   );
 });
 
@@ -355,4 +353,79 @@ test("DX5: JIT membership enforces seats.max (default 3 seats: admin plus two)",
       correlation_id: deniedCommand.correlationId,
     },
   ]);
+});
+
+test("DX6: concurrent JIT grants through different connections cannot exceed seats.max", async () => {
+  const { admin, tenantId } = await setup();
+  const firstDomain = domain();
+  const secondDomain = domain();
+  const firstIssuer = "https://concurrent-first.example/dex";
+  const secondIssuer = "https://concurrent-second.example/dex";
+  await createIdentityConnection(
+    db,
+    admin,
+    tenantId,
+    {
+      issuer: firstIssuer,
+      type: "oidc",
+      domains: [firstDomain],
+      jitEnabled: true,
+    },
+    verified,
+    cmd(),
+  );
+  await createIdentityConnection(
+    db,
+    admin,
+    tenantId,
+    {
+      issuer: secondIssuer,
+      type: "oidc",
+      domains: [secondDomain],
+      jitEnabled: true,
+    },
+    verified,
+    cmd(),
+  );
+  await jitMembership(db, jitUser(firstIssuer, firstDomain), cmd());
+  const users = [
+    jitUser(firstIssuer, firstDomain),
+    jitUser(secondIssuer, secondDomain),
+  ];
+  const results = await Promise.allSettled(
+    users.map((user) => jitMembership(db, user, cmd())),
+  );
+  assert.equal(
+    results.filter((result) => result.status === "fulfilled").length,
+    1,
+  );
+  assert.equal(
+    results.filter(
+      (result) =>
+        result.status === "rejected" && result.reason instanceof SeatLimitError,
+    ).length,
+    1,
+  );
+  const [{ n }] = await adminQuery<{ n: string }>(
+    "SELECT count(*)::text AS n FROM memberships WHERE tenant_id=$1 AND state='active'",
+    [tenantId],
+  );
+  assert.equal(n, "3");
+});
+
+test("DX7: concurrent JIT for one identity returns the persisted membership", async () => {
+  const a = await claimed();
+  const user = jitUser(ISSUER_A, a.name);
+  const results = await Promise.all([
+    jitMembership(db, user, cmd()),
+    jitMembership(db, user, cmd()),
+  ]);
+  assert.deepEqual(
+    results.map((result) => result.roles),
+    [["viewer"], ["viewer"]],
+  );
+  assert.deepEqual(
+    (await lookupMembership(db, user.issuer, user.subject))?.roles,
+    ["viewer"],
+  );
 });

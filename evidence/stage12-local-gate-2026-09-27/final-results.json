@@ -1,0 +1,25 @@
+[
+  {
+    "name": "plan-final",
+    "command": [
+      "python3",
+      "scripts/check_plan.py"
+    ],
+    "exit": 0,
+    "output": "Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.\nThis check validates planning files only. Run make verify and make smoke for application checks.\n"
+  },
+  {
+    "name": "diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "scripts/stage12-postgres-restore.sh",
+      "docs/STAGE_12_PLAN.md",
+      "evidence/STAGE_12_LOCAL_GATE.md"
+    ],
+    "exit": 0,
+    "output": ""
+  }
+]

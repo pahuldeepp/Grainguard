@@ -24,64 +24,11 @@ export type Flags = Record<string, Rule>;
 export const GLOBAL_FLAG_TENANT = "00000000-0000-4000-8000-000000000001";
 type Row = { config_id: string; config_version: bigint; flags: Flags };
 
-async function writeConfiguration(
-  tx: Tx,
-  input: {
-    tenantId: string;
-    actorId: string;
-    flags: Flags;
-    expected: bigint;
-    cmd: Command;
-    request: string;
-    scope: "tenant" | "global";
-    commandType: "flags.put" | "flags.global.put";
-  },
-) {
-  const {
-    tenantId,
-    actorId,
-    flags,
-    expected,
-    cmd,
-    request,
-    scope,
-    commandType,
-  } = input;
-  const [previous] = await tx.$queryRaw<
-    Row[]
-  >`SELECT config_id::text, config_version, flags FROM flag_configurations WHERE tenant_id = ${tenantId}::uuid FOR UPDATE`;
-  const current = previous?.config_version ?? 0n;
-  if (current !== expected) throw new VersionConflictError(current);
-  const version = current + 1n;
-  const configId = previous?.config_id ?? randomUUID();
-  if (previous)
-    await tx.$executeRaw`UPDATE flag_configurations SET flags = ${JSON.stringify(flags)}::jsonb, config_version = ${version}, updated_by = ${actorId}::uuid, updated_at = clock_timestamp() WHERE tenant_id = ${tenantId}::uuid`;
-  else
-    await tx.$executeRaw`INSERT INTO flag_configurations (tenant_id, config_id, flags, config_version, updated_by) VALUES (${tenantId}::uuid, ${configId}::uuid, ${JSON.stringify(flags)}::jsonb, ${version}, ${actorId}::uuid)`;
-  const auditId = nameId("flag-audit", tenantId, configId, String(version));
-  await tx.$executeRaw`INSERT INTO flag_configuration_audit (tenant_id, audit_id, config_id, config_version, actor_identity_id, flags, correlation_id) VALUES (${tenantId}::uuid, ${auditId}::uuid, ${configId}::uuid, ${version}, ${actorId}::uuid, ${JSON.stringify(flags)}::jsonb, ${cmd.correlationId}::uuid)`;
-  const eventId = nameId("flag-event", tenantId, configId, String(version));
-  const payload = {
-    scope,
-    config_version: String(version),
-    flags,
-    actor_identity_id: actorId,
-  };
-  await tx.$executeRaw`INSERT INTO outbox_events (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type, schema_version, occurred_at, correlation_id, causation_id, traceparent, payload) VALUES (${eventId}::uuid, ${tenantId}::uuid, 'flag_configuration', ${configId}::uuid, ${version}, 'flag.configuration_changed', 1, clock_timestamp(), ${cmd.correlationId}::uuid, ${cmd.correlationId}::uuid, ${cmd.traceparent}, ${JSON.stringify(payload)}::jsonb)`;
-  const body = { version: String(version), flags };
-  await tx.$executeRaw`INSERT INTO command_receipts (tenant_id, command_type, idempotency_key, normalized_request, response_body) VALUES (${tenantId}::uuid, ${commandType}, ${cmd.idempotencyKey}, ${request}::jsonb, ${JSON.stringify(body)}::jsonb)`;
-  return body;
-}
-
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object")
     return `{${Object.keys(value)
-      .sort((left, right) => {
-        if (left < right) return -1;
-        if (left > right) return 1;
-        return 0;
-      })
+      .sort((a, b) => Number(a > b) - Number(a < b))
       .map(
         (key) =>
           `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`,
@@ -206,8 +153,7 @@ export async function putFlags(
     >`SELECT 1 FROM organizations WHERE tenant_id = ${tenantId}::uuid AND state = 'active' FOR UPDATE`;
     if (!org) throw new NotFoundError();
     const actorId = await admin(tx, tenantId, actor);
-    const lockKey = `${tenantId}|flags|${cmd.idempotencyKey}`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${tenantId}|flags|${cmd.idempotencyKey}`}, 0))`;
     const [receipt] = await tx.$queryRaw<
       {
         normalized_request: unknown;
@@ -226,16 +172,30 @@ export async function putFlags(
         throw new IdempotencyConflictError();
       return receipt.response_body;
     }
-    return writeConfiguration(tx, {
-      tenantId,
-      actorId,
-      flags,
-      expected,
-      cmd,
-      request,
+    const [previous] = await tx.$queryRaw<
+      Row[]
+    >`SELECT config_id::text, config_version, flags FROM flag_configurations WHERE tenant_id = ${tenantId}::uuid FOR UPDATE`;
+    const current = previous?.config_version ?? 0n;
+    if (current !== expected) throw new VersionConflictError(current);
+    const version = current + 1n;
+    const configId = previous?.config_id ?? randomUUID();
+    if (previous)
+      await tx.$executeRaw`UPDATE flag_configurations SET flags = ${JSON.stringify(flags)}::jsonb, config_version = ${version}, updated_by = ${actorId}::uuid, updated_at = clock_timestamp() WHERE tenant_id = ${tenantId}::uuid`;
+    else
+      await tx.$executeRaw`INSERT INTO flag_configurations (tenant_id, config_id, flags, config_version, updated_by) VALUES (${tenantId}::uuid, ${configId}::uuid, ${JSON.stringify(flags)}::jsonb, ${version}, ${actorId}::uuid)`;
+    const auditId = nameId("flag-audit", tenantId, configId, String(version));
+    await tx.$executeRaw`INSERT INTO flag_configuration_audit (tenant_id, audit_id, config_id, config_version, actor_identity_id, flags, correlation_id) VALUES (${tenantId}::uuid, ${auditId}::uuid, ${configId}::uuid, ${version}, ${actorId}::uuid, ${JSON.stringify(flags)}::jsonb, ${cmd.correlationId}::uuid)`;
+    const eventId = nameId("flag-event", tenantId, configId, String(version));
+    const payload = {
       scope: "tenant",
-      commandType: "flags.put",
-    });
+      config_version: String(version),
+      flags,
+      actor_identity_id: actorId,
+    };
+    await tx.$executeRaw`INSERT INTO outbox_events (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type, schema_version, occurred_at, correlation_id, causation_id, traceparent, payload) VALUES (${eventId}::uuid, ${tenantId}::uuid, 'flag_configuration', ${configId}::uuid, ${version}, 'flag.configuration_changed', 1, clock_timestamp(), ${cmd.correlationId}::uuid, ${cmd.correlationId}::uuid, ${cmd.traceparent}, ${JSON.stringify(payload)}::jsonb)`;
+    const body = { version: String(version), flags };
+    await tx.$executeRaw`INSERT INTO command_receipts (tenant_id, command_type, idempotency_key, normalized_request, response_body) VALUES (${tenantId}::uuid, 'flags.put', ${cmd.idempotencyKey}, ${request}::jsonb, ${JSON.stringify(body)}::jsonb)`;
+    return body;
   });
 }
 
@@ -261,8 +221,7 @@ export async function putGlobalFlags(
       unknown[]
     >`SELECT 1 FROM organizations WHERE tenant_id = ${tenantId}::uuid FOR UPDATE`;
     if (!org) throw new NotFoundError();
-    const lockKey = `${tenantId}|flags.global|${cmd.idempotencyKey}`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${tenantId}|flags.global|${cmd.idempotencyKey}`}, 0))`;
     const [receipt] = await tx.$queryRaw<
       {
         normalized_request: { expected: string; flags: Flags };
@@ -277,15 +236,29 @@ export async function putGlobalFlags(
         throw new IdempotencyConflictError();
       return receipt.response_body;
     }
-    return writeConfiguration(tx, {
-      tenantId,
-      actorId,
-      flags,
-      expected,
-      cmd,
-      request,
+    const [previous] = await tx.$queryRaw<
+      Row[]
+    >`SELECT config_id::text, config_version, flags FROM flag_configurations WHERE tenant_id = ${tenantId}::uuid FOR UPDATE`;
+    const current = previous?.config_version ?? 0n;
+    if (current !== expected) throw new VersionConflictError(current);
+    const version = current + 1n;
+    const configId = previous?.config_id ?? randomUUID();
+    if (previous)
+      await tx.$executeRaw`UPDATE flag_configurations SET flags = ${JSON.stringify(flags)}::jsonb, config_version = ${version}, updated_by = ${actorId}::uuid, updated_at = clock_timestamp() WHERE tenant_id = ${tenantId}::uuid`;
+    else
+      await tx.$executeRaw`INSERT INTO flag_configurations (tenant_id, config_id, flags, config_version, updated_by) VALUES (${tenantId}::uuid, ${configId}::uuid, ${JSON.stringify(flags)}::jsonb, ${version}, ${actorId}::uuid)`;
+    const auditId = nameId("flag-audit", tenantId, configId, String(version));
+    await tx.$executeRaw`INSERT INTO flag_configuration_audit (tenant_id, audit_id, config_id, config_version, actor_identity_id, flags, correlation_id) VALUES (${tenantId}::uuid, ${auditId}::uuid, ${configId}::uuid, ${version}, ${actorId}::uuid, ${JSON.stringify(flags)}::jsonb, ${cmd.correlationId}::uuid)`;
+    const eventId = nameId("flag-event", tenantId, configId, String(version));
+    const payload = {
       scope: "global",
-      commandType: "flags.global.put",
-    });
+      config_version: String(version),
+      flags,
+      actor_identity_id: actorId,
+    };
+    await tx.$executeRaw`INSERT INTO outbox_events (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type, schema_version, occurred_at, correlation_id, causation_id, traceparent, payload) VALUES (${eventId}::uuid, ${tenantId}::uuid, 'flag_configuration', ${configId}::uuid, ${version}, 'flag.configuration_changed', 1, clock_timestamp(), ${cmd.correlationId}::uuid, ${cmd.correlationId}::uuid, ${cmd.traceparent}, ${JSON.stringify(payload)}::jsonb)`;
+    const body = { version: String(version), flags };
+    await tx.$executeRaw`INSERT INTO command_receipts (tenant_id, command_type, idempotency_key, normalized_request, response_body) VALUES (${tenantId}::uuid, 'flags.global.put', ${cmd.idempotencyKey}, ${request}::jsonb, ${JSON.stringify(body)}::jsonb)`;
+    return body;
   });
 }

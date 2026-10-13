@@ -1,0 +1,127 @@
+name: greenguard-observability
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.123.0
+    command: [--config=/etc/otelcol-contrib/config.yaml]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "127.0.0.1:14317:4317"
+      - "127.0.0.1:14318:4318"
+      - "127.0.0.1:18889:8889"
+    depends_on: [tempo]
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - ./rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports: ["127.0.0.1:19090:9090"]
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-development-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus, loki, tempo]
+    restart: unless-stopped
+  loki:
+    image: grafana/loki:3.4.2
+    command: [-config.file=/etc/loki/local-config.yaml]
+    ports: ["127.0.0.1:13100:3100"]
+    volumes: [loki-data:/loki]
+    restart: unless-stopped
+  tempo:
+    image: grafana/tempo:2.7.2
+    command: [-config.file=/etc/tempo/tempo.yaml]
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:13200:3200"
+      - "127.0.0.1:14319:4317"
+      - "127.0.0.1:14320:4318"
+    restart: unless-stopped
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager]
+    volumes:
+      - ./alertmanager.yaml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports: ["127.0.0.1:19093:9093"]
+    restart: unless-stopped
+  node-exporter:
+    image: prom/node-exporter:v1.9.0
+    ports: ["127.0.0.1:19100:9100"]
+    restart: unless-stopped
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter@sha256:386b12d19eab2a37d7cd8ca8b4c7491cc7a830d9581f49af6c98a393da9605e6
+    environment:
+      DATA_SOURCE_NAME: postgresql://greenguard_observer:${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}@host.docker.internal:55432/postgres?sslmode=disable
+    ports: ["127.0.0.1:19187:9187"]
+    restart: unless-stopped
+  aws-cloudwatch-exporter:
+    image: prom/cloudwatch-exporter@sha256:da88be5880dc8413639b67904bf98525552c84282eff74e54556e00956520512
+    profiles: [aws]
+    command: ["9106", "/config/config.yml"]
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - ./.generated/aws-cloudwatch.yaml:/config/config.yml:ro
+    ports: ["127.0.0.1:19106:9106"]
+    restart: unless-stopped
+  # Optional streaming-backbone exporters: `docker compose --profile brokers up -d`.
+  # Scrape jobs live in prometheus-brokers.yaml. Not started by the default stack.
+  streaming-state-exporter:
+    profiles: [brokers]
+    # node:24.21-alpine; index digest resolved with docker buildx imagetools inspect.
+    image: node@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+    command: [node, /exporter/streaming-state-exporter.mjs]
+    environment:
+      CONNECT_URL: ${CONNECT_URL:-http://host.docker.internal:58083}
+      SCHEMA_REGISTRY_URL: ${SCHEMA_REGISTRY_URL:-http://host.docker.internal:58081}
+    volumes: [./exporters:/exporter:ro]
+    mem_limit: 64m
+    ports: ["127.0.0.1:19309:9309"]
+    restart: unless-stopped
+  postgres-exporter-slots:
+    profiles: [brokers]
+    image: prometheuscommunity/postgres-exporter@sha256:386b12d19eab2a37d7cd8ca8b4c7491cc7a830d9581f49af6c98a393da9605e6
+    command:
+      - --extend.query-path=/queries.yaml
+      - --disable-default-metrics
+      - --disable-settings-metrics
+      - --no-collector.database
+      - --no-collector.locks
+      - --no-collector.replication
+      - --no-collector.replication_slot
+      - --no-collector.wal
+    environment:
+      DATA_SOURCE_NAME: postgresql://greenguard_observer:${OBSERVABILITY_DB_PASSWORD:?Run make bootstrap}@host.docker.internal:55432/postgres?sslmode=disable
+    volumes: [./postgres-exporter-slots.yaml:/queries.yaml:ro]
+    mem_limit: 64m
+    ports: ["127.0.0.1:19188:9187"]
+    restart: unless-stopped
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:
+  alertmanager-data:

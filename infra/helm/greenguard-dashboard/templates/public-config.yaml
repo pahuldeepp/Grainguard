@@ -1,0 +1,34 @@
+{{- if .Values.publicOidc.enabled }}
+{{- $oidc := .Values.publicOidc -}}
+{{- $url := urlParse $oidc.authority -}}
+{{- if or (ne $url.scheme "https") (not $url.host) (not (regexMatch "^https://[^/?#@]+(/[^?#]*)?$" $oidc.authority)) (not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$" $oidc.clientId)) -}}
+{{- fail "publicOidc requires an HTTPS authority and public clientId" -}}
+{{- end -}}
+{{- if or (hasSuffix ".example.com" $url.host) (eq $url.host "example.com") -}}
+{{- fail "publicOidc authority cannot be a placeholder" -}}
+{{- end -}}
+{{- if and (eq $oidc.tokenMode "audience") (not $oidc.audience) -}}
+{{- fail "publicOidc audience mode requires audience" -}}
+{{- end -}}
+{{- if and (eq $oidc.tokenMode "cognito-access") $oidc.audience -}}
+{{- fail "publicOidc Cognito mode must not send audience; use resource binding" -}}
+{{- end -}}
+{{- if and $oidc.resource (not (regexMatch "^https://[^/?#@]+(/[^?#]*)?$" $oidc.resource)) -}}
+{{- fail "publicOidc resource must be HTTPS" -}}
+{{- end -}}
+{{- $config := dict "authority" $oidc.authority "clientId" $oidc.clientId "tokenMode" $oidc.tokenMode -}}
+{{- if eq $oidc.tokenMode "audience" -}}
+{{- $_ := set $config "audience" $oidc.audience -}}
+{{- end -}}
+{{- if $oidc.resource -}}
+{{- $_ := set $config "resource" $oidc.resource -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-public-config" (include "greenguard-dashboard.fullname" .) | quote }}
+  labels:
+    {{- include "greenguard-dashboard.labels" . | nindent 4 }}
+data:
+  config.json: {{ $config | toJson | quote }}
+{{- end }}

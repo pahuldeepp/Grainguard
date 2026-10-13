@@ -1,0 +1,259 @@
+{{- if .Values.enabled }}
+{{- include "ml-synthetic-data.validate" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: ml-synthetic-kafka
+  ports:
+    - {name: broker, port: 9093, targetPort: broker}
+    - {name: controller, port: 9094, targetPort: controller}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ml-synthetic-kafka
+  ports:
+    - {name: broker, port: 9093, targetPort: broker}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-synthetic-kafka-storage-config
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+data:
+  server.properties: |
+    process.roles=broker,controller
+    node.id=1
+    controller.quorum.voters=1@ml-synthetic-kafka-0.kafka-headless.ml-synthetic.svc.cluster.local:9094
+    controller.listener.names=CONTROLLER
+    listeners=INTERNAL://:9093,CONTROLLER://:9094
+    advertised.listeners=INTERNAL://ml-synthetic-kafka-0.kafka-headless.ml-synthetic.svc.cluster.local:9093
+    listener.security.protocol.map=INTERNAL:SASL_SSL,CONTROLLER:SSL
+    listener.name.internal.scram-sha-512.sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required;
+    inter.broker.listener.name=INTERNAL
+    log.dirs=/var/lib/kafka/data
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ml-synthetic-kafka
+  labels:
+    {{- include "ml-synthetic-data.labels" . | nindent 4 }}
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ml-synthetic-kafka
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ml-synthetic-kafka
+        greenguard.io/data-class: synthetic
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: format-kraft-storage
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              # The main container mounts an in-memory config directory so
+              # Kafka can render configuration with a read-only rootfs. Seed
+              # the image's bundled logging/default files before formatting.
+              cp -a /etc/kafka/docker/. /opt/kafka/config/
+              if [[ -f /var/lib/kafka/data/meta.properties ]]; then exit 0; fi
+              for value in "$KAFKA_ADMIN_PASSWORD" "$KAFKA_SCORER_PASSWORD" "$KAFKA_FIXTURE_PASSWORD"; do
+                [[ "$value" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo 'SCRAM passwords must be generated 64-character hex strings' >&2; exit 1; }
+              done
+              /opt/kafka/bin/kafka-storage.sh format \
+                --config /etc/kafka/storage/server.properties \
+                --cluster-id "$CLUSTER_ID" \
+                --add-scram "SCRAM-SHA-512=[name=ml_synthetic_admin,password=${KAFKA_ADMIN_PASSWORD}]" \
+                --add-scram "SCRAM-SHA-512=[name=ml_scoring,password=${KAFKA_SCORER_PASSWORD}]" \
+                --add-scram "SCRAM-SHA-512=[name=ml_fixture,password=${KAFKA_FIXTURE_PASSWORD}]"
+          env:
+            - {name: CLUSTER_ID, value: {{ .Values.kafka.clusterId | quote }}}
+            - name: KAFKA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaAuth | quote }}
+                  key: admin-password
+            - name: KAFKA_SCORER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaAuth | quote }}
+                  key: scorer-password
+            - name: KAFKA_FIXTURE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaAuth | quote }}
+                  key: fixture-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+            - {name: storage-config, mountPath: /etc/kafka/storage, readOnly: true}
+            - {name: kafka-config, mountPath: /opt/kafka/config}
+            - {name: temporary, mountPath: /tmp}
+      containers:
+        - name: kafka
+          image: {{ .Values.images.kafka | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: CLUSTER_ID, value: {{ .Values.kafka.clusterId | quote }}}
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@ml-synthetic-kafka-0.kafka-headless.ml-synthetic.svc.cluster.local:9094"}
+            - {name: KAFKA_LISTENERS, value: "INTERNAL://:9093,CONTROLLER://:9094"}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://ml-synthetic-kafka-0.kafka-headless.ml-synthetic.svc.cluster.local:9093"}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "INTERNAL:SASL_SSL,CONTROLLER:SSL"}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: INTERNAL}
+            - {name: KAFKA_AUTHORIZER_CLASS_NAME, value: org.apache.kafka.metadata.authorizer.StandardAuthorizer}
+            - {name: KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND, value: "false"}
+            - {name: KAFKA_SUPER_USERS, value: "User:ml_synthetic_admin;User:CN=kafka.ml-synthetic.svc.cluster.local"}
+            - {name: KAFKA_SASL_ENABLED_MECHANISMS, value: SCRAM-SHA-512}
+            - {name: KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL, value: SCRAM-SHA-512}
+            - {name: KAFKA_LISTENER_NAME_INTERNAL_SASL_ENABLED_MECHANISMS, value: SCRAM-SHA-512}
+            - name: KAFKA_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaAuth | quote }}
+                  key: inter-broker-jaas
+            - {name: KAFKA_OPTS, value: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka_server_jaas.conf"}
+            - {name: KAFKA_SSL_KEYSTORE_LOCATION, value: /etc/greenguard/kafka/broker.keystore.p12}
+            - {name: KAFKA_SSL_KEYSTORE_TYPE, value: PKCS12}
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaTls | quote }}
+                  key: keystore-password
+            - name: KAFKA_SSL_KEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaTls | quote }}
+                  key: key-password
+            - {name: KAFKA_SSL_TRUSTSTORE_LOCATION, value: /etc/greenguard/kafka/broker.truststore.p12}
+            - {name: KAFKA_SSL_TRUSTSTORE_TYPE, value: PKCS12}
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.kafkaTls | quote }}
+                  key: truststore-password
+            - {name: KAFKA_SSL_CLIENT_AUTH, value: none}
+            # KRaft controller traffic is mutually authenticated. The broker
+            # certificate CN above is an explicit cluster superuser; anonymous
+            # controller traffic is never granted cluster permissions.
+            - {name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_CLIENT_AUTH, value: required}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_MIN_INSYNC_REPLICAS, value: "1"}
+            - {name: KAFKA_DEFAULT_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_LOG_RETENTION_HOURS, value: "48"}
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xms256m -Xmx768m"}
+            # The upstream image writes JVM GC logs relative to /opt/kafka/bin;
+            # route them to writable ephemeral storage with read-only rootfs.
+            - {name: LOG_DIR, value: /tmp/kafka-logs}
+          ports:
+            - {name: broker, containerPort: 9093, protocol: TCP}
+            - {name: controller, containerPort: 9094, protocol: TCP}
+          startupProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 10
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources.kafka | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+            - {name: kafka-tls, mountPath: /etc/greenguard/kafka, readOnly: true}
+            - {name: kafka-jaas, mountPath: /etc/kafka/secrets, readOnly: true}
+            - {name: storage-config, mountPath: /mnt/shared/config/server.properties, subPath: server.properties, readOnly: true}
+            - {name: kafka-config, mountPath: /opt/kafka/config}
+            - {name: temporary, mountPath: /tmp}
+      volumes:
+        - name: storage-config
+          configMap:
+            name: ml-synthetic-kafka-storage-config
+            # The Docker wrapper copies mounted properties then appends
+            # environment overrides; keep the copied file owner-writable.
+            defaultMode: 0644
+        - name: kafka-tls
+          secret:
+            secretName: {{ .Values.secrets.kafkaTls | quote }}
+            defaultMode: 0440
+            items:
+              - {key: broker.keystore.p12, path: broker.keystore.p12}
+              - {key: broker.truststore.p12, path: broker.truststore.p12}
+        - name: kafka-jaas
+          secret:
+            secretName: {{ .Values.secrets.kafkaAuth | quote }}
+            defaultMode: 0440
+            items:
+              - {key: broker-jaas, path: kafka_server_jaas.conf}
+        - name: kafka-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "ml-synthetic-data.labels" . | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storage.className | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.kafkaSize | quote }}
+{{- end }}

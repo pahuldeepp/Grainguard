@@ -135,6 +135,16 @@ export function createTokenVerifierFromEnv(
   getenv: Getenv,
   readFile: (path: string) => string,
 ) {
+  const rawTokenMode = getenv("AUTH_TOKEN_MODE") || "audience";
+  if (rawTokenMode !== "audience" && rawTokenMode !== "cognito-access")
+    throw new Error("AUTH_TOKEN_MODE must be audience or cognito-access");
+  const tokenMode: "audience" | "cognito-access" = rawTokenMode;
+  const clientIds = (getenv("AUTH_COGNITO_CLIENT_IDS") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (tokenMode === "cognito-access" && !clientIds.length)
+    throw new Error("AUTH_COGNITO_CLIENT_IDS is required for cognito-access");
   const membershipFile = getenv("AUTH_MEMBERSHIP_FILE");
   const refreshMs =
     optionalNumber(getenv, "AUTH_MEMBERSHIP_REFRESH_MS") ?? 30_000;
@@ -148,7 +158,12 @@ export function createTokenVerifierFromEnv(
   // Validate verifier configuration before starting a refresh timer.
   const verifierOptions = {
     issuer: required(getenv, "AUTH_ISSUER"),
-    audience: required(getenv, "AUTH_AUDIENCE"),
+    audience:
+      tokenMode === "audience"
+        ? required(getenv, "AUTH_AUDIENCE")
+        : getenv("AUTH_AUDIENCE") || undefined,
+    tokenMode,
+    cognitoClientIds: tokenMode === "cognito-access" ? clientIds : undefined,
     keys: {
       jwksUrl: required(getenv, "AUTH_JWKS_URL"),
       cacheMaxAgeMs: optionalNumber(getenv, "AUTH_JWKS_CACHE_MS"),

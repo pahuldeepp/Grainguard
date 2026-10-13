@@ -29,6 +29,8 @@ type RequestMeta struct {
 
 // Stable rejection reasons. Each maps to one HTTP status and is returned to the device.
 const (
+	ReasonTelemetryV2Disabled = "telemetry_v2_disabled"
+	ReasonSensorForbidden     = "sensor_forbidden"
 	ReasonInvalidBody         = "invalid_body"
 	ReasonInvalidField        = "invalid_field"
 	ReasonNoMeasurements      = "no_measurements"

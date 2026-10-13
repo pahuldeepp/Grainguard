@@ -40,7 +40,7 @@ export class NotificationContactsController {
   ) {
     const version =
       typeof ifMatch === "string"
-        ? /^"(0|[1-9]\d{0,18})"$/.exec(ifMatch)
+        ? /^"(0|[1-9][0-9]{0,18})"$/.exec(ifMatch)
         : null;
     if (!version)
       throw new InvalidInputError(

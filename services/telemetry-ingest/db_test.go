@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,6 +31,7 @@ func openPool(t *testing.T, key string, maxConns int32) *pgxpool.Pool {
 	}
 	config.MaxConns = maxConns
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	configureFixturePlacement(t, config)
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +56,12 @@ func adminConn(t *testing.T, database string) *pgx.Conn {
 		t.Fatal(err)
 	}
 	u.Path = "/" + database
-	conn, err := pgx.Connect(context.Background(), u.String())
+	config, err := pgx.ParseConfig(u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Tracer = fixturePlacementTracer{t, u.String()}
+	conn, err := pgx.ConnectConfig(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,4 +127,23 @@ func (e eventSpec) json() []byte {
 		"aggregate_type": "device", "aggregate_id": e.device, "aggregate_version": v, "payload": payload,
 	})
 	return data
+}
+
+// Fixture administrator mutations carry the same tenant and shard identity as runtime writes.
+func fixtureAdminExec(t *testing.T, conn *pgx.Conn, tenant, query string, args ...any) (pgconn.CommandTag, error) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenant); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return tag, err
+	}
+	return tag, tx.Commit(ctx)
 }

@@ -65,6 +65,27 @@ test("AUTH_* is all-or-nothing and remote JWKS must use https", () => {
   );
 });
 
+test("single-issuer Cognito access mode requires an explicit public client allowlist", () => {
+  const input = {
+    ...base,
+    AUTH_TOKEN_MODE: "cognito-access",
+    AUTH_ISSUER:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example",
+    AUTH_JWKS_URL:
+      "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
+  };
+  assert.throws(() => readConfig(input), /AUTH_COGNITO_CLIENT_IDS/);
+  assert.deepEqual(
+    readConfig({ ...input, AUTH_COGNITO_CLIENT_IDS: "web, ios" }).auth,
+    {
+      issuer: input.AUTH_ISSUER,
+      jwksUrl: input.AUTH_JWKS_URL,
+      tokenMode: "cognito-access",
+      cognitoClientIds: ["web", "ios"],
+    },
+  );
+});
+
 test("09g multi-issuer config accepts two issuers and preserves legacy single issuer", () => {
   const issuers = [
     {
