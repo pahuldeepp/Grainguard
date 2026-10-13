@@ -78,6 +78,25 @@ shared GreenGuard Compose/database project was not restarted or modified.
   Stage 07 Kafka/CDC/MQTT acceptance above supplies its separate live local
   evidence. The temporary project, volume, credentials, and worktree were
   removed afterward.
+- Vendor-image hardening candidate build and scan completed locally. Candidate
+  builds retained Kafka 3.9.2 and Cassandra 5.0.9 behavior, and Trivy scanned
+  both immutable local image IDs with the current HIGH/CRITICAL fixable policy.
+  The policy gate **fails**: Kafka has 21 HIGH and 1 CRITICAL Java dependency
+  findings; Cassandra has 17 HIGH and 1 CRITICAL Java dependency findings.
+  The locked OS package hardening did not change those bundled Java libraries.
+  No vulnerability waiver or release pin change was made. Detailed Trivy JSON,
+  database metadata, immutable image inspections, and build logs are retained
+  under ignored `.local/vendor-hardening/review-20261013/` for local review.
+- The same candidates passed the isolated runtime smoke: Kafka authenticated
+  TLS/KRaft, scoped producer/consumer round trip, cross-tenant ACL denial,
+  invalid-password rejection, and non-root runtime; Cassandra non-root runtime,
+  TLS/authentication and plaintext/CA rejection, scoped read/write and denied
+  role, TTL, plus persisted SSTable data through a 5.0.5→5.0.9 single-node
+  restart. The smoke explicitly does **not** prove full application CDC,
+  multi-node availability, or release security eligibility. The run recorded
+  `cleanupComplete: true`; its containers, network, volume, credentials, and
+  fixture files were removed. Smoke logs and cleanup receipts remain under
+  ignored `.local/vendor-hardening/smoke-20261013/`.
 
 ## Still not proven / deployment blockers
 
@@ -89,8 +108,8 @@ shared GreenGuard Compose/database project was not restarted or modified.
 - `make verify` ran locally and passed. A full remote CI run for the current
   branch still has not run.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
-  checks remain unresolved. No release eligibility or security thresholds
-  were weakened.
+  checks remain unresolved. The latest candidate scan is still red as detailed
+  above. No release eligibility or security thresholds were weakened.
 - Current quota evidence says the safe workload minimum exceeds the reported
   8-vCPU quota. No workload or security control was removed to force admission.
 - The trusted initial production owner payload, deployed user tenant
