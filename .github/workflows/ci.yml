@@ -251,6 +251,12 @@ jobs:
           platforms: amd64
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
+      - name: Prepare private native scanner home
+        if: runner.arch == 'ARM64'
+        run: |
+          scanner_home="$(mktemp -d "$RUNNER_TEMP/greenguard-sonar.XXXXXXXX")"
+          chmod 700 "$scanner_home"
+          echo "SONAR_SCANNER_HOME=$scanner_home" >> "$GITHUB_ENV"
       - name: Analyze coverage and enforce SonarQube gate
         env:
           SONAR_SCANNER_PROFILE: ${{ runner.arch == 'ARM64' && 'native' || 'docker' }}
@@ -329,6 +335,14 @@ jobs:
           make db-down
           make sonar-down
           make ci-compose-cleanup
+      - name: Remove private native scanner home
+        if: always() && runner.arch == 'ARM64'
+        run: |
+          if [[ -z "${SONAR_SCANNER_HOME:-}" ]]; then exit 0; fi
+          case "$SONAR_SCANNER_HOME" in
+            "$RUNNER_TEMP"/greenguard-sonar.*) rm -rf -- "$SONAR_SCANNER_HOME" ;;
+            *) echo "Refusing to remove unexpected scanner home" >&2; exit 1 ;;
+          esac
   publish:
     name: Publish verified images
     needs:

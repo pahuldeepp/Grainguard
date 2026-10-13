@@ -47,6 +47,10 @@ export function scannerProfile(value = "docker") {
   return value;
 }
 
+export function scannerHome(env = process.env, fallback = homedir()) {
+  return env.SONAR_SCANNER_HOME || fallback;
+}
+
 async function ownedDirectory(path, privateMode = false) {
   await mkdir(path, { mode: 0o700 }).catch((error) => {
     if (error.code !== "EEXIST") throw error;
@@ -220,7 +224,7 @@ with zipfile.ZipFile(archive) as z:
 export async function prepareNativeScanner({
   platform = process.platform,
   arch = process.arch,
-  home = homedir(),
+  home = scannerHome(),
   download = downloadArchive,
   run = runBounded,
 } = {}) {

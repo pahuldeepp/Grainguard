@@ -170,6 +170,15 @@ shared GreenGuard Compose/database project was not restarted or modified.
   temporary empty PV receipt based on that independent result let the strict
   inventory complete. This does not certify every AWS region or every resource
   in the account.
+- PR #19's run `38415012119` passed `make verify`, coverage generation, smoke,
+  staging, Helm/GitOps rendering, and OIDC integration. Its Sonar step failed
+  before analysis: the native scanner's protected-directory guard rejected the
+  runner's group-writable `/home/runner/.cache` (mode `0775`). The scanner guard
+  was correct; CI now creates a private per-run scanner home under `RUNNER_TEMP`
+  and removes only that explicitly prefixed directory. A regression test covers
+  the home override. Targeted scanner tests passed **21/21**, `actionlint` passed,
+  and `git diff --check` passed. The old run does not include this fix and is
+  still running unrelated integration jobs.
 - The Terraform capacity formula's checked-in defaults require **52 vCPUs** for
   managed-node maxima plus the configured DEFAULT-update surge in two AZs
   (before Karpenter capacity); with AI parser nodes enabled it requires
@@ -185,13 +194,13 @@ shared GreenGuard Compose/database project was not restarted or modified.
 
 ## Still not proven / deployment blockers
 
-- Full current-commit CI has not run. The latest available remote run is on an
-  older SHA and is summarized above. It does not establish that current-branch
-  browser E2E or Sonar passes. The authorization-request selection race has a
-  focused regression test and the full local verify/smoke gate is green, but
-  the opt-in real browser E2E still needs a fresh run.
-- `make verify` ran locally and passed. A full remote CI run for the current
-  branch still has not run.
+- Full CI on commit `7f198aa` and the scanner-home fix has not run yet. Run
+  `38415012119` targets older SHA `0d59b57e5da3c158cf32932d7c9a14648591acd8`;
+  its positive test results do not prove the latest changes. It does not
+  establish that current-branch browser E2E or Sonar passes. The
+  authorization-request selection race has a focused regression test and the
+  full local verify/smoke gate is green, but the opt-in real browser E2E still
+  needs a fresh run.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
   checks remain unresolved. The latest candidate scan is still red as detailed
   above. No release eligibility or security thresholds were weakened.

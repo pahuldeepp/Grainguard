@@ -19,6 +19,7 @@ import { join } from "node:path";
 import {
   nativeRelease,
   scannerProfile,
+  scannerHome,
   verifyArchive,
   downloadArchive,
   prepareNativeScanner,
@@ -32,6 +33,14 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("native scanner honors a job-private home while preserving the user-home default", () => {
+  assert.equal(
+    scannerHome({ SONAR_SCANNER_HOME: "/runner/temp/sonar-home" }, "/home/runner"),
+    "/runner/temp/sonar-home",
+  );
+  assert.equal(scannerHome({}, "/home/runner"), "/home/runner");
+});
 
 test("native releases are pinned and profile selection is explicit", () => {
   assert.equal(scannerProfile(), "docker");
