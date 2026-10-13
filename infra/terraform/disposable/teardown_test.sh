@@ -94,8 +94,8 @@ case "$1 $2" in
   "cloudfront list-vpc-origins") cat "$STUB_DIR/vpc_origin" 2>/dev/null || true ;;
   "wafv2 list-web-acls") cat "$STUB_DIR/edge_waf" 2>/dev/null || true ;;
   "cognito-idp list-user-pools")
-    if [[ "$*" != *"--page-size 60"* || "$*" == *"--max-results"* ]]; then
-      echo 'Cognito inventory must use CLI auto-pagination' >&2; exit 254
+    if [[ "$*" != *"--max-results 60"* || "$*" == *"--page-size"* ]]; then
+      echo 'Cognito inventory must provide the required service MaxResults parameter' >&2; exit 254
     fi
     cat "$STUB_DIR/cognito_pool" 2>/dev/null || true ;;
   "cognito-idp describe-user-pool-domain")

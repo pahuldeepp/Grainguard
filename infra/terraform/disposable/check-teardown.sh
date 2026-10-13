@@ -178,7 +178,7 @@ web_distributions="$(aws cloudfront list-distributions --query "DistributionList
 api_distributions="$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='$cluster mobile BFF'].ARN" --output text)"
 vpc_origins="$(aws cloudfront list-vpc-origins --query "VpcOriginList.Items[?Name=='$edge_name'].Arn" --output text)"
 edge_waf="$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 --query "WebACLs[?Name=='$edge_name'].ARN" --output text)"
-cognito_pools="$(aws cognito-idp list-user-pools --page-size 60 --query "UserPools[?Name=='${edge_name%-edge}-users'].Id" --output text)"
+cognito_pools="$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='${edge_name%-edge}-users'].Id" --output text)"
 if cognito_domain_description="$(aws cognito-idp describe-user-pool-domain --domain "$cognito_prefix" \
   --query 'DomainDescription.UserPoolId' --output text 2>&1)"; then
   :

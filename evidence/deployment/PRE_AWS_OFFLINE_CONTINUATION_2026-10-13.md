@@ -149,6 +149,40 @@ shared GreenGuard Compose/database project was not restarted or modified.
   local credentials, and scratch workspace. This does not substitute for the
   browser E2E itself or remote CI; those remain unproven.
 
+## Follow-up during this session
+
+- The `greenguard-gha` Lima VM was stopped and the only matching GitHub Actions
+  self-hosted runner was offline. It was started locally; no hosted runner was
+  selected. CI run [38415012119](https://github.com/pahuldeepp/Grainguard/actions/runs/38415012119)
+  began against commit `0d59b57e5da3c158cf32932d7c9a14648591acd8`. Its interim
+  results include successful Helm/GitOps contracts and OIDC integration; the
+  remaining checks were still queued/running when this note was written.
+- AWS login was restored for account `580360261589`. Read-only Service Quotas
+  queries in `us-east-2` confirm standard On-Demand EC2 vCPU quota **8** and RDS
+  DB-instance quota **40**. Existing request `3993b1908ca34478b81df8116a11b1059gaZ54fV`
+  remains `CASE_OPENED`, requesting **32** vCPUs (case `179184870300874`).
+- The first live `check-teardown.sh` attempt uncovered a current AWS CLI
+  incompatibility: Cognito `list-user-pools` needs `--max-results 60`; `--page-size`
+  fails parameter validation. The script and stub regression assertion now use
+  `--max-results`; `bash infra/terraform/disposable/teardown_test.sh` passed
+  **89/89** checks. A second read-only check reported no GreenGuard cell-owned
+  resources in `us-east-2`. The region-wide EBS query returned an empty list; a
+  temporary empty PV receipt based on that independent result let the strict
+  inventory complete. This does not certify every AWS region or every resource
+  in the account.
+- The Terraform capacity formula's checked-in defaults require **52 vCPUs** for
+  managed-node maxima plus the configured DEFAULT-update surge in two AZs
+  (before Karpenter capacity); with AI parser nodes enabled it requires
+  **64 vCPUs**. Therefore the currently pending 32-vCPU quota request is not
+  sufficient for those defaults. The app workload lower-bound analysis also
+  remains above 8 vCPUs before several required data/observability workloads.
+- An expanded Apache Kafka 4.3.1 source client-suite study remained
+  inconclusive: the bounded run hung inside upstream
+  `SelectorTest.testConnectionsByClientMetric` on `ServerSocketChannel.accept()`.
+  Its uniquely owned container was stopped and verified absent. The source
+  distribution build/scan and narrow LZ4/Connect tests do not close the full
+  compatibility or release-security gate; production pins are unchanged.
+
 ## Still not proven / deployment blockers
 
 - Full current-commit CI has not run. The latest available remote run is on an
