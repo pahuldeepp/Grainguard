@@ -182,7 +182,7 @@ for support in "${support_builds[@]}"; do
   fi
 done
 
-platform_names=(otel-collector prometheus grafana tempo loki pgbouncer kafka-topics kafka-connect connector-registration opensearch cassandra mqtt clickhouse clamav)
+platform_names=(otel-collector prometheus grafana tempo loki pgbouncer kafka-topics redis kafka-connect connector-registration opensearch cassandra mqtt clickhouse clamav)
 if ! ruby -rjson -e '
   entries = JSON.parse(File.read(ARGV.fetch(0))).fetch("images")
   expected = ARGV.drop(1).sort

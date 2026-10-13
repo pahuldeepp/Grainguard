@@ -1,4 +1,4 @@
-.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed ci-compose-cleanup
+.PHONY: bootstrap db-up db-down db-logs db-migrate build-otel dev verify check-plan build smoke helm-validate kyverno-validate observability-up observability-down observability-validate observability-test-rules ml-clickhouse-up ml-clickhouse-down ml-local-synthetic-seed ci-compose-cleanup image-inventory
 # Local connection settings from make bootstrap; exported so tests and Prisma see them.
 -include .env
 export
@@ -38,7 +38,9 @@ build:
 	cd services/hardware-service && go build -o ../../build/hardware-worker ./cmd/worker
 dev: db-migrate build
 	npm run dev
-verify: check-plan db-migrate
+image-inventory:
+	bash scripts/check-image-inventory.sh
+verify: check-plan image-inventory db-migrate
 	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
 	node --test scripts/browser-e2e-stack.test.mjs
