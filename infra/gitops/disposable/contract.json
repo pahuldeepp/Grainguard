@@ -1,7 +1,19 @@
 {
   "schemaVersion": 1,
   "namespace": "greenguard",
-  "requiredApplications": ["greenguard-edge-routing"],
+  "requiredApplications": [
+    "greenguard-edge-routing",
+    "greenguard-disposable-data",
+    "greenguard-kafka-topics",
+    "greenguard-schema-registry",
+    "greenguard-pgbouncer",
+    "greenguard-kafka-connect",
+    "greenguard-connector-registration",
+    "greenguard-opensearch",
+    "greenguard-cassandra",
+    "greenguard-clickhouse",
+    "greenguard-live-acceptance-probes"
+  ],
   "phases": [
     {
       "id": "controllers",
@@ -438,7 +450,9 @@
       "initialJob": "projection-history-s4-initial"
     }
   ],
-  "operatorSecrets": ["greenguard-telemetry-replay-config"],
+  "operatorSecrets": [
+    "greenguard-telemetry-replay-config"
+  ],
   "acceptanceJobs": [
     {
       "name": "postgres-owner-migration-gate",
@@ -448,6 +462,46 @@
       "images": [
         "migration-gate",
         "migration-sql"
+      ]
+    },
+    {
+      "name": "kafka-produce-consume",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "kafka-produce-consume"
+      },
+      "images": [
+        "kafka-topics"
+      ]
+    },
+    {
+      "name": "redis-tenant-cache-roundtrip",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "redis-tenant-cache-roundtrip"
+      },
+      "images": [
+        "redis"
+      ]
+    },
+    {
+      "name": "cassandra-tenant-partition-roundtrip",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "cassandra-tenant-partition-roundtrip"
+      },
+      "images": [
+        "cassandra"
+      ]
+    },
+    {
+      "name": "opensearch-index-search",
+      "selector": {
+        "greenguard.io/migration-gate": "false",
+        "greenguard.io/acceptance-probe": "opensearch-index-search"
+      },
+      "images": [
+        "cassandra"
       ]
     },
     {

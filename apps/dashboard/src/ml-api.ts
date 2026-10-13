@@ -81,11 +81,9 @@ export class MlApi {
     }>(
       this.getAccessToken,
       operations[action],
-      action === "promote"
+      action === "promote" || action === "rollback"
         ? { version: version ?? "" }
-        : action === "rollback"
-          ? { version: version ?? "" }
-          : {},
+        : {},
       {
         signIn: "Sign in to manage ML operations.",
         request: "ML operation failed",

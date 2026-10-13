@@ -107,7 +107,7 @@ variable "observability_image_digests" {
 }
 
 variable "data_plane_image_digests" {
-  description = "Exactly four immutable images for disposable PgBouncer, Kafka topic bootstrap, Kafka Connect and connector registration."
+  description = "Exactly five immutable images for disposable PgBouncer, Kafka topic bootstrap, Kafka Connect, connector registration and Redis acceptance."
   type        = map(string)
   default     = {}
   validation {
@@ -192,7 +192,7 @@ locals {
     flatten([for shard_id in local.postgres_shard_ids : [for owner in ["telemetry", "projection", "jobs", "saga", "hardware", "inventory", "alerts", "risk", "notifications"] : "greenguard-${shard_id}-${owner}-migration"]])
   ))
   required_observability_images = toset(["otel-collector", "prometheus", "grafana", "tempo", "loki"])
-  required_data_plane_images    = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"])
+  required_data_plane_images    = toset(["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration", "redis"])
   required_data_plane_secrets   = toset(["greenguard-pgbouncer-auth", "greenguard-cdc-credentials", "greenguard-kafka-auth", "greenguard-kafka-ca", "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth", "greenguard-opensearch-admin", "greenguard-opensearch-clients", "greenguard-opensearch-tls", "greenguard-opensearch-ca", "greenguard-cassandra-auth", "greenguard-cassandra-tls", "greenguard-mqtt-broker", "greenguard-data-credentials"])
   required_cell_secret_names = setunion(
     local.required_runtime_secret_names,
@@ -499,10 +499,9 @@ resource "helm_release" "gitops_bootstrap" {
       caSecret      = "greenguard-rds-ca"
     }
     acceptanceProbes = {
-      # ClickHouse storage roundtrip can run during bootstrap. OIDC membership
-      # readback needs a real, signature-verified operator access token and is
-      # enabled explicitly only after interactive login/enrollment.
-      enabled                 = var.identity_mode == "managed-dex"
+      # Data roundtrips are mandatory in every identity mode. Membership
+      # readback additionally needs a verified token after interactive login.
+      enabled                 = true
       membershipEnabled       = var.enable_live_membership_acceptance
       clickhouseImage         = var.clickhouse_image_digest
       tenantControlPlaneImage = lookup(var.deployment_image_digests, "tenant-control-plane", "")
@@ -565,7 +564,7 @@ resource "helm_release" "gitops_bootstrap" {
     }
     precondition {
       condition     = length(setsubtract(local.required_data_plane_images, toset(keys(var.data_plane_image_digests)))) == 0 && length(setsubtract(toset(keys(var.data_plane_image_digests)), local.required_data_plane_images)) == 0
-      error_message = "Application tree needs exactly four digest-pinned data-plane images."
+      error_message = "Application tree needs exactly five digest-pinned data-plane images."
     }
     precondition {
       condition     = var.opensearch_image_digest != ""
@@ -612,6 +611,8 @@ resource "terraform_data" "deployed_workload_acceptance" {
       managed_dex_enabled              = var.identity_mode == "managed-dex"
       membership_acceptance_enabled    = var.enable_live_membership_acceptance
       clickhouse_image_digest          = var.clickhouse_image_digest
+      cassandra_image_digest           = var.cassandra_image_digest
+      data_plane_image_digests         = var.data_plane_image_digests
     }
   }
   # Helm revision changes for any root Application value update, including

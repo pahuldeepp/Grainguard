@@ -67,10 +67,10 @@ def inventory(inputs, contract):
     observability = inputs["observability_image_digests"]
     if not isinstance(observability, dict) or set(observability) != observability_names:
         raise ValueError("observability image inventory must contain exactly the five Terraform keys")
-    data_plane_names = {"pgbouncer", "kafka-topics", "kafka-connect", "connector-registration"}
+    data_plane_names = {"pgbouncer", "kafka-topics", "kafka-connect", "connector-registration", "redis"}
     data_plane = inputs["data_plane_image_digests"]
     if not isinstance(data_plane, dict) or set(data_plane) != data_plane_names:
-        raise ValueError("data-plane image inventory must contain exactly the four Terraform keys")
+        raise ValueError("data-plane image inventory must contain exactly the five Terraform keys")
     platform = {**observability, **data_plane}
     for field, name in (("opensearch_image_digest", "opensearch"), ("cassandra_image_digest", "cassandra"),
                         ("mqtt_image_digest", "mqtt"), ("clickhouse_image_digest", "clickhouse")):

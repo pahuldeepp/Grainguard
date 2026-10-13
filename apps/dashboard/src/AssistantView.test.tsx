@@ -559,6 +559,23 @@ test("explains that PDF upload requires an operator or admin role", async () => 
   );
 });
 
+test("does not render a NaN retry delay for PDF upload throttling", async () => {
+  const limited = Object.assign(new Error("provider_rate_limited"), {
+    retryAfterSeconds: Number.NaN,
+  });
+  const api = apiMock({ uploadPdf: vi.fn().mockRejectedValue(limited) });
+  render(<AssistantView api={api} sessionId="tenant:user" />);
+  const file = new File(["%PDF-test"], "grain-guide.pdf", {
+    type: "application/pdf",
+  });
+  fireEvent.change(screen.getByLabelText("Choose a PDF to upload"), {
+    target: { files: [file] },
+  });
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Wait a moment and try again.");
+  expect(alert.textContent).not.toContain("NaN");
+});
+
 test("requires inline confirmation, then removes the deleted active chat", async () => {
   const api = apiMock({
     listConversations: vi

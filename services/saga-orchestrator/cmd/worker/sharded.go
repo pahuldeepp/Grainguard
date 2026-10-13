@@ -20,25 +20,11 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 		return err
 	}
 	defer db.Close()
-	leases := saga.PlacementLeases{}
-	if err := db.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
-		if err := db.WithInfrastructure(ctx, shard, "", func(context.Context, pgx.Tx) error { return nil }); err != nil {
-			return err
-		}
-		leases[shard] = &saga.Leases{DB: db.InfrastructureDB(shard), Holder: cfg.holder + "/" + shard, TTL: cfg.ttl, MaxShards: cfg.maxShards}
-		return nil
-	}); err != nil {
+	leases, err := shardedLeases(ctx, db, cfg)
+	if err != nil {
 		return err
 	}
-	defer func() {
-		release, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		for shard, l := range leases {
-			if err := l.Release(release); err != nil {
-				slog.Warn("saga lease release failed", "physical_shard", shard, "error", err)
-			}
-		}
-	}()
+	defer releaseShardedLeases(ctx, leases)
 	security, err := transport.SecurityOptions(getenv)
 	if err != nil {
 		return err
@@ -80,17 +66,8 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	}
 	workersDone := make(chan struct{}, len(activeShards))
 	for _, shard := range activeShards {
-		w := worker{db: db.InfrastructureDB(shard), store: saga.Store{DB: db, Fence: leases}, leases: leases[shard], metrics: metrics, cursors: map[int]string{}, health: health, healthID: shard, publish: func(ctx context.Context, key, value []byte) error {
-			return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
-		}}
-		go func() {
-			defer func() { workersDone <- struct{}{} }()
-			err := w.loop(work, cfg.ttl, nil)
-			if err == nil && work.Err() == nil {
-				err = errors.New("saga shard worker exited")
-			}
-			results <- err
-		}()
+		w := shardWorker(db, leases, shard, producer, metrics, health)
+		go runShardWorker(work, w, cfg.ttl, workersDone, results)
 	}
 	select {
 	case <-ctx.Done():
@@ -104,6 +81,43 @@ func runSharded(ctx context.Context, getenv func(string) string, cfg config) err
 	<-consumerDone
 	return fmtErrorShard(err)
 }
+func shardedLeases(ctx context.Context, db *common.ShardedDB, cfg config) (saga.PlacementLeases, error) {
+	leases := saga.PlacementLeases{}
+	err := db.ForEachPrimary(ctx, func(shard string, _ *pgxpool.Pool) error {
+		if err := db.WithInfrastructure(ctx, shard, "", func(context.Context, pgx.Tx) error { return nil }); err != nil {
+			return err
+		}
+		leases[shard] = &saga.Leases{DB: db.InfrastructureDB(shard), Holder: cfg.holder + "/" + shard, TTL: cfg.ttl, MaxShards: cfg.maxShards}
+		return nil
+	})
+	return leases, err
+}
+
+func releaseShardedLeases(ctx context.Context, leases saga.PlacementLeases) {
+	release, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	for shard, l := range leases {
+		if err := l.Release(release); err != nil {
+			slog.Warn("saga lease release failed", "physical_shard", shard, "error", err)
+		}
+	}
+}
+
+func shardWorker(db *common.ShardedDB, leases saga.PlacementLeases, shard string, producer *kgo.Client, metrics *saga.Metrics, health *workerHealth) worker {
+	return worker{db: db.InfrastructureDB(shard), store: saga.Store{DB: db, Fence: leases}, leases: leases[shard], metrics: metrics, cursors: map[int]string{}, health: health, healthID: shard, publish: func(ctx context.Context, key, value []byte) error {
+		return transport.Publish(ctx, producer, saga.CommandTopic, key, value, commandHeaders(value))
+	}}
+}
+
+func runShardWorker(ctx context.Context, w worker, ttl time.Duration, done chan<- struct{}, results chan<- error) {
+	defer func() { done <- struct{}{} }()
+	err := w.loop(ctx, ttl, nil)
+	if err == nil && ctx.Err() == nil {
+		err = errors.New("saga shard worker exited")
+	}
+	results <- err
+}
+
 func fmtErrorShard(err error) error {
 	if err == nil {
 		return nil

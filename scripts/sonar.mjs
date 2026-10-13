@@ -2,6 +2,7 @@ import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { ensureAnalysisToken } from "./sonar-token.mjs";
 import { assertMeasuredQualityGate } from "./sonar-gate.mjs";
 import { prepareSonarSnapshot } from "./sonar-snapshot.mjs";
+import { runNativeScanner, scannerProfile } from "./sonar-native.mjs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 const command = process.argv[2];
@@ -180,6 +181,7 @@ if (command === "init") {
   process.exit(0);
 }
 if (!process.env.SONAR_TOKEN) throw new Error("Run make sonar-init first");
+const profile = scannerProfile(process.env.SONAR_SCANNER_PROFILE);
 for (const f of [
   "apps/dashboard/coverage/lcov.info",
   "services/device-service/coverage/lcov.info",
@@ -195,10 +197,19 @@ const reports = [
 const source = prepareSonarSnapshot(process.cwd(), reports);
 let scanExit;
 try {
-  scanExit = compose(
-    ["run", "--rm", "--volume", `${source.directory}:/usr/src`, "scanner"],
-    false,
-  );
+  scanExit =
+    profile === "native"
+      ? await runNativeScanner(source.directory)
+      : compose(
+          [
+            "run",
+            "--rm",
+            "--volume",
+            `${source.directory}:/usr/src`,
+            "scanner",
+          ],
+          false,
+        );
 } finally {
   source.cleanup();
 }

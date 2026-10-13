@@ -6,8 +6,8 @@
 {{- if $data.enabled }}
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($data.rdsHost | default "")) }}{{ fail "data plane requires an RDS endpoint DNS name" }}{{ end }}
 {{- $images := $data.images | default dict }}
-{{- if ne (len $images) 4 }}{{ fail "data plane requires exactly four image digests" }}{{ end }}
-{{- range (list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration") }}
+{{- if ne (len $images) 5 }}{{ fail "data plane requires exactly five image digests" }}{{ end }}
+{{- range (list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration" "redis") }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $images . | default "")) }}{{ fail (printf "data plane image %s must be an immutable OCI digest" .) }}{{ end }}
 {{- end }}
 {{- $secrets := $data.secrets | default dict }}

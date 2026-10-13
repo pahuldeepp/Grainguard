@@ -195,7 +195,10 @@ jobs:
   quality:
     name: Required quality gate
     runs-on: [self-hosted, linux, ARM64, greenguard-ci]
-    timeout-minutes: 35
+    # The pinned amd64 scanner runs under emulation on this owned ARM64 runner.
+    # Observed run: tests/coverage took 21m, then scan was killed at the 35m cap.
+    # Allow bounded time for complete analysis; every quality threshold remains.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -249,6 +252,8 @@ jobs:
       - name: Start isolated SonarQube
         run: make sonar-up sonar-init
       - name: Analyze coverage and enforce SonarQube gate
+        env:
+          SONAR_SCANNER_PROFILE: ${{ runner.arch == 'ARM64' && 'native' || 'docker' }}
         run: make sonar-scan
       - name: Verify every coverage artifact exists
         run: |

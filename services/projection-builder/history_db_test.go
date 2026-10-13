@@ -242,6 +242,13 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 	if reads != 1 || sensors != 0 {
 		t.Fatalf("fixture counts reading=%d sensor=%d", reads, sensors)
 	}
+	assertHistoryManifestHash(t, ctx, maintainer, partition)
+	assertCertifiedHistoryPruning(t, ctx, db, maintainer, partition, oldDay, historyPartitionCounts{readings: reads, sensors: sensors})
+	assertStaleHistoryReceiptRetained(t, ctx, db, maintainer, oldDay, tenant, device)
+}
+
+func assertHistoryManifestHash(t *testing.T, ctx context.Context, maintainer *pgxpool.Pool, partition string) {
+	t.Helper()
 	// The verifier hashes UTC JSONB rows in manifest order. The SQL helper
 	// must produce the same bytes and ignore the caller's session timezone.
 	manifestTx, err := maintainer.Begin(ctx)
@@ -271,6 +278,16 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 	if err := manifestTx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// historyPartitionCounts keeps the coverage receipt's paired row counts together.
+type historyPartitionCounts struct {
+	readings, sensors int64
+}
+
+func assertCertifiedHistoryPruning(t *testing.T, ctx context.Context, db historyDatabase, maintainer *pgxpool.Pool, partition string, oldDay time.Time, counts historyPartitionCounts) {
+	t.Helper()
+	reads, sensors := counts.readings, counts.sensors
 	// Legacy-format hashes are syntactically valid but must fail closed and
 	// remain candidates for the updated verifier even when counts match.
 	if _, err := maintainer.Exec(ctx, "SELECT projection_history_record_cassandra_coverage($1,$2,$3,$4,$5::double precision)", partition, reads, sensors, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", history.DefaultWindow.Seconds()); err != nil {
@@ -321,7 +338,11 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", partition); n != 0 {
 		t.Fatal("maintenance did not prune a currently certified read-model partition")
 	}
+}
 
+func assertStaleHistoryReceiptRetained(t *testing.T, ctx context.Context, db historyDatabase, maintainer *pgxpool.Pool, oldDay time.Time, tenant, device string) {
+	t.Helper()
+	var reads, sensors int64
 	// A new delayed projection row invalidates the prior receipt by changing
 	// the partition count. Maintenance must retain it until verification reruns.
 	secondDay := oldDay.Add(-24 * time.Hour)
@@ -355,6 +376,20 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 	if n := scalar(t, maintainer, "SELECT count(*) FROM projection_history_cassandra_candidates($1::double precision) WHERE partition_name=$2", history.DefaultWindow.Seconds(), stalePartition); n != 1 {
 		t.Fatal("same-count mutation was not selected for reverification")
 	}
+	assertMaintenanceRelationFence(t, ctx, db, maintainer, stalePartition, tenant)
+
+	late = historyAt(t, tenant, device, 3, secondDay.Add(2*time.Hour))
+	if err := (&Store{DB: db.runtime, HistoryWindow: 3650 * 24 * time.Hour}).Apply(ctx, message(late), late); err != nil {
+		t.Fatal(err)
+	}
+	maintainHistory(t, db)
+	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", stalePartition); n != 1 {
+		t.Fatal("stale Cassandra coverage receipt allowed read-history pruning")
+	}
+}
+
+func assertMaintenanceRelationFence(t *testing.T, ctx context.Context, db historyDatabase, maintainer *pgxpool.Pool, stalePartition, tenant string) {
+	t.Helper()
 	// A maintenance transaction retains its relation locks until commit or
 	// rollback, including when it keeps a partition after a hash mismatch.
 	maintenanceTx, err := maintainer.Begin(ctx)
@@ -382,15 +417,8 @@ func TestDatabaseHistoryPruneRequiresCurrentCoverageReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	late = historyAt(t, tenant, device, 3, secondDay.Add(2*time.Hour))
-	if err := (&Store{DB: db.runtime, HistoryWindow: 3650 * 24 * time.Hour}).Apply(ctx, message(late), late); err != nil {
-		t.Fatal(err)
-	}
-	maintainHistory(t, db)
-	if n := scalar(t, db.admin, "SELECT count(*) FROM pg_class WHERE oid=to_regclass($1)", stalePartition); n != 1 {
-		t.Fatal("stale Cassandra coverage receipt allowed read-history pruning")
-	}
 }
+
 func assertHistoryPartitions(t *testing.T, db historyDatabase, now time.Time) {
 	t.Helper()
 	// Every partition including days ahead has forced RLS and its own policy.

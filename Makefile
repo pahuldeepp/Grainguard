@@ -42,17 +42,18 @@ verify: check-plan db-migrate
 	$(MAKE) control-plane-seed
 	$(MAKE) risk-test
 	node --test scripts/browser-e2e-stack.test.mjs
-	node --test scripts/sonar-token.test.mjs scripts/sonar-gate.test.mjs scripts/sonar-snapshot.test.mjs
+	node --test scripts/sonar-token.test.mjs scripts/sonar-gate.test.mjs scripts/sonar-snapshot.test.mjs scripts/sonar-native.test.mjs
 	npm run format:check
 	npm run lint
 	npm run typecheck
 	npm test
 	node --test scripts/contacts-schema.test.mjs
+	node --test scripts/generate-tenant-bootstrap-ledger-manifest.test.mjs
 	node --test scripts/telemetry-ingest-performance-contract.test.mjs
 	$(MAKE) telemetry-sinks-test
 	node --test scripts/placement-fixture.test.mjs
 	node --test scripts/stage12-compose-gate.test.mjs tests/chaos/stage13-harness.test.mjs
-	node --test scripts/ci-compose-project.test.mjs
+	node --test scripts/ci-compose-project.test.mjs scripts/rabbitmq-start.test.mjs scripts/stage07-process-health.test.mjs
 	cd packages/kafka-transport && test -z "$$(gofmt -l .)"
 	cd packages/kafka-transport && go vet ./...
 	cd packages/kafka-transport && go test -race ./...
@@ -349,7 +350,7 @@ RABBITMQ_COMPOSE_ABS = docker compose --env-file $(CURDIR)/.env -f $(CURDIR)/inf
 RABBITMQ_RESTART_CMD ?= $(RABBITMQ_COMPOSE_ABS) restart rabbitmq >/dev/null 2>&1 && $(RABBITMQ_COMPOSE_ABS) up -d --wait rabbitmq >/dev/null 2>&1
 .PHONY: rabbitmq-up rabbitmq-down rabbitmq-test dlq-replay redrive-dead
 rabbitmq-up:
-	$(RABBITMQ_COMPOSE) up -d --wait rabbitmq
+	node scripts/rabbitmq-start.mjs -- $(RABBITMQ_COMPOSE)
 rabbitmq-down:
 	$(RABBITMQ_COMPOSE) stop rabbitmq
 # Destructive: restarts the broker mid-flight and purges the notification queues.

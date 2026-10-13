@@ -42,6 +42,8 @@ class WorkloadGateTests(unittest.TestCase):
             "managed_dex_enabled": False,
             "membership_acceptance_enabled": False,
             "clickhouse_image_digest": "ghcr.io/pahuldeepp/grainguard/clickhouse@sha256:" + "f" * 64,
+            "cassandra_image_digest": "ghcr.io/pahuldeepp/grainguard/cassandra@sha256:" + "a" * 64,
+            "data_plane_image_digests": {name: f"ghcr.io/pahuldeepp/grainguard/{name}@sha256:" + "a" * 64 for name in ["pgbouncer", "kafka-topics", "kafka-connect", "connector-registration", "redis"]},
         }
         labels = {"app.kubernetes.io/instance": "bff"}
         self.snapshot = {"cell_name": self.cell["cluster_name"], "items": [
@@ -102,6 +104,8 @@ class WorkloadGateTests(unittest.TestCase):
             "managed_dex_enabled": True,
             "membership_acceptance_enabled": False,
             "clickhouse_image_digest": "ghcr.io/pahuldeepp/grainguard/clickhouse@sha256:" + "e" * 64,
+            "cassandra_image_digest": self.release["cassandra_image_digest"],
+            "data_plane_image_digests": self.release["data_plane_image_digests"],
         }
         gate.inputs(self.cell, release, contract)
         release["membership_acceptance_enabled"] = True
@@ -368,6 +372,36 @@ class WorkloadGateTests(unittest.TestCase):
         self.snapshot["items"][-1]["status"] = {"succeeded": 0, "failed": 1, "conditions": []}
         self.assertIn("authenticated-web-journey: acceptance Job has not completed successfully", " ".join(
             gate.readiness(self.snapshot, self.release, self.contract)))
+
+    def test_all_data_jobs_are_required_at_exact_revision_and_image(self):
+        production = json.loads((gate.BASE / "contract.json").read_text())
+        probes = [job for job in production["acceptanceJobs"] if job["name"] in {
+            "kafka-produce-consume", "redis-tenant-cache-roundtrip", "cassandra-tenant-partition-roundtrip", "opensearch-index-search", "clickhouse-roundtrip"}]
+        self.assertEqual(len(probes), 5)
+        for probe in probes:
+            contract = copy.deepcopy(self.contract)
+            contract["acceptanceJobs"].append(probe)
+            gate.inputs(self.cell, self.release, contract)
+            self.assertIn(f'{probe["name"]}: expected exactly one completed acceptance Job', gate.readiness(self.snapshot, self.release, contract))
+            owner = probe["images"][0]
+            image = (self.release["data_plane_image_digests"].get(owner) or
+                     self.release.get(owner + "_image_digest"))
+            job = {"kind": "Job", "metadata": {"name": probe["name"], "labels": {
+                **probe["selector"], "greenguard.io/acceptance-revision": self.release["gitops_revision"]}},
+                "spec": {"template": {"spec": {"containers": [{"name": "probe", "image": image}]}}},
+                "status": {"succeeded": 1, "failed": 0, "conditions": [{"type": "Complete", "status": "True"}]}}
+            snapshot = copy.deepcopy(self.snapshot)
+            snapshot["items"].append(job)
+            with self.subTest(probe=probe["name"]):
+                self.assertEqual(gate.readiness(snapshot, self.release, contract), [])
+                job["metadata"]["labels"]["greenguard.io/acceptance-revision"] = "0" * 40
+                self.assertIn(f'{probe["name"]}: acceptance Job revision differs from the exact release', gate.readiness(snapshot, self.release, contract))
+                job["metadata"]["labels"]["greenguard.io/acceptance-revision"] = self.release["gitops_revision"]
+                job["status"]["failed"] = 1
+                self.assertIn(f'{probe["name"]}: acceptance Job has not completed successfully', gate.readiness(snapshot, self.release, contract))
+                job["status"]["failed"] = 0
+                job["spec"]["template"]["spec"]["containers"].append({"name": "unowned", "image": "example.test/admin:latest"})
+                self.assertIn(f'{probe["name"]}: acceptance tools differ from immutable release inputs', gate.readiness(snapshot, self.release, contract))
 
     def test_acceptance_job_contract_is_extensible_but_postgres_gate_is_mandatory(self):
         contract = copy.deepcopy(self.contract)

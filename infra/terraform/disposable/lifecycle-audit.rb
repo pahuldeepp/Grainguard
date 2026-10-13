@@ -73,6 +73,7 @@ TAG_INVENTORY_TYPES = %w[
   aws_iam_role aws_internet_gateway aws_kms_key aws_lb aws_lb_target_group
   aws_nat_gateway aws_s3_bucket aws_secretsmanager_secret aws_security_group
   aws_subnet aws_vpc aws_vpc_endpoint aws_wafv2_web_acl aws_route_table
+  aws_sqs_queue aws_cloudwatch_event_rule aws_iam_instance_profile
 ].freeze
 
 DIRECT_INVENTORY_MARKERS = {
@@ -90,7 +91,10 @@ DIRECT_INVENTORY_MARKERS = {
   'aws_nat_gateway' => 'ec2 describe-nat-gateways',
   'aws_s3_bucket' => 's3api list-buckets',
   'aws_vpc' => 'ec2 describe-vpcs',
-  'aws_wafv2_web_acl' => 'wafv2 list-web-acls'
+  'aws_wafv2_web_acl' => 'wafv2 list-web-acls',
+  'aws_sqs_queue' => 'sqs list-queues',
+  'aws_cloudwatch_event_rule' => 'events list-rules',
+  'aws_iam_instance_profile' => 'iam list-instance-profiles'
 }.freeze
 
 SUPPORTING_RESOURCE_TYPES = %w[
@@ -103,6 +107,7 @@ SUPPORTING_RESOURCE_TYPES = %w[
   aws_s3_bucket_versioning
   aws_secretsmanager_secret_version aws_vpc_security_group_egress_rule
   aws_vpc_security_group_ingress_rule
+  aws_sqs_queue_policy aws_cloudwatch_event_target aws_ec2_tag
 ].freeze
 
 def aws_resource_inventory_gaps(sources = nil)
@@ -198,6 +203,15 @@ def findings(sources = nil)
   require_contract(findings, 'cognito_deletion', 'identity.tf', 'deletion_protection      = "INACTIVE"')
   require_contract(findings, 'edge_ownership', 'edge.tf', 'resource "aws_lb" "edge"', 'resource "aws_cloudfront_distribution" "web"', 'resource "aws_cloudfront_distribution" "api"', 'resource "aws_wafv2_web_acl" "edge"')
   require_contract(findings, 'kubernetes_cleanup', 'pre-destroy.sh', 'k delete applications.argoproj.io', 'k delete ingress', 'k delete pvc', 'tagged_load_balancers')
+  # Karpenter creates EC2 capacity outside Terraform state; both the cleanup
+  # and the final inventory must address it from the AWS API.
+  require_contract(findings, 'karpenter_cleanup', 'pre-destroy.sh', 'k delete nodepools.karpenter.sh --all', 'k delete nodeclaims.karpenter.sh --all',
+                   'aws ec2 terminate-instances', 'Karpenter instances still present after', 'aws ec2 delete-launch-template',
+                   'Name=tag-key,Values=karpenter.sh/nodepool')
+  require_contract(findings, 'karpenter_inventory', 'check-teardown.sh', 'aws ec2 describe-instances', 'Name=tag-key,Values=karpenter.sh/nodepool',
+                   'aws ec2 describe-launch-templates', 'Karpenter-launched EC2 instances not terminated', 'Karpenter launch templates')
+  require_contract(findings, 'karpenter_destroy_order', 'karpenter.tf', 'resource "helm_release" "karpenter_nodepools"', 'helm_release.karpenter,',
+                   'resource "aws_iam_instance_profile" "karpenter_node"')
   require_contract(findings, 'cdk_cleanup', 'pre-destroy.sh', 'aws cloudformation delete-stack', 'aws cloudformation wait stack-delete-complete')
   require_contract(findings, 'post_inventory', 'destroy-verified.sh', '"$here/check-teardown.sh"')
   require_contract(findings, 'pv_inventory', 'check-teardown.sh', 'GreenGuard EBS volume from saved PV', 'PV inventory unavailable; exact untagged EBS proof cannot pass')
@@ -234,6 +248,8 @@ def findings(sources = nil)
     'partial_destroy_owner_preflight' => ['pre-destroy.sh',
       ordered.call(pre, 'production', 'actual_account="$(aws sts get-caller-identity',
         '/check-teardown.sh" --preflight', 'aws iam simulate-principal-policy', 'k delete applications.argoproj.io') &&
+      ordered.call(pre, 'k get crd nodepools.karpenter.sh', 'aws iam simulate-principal-policy', 'k delete applications.argoproj.io',
+        'k delete pvc', 'k delete nodepools.karpenter.sh --all', 'aws ec2 terminate-instances', 'tagged_load_balancers()') &&
       pre.include?('if [ -n "$denied" ] && [ "$denied" != None ]; then') &&
       ordered.call(inventory, 'production', 'actual_account="$(aws sts get-caller-identity', 'aws ec2')],
     'verified_destroy_order' => ['destroy-verified.sh',

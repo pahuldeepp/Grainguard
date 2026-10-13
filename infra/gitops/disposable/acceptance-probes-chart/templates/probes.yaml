@@ -1,4 +1,7 @@
-{{- if or .Values.clickhouseEnabled .Values.membershipEnabled }}
+{{- range $key := list "dataPlaneEnabled" "clickhouseEnabled" "membershipEnabled" }}
+{{- if not (kindIs "bool" (index $.Values $key)) }}{{ fail (printf "%s must be boolean" $key) }}{{ end }}
+{{- end }}
+{{- if or .Values.dataPlaneEnabled .Values.clickhouseEnabled .Values.membershipEnabled }}
 {{- if ne .Release.Namespace .Values.namespace }}{{ fail "acceptance probes must render in the configured GreenGuard namespace" }}{{ end }}
 {{- if ne .Values.namespace "greenguard" }}{{ fail "disposable acceptance probes are restricted to greenguard namespace" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9-]{2,62}$" (.Values.cell | default "")) }}{{ fail "acceptance probes require a valid disposable cell name" }}{{ end }}
@@ -14,7 +17,7 @@
 {{- if ne .Values.identitySecret "greenguard-dex-config" }}{{ fail "membership probe requires the managed Dex identity Secret" }}{{ end }}
 {{- if ne .Values.accessTokenSecret "greenguard-acceptance-oidc-token" }}{{ fail "membership probe requires the operator-provisioned access-token Secret" }}{{ end }}
 {{- end }}
-{{- $run := sha256sum (toJson .Values) | trunc 12 -}}
+{{- $run := sha256sum (printf "%s:%s" (toJson .Values) (.Files.Glob "files/*").AsConfig) | trunc 12 -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -30,8 +33,18 @@ metadata:
 data:
   tenant-membership-readback.mjs: |
 {{ .Files.Get "files/tenant-membership-readback.mjs" | indent 4 }}
-  clickhouse-roundtrip.sql: |
-{{ .Files.Get "files/clickhouse-roundtrip.sql" | indent 4 }}
+  clickhouse-roundtrip.sh: |
+{{ .Files.Get "files/clickhouse-roundtrip.sh" | indent 4 }}
+  kafka-roundtrip.sh: |
+{{ .Files.Get "files/kafka-roundtrip.sh" | indent 4 }}
+  redis-roundtrip.sh: |
+{{ .Files.Get "files/redis-roundtrip.sh" | indent 4 }}
+  cassandra-roundtrip.sh: |
+{{ .Files.Get "files/cassandra-roundtrip.sh" | indent 4 }}
+  cassandra-roundtrip.py: |
+{{ .Files.Get "files/cassandra-roundtrip.py" | indent 4 }}
+  opensearch-roundtrip.py: |
+{{ .Files.Get "files/opensearch-roundtrip.py" | indent 4 }}
 {{- if .Values.clickhouseEnabled }}
 ---
 apiVersion: batch/v1
@@ -66,19 +79,14 @@ spec:
         runAsNonRoot: true
         runAsUser: 101
         runAsGroup: 101
+        fsGroup: 101
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: clickhouse-roundtrip
           image: {{ .Values.clickhouseImage | quote }}
           imagePullPolicy: IfNotPresent
-          command: [/bin/bash, -ec]
-          args:
-            - >-
-              clickhouse-client --host greenguard-clickhouse.greenguard.svc.cluster.local
-              --port 8123 --protocol http --user "$CLICKHOUSE_USER"
-              --password "$CLICKHOUSE_PASSWORD" --session_id "gg-acceptance-${HOSTNAME}"
-              --multiquery --format=Null
-              --queries-file /probe/clickhouse-roundtrip.sql
+          command: [/bin/bash]
+          args: ["/probe/clickhouse-roundtrip.sh"]
           env:
             - name: CLICKHOUSE_USER
               valueFrom:
@@ -88,6 +96,7 @@ spec:
                 secretKeyRef: {name: {{ .Values.clickhouseSecret | quote }}, key: CLICKHOUSE_PASSWORD}
           volumeMounts:
             - {name: probe, mountPath: /probe, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 25m, memory: 64Mi}
             limits: {cpu: 250m, memory: 256Mi}
@@ -96,6 +105,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
       volumes:
+        - {name: tmp, emptyDir: {}}
         - name: probe
           configMap: {name: greenguard-acceptance-{{ $run }}, defaultMode: 0444}
 {{- end }}
@@ -152,6 +162,7 @@ spec:
                 secretKeyRef: {name: {{ .Values.accessTokenSecret | quote }}, key: access-token}
           volumeMounts:
             - {name: probe, mountPath: /probe, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 25m, memory: 64Mi}
             limits: {cpu: 250m, memory: 256Mi}
@@ -160,6 +171,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
       volumes:
+        - {name: tmp, emptyDir: {}}
         - name: probe
           configMap: {name: greenguard-acceptance-{{ $run }}, defaultMode: 0444}
 {{- end }}
@@ -178,29 +190,39 @@ spec:
   egress:
     - to:
         - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: istio-system}
+          podSelector:
+            matchLabels: {app: istiod}
+      ports: [{protocol: TCP, port: 15012}]
+    - to:
+        - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: kube-system}
           podSelector:
             matchLabels: {k8s-app: kube-dns}
       ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
-{{- if .Values.clickhouseEnabled }}
+{{- range $probe := list (dict "enabled" .Values.clickhouseEnabled "id" "clickhouse-roundtrip" "target" (dict "app.kubernetes.io/name" "greenguard-clickhouse") "port" 9000) (dict "enabled" .Values.membershipEnabled "id" "tenant-membership-readback" "target" (dict "app.kubernetes.io/instance" "tenant-control-plane") "port" 3010) }}
+{{- if $probe.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: acceptance-{{ $probe.id }}-egress}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: greenguard-live-acceptance-probes
+      greenguard.io/acceptance-probe: {{ $probe.id }}
+  policyTypes: [Egress]
+  egress:
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: greenguard}
           podSelector:
-            matchLabels: {app.kubernetes.io/name: greenguard-clickhouse}
-      ports:
-        - {protocol: TCP, port: 8123}
+            matchLabels:
+{{ toYaml $probe.target | indent 14 }}
+      ports: [{protocol: TCP, port: {{ $probe.port }}}]
 {{- end }}
-{{- if .Values.membershipEnabled }}
-    - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: greenguard}
-          podSelector:
-            matchLabels: {app.kubernetes.io/instance: tenant-control-plane}
-      ports:
-        - {protocol: TCP, port: 3010}
 {{- end }}
 {{- if .Values.clickhouseEnabled }}
 ---
@@ -222,7 +244,7 @@ spec:
               app.kubernetes.io/name: greenguard-live-acceptance-probes
               greenguard.io/acceptance-probe: clickhouse-roundtrip
       ports:
-        - {protocol: TCP, port: 8123}
+        - {protocol: TCP, port: 9000}
 {{- end }}
 {{- if .Values.membershipEnabled }}
 ---

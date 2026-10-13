@@ -55,7 +55,7 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
   synthetic = "ghcr.io/pahuldeepp/grainguard/ml-scoring-synthetic@#{digest}"
   platform = platform_names.to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
   observability_names = %w[otel-collector prometheus grafana tempo loki]
-  data_plane_names = %w[pgbouncer kafka-topics kafka-connect connector-registration]
+  data_plane_names = %w[pgbouncer kafka-topics kafka-connect connector-registration redis]
   available_ai = ai_present_names.to_h { |name| [name, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
   ai_sources = ai_repository_by_key.to_h { |key, name| [key, "ghcr.io/pahuldeepp/grainguard/#{name}@#{digest}"] }
   ai_images = {**ai_sources, 'clamav' => platform.fetch('clamav')}
@@ -84,7 +84,9 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
     'ai_runtime_missing_sources' => [],
     'acceptance_probes' => {
       'status' => 'ready', 'chart' => 'infra/gitops/disposable/acceptance-probes-chart',
-      'images' => {'clickhouse' => platform.fetch('clickhouse'),
+      'images' => {'kafka' => platform.fetch('kafka-topics'), 'redis' => platform.fetch('redis'),
+                   'cassandra' => platform.fetch('cassandra'), 'opensearch_probe' => platform.fetch('cassandra'),
+                   'clickhouse' => platform.fetch('clickhouse'),
                    'tenant_membership_readback' => deployment.fetch('tenant-control-plane')}
     }
   }))
@@ -176,7 +178,9 @@ Dir.mktmpdir('greenguard-ecr-promotion-') do |directory|
     'release_status' => 'ready', 'blocking_reasons' => [], 'upstream_signature_gaps' => [],
     'acceptance_probes' => {
       'status' => 'ready', 'chart' => 'infra/gitops/disposable/acceptance-probes-chart',
-      'images' => {'clickhouse' => platform.fetch('clickhouse'),
+      'images' => {'kafka' => platform.fetch('kafka-topics'), 'redis' => platform.fetch('redis'),
+                   'cassandra' => platform.fetch('cassandra'), 'opensearch_probe' => platform.fetch('cassandra'),
+                   'clickhouse' => platform.fetch('clickhouse'),
                    'tenant_membership_readback' => deployment.fetch('tenant-control-plane')}
     }
   }))

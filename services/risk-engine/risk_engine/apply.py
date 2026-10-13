@@ -232,8 +232,7 @@ class Applier:
             return Result(SKIPPED, choice.reason)
         return self._score(tx, reading, choice)
 
-    def _score(self, tx: Tx, reading: Telemetry, choice: Selected) -> Result:
-        interval = choice.interval
+    def _select_scoring_policy(self, tx: Tx, reading: Telemetry, interval):
         selected = tx.select_policy(interval.bin_id, interval.grain_type, reading.observed_at) \
             if hasattr(tx, "select_policy") else None
         if hasattr(tx, "select_policy"):
@@ -243,6 +242,11 @@ class Applier:
                 raise _Rollback(Result(QUARANTINE, "policy_unavailable")) from None
         else:
             policy = self.policies.get(interval.grain_type)
+        return selected, policy
+
+    def _score(self, tx: Tx, reading: Telemetry, choice: Selected) -> Result:
+        interval = choice.interval
+        selected, policy = self._select_scoring_policy(tx, reading, interval)
         if policy is None:
             raise _Rollback(Result(QUARANTINE, "policy_unavailable"))
         try:
@@ -256,12 +260,7 @@ class Applier:
             provenance = {**dict(selected.provenance), "status": selected.status,
                           "effective_from": events.format_time(selected.effective_from),
                           "effective_to": events.format_time(selected.effective_to) if selected.effective_to else None}
-        if selected is not None:
-            existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version, policy.policy_id)
-            if existing is None and hasattr(tx, "legacy_assessment"):
-                existing = tx.legacy_assessment(envelope.event_id, interval.lot_id, policy.version)
-        else:
-            existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version)
+        existing = _existing_assessment(tx, reading, interval, policy, selected)
         if existing is not None:
             return Result(DUPLICATE, event_id=str(existing[EVENT_ID]),
                           assessment_id=str(existing[ASSESSMENT_ID]))
@@ -287,6 +286,17 @@ class Applier:
                                      schema_version=2 if selected is not None or reading.schema_version == 2
                                      or not policy.calibrated else 1))
         return Result(APPLIED, event_id=event_id, assessment_id=assessment_id)
+
+
+def _existing_assessment(tx, reading, interval, policy, selected):
+    envelope = reading.envelope
+    if selected is not None:
+        existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version, policy.policy_id)
+        if existing is None and hasattr(tx, "legacy_assessment"):
+            existing = tx.legacy_assessment(envelope.event_id, interval.lot_id, policy.version)
+    else:
+        existing = tx.assessment(envelope.event_id, interval.lot_id, policy.version)
+    return existing
 
 
 def build_event(tenant_id: str, values: Mapping[str, Any], occurred_at: datetime,

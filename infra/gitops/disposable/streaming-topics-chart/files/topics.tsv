@@ -34,6 +34,8 @@ greenguard.knowledge.document.index.requested.v1|6|delete|259200000
 greenguard.knowledge.assistant.suggestion.used.v1|6|delete|604800000
 greenguard.knowledge.assistant.suggestion.used.v1.quarantine|1|delete|1209600000
 greenguard.ai-usage-settled.v1|6|delete|604800000
+greenguard.acceptance.probe.v1|1|delete|600000
+greenguard.acceptance.denied.v1|1|delete|600000
 greenguard.connect.configs|1|compact|-
 greenguard.connect.offsets|1|compact|-
 greenguard.connect.status|1|compact|-

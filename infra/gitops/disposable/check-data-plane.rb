@@ -2,6 +2,7 @@
 require 'yaml'
 require 'open3'
 require 'set'
+require 'json'
 
 root = __dir__
 terraform = File.read(File.join(root, '../../terraform/disposable/gitops.tf'))
@@ -13,7 +14,7 @@ abort 'Terraform lost data-plane image inputs or RDS host wiring' unless
   terraform.include?('local.required_data_plane_secrets')
 render = lambda do |chart, values|
   path = File.join(root, chart)
-  flags = values.flat_map { |key, value| ['--set-string', "#{key}=#{value}"] }
+  flags = values.flat_map { |key, value| [([true, false].include?(value) ? '--set' : '--set-string'), "#{key}=#{value}"] }
   output, error, status = Open3.capture3('helm', 'template', chart, path, '--namespace', 'greenguard', *flags)
   abort "#{chart} render failed: #{error}" unless status.success?
   YAML.load_stream(output).compact
@@ -50,7 +51,7 @@ topic_source, topic_error, topic_status = Open3.capture3('ruby', File.join(root,
 abort "topic generator failed: #{topic_error}" unless topic_status.success?
 topic_copy = File.read(File.join(root, 'streaming-topics-chart/files/topics.tsv'))
 abort 'Kafka topic inventory drifted from local lifecycle source' unless topic_copy == topic_source
-abort 'expected 43 Kafka topics' unless topic_copy.lines.length == 43
+abort 'expected 45 Kafka topics' unless topic_copy.lines.length == 45
 topics = render.call('streaming-topics-chart', {})
 topic_job = topics.find { |item| item['kind'] == 'Job' && item.dig('metadata', 'name')&.start_with?('greenguard-topics-') }
 abort 'Kafka topic Job must be bounded/non-root' unless topic_job.dig('spec', 'activeDeadlineSeconds').to_i.positive? && topic_job.dig('spec', 'template', 'spec', 'securityContext', 'runAsNonRoot') == true
@@ -78,7 +79,7 @@ abort 'Kafka ACL Job must be bounded, non-root and use the admin Secret/CA' unle
   acl_pod.fetch('volumes').any? { |item| item.dig('secret', 'secretName') == 'greenguard-kafka-ca' } &&
   acl_container.fetch('args').first.include?('--command-config /tmp/kafka-client.properties')
 known_topics = topic_copy.lines.map { |line| line.split('|', 2).first }.to_set
-known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane telemetry-sinks telemetry-replay knowledge-service model-gateway-usage]
+known_principals = %w[registry connect cdc-transformer projection-builder cache-invalidator risk-engine hardware-service-worker eventbridge-bridge saga-api saga-worker billing-service notification-service cassandra-writer search-indexer read-api workflow-alerts device-service telemetry-ingest jobs-worker tenant-control-plane telemetry-sinks telemetry-replay knowledge-service model-gateway-usage acceptance-probe]
 acl_principals = []
 acl_copy.lines.each do |line|
   next if line.start_with?('#') || line.strip.empty?
@@ -91,6 +92,21 @@ acl_copy.lines.each do |line|
   acl_principals << principal
 end
 abort 'Kafka ACL inventory omits an active principal' unless (known_principals - acl_principals).empty?
+# The live acceptance principal may touch only its own short-retention topic
+# and group. The second acceptance topic must stay without any ACL so the
+# probe can prove deny-by-default with a write that cannot reach domain data.
+acceptance_rows = acl_copy.lines.map(&:strip).select { |line| line.start_with?('acceptance-probe|') }
+abort 'Kafka acceptance principal must be limited to its dedicated topic and group' unless acceptance_rows == [
+  'acceptance-probe|topic|literal|greenguard.acceptance.probe.v1|Read,Write,Describe',
+  'acceptance-probe|group|literal|greenguard-acceptance-probe|Read'
+]
+abort 'Kafka acceptance topics must be single-partition with ten-minute retention' unless
+  topic_copy.lines.map(&:strip).select { |line| line.start_with?('greenguard.acceptance.') } == [
+    'greenguard.acceptance.probe.v1|1|delete|600000', 'greenguard.acceptance.denied.v1|1|delete|600000'
+  ]
+abort 'Kafka deny-by-default proof topic must not be granted to any principal' if acl_copy.include?('greenguard.acceptance.denied.v1')
+abort 'Kafka acceptance topic must not be granted to a runtime principal' unless
+  acl_copy.lines.select { |line| line.include?('greenguard.acceptance.') }.all? { |line| line.start_with?('acceptance-probe|') }
 
 connect = render.call('kafka-connect-chart', { 'image' => digest })
 connect_service = connect.find { |item| item['kind'] == 'Service' }
@@ -107,9 +123,43 @@ abort 'Connect broker TLS/SASL contract missing' unless connect_env.dig('CONNECT
 abort 'Connect topic auto-create must stay disabled' unless connect_container.fetch('env').any? { |item| item['name'] == 'CONNECT_TOPIC_CREATION_ENABLE' && item['value'] == 'false' }
 abort 'Connect probes/resources missing' unless %w[startupProbe readinessProbe livenessProbe resources].all? { |key| connect_container.key?(key) }
 
+# Probe renders and inventory binding are offline shape evidence only.
+probe_values = {
+  'dataPlaneEnabled' => true, 'clickhouseEnabled' => true,
+  'cell' => 'greenguard-test', 'revision' => 'b' * 40,
+  'kafkaImage' => digest, 'redisImage' => digest, 'cassandraImage' => digest,
+  'clickhouseImage' => digest
+}
+probe_docs = render.call('acceptance-probes-chart', probe_values)
+probe_jobs = probe_docs.select { |item| item['kind'] == 'Job' }
+expected_probe_ids = %w[kafka-produce-consume redis-tenant-cache-roundtrip cassandra-tenant-partition-roundtrip opensearch-index-search clickhouse-roundtrip]
+abort 'data acceptance Job inventory incomplete' unless probe_jobs.map { |job| job.dig('metadata', 'labels', 'greenguard.io/acceptance-probe') }.sort == expected_probe_ids.sort
+probe_jobs.each do |job|
+  pod = job.dig('spec', 'template', 'spec')
+  abort 'acceptance Job lost exact revision/non-root/deadline/credential boundary' unless
+    job.dig('metadata', 'labels', 'greenguard.io/acceptance-revision') == 'b' * 40 &&
+    job.dig('spec', 'activeDeadlineSeconds').to_i.positive? &&
+    pod['automountServiceAccountToken'] == false && pod.dig('securityContext', 'runAsNonRoot') == true &&
+    pod.fetch('containers').all? { |container| container['image'] == digest && container.dig('securityContext', 'readOnlyRootFilesystem') == true } &&
+    !pod.to_yaml.include?('admin-password') && !pod.to_yaml.include?('server.p12')
+end
+probe_scripts = probe_docs.find { |item| item['kind'] == 'ConfigMap' }.fetch('data')
+%w[kafka-roundtrip.sh redis-roundtrip.sh cassandra-roundtrip.py opensearch-roundtrip.py clickhouse-roundtrip.sh].each do |name|
+  abort "acceptance script #{name} missing or empty" unless probe_scripts.fetch(name, '').include?('PASS')
+end
+platform_inventory = JSON.parse(File.read(File.join(root, 'platform-image-inventory.json')))
+platform_sources = platform_inventory.fetch('images').to_h { |item| [item.fetch('name'), item['source']] }
+%w[kafka redis].each do |name|
+  server_file = File.join(root, '../../kubernetes/disposable-data', name == 'redis' ? 'redis-cluster.yaml' : 'kafka.yaml')
+  server_docs = YAML.load_stream(File.read(server_file)).compact
+  server = server_docs.find { |item| item['kind'] == 'StatefulSet' }
+  role = name == 'kafka' ? 'kafka-topics' : name
+  abort "#{name} probe upstream image drifted from the owned server pin" unless
+    platform_sources.fetch(role) == server.dig('spec', 'template', 'spec', 'containers', 0, 'image')
+end
 argo_output, argo_error, argo_status = Open3.capture3('ruby', File.join(root, 'test-data-plane-applications.rb'))
 abort "data plane Argo check failed: #{argo_error}" unless argo_status.success?
-puts 'Disposable PgBouncer, Kafka topic inventory, Connect charts, and Argo child ordering pass offline shape checks.'
+puts 'Disposable PgBouncer, Kafka topic/ACL inventory, Connect, all five data roundtrip Jobs and Argo child ordering pass offline shape checks.'
 if ARGV.include?('--ready')
   abort 'Data plane not ready: images and Secret values are undelivered; connector/schema registration, NetworkPolicy/mesh and live Kafka ACL/TLS/RDS proof are unverified.'
 end

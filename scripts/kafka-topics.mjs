@@ -42,6 +42,10 @@ const domainTopics = [
   ["greenguard.knowledge.assistant.suggestion.used.v1", 6, "delete", "604800000"],
   ["greenguard.knowledge.assistant.suggestion.used.v1.quarantine", 1, "delete", "1209600000"],
   ["greenguard.ai-usage-settled.v1", 6, "delete", "604800000"],
+  // Live acceptance probe only; never carries tenant data. Ten-minute retention is its cleanup.
+  ["greenguard.acceptance.probe.v1", 1, "delete", "600000"],
+  // Deliberately has no ACL for any principal: the acceptance probe must be denied here.
+  ["greenguard.acceptance.denied.v1", 1, "delete", "600000"],
 ];
 // Infrastructure storage is separate from the domain topics.
 // prettier-ignore

@@ -35,6 +35,15 @@ def _time(value: object, name: str, nullable: bool = False) -> datetime | None:
     return parsed
 
 
+def _validate_policy_objects(body) -> None:
+    for key in ("measurement_thresholds", "risk_thresholds", "provenance"):
+        if not isinstance(body[key], dict):
+            raise TypeError(f"{key} must be an object")
+    for key in ("calibration_evidence", "approved_by"):
+        if body[key] is not None and not isinstance(body[key], str):
+            raise ValueError(f"{key} must be a string or null")
+
+
 def _parse_policy(body: object, tenant_id: str) -> PolicyVersion:
     if not isinstance(body, dict) or set(body) != _FIELDS:
         raise ValueError("policy fields do not match the owner contract")
@@ -50,12 +59,7 @@ def _parse_policy(body: object, tenant_id: str) -> PolicyVersion:
         raise TypeError("grain_type and status must be strings")
     if not isinstance(body["calibrated"], bool):
         raise TypeError("calibrated must be boolean")
-    for key in ("measurement_thresholds", "risk_thresholds", "provenance"):
-        if not isinstance(body[key], dict):
-            raise TypeError(f"{key} must be an object")
-    for key in ("calibration_evidence", "approved_by"):
-        if body[key] is not None and not isinstance(body[key], str):
-            raise ValueError(f"{key} must be a string or null")
+    _validate_policy_objects(body)
     return PolicyVersion(
         tenant_id, body["policy_id"], version, body["grain_type"], bin_id,
         _time(body["effective_from"], "effective_from"),
@@ -86,42 +90,50 @@ class PolicyAPI:
             self._send(handler, 403, {"error": "admin_role_required"})
             return True
         try:
-            if handler.command == "POST" and not parsed.query:
-                length = int(handler.headers.get("Content-Length", "0"))
-                if not 1 <= length <= 65536:
-                    self._send(handler, 413, {"error": "request_too_large"})
-                    return True
-                body = json.loads(handler.rfile.read(length))
-                event = self.service.publish(principal, _parse_policy(body, principal.tenant_id))
-                self._send(handler, 201, event)
-                return True
-            if handler.command == "GET" and parsed.query:
-                query = parse_qs(parsed.query, strict_parsing=True)
-                if set(query) != {"grain_type", "bin_id", "at"} or any(len(v) != 1 for v in query.values()):
-                    raise ValueError("query requires grain_type, bin_id and at")
-                grain, bin_id = query["grain_type"][0], query["bin_id"][0]
-                if bin_id == "*":
-                    # The zero UUID is only a lookup sentinel for a grain-wide policy.
-                    bin_id = "00000000-0000-0000-0000-000000000000"
-                elif not _UUID.fullmatch(bin_id):
-                    raise ValueError("bin_id must be a UUID or *")
-                policy = self.service.effective(principal, bin_id, grain, _time(query["at"][0], "at"))
-                self._send(handler, 404 if policy is None else 200,
-                           {"status": "not_configured"} if policy is None else
-                           {"status": "configured", "policy": policy.as_dict()})
-                return True
-            self._send(handler, 405, {"error": "method_not_allowed"})
+            self._dispatch(handler, parsed, principal)
         except PermissionError as error:
             self._send(handler, 403, {"error": str(error)})
         except TimeoutError:
             self._send(handler, 408, {"error": "request_timeout"})
-        except (ValueError, TypeError, json.JSONDecodeError) as error:
+        except (ValueError, TypeError) as error:
             self._send(handler, 400, {"error": str(error)})
         except StoreError as error:
             status = 409 if error.sqlstate and error.sqlstate.startswith("23") else 503
             self._send(handler, status, {"error": "policy_version_conflict" if status == 409 else
                                          "policy_store_unavailable"})
         return True
+
+    def _dispatch(self, handler, parsed, principal) -> None:
+        if handler.command == "POST" and not parsed.query:
+            self._publish(handler, principal)
+        elif handler.command == "GET" and parsed.query:
+            self._effective(handler, parsed, principal)
+        else:
+            self._send(handler, 405, {"error": "method_not_allowed"})
+
+    def _publish(self, handler, principal) -> None:
+        length = int(handler.headers.get("Content-Length", "0"))
+        if not 1 <= length <= 65536:
+            self._send(handler, 413, {"error": "request_too_large"})
+            return
+        body = json.loads(handler.rfile.read(length))
+        event = self.service.publish(principal, _parse_policy(body, principal.tenant_id))
+        self._send(handler, 201, event)
+
+    def _effective(self, handler, parsed, principal) -> None:
+        query = parse_qs(parsed.query, strict_parsing=True)
+        if set(query) != {"grain_type", "bin_id", "at"} or any(len(v) != 1 for v in query.values()):
+            raise ValueError("query requires grain_type, bin_id and at")
+        grain, bin_id = query["grain_type"][0], query["bin_id"][0]
+        if bin_id == "*":
+            # The zero UUID is only a lookup sentinel for a grain-wide policy.
+            bin_id = "00000000-0000-0000-0000-000000000000"
+        elif not _UUID.fullmatch(bin_id):
+            raise ValueError("bin_id must be a UUID or *")
+        policy = self.service.effective(principal, bin_id, grain, _time(query["at"][0], "at"))
+        self._send(handler, 404 if policy is None else 200,
+                   {"status": "not_configured"} if policy is None else
+                   {"status": "configured", "policy": policy.as_dict()})
 
     @staticmethod
     def _send(handler: Any, status: int, value: dict[str, Any]) -> None:

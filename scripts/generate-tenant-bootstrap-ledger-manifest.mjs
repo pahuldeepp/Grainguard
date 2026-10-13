@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 const OWNERS = {
@@ -122,9 +129,18 @@ for (const [owner, spec] of Object.entries(OWNERS))
   owners[owner] = await collect(owner, spec);
 const manifest = { schemaVersion: 1, owners };
 await mkdir(dirname(output), { recursive: true });
-await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`, {
-  mode: 0o444,
-});
+const temporary = `${output}.${randomUUID()}.tmp`;
+try {
+  await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+    mode: 0o444,
+    flag: "wx",
+  });
+  // Rebuilds replace the complete public manifest without making its previous
+  // read-only copy writable or leaving a partially written ledger behind.
+  await rename(temporary, output);
+} finally {
+  await rm(temporary, { force: true });
+}
 console.log(
   `generated tenant-bootstrap ledger manifest for ${Object.keys(owners).length} owner services`,
 );

@@ -21,6 +21,29 @@ const ML_SECTIONS = [
 ] as const;
 type MlSection = (typeof ML_SECTIONS)[number][0];
 
+function mlSectionFor(pathname: string): MlSection {
+  switch (pathname) {
+    case "/ml/drift":
+      return "drift";
+    case "/ml/performance":
+      return "performance";
+    case "/ml/models":
+      return "models";
+    case "/ml/retraining":
+      return "retraining";
+    default:
+      return "overview";
+  }
+}
+
+const mlPageTitles: Record<MlSection, string> = {
+  overview: "ML operations",
+  drift: "Feature drift",
+  performance: "Model performance",
+  models: "Model registry",
+  retraining: "Retraining",
+};
+
 function MlSectionNavigation({ section }: { section: MlSection }) {
   return (
     <nav aria-label="ML operations" className="ml-section-nav">
@@ -211,26 +234,8 @@ export function MlOperationsView({
   sessionId?: string;
 }) {
   const pathname = useLocation().pathname;
-  const section: MlSection =
-    pathname === "/ml/drift"
-      ? "drift"
-      : pathname === "/ml/performance"
-        ? "performance"
-        : pathname === "/ml/models"
-          ? "models"
-          : pathname === "/ml/retraining"
-            ? "retraining"
-            : "overview";
-  const pageTitle =
-    section === "overview"
-      ? "ML operations"
-      : section === "drift"
-        ? "Feature drift"
-        : section === "performance"
-          ? "Model performance"
-          : section === "models"
-            ? "Model registry"
-            : "Retraining";
+  const section: MlSection = mlSectionFor(pathname);
+  const pageTitle = mlPageTitles[section];
   const query = useQuery({
     queryKey: ["ml-operations", sessionId],
     queryFn: () => api!.snapshot(),

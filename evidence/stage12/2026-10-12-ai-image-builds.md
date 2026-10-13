@@ -17,10 +17,28 @@ Build cache was reused. This is not a clean, network-independent build proof.
 | model-gateway | `services/model-gateway/Dockerfile` | `sha256:1df0903912b11f2ae6e0c896f96020408057326dd56f3b983b180595382d8f08` |
 | model-gateway-usage | `services/model-gateway/Dockerfile.usage` | `sha256:97ac90f1dcede92c4b5901494b409f650d131836af969d8a47f09d0557c0e20c` |
 
-The IDs above are local image configuration hashes, **not** ECR repository
-manifest digests. They must not be inserted into Terraform release inputs.
+The IDs above are exactly the local Docker `image inspect .Id` values; they
+are **not verified ECR repository digests**. They must not be inserted into Terraform release inputs.
 These images have not been pushed, signed, vulnerability-scanned or deployed
 by this check. Runtime/provider connectivity, Kubernetes admission, health,
 OIDC, tenant isolation and live assistant workflows remain acceptance gates.
-The synthetic ML scorer is separate from these seven images and is not covered
-by this evidence. Raw build logs remain privately on the operator workstation.
+## Synthetic ML scorer
+
+Built `services/ml-scoring/deploy/Dockerfile` for linux/amd64 from `3a7409b`.
+Build returned exit code 0 and image inspection reports amd64, user
+`10001:10001`, local ID
+`sha256:a480f9c3004b91d7e329f0efabfac5ccf4fbe2f7e7587f9c15f7fa356a8ded55`.
+The image was run with no network, read-only filesystem, a 64 MiB temporary
+filesystem, one CPU and 2 GiB memory. Its real `ModelRegistry.load` verified
+manifest/artifact integrity and the packaged golden vector for
+`i4-transformer-bcf286ab98d45f8c`, returning golden probability
+`0.00010325924813514575`. The manifest remains `synthetic_only=true` and
+`production_eligible=false`. This verifies loading and reproducible fixture
+inference inside the built container, not predictive validity or the live
+Kafka/database/alert workflow.
+
+The knowledge-parser image also imported `pypdfium2`, `pdf_parser` and
+`pdf_ocr` successfully with no network. These are dependency loading checks,
+not a sandbox escape/security acceptance test.
+
+Raw build and check logs remain privately on the operator workstation.

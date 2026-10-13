@@ -223,33 +223,8 @@ fi
 # Retain all managed shard master secret ARNs before destroy erases outputs.
 # Successful applies expose the registry; partial applies are recovered from
 # the already-read state, with account/region validation before any deletion.
-printf '%s\n%s' "$outputs_json" "${partial_state_json:-}" | python3 -c '
-import json, re, sys
-stream = sys.stdin.read()
-outputs, offset = json.JSONDecoder().raw_decode(stream)
-partial = json.loads(stream[offset:].strip() or "{}")
-region, account = sys.argv[1:]
-arns = []
-if "postgres_shards" in outputs:
-    registry = outputs["postgres_shards"].get("value")
-    if not isinstance(registry, dict) or set(registry) != {"s1", "s2", "s3", "s4"}:
-        raise SystemExit("destroy-verified: invalid shard registry output")
-    for shard_id, shard in registry.items():
-        if not isinstance(shard, dict):
-            raise SystemExit("destroy-verified: invalid shard registry entry")
-        arns.append(shard.get("master_secret_arn"))
-resources = partial.get("values", {}).get("root_module", {}).get("resources", [])
-for resource in resources:
-    if resource.get("mode") == "managed" and resource.get("type") == "aws_db_instance" and resource.get("name") == "shard":
-        secrets = resource.get("values", {}).get("master_user_secret")
-        if not isinstance(secrets, list) or len(secrets) != 1:
-            raise SystemExit("destroy-verified: shard master secret unavailable in partial state")
-        arns.append(secrets[0].get("secret_arn"))
-for arn in arns:
-    if not isinstance(arn, str) or not re.fullmatch(r"arn:aws[a-z-]*:secretsmanager:" + re.escape(region) + ":" + account + ":secret:.+", arn):
-        raise SystemExit("destroy-verified: shard master secret ARN does not match saved account/region")
-print("\n".join(dict.fromkeys(arns)))
-' "$region" "$account" >"$shard_secrets_file" || exit 1
+printf '%s\n%s' "$outputs_json" "${partial_state_json:-}" | \
+  python3 "$here/capture-shard-secrets.py" "$region" "$account" >"$shard_secrets_file" || exit 1
 fi
 
 # Save the scope before pre-cleanup mutates anything. A failed destroy or

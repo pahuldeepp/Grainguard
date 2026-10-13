@@ -78,6 +78,12 @@ data:
     cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON KEYSPACE greenguard_history TO gg_history_reader' >/dev/null
     cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT MODIFY ON KEYSPACE greenguard_history TO gg_history_writer' >/dev/null
     cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON KEYSPACE greenguard_history TO gg_history_writer' >/dev/null
+    # Dedicated disposable table: no additional access to domain keyspaces.
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e "CREATE KEYSPACE IF NOT EXISTS greenguard_acceptance WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}" >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'CREATE TABLE IF NOT EXISTS greenguard_acceptance.probe (tenant_id uuid, probe_id uuid, marker text, PRIMARY KEY (tenant_id, probe_id)) WITH default_time_to_live = 120' >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON TABLE greenguard_acceptance.probe TO gg_history_reader' >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT SELECT ON TABLE greenguard_acceptance.probe TO gg_history_writer' >/dev/null
+    cqlsh --ssl -u cassandra -p "$admin" greenguard-cassandra 9042 -e 'GRANT MODIFY ON TABLE greenguard_acceptance.probe TO gg_history_writer' >/dev/null
   activate.py: |
     import json, os, pathlib, socket, ssl, subprocess, urllib.request
     context_cql = ssl.create_default_context(cafile='/cql-tls/ca.crt')

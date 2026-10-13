@@ -176,3 +176,35 @@ test("server throttling carries a bounded retry hint without echoing backend det
     "private_backend_detail",
   );
 });
+
+test.each([
+  [401, "Your session expired. Sign in again to review this action."],
+  [403, "You no longer have permission to review this action."],
+  [404, "This proposal is no longer available in your account."],
+  [409, "This proposal changed. Refresh its status before continuing."],
+  [410, "This proposal has expired."],
+  [429, "Action requests are temporarily rate limited."],
+  [
+    503,
+    "Advisor is temporarily unavailable. Refresh the action status before retrying.",
+  ],
+])(
+  "preserves safe Advisor failure guidance for HTTP %s",
+  async (status, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ code: "PRIVATE DETAIL" }, { status }),
+        ),
+    );
+    await expect(
+      new AdvisorApi(async () => "token").get(approved.proposal_id),
+    ).rejects.toMatchObject({
+      status,
+      retryAfter: 1,
+      message,
+    });
+  },
+);

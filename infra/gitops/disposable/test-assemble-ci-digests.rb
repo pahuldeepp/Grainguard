@@ -61,7 +61,7 @@ Dir.mktmpdir('greenguard-ci-digests-') do |directory|
   abort 'runtime image manifest mismatch' unless JSON.parse(File.read(File.join(output, 'images.json'))) == generated.fetch('deployment_image_digests')
   abort 'migration image manifest mismatch' unless JSON.parse(File.read(File.join(output, 'migration-images.json'))) == generated.fetch('migration_image_digests')
   expected_observability = %w[otel-collector prometheus grafana tempo loki]
-  expected_data_plane = %w[pgbouncer kafka-topics kafka-connect connector-registration]
+  expected_data_plane = %w[pgbouncer kafka-topics kafka-connect connector-registration redis]
   abort 'observability image contract mismatch' unless generated.fetch('observability_image_digests').keys.sort == expected_observability.sort
   abort 'data-plane image contract mismatch' unless generated.fetch('data_plane_image_digests').keys.sort == expected_data_plane.sort
   abort 'server image contract mismatch' unless %w[opensearch_image_digest cassandra_image_digest mqtt_image_digest clickhouse_image_digest].all? { |field| generated.key?(field) }
@@ -75,6 +75,11 @@ Dir.mktmpdir('greenguard-ci-digests-') do |directory|
   abort 'unsigned vendor dependencies did not block Terraform apply' unless coverage.fetch('terraform_apply_eligible') == false && coverage.fetch('release_status') == 'blocked'
   abort 'vendor signature gaps are not explicit' unless coverage.fetch('upstream_signature_gaps').sort == platform_inventory.fetch('images').select { |item| item.fetch('kind').start_with?('vendor') }.map { |item| item.fetch('name') }.sort
   abort 'telemetry-sinks CI source is absent' unless File.read(File.join(__dir__, '../../../.github/workflows/ci.yml')).include?('dockerfile: services/telemetry-sinks/deploy/Dockerfile')
+  abort 'data probe image roles are missing' unless
+    coverage.dig('acceptance_probes', 'images', 'kafka') == generated.fetch('data_plane_image_digests').fetch('kafka-topics') &&
+    coverage.dig('acceptance_probes', 'images', 'redis') == generated.fetch('data_plane_image_digests').fetch('redis') &&
+    coverage.dig('acceptance_probes', 'images', 'cassandra') == generated.fetch('cassandra_image_digest') &&
+    coverage.dig('acceptance_probes', 'images', 'opensearch_probe') == generated.fetch('cassandra_image_digest')
   abort 'acceptance probe image roles are missing' unless coverage.dig('acceptance_probes', 'status') == 'ready' &&
     coverage.dig('acceptance_probes', 'images', 'clickhouse') == generated.fetch('clickhouse_image_digest') &&
     coverage.dig('acceptance_probes', 'images', 'tenant_membership_readback') == generated.fetch('deployment_image_digests').fetch('tenant-control-plane')

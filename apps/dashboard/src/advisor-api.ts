@@ -73,26 +73,31 @@ function parseProposal(value: unknown): AdvisorProposal {
   }
   return value as unknown as AdvisorProposal;
 }
+function advisorRequestMessage(status: number): string {
+  switch (status) {
+    case 401:
+      return "Your session expired. Sign in again to review this action.";
+    case 403:
+      return "You no longer have permission to review this action.";
+    case 404:
+      return "This proposal is no longer available in your account.";
+    case 409:
+      return "This proposal changed. Refresh its status before continuing.";
+    case 410:
+      return "This proposal has expired.";
+    case 429:
+      return "Action requests are temporarily rate limited.";
+    default:
+      return "Advisor is temporarily unavailable. Refresh the action status before retrying.";
+  }
+}
+
 export class AdvisorRequestError extends Error {
   constructor(
     readonly status: number,
     readonly retryAfter: number,
   ) {
-    super(
-      status === 401
-        ? "Your session expired. Sign in again to review this action."
-        : status === 403
-          ? "You no longer have permission to review this action."
-          : status === 404
-            ? "This proposal is no longer available in your account."
-            : status === 409
-              ? "This proposal changed. Refresh its status before continuing."
-              : status === 410
-                ? "This proposal has expired."
-                : status === 429
-                  ? "Action requests are temporarily rate limited."
-                  : "Advisor is temporarily unavailable. Refresh the action status before retrying.",
-    );
+    super(advisorRequestMessage(status));
   }
 }
 export class AdvisorApi {

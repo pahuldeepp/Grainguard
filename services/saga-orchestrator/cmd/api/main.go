@@ -48,68 +48,22 @@ type server struct {
 }
 
 func main() {
-	if err := common.RequireShardRegistry(os.Getenv); err != nil {
+	u, err := apiEnvironment(os.Getenv)
+	if err != nil {
 		log.Fatal(err)
 	}
-	for _, key := range []string{"SAGA_DIRECT_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL"} {
-		if key == "SAGA_DIRECT_URL" && os.Getenv("SHARD_REGISTRY_FILE") != "" {
-			continue
-		}
-		if os.Getenv(key) == "" {
-			log.Fatalf("%s is required", key)
-		}
-	}
-	u, err := url.Parse(os.Getenv("AUTH_JWKS_URL"))
-	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
-		log.Fatal("AUTH_JWKS_URL must be https or loopback http")
-	}
 	ctx := context.Background()
-	var db common.TxStarter
-	var metrics http.Handler
-	if os.Getenv("SHARD_REGISTRY_FILE") != "" {
-		shards, err := common.ShardedDBFromEnvironment(os.Getenv, "saga-orchestrator", "greenguard_sagas", "saga_app")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer shards.Close()
-		db, metrics = shards, saga.ShardedHandler(nil, shards)
-		if err := shards.Ping(ctx); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		pool, err := pgxpool.New(ctx, os.Getenv("SAGA_DIRECT_URL"))
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer pool.Close()
-		if err := pool.Ping(ctx); err != nil {
-			log.Fatal(err)
-		}
-		db, metrics = pool, saga.Handler(nil, pool)
+	db, metrics, closeDB, err := apiDatabase(ctx, os.Getenv)
+	if err != nil {
+		log.Fatal(err)
 	}
-	source := os.Getenv("AUTH_MEMBERSHIP_SOURCE")
-	if source == "" {
-		source = "file"
+	defer closeDB()
+	auth, err := apiVerifier(ctx, os.Getenv, u)
+	if err != nil {
+		log.Fatal(err)
 	}
-	if source != "file" && source != "control-plane" {
-		log.Fatal("AUTH_MEMBERSHIP_SOURCE must be file or control-plane")
-	}
-	auth := &verifier{issuer: os.Getenv("AUTH_ISSUER"), audience: os.Getenv("AUTH_AUDIENCE"), jwksURL: u.String(), membershipFile: os.Getenv("AUTH_MEMBERSHIP_FILE"), membershipSource: source, client: &http.Client{Timeout: 5 * time.Second}}
-	if source == "file" && auth.membershipFile != "" {
-		if _, err := loadMemberships(auth.membershipFile); err != nil {
-			log.Fatalf("invalid AUTH_MEMBERSHIP_FILE: %v", err)
-		}
-	}
-	if source == "control-plane" {
-		cache, err := newControlMembershipCache(os.Getenv, auth.client)
-		if err != nil {
-			log.Fatal(err)
-		}
-		auth.membershipCache = cache
-		defer cache.close()
-		if err := cache.startConsumer(ctx); err != nil {
-			log.Fatal(err)
-		}
+	if auth.membershipCache != nil {
+		defer auth.membershipCache.close()
 	}
 	s := server{store: saga.Store{DB: db}, auth: auth, metrics: metrics}
 	addr := os.Getenv("SAGA_API_ADDR")
@@ -149,6 +103,87 @@ func main() {
 	}
 }
 
+const controlPlaneMembershipSource = "control-plane"
+
+func apiEnvironment(getenv func(string) string) (*url.URL, error) {
+	if err := common.RequireShardRegistry(getenv); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"SAGA_DIRECT_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_JWKS_URL"} {
+		if key == "SAGA_DIRECT_URL" && getenv("SHARD_REGISTRY_FILE") != "" {
+			continue
+		}
+		if getenv(key) == "" {
+			return nil, fmt.Errorf("%s is required", key)
+		}
+	}
+	return apiJWKSURL(getenv("AUTH_JWKS_URL"))
+}
+
+func apiJWKSURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
+		return nil, errors.New("AUTH_JWKS_URL must be https or loopback http")
+	}
+	return u, nil
+}
+
+func apiDatabase(ctx context.Context, getenv func(string) string) (common.TxStarter, http.Handler, func(), error) {
+	if getenv("SHARD_REGISTRY_FILE") != "" {
+		shards, err := common.ShardedDBFromEnvironment(getenv, "saga-orchestrator", "greenguard_sagas", "saga_app")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if err := closeOnStartupError(func() error { return shards.Ping(ctx) }, shards.Close); err != nil {
+			return nil, nil, nil, err
+		}
+		return shards, saga.ShardedHandler(nil, shards), shards.Close, nil
+	}
+	pool, err := pgxpool.New(ctx, getenv("SAGA_DIRECT_URL"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := closeOnStartupError(func() error { return pool.Ping(ctx) }, pool.Close); err != nil {
+		return nil, nil, nil, err
+	}
+	return pool, saga.Handler(nil, pool), pool.Close, nil
+}
+
+func apiVerifier(ctx context.Context, getenv func(string) string, u *url.URL) (*verifier, error) {
+	source := getenv("AUTH_MEMBERSHIP_SOURCE")
+	if source == "" {
+		source = "file"
+	}
+	if source != "file" && source != controlPlaneMembershipSource {
+		return nil, errors.New("AUTH_MEMBERSHIP_SOURCE must be file or control-plane")
+	}
+	auth := &verifier{issuer: getenv("AUTH_ISSUER"), audience: getenv("AUTH_AUDIENCE"), jwksURL: u.String(), membershipFile: getenv("AUTH_MEMBERSHIP_FILE"), membershipSource: source, client: &http.Client{Timeout: 5 * time.Second}}
+	if source == "file" && auth.membershipFile != "" {
+		if _, err := loadMemberships(auth.membershipFile); err != nil {
+			return nil, fmt.Errorf("invalid AUTH_MEMBERSHIP_FILE: %v", err)
+		}
+	}
+	if source == controlPlaneMembershipSource {
+		cache, err := newControlMembershipCache(getenv, auth.client)
+		if err != nil {
+			return nil, err
+		}
+		auth.membershipCache = cache
+		if err := closeOnStartupError(func() error { return cache.startConsumer(ctx) }, cache.close); err != nil {
+			return nil, err
+		}
+	}
+	return auth, nil
+}
+
+func closeOnStartupError(start func() error, closeResource func()) error {
+	if err := start(); err != nil {
+		closeResource()
+		return err
+	}
+	return nil
+}
+
 func validateListenAddress(addr string, tlsEnabled bool) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -164,9 +199,19 @@ func validateListenAddress(addr string, tlsEnabled bool) error {
 	return nil
 }
 
+func (s *server) healthStatus() int {
+	if s.auth == nil || s.auth.membershipCache == nil {
+		return http.StatusNoContent
+	}
+	if s.auth.membershipCache.membershipConsumerError() != nil {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusNoContent
+}
+
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(s.healthStatus())
 		return
 	}
 	// Aggregate, tenant-free gauges only; the API binds loopback unless mTLS is on.
@@ -180,6 +225,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.auth.verify(r)
 	if err != nil {
+		if errors.Is(err, errMembershipUnavailable) {
+			problem(w, http.StatusServiceUnavailable, "membership_unavailable")
+			return
+		}
 		if errors.Is(err, errMembershipRevoked) {
 			problem(w, http.StatusForbidden, "insufficient_role")
 			return
@@ -346,7 +395,7 @@ func (v *verifier) verify(r *http.Request) (principal, error) {
 	sub, _ := claims["sub"].(string)
 	tenant, _ := claims["tenant_id"].(string)
 	var roles map[string]bool
-	if v.membershipSource == "control-plane" {
+	if v.membershipSource == controlPlaneMembershipSource {
 		tenant, roles, err = v.membershipCache.roles(r.Context(), v.issuer, sub)
 	} else if v.membershipFile != "" {
 		// The IdP proves identity only. GreenGuard's current membership overrides

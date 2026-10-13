@@ -78,14 +78,16 @@ locals {
   ])
   runtime_shard_bootstrap_role_keys = setsubtract(local.runtime_bootstrap_role_keys, local.runtime_central_only_bootstrap_role_keys)
   runtime_secret_exact_keys = {
-    greenguard-rds-bootstrap    = local.runtime_bootstrap_role_keys
-    greenguard-rds-ca           = toset(["ca.pem"])
-    greenguard-opensearch-ca    = toset(["ca.crt"])
-    greenguard-kafka-ca         = toset(["ca.crt", "registry-ca.crt"])
-    greenguard-opensearch-tls   = toset(["ca.crt", "node.crt", "node.key", "admin.crt", "admin.key"])
-    greenguard-cassandra-tls    = toset(["server.p12", "keystore-password", "ca.crt"])
-    greenguard-mqtt-broker      = toset(["tls.crt", "tls.key", "ca.crt", "passwords", "acl"])
-    greenguard-data-credentials = toset(["REDIS_PASSWORD", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"])
+    greenguard-rds-bootstrap      = local.runtime_bootstrap_role_keys
+    greenguard-rds-ca             = toset(["ca.pem"])
+    greenguard-opensearch-ca      = toset(["ca.crt"])
+    greenguard-kafka-auth         = toset(["broker-jaas", "registry-kafka-jaas", "acceptance-client-jaas", "keystore-password", "key-password", "truststore-password", "registry-keystore-password", "registry-key-password", "registry-jaas.conf", "registry-users.properties", "broker.keystore.p12", "broker.truststore.p12", "registry.keystore.p12", "kafka.truststore.p12"])
+    greenguard-opensearch-clients = toset(["writer-password", "reader-password", "acceptance-writer-password", "acceptance-reader-password"])
+    greenguard-kafka-ca           = toset(["ca.crt", "registry-ca.crt"])
+    greenguard-opensearch-tls     = toset(["ca.crt", "node.crt", "node.key", "admin.crt", "admin.key"])
+    greenguard-cassandra-tls      = toset(["server.p12", "keystore-password", "ca.crt"])
+    greenguard-mqtt-broker        = toset(["tls.crt", "tls.key", "ca.crt", "passwords", "acl"])
+    greenguard-data-credentials   = toset(["REDIS_PASSWORD", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS", "RABBITMQ_ERLANG_COOKIE"])
   }
 
   runtime_database_profiles = {
@@ -314,6 +316,19 @@ resource "aws_secretsmanager_secret_version" "runtime" {
         length(try(var.telemetry_sink_credentials["TELEMETRY_REPLAY_KAFKA_SASL_PASSWORD"], "")) >= 24
       )
       error_message = "The disposable telemetry sinks require complete Kafka and ClickHouse credentials."
+    }
+    precondition {
+      condition = each.key != "greenguard-opensearch-clients" || try(
+        length(toset(values(var.runtime_secret_values[each.key]))) == 4, false
+      )
+      error_message = "OpenSearch runtime and disposable acceptance users require four distinct passwords."
+    }
+    precondition {
+      condition = each.key != "greenguard-kafka-auth" || try(
+        can(regex("^org\\.apache\\.kafka\\.common\\.security\\.plain\\.PlainLoginModule required username=\"acceptance-probe\" password=\"[A-Za-z0-9_-]{32,128}\";$", var.runtime_secret_values[each.key]["acceptance-client-jaas"])) &&
+        strcontains(var.runtime_secret_values[each.key]["broker-jaas"], replace(regex("password=\"[A-Za-z0-9_-]{32,128}\"", var.runtime_secret_values[each.key]["acceptance-client-jaas"]), "password=", "user_acceptance-probe=")), false
+      )
+      error_message = "Kafka acceptance must use its matching scoped acceptance-probe broker credential."
     }
     precondition {
       condition     = each.key != "notification-contacts-projector-config" || alltrue([for key in ["KAFKA_BROKERS", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD", "SCHEMA_REGISTRY_URL", "SCHEMA_REGISTRY_USERNAME", "SCHEMA_REGISTRY_PASSWORD"] : try(length(trimspace(var.runtime_secret_values["notification-service-config"][key])) > 0, false)])

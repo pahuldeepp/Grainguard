@@ -6,6 +6,7 @@ require 'tempfile'
 ROOT = __dir__
 DIGEST = "ghcr.io/dexidp/dex:v2.41.1@sha256:#{'b' * 64}"
 CLICKHOUSE_DIGEST = "example.test/clickhouse-client@sha256:#{'e' * 64}"
+PLANE_DIGEST = "example.test/data@sha256:#{'f' * 64}"
 CONTROL_PLANE_DIGEST = "example.test/tenant-control-plane@sha256:#{'d' * 64}"
 VALUES = {
   'cell' => 'gg-test',
@@ -13,11 +14,11 @@ VALUES = {
   'revision' => 'a' * 40,
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, "example.test/#{name}@sha256:#{'c' * 64}"] },
   'edgeRouting' => {'enabled' => true, 'accountId' => '123456789012', 'region' => 'us-east-2', 'targetGroupARN' => 'arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/greenguard/0123456789abcdef'},
-  'dataPlane' => {'enabled' => false},
-  'searchPlane' => {'enabled' => false},
-  'cassandraPlane' => {'enabled' => false},
   'mqttPlane' => {'enabled' => false},
-  'clickhousePlane' => {'enabled' => false},
+  'clickhousePlane' => {'enabled' => true, 'image' => CLICKHOUSE_DIGEST, 'storageClassName' => 'gp3', 'storageSize' => '20Gi', 'authSecret' => 'greenguard-telemetry-clickhouse-config'},
+  'dataPlane' => {'enabled' => true, 'rdsHost' => 'db.example.us-east-2.rds.amazonaws.com', 'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration redis].to_h { |name| [name, PLANE_DIGEST] }, 'secrets' => {'pgbouncerAuth' => 'greenguard-pgbouncer-auth', 'rdsCa' => 'greenguard-rds-ca', 'cdcCredentials' => 'greenguard-cdc-credentials'}},
+  'searchPlane' => {'enabled' => true, 'image' => PLANE_DIGEST, 'bootstrapImage' => PLANE_DIGEST},
+  'cassandraPlane' => {'enabled' => true, 'image' => PLANE_DIGEST, 'migratorImage' => PLANE_DIGEST, 'authSecret' => 'greenguard-cassandra-auth', 'tlsSecret' => 'greenguard-cassandra-tls', 'apiServerCIDR' => '10.100.0.1/32'},
   'managedDex' => {
     'enabled' => true, 'image' => DIGEST,
     'issuer' => 'https://d111111abcdef8.cloudfront.net/dex',

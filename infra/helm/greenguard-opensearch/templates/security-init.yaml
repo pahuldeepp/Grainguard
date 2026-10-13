@@ -38,6 +38,10 @@ spec:
             - {name: OPENSEARCH_ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-admin, key: password}}}
             - {name: OPENSEARCH_WRITER_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: writer-password}}}
             - {name: OPENSEARCH_READER_PASSWORD, valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: reader-password}}}
+            - name: OPENSEARCH_ACCEPTANCE_WRITER_PASSWORD
+              valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: acceptance-writer-password}}
+            - name: OPENSEARCH_ACCEPTANCE_READER_PASSWORD
+              valueFrom: {secretKeyRef: {name: greenguard-opensearch-clients, key: acceptance-reader-password}}
           volumeMounts:
             - {name: script, mountPath: /script, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}

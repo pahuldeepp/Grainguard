@@ -28,6 +28,7 @@ spec:
     app.kubernetes.io/name: greenguard-clickhouse
   ports:
     - {name: http, port: 8123, targetPort: http, protocol: TCP}
+    - {name: tcp-native, port: 9000, targetPort: tcp-native, protocol: TCP}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -69,6 +70,7 @@ spec:
             - {name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT, value: "1"}
           ports:
             - {name: http, containerPort: 8123, protocol: TCP}
+            - {name: tcp-native, containerPort: 9000, protocol: TCP}
           startupProbe:
             httpGet: {path: /ping, port: http}
             periodSeconds: 5
@@ -125,6 +127,13 @@ spec:
       ports:
         - {protocol: TCP, port: 8123}
   egress:
+    # The server proxy obtains xDS/SDS before wave-28 can become healthy.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: istio-system}
+          podSelector:
+            matchLabels: {app: istiod}
+      ports: [{protocol: TCP, port: 15012}]
     - to:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: kube-system}

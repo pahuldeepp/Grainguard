@@ -18,7 +18,7 @@ class Metrics:
         self._lock = threading.Lock()
         self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
         self._placement_sum = 0.0
-        self._placement_buckets = {bound: 0 for bound in (0.01, 0.05, 0.1, 0.5, 1.0, 2.0, float("inf"))}
+        self._placement_buckets = dict.fromkeys((0.01, 0.05, 0.1, 0.5, 1.0, 2.0, float("inf")), 0)
 
     def observe_placement(self, seconds: float, failed: bool) -> None:
         self.inc("greenguard_risk_placement_requests_total", outcome="error" if failed else "ok")

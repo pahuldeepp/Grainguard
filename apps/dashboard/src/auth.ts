@@ -35,12 +35,12 @@ export function oidcConfiguration() {
   )
     return null;
   const origin = window.location.origin;
-  const extraQueryParams: Record<string, string> =
-    tokenMode === "cognito-access"
-      ? resource
-        ? { resource }
-        : {}
-      : { audience: audience! };
+  let extraQueryParams: Record<string, string>;
+  if (tokenMode === "cognito-access") {
+    extraQueryParams = resource ? { resource } : {};
+  } else {
+    extraQueryParams = { audience: audience! };
+  }
   return {
     authority,
     client_id: clientId,

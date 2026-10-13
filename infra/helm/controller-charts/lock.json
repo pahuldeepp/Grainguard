@@ -6,6 +6,7 @@
     {"name":"istiod","file":"istiod-1.30.5.tgz","version":"1.30.5","source":"https://istio-release.storage.googleapis.com/charts","sha256":"c91d0f8c102a377795da2145eb23912dc648a3277c973b9cfd0049a4d76f096a"},
     {"name":"istio-ingressgateway","file":"gateway-1.30.5.tgz","version":"1.30.5","source":"https://istio-release.storage.googleapis.com/charts","sha256":"08ae2c62f52097094643b0c78d7053ef24ad04e96e27fc75b441254fbbb373cd"},
     {"name":"keda","file":"keda-2.21.0.tgz","version":"2.21.0","source":"https://kedacore.github.io/charts","sha256":"a7da56bf41a33dad9d2fc82a6fdecee552fff947d80bf1e1dbcf4db0f9e26dee"},
+    {"name":"karpenter","file":"karpenter-1.15.0.tgz","version":"1.15.0","source":"oci://public.ecr.aws/karpenter/karpenter","ociDigest":"sha256:881ac708884b0aae218c696cadc62805739043dba7a6340e93059204c5933593","sha256":"f1064e373f93bf265f49044328235ed940abb83e6336554f41dde98a55f114b1"},
     {"name":"argo-rollouts","file":"argo-rollouts-2.43.2.tgz","version":"2.43.2","source":"https://argoproj.github.io/argo-helm","sha256":"35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679"},
     {"name":"argocd","file":"argo-cd-10.9.2.tgz","version":"10.9.2","source":"https://argoproj.github.io/argo-helm","sha256":"970ced346a0ddc3e475a7ff780e9b9c2fdebc07d9a367d2edb6ef4f49832c24a"}
   ]

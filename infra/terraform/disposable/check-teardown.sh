@@ -70,6 +70,8 @@ else
   exit 1
 fi
 edge_name="${data_prefix:0:17}-${edge_hash}-edge"
+# Mirrors local.karpenter_name in karpenter.tf.
+karpenter_name="${cluster:0:30}-${cell_hash}-kp"
 cognito_prefix="gg-${cognito_hash}"
 
 report() {
@@ -140,6 +142,22 @@ else
   exit 1
 fi
 
+# Karpenter launches instances and launch templates outside Terraform state.
+# Query EC2 directly: terminated instances linger in the tagging API, and a
+# running one is the costliest thing a destroy can leave behind.
+karpenter_instances="$(aws ec2 describe-instances \
+  --filters "Name=tag:kubernetes.io/cluster/$cluster,Values=owned" "Name=tag-key,Values=karpenter.sh/nodepool" \
+    "Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down" \
+  --query 'Reservations[].Instances[].InstanceId' --output text)"
+karpenter_launch_templates="$(aws ec2 describe-launch-templates \
+  --filters "Name=tag:eks:eks-cluster-name,Values=$cluster" \
+    "Name=tag:kubernetes.io/cluster/$cluster,Values=owned" "Name=tag-key,Values=karpenter.sh/nodepool" \
+  --query 'LaunchTemplates[].LaunchTemplateId' --output text)"
+karpenter_queues="$(aws sqs list-queues --queue-name-prefix "$karpenter_name" --query 'QueueUrls' --output text)"
+karpenter_rules="$(aws events list-rules --name-prefix "$karpenter_name-" --query 'Rules[].Name' --output text)"
+karpenter_instance_profiles="$(aws iam list-instance-profiles \
+  --query "InstanceProfiles[?starts_with(InstanceProfileName, '$karpenter_name-')].InstanceProfileName" --output text)"
+
 s3_buckets="$(aws s3api list-buckets --query 'Buckets[].Name' --output text)"
 if ecr_repositories="$(aws ecr describe-repositories \
   --query "repositories[?starts_with(repositoryName, '${ecr_prefix}')].repositoryName" --output text 2>&1)"; then
@@ -205,6 +223,11 @@ if [ -f "$pv_inventory" ]; then
 else
   report "PV inventory unavailable; exact untagged EBS proof cannot pass" "$pv_inventory"
 fi
+report "Karpenter-launched EC2 instances not terminated" "$karpenter_instances"
+report "Karpenter launch templates" "$karpenter_launch_templates"
+report "Karpenter interruption queue" "$karpenter_queues"
+report "Karpenter interruption EventBridge rules" "$karpenter_rules"
+report "Karpenter node instance profile" "$karpenter_instance_profiles"
 report "Log groups" \
   "$eks_logs
 $vpc_flow_log

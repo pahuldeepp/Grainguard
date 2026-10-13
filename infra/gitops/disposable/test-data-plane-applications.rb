@@ -14,7 +14,7 @@ values = {
   'dataPlane' => {
     'enabled' => true,
     'rdsHost' => 'db.example.us-east-1.rds.amazonaws.com',
-    'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration].to_h { |name| [name, digest] },
+    'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration redis].to_h { |name| [name, digest] },
     'shards' => {
       's1' => {'rdsHost' => 'shard1.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard1-cdc', 'bootstrapSecret' => 'greenguard-s1-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s1-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s1', 'pgbouncerAuthSecret' => 'greenguard-s1-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s1-projection-history-maintenance-config'},
       's2' => {'rdsHost' => 'shard2.example.us-east-1.rds.amazonaws.com', 'cdcSecret' => 'greenguard-shard2-cdc', 'bootstrapSecret' => 'greenguard-s2-rds-bootstrap', 'tenantBootstrapSecret' => 'greenguard-s2-tenant-bootstrap', 'tenantBootstrapVersion' => 'v1', 'tenantBootstrapRole' => 'tenant_bootstrap_s2', 'pgbouncerAuthSecret' => 'greenguard-s2-pgbouncer-auth', 'projectionMaintenanceSecret' => 'greenguard-s2-projection-history-maintenance-config'},

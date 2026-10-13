@@ -6,6 +6,7 @@
     {"name": "istiod", "namespace": "istio-system", "chart": "istiod", "version": "1.30.5", "requires": ["istio-base CRDs healthy", "chart integrity verification"]},
     {"name": "istio-ingressgateway", "namespace": "istio-system", "chart": "gateway", "version": "1.30.5", "requires": ["istiod healthy", "Service port 80 to pod port 8080", "readiness port 15021", "chart integrity verification"]},
     {"name": "keda", "namespace": "keda", "chart": "keda", "version": "2.21.0", "requires": ["CRDs and metrics API healthy", "chart integrity verification"]},
+    {"name": "karpenter", "namespace": "kube-system", "chart": "karpenter", "version": "1.15.0", "requires": ["EKS Pod Identity association", "interruption queue and node access entry from Terraform", "chart integrity verification", "configured managed maxima, update surge, NodePool limits and reserves within the approved EC2 quota"]},
     {"name": "argo-rollouts", "namespace": "argo-rollouts", "chart": "argo-rollouts", "version": "2.43.2", "requires": ["CRDs and controller healthy", "chart integrity verification"]},
     {"name": "argocd", "namespace": "argocd", "chart": "argo-cd", "version": "10.9.2", "requires": ["EKS API reachable", "chart integrity verification", "application tree and immutable image digests"]}
   ]

@@ -9,6 +9,49 @@ import {
 } from "./advisor-api";
 import type { AssistantCitation } from "./assistant-api";
 
+function agentFailureMessage(status: number): string {
+  if (status === 401)
+    return "Your session expired. Sign in again to use the agent.";
+  if (status === 403) return "You do not have access to this request.";
+  if (status === 503)
+    return "Agent services are temporarily unavailable. Please try again later.";
+  return "The agent could not complete this request.";
+}
+
+function actionFailureMessage(
+  reason: unknown,
+  mutationStarted: boolean,
+  notice: string,
+): string {
+  if (reason instanceof AdvisorRequestError) return reason.message;
+  if (mutationStarted)
+    return "The action outcome could not be confirmed. Refresh its status before retrying.";
+  return (
+    notice || "Action status could not be confirmed. Refresh before retrying."
+  );
+}
+
+function agentRunLabel(busy: boolean, cooldownSeconds: number): string {
+  if (busy) return "Working…";
+  if (cooldownSeconds > 0) return `Try again in ${cooldownSeconds}s`;
+  return "Run agent";
+}
+
+function executionStatusLabel(proposal: AdvisorProposal): string {
+  if (proposal.execution_status === "succeeded")
+    return "Completed and confirmed";
+  if (
+    proposal.execution_status === "failed" ||
+    Number(proposal.execution_attempts) >= advisorExecutionAttemptLimit
+  )
+    return "Stopped; no further retries allowed";
+  if (proposal.execution_status === "running")
+    return "In progress; refresh to check the outcome";
+  if (proposal.execution_status === "retryable")
+    return "Completion not confirmed; a manual retry is available";
+  return "Completion not confirmed";
+}
+
 export function AssistantAgent({
   getAccessToken,
   onCitation,
@@ -225,13 +268,7 @@ export function AssistantAgent({
         };
         throw new Error(
           (failure?.code && messages[failure.code]) ||
-            (response.status === 401
-              ? "Your session expired. Sign in again to use the agent."
-              : response.status === 403
-                ? "You do not have access to this request."
-                : response.status === 503
-                  ? "Agent services are temporarily unavailable. Please try again later."
-                  : "The agent could not complete this request."),
+            agentFailureMessage(response.status),
         );
       }
       const value = (await response.json()) as {
@@ -363,14 +400,7 @@ export function AssistantAgent({
           setUnconfirmed((prev) => ({ ...prev, [proposal.proposal_id]: true }));
         }
       }
-      setError(
-        reason instanceof AdvisorRequestError
-          ? reason.message
-          : mutationStarted
-            ? "The action outcome could not be confirmed. Refresh its status before retrying."
-            : notice ||
-              "Action status could not be confirmed. Refresh before retrying.",
-      );
+      setError(actionFailureMessage(reason, mutationStarted, notice));
     } finally {
       if (current === generation.current) {
         busyRef.current = false;
@@ -401,11 +431,7 @@ export function AssistantAgent({
         disabled={busy || cooldownSeconds > 0 || question.trim().length < 4}
         onClick={() => void run()}
       >
-        {busy
-          ? "Working…"
-          : cooldownSeconds > 0
-            ? `Try again in ${cooldownSeconds}s`
-            : "Run agent"}
+        {agentRunLabel(busy, cooldownSeconds)}
       </button>
       {error && (
         <p role="alert">
@@ -472,17 +498,7 @@ export function AssistantAgent({
                         s. Refresh can still check the current status.
                       </p>
                     )}
-                    {p.execution_status === "succeeded"
-                      ? "Completed and confirmed"
-                      : p.execution_status === "failed" ||
-                          Number(p.execution_attempts) >=
-                            advisorExecutionAttemptLimit
-                        ? "Stopped; no further retries allowed"
-                        : p.execution_status === "running"
-                          ? "In progress; refresh to check the outcome"
-                          : p.execution_status === "retryable"
-                            ? "Completion not confirmed; a manual retry is available"
-                            : "Completion not confirmed"}
+                    {executionStatusLabel(p)}
                   </dd>
                   <dt>Execution attempts</dt>
                   <dd>
@@ -507,7 +523,7 @@ export function AssistantAgent({
             >
               Refresh action status
             </button>
-            {p.status === "pending" ? (
+            {p.status === "pending" && (
               <>
                 <button
                   disabled={
@@ -535,26 +551,27 @@ export function AssistantAgent({
                   Reject
                 </button>
               </>
-            ) : p.status === "approved" &&
+            )}
+            {p.status === "approved" &&
               ["pending", "retryable", "running"].includes(
                 p.execution_status ?? "",
-              ) ? (
-              <button
-                disabled={
-                  busy ||
-                  refreshing ||
-                  Boolean(unconfirmed[p.proposal_id]) ||
-                  !Number.isSafeInteger(p.execution_attempts) ||
-                  Number(p.execution_attempts) >=
-                    advisorExecutionAttemptLimit ||
-                  clock < (retryDeadlines.current[p.proposal_id] ?? 0)
-                }
-                type="button"
-                onClick={() => void mutate(p)}
-              >
-                Retry approved action
-              </button>
-            ) : null}
+              ) && (
+                <button
+                  disabled={
+                    busy ||
+                    refreshing ||
+                    Boolean(unconfirmed[p.proposal_id]) ||
+                    !Number.isSafeInteger(p.execution_attempts) ||
+                    Number(p.execution_attempts) >=
+                      advisorExecutionAttemptLimit ||
+                    clock < (retryDeadlines.current[p.proposal_id] ?? 0)
+                  }
+                  type="button"
+                  onClick={() => void mutate(p)}
+                >
+                  Retry approved action
+                </button>
+              )}
             {p.execution_status === "succeeded" && p.execution_receipt && (
               <details>
                 <summary>Execution confirmation</summary>

@@ -20,6 +20,7 @@
     {"name":"loki","kind":"vendor","source":"grafana/loki@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08","source_signature_verified":false,"signature_review":"pending"},
     {"name":"pgbouncer","kind":"build","dockerfile":"infra/compose/pgbouncer/Dockerfile"},
     {"name":"kafka-topics","kind":"vendor","source":"apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"redis","kind":"vendor","source":"redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499","source_signature_verified":false,"signature_review":"pending"},
     {"name":"kafka-connect","kind":"build","dockerfile":"infra/kafka/Dockerfile.connect"},
     {"name":"connector-registration","kind":"build","dockerfile":"infra/gitops/disposable/connector-registration/Dockerfile"},
     {"name":"opensearch","kind":"vendor","source":"opensearchproject/opensearch@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd","source_signature_verified":false,"signature_review":"pending"},
@@ -32,9 +33,13 @@
     "status": "ready",
     "chart": "infra/gitops/disposable/acceptance-probes-chart",
     "image_roles": {
+      "kafka": "data_plane_image_digests.kafka-topics",
+      "redis": "data_plane_image_digests.redis",
+      "cassandra": "cassandra_image_digest",
+      "opensearch_probe": "cassandra_image_digest",
       "clickhouse": "clickhouse_image_digest",
       "tenant_membership_readback": "deployment_image_digests.tenant-control-plane"
     },
-    "reason": "The checked-in chart intentionally reuses the signed ClickHouse server digest for clickhouse-client and the signed tenant-control-plane runtime digest for its Node membership readback script."
+    "reason": "The chart reuses owned Kafka, Redis, Cassandra (bundled driver 3.29.0/python3), ClickHouse (native client) and tenant-control-plane (Node) digests. Ready describes chart implementation; credentials and live execution remain unproved."
   }
 }

@@ -33,7 +33,11 @@ def _security_config() -> dict[str, Any]:
         return {}
     if protocol != "SASL_SSL" or mechanism != "PLAIN" or not all((user, password, ca_file)):
         raise ValueError("Kafka requires SASL_SSL, PLAIN credentials, and a TLS CA file")
-    ssl.create_default_context(cafile=ca_file)
+    # This secure client context validates the CA bundle before client creation.
+    # Kafka transport is owned by librdkafka, using the verification options below.
+    ca_validation_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ca_validation_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    ca_validation_context.load_verify_locations(cafile=ca_file)
     return {"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
             "sasl.username": user, "sasl.password": password, "ssl.ca.location": ca_file,
             "enable.ssl.certificate.verification": True}

@@ -1,0 +1,59 @@
+{{- range $name := list "compute" "general" }}
+{{- $pool := index $.Values.pools $name }}
+{{- if ne (toString $pool.cpuLimit) "0" }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: greenguard-{{ $name }}
+  labels:
+    greenguard.io/cell: {{ $.Values.cell | quote }}
+spec:
+  # Eventually consistent: parallel provisioning can temporarily overrun this.
+  # Terraform preflight counts limits plus an explicit capacity reserve.
+  limits:
+    cpu: {{ $pool.cpuLimit | quote }}
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: {{ $.Values.consolidateAfter }}
+    budgets:
+      - nodes: "1"
+  template:
+    metadata:
+      labels:
+        greenguard.io/workload-class: {{ $name }}
+        greenguard.io/cell: {{ $.Values.cell | quote }}
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: greenguard-disposable
+      expireAfter: {{ $.Values.expireAfter }}
+      terminationGracePeriod: {{ $.Values.terminationGracePeriod }}
+      {{- if eq $name "compute" }}
+      taints:
+        - key: greenguard.io/workload-class
+          value: compute
+          effect: NoSchedule
+      {{- end }}
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: [{{ $.Values.arch | quote }}]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: karpenter.k8s.aws/instance-family
+          operator: In
+          values: {{ toJson $.Values.instanceFamilies }}
+        - key: karpenter.k8s.aws/instance-cpu
+          operator: In
+          values: {{ toJson $.Values.instanceCpus }}
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: {{ toJson $.Values.zones }}
+{{- end }}
+{{- end }}

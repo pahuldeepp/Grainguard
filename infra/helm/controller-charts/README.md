@@ -1,12 +1,15 @@
 # Disposable controller chart archives
 
-The seven `.tgz` files are the exact chart archives referenced by
-`infra/terraform/disposable/controllers.tf`. `lock.json` records their chart
+The eight `.tgz` files are the exact chart archives referenced by
+`infra/terraform/disposable/controllers.tf` and `karpenter.tf`. `lock.json` records their chart
 versions, source repositories and SHA-256 hashes. Run
 `ruby infra/gitops/disposable/check-controllers.rb` before a release; it checks
 every archive, its chart metadata and Terraform's local archive paths.
 
 The archives were fetched with `helm pull --repo <source> --version <version>`.
+Karpenter publishes only an OCI chart, so its archive was fetched with
+`helm pull oci://public.ecr.aws/karpenter/karpenter --version 1.15.0`; the lock
+also records the OCI manifest digest Helm reported.
 The SHA-256 lock prevents a later remote chart update from silently changing
 this Terraform deployment. It does not prove an upstream signature. A chart
 update requires reviewing the extracted chart, replacing the archive,

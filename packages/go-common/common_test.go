@@ -85,6 +85,45 @@ func TestWithTenantPlacementRejectsInvalidAndInactiveRoutesBeforeBegin(t *testin
 	}
 }
 
+func TestExpiredPlacementBeforeBeginReportsOnlyExpiryTimingAndRetainsErrorIdentity(t *testing.T) {
+	tx := &placementTestTx{}
+	db := &placementTestDB{tx: tx}
+	expires := time.Now().Add(-time.Second)
+	route := TenantPlacement{TenantID: tenantID, ShardID: "s1", Incarnation: tenantID, PlacementEpoch: "1", State: "active", ExpiresAt: expires}
+	err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("expired route invoked callback"); return nil })
+	if !errors.Is(err, ErrInvalidTenantPlacement) || db.begins != 0 || len(tx.statements) != 0 || tx.rollbacks != 0 {
+		t.Fatalf("expired route reached transaction: err=%v begins=%d tx=%+v", err, db.begins, tx)
+	}
+	if !strings.Contains(err.Error(), "expired before transaction begin") || !strings.Contains(err.Error(), "expires_at="+expires.UTC().Format(time.RFC3339Nano)) || !strings.Contains(err.Error(), "observed_at=") {
+		t.Fatalf("pre-begin expiry diagnostic missing: %v", err)
+	}
+	if strings.Contains(err.Error(), tenantID) || strings.Contains(err.Error(), "placement_epoch") {
+		t.Fatalf("diagnostic exposed route identity: %v", err)
+	}
+}
+
+func TestMalformedPlacementDoesNotBecomeExpiryDiagnostic(t *testing.T) {
+	base := TenantPlacement{TenantID: tenantID, ShardID: "s1", Incarnation: tenantID, PlacementEpoch: "1", State: "active", ExpiresAt: time.Now().Add(-time.Second)}
+	for _, mutate := range []func(*TenantPlacement){
+		func(p *TenantPlacement) { p.TenantID = "bad" },
+		func(p *TenantPlacement) { p.ShardID = "s5" },
+		func(p *TenantPlacement) { p.Incarnation = "bad" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "01" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "9223372036854775808" },
+		func(p *TenantPlacement) { p.PlacementEpoch = "0" },
+		func(p *TenantPlacement) { p.State = "quiescing" },
+		func(p *TenantPlacement) { p.ExpiresAt = time.Time{} },
+	} {
+		route := base
+		mutate(&route)
+		db := &placementTestDB{tx: &placementTestTx{}}
+		err := WithTenantPlacement(context.Background(), db, route, func(context.Context, pgx.Tx) error { t.Fatal("invalid route invoked callback"); return nil })
+		if err != ErrInvalidTenantPlacement || db.begins != 0 {
+			t.Fatalf("invalid route reclassified: err=%v begins=%d", err, db.begins)
+		}
+	}
+}
+
 func TestWithTenantPlacementRollsBackWhenDatabaseRejectsAdmission(t *testing.T) {
 	denied := errors.New("stale placement")
 	tx := &placementTestTx{execErr: denied}

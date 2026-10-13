@@ -149,7 +149,18 @@ func TestStillValidJWTGetsSaga403AfterControlPlaneRevocation(t *testing.T) {
 	}))
 	defer jwks.Close()
 	state := controlMembership{TenantID: tenant, Roles: []string{"viewer"}, Version: "1", State: "active"}
-	lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(state) }))
+	lookupOutage := false
+	lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if lookupOutage {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if state.TenantID == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(state)
+	}))
 	defer lookup.Close()
 	versions := &versionRedis{versions: map[string]string{}}
 	cache := &controlMembershipCache{url: lookup.URL, token: "secret", client: lookup.Client(), redis: versions, entries: map[string]membershipEntry{}, floors: map[string]map[string]uint64{}}
@@ -169,6 +180,30 @@ func TestStillValidJWTGetsSaga403AfterControlPlaneRevocation(t *testing.T) {
 	if err != nil || p.Tenant != tenant || !p.Roles["viewer"] || p.Roles["admin"] {
 		t.Fatalf("first-party mapping: %+v %v", p, err)
 	}
+	cache.mu.Lock()
+	delete(cache.entries, identityID(issuer, "alice"))
+	cache.mu.Unlock()
+	lookupOutage = true
+	lookupFailure := httptest.NewRecorder()
+	(&server{auth: v}).ServeHTTP(lookupFailure, request())
+	if lookupFailure.Code != http.StatusServiceUnavailable {
+		t.Fatalf("lookup outage misclassified as authorization denial: %d", lookupFailure.Code)
+	}
+	lookupOutage = false
+	versions.down = true
+	redisFailure := httptest.NewRecorder()
+	(&server{auth: v}).ServeHTTP(redisFailure, request())
+	if redisFailure.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Redis outage misclassified as authorization denial: %d", redisFailure.Code)
+	}
+	versions.down = false
+	cache.setMembershipConsumerError(errMembershipUnavailable)
+	unavailable := httptest.NewRecorder()
+	(&server{auth: v}).ServeHTTP(unavailable, request())
+	if unavailable.Code != http.StatusServiceUnavailable || !strings.Contains(unavailable.Body.String(), "membership_unavailable") {
+		t.Fatalf("consumer outage misclassified: status=%d body=%s", unavailable.Code, unavailable.Body.String())
+	}
+	cache.setMembershipConsumerError(nil)
 	state = controlMembership{TenantID: tenant, Version: "2", State: "revoked"}
 	event := membershipEvent{EventType: "membership.changed", TenantID: tenant}
 	event.Payload.IdentityID = identityID(issuer, "alice")
@@ -181,4 +216,14 @@ func TestStillValidJWTGetsSaga403AfterControlPlaneRevocation(t *testing.T) {
 	if response.Code != 403 {
 		t.Fatalf("revoked token returned %d", response.Code)
 	}
+	state = controlMembership{} // An authoritative negative is still a denial.
+	cache.mu.Lock()
+	delete(cache.entries, identityID(issuer, "alice"))
+	cache.mu.Unlock()
+	missing := httptest.NewRecorder()
+	(&server{auth: v}).ServeHTTP(missing, request())
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("negative membership was not a 401 denial: %d", missing.Code)
+	}
+
 }

@@ -76,19 +76,8 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if (cfg.url == "" && getenv("SHARD_REGISTRY_FILE") == "") || len(cfg.brokers) == 0 {
 		return config{}, errors.New("SAGA_DATABASE_URL and KAFKA_BROKERS are required")
 	}
-	if raw := getenv("SAGA_LEASE_TTL_SECONDS"); raw != "" {
-		seconds, err := strconv.Atoi(raw)
-		if err != nil || seconds < 2 || seconds > 300 {
-			return config{}, errors.New("SAGA_LEASE_TTL_SECONDS must be 2..300")
-		}
-		cfg.ttl = time.Duration(seconds) * time.Second
-	}
-	if raw := getenv("SAGA_MAX_SHARDS"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > saga.ShardCount {
-			return config{}, fmt.Errorf("SAGA_MAX_SHARDS must be 1..%d", saga.ShardCount)
-		}
-		cfg.maxShards = n
+	if err := cfg.loadLeaseConfig(getenv); err != nil {
+		return config{}, err
 	}
 	if cfg.group == "" {
 		cfg.group = "greenguard-saga-orchestrator-v1"
@@ -97,6 +86,24 @@ func loadConfig(getenv func(string) string) (config, error) {
 		cfg.holder = defaultHolder()
 	}
 	return cfg, nil
+}
+
+func (cfg *config) loadLeaseConfig(getenv func(string) string) error {
+	if raw := getenv("SAGA_LEASE_TTL_SECONDS"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 2 || seconds > 300 {
+			return errors.New("SAGA_LEASE_TTL_SECONDS must be 2..300")
+		}
+		cfg.ttl = time.Duration(seconds) * time.Second
+	}
+	if raw := getenv("SAGA_MAX_SHARDS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > saga.ShardCount {
+			return fmt.Errorf("SAGA_MAX_SHARDS must be 1..%d", saga.ShardCount)
+		}
+		cfg.maxShards = n
+	}
+	return nil
 }
 
 func defaultHolder() string {

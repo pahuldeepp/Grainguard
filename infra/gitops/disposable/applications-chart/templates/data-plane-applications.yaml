@@ -7,8 +7,8 @@
 {{- if not (regexMatch "^(https://[^ ]+\\.git|ssh://git@github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git)$" .Values.repositoryUrl) }}{{ fail "data plane requires an HTTPS Git repository or a GitHub SSH deploy key" }}{{ end }}
 {{- if not .Values.cell }}{{ fail "data plane requires a cell" }}{{ end }}
 {{- if not (regexMatch "^[a-zA-Z0-9.-]+\\.rds\\.amazonaws\\.com$" ($data.rdsHost | default "")) }}{{ fail "data plane requires an RDS endpoint DNS name" }}{{ end }}
-{{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration" }}
-{{- if ne (len $images) (len $names) }}{{ fail "data plane requires exactly four image digests" }}{{ end }}
+{{- $names := list "pgbouncer" "kafka-topics" "kafka-connect" "connector-registration" "redis" }}
+{{- if ne (len $images) (len $names) }}{{ fail "data plane requires exactly five image digests" }}{{ end }}
 {{- range $names }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $images . | default "")) }}{{ fail (printf "data plane image %s must be an immutable OCI digest" .) }}{{ end }}
 {{- end }}
@@ -32,7 +32,7 @@
 {{- end }}
 {{- range $app := $apps }}
 {{- if eq $app.name "kafka-connect" }}{{- $_ := set $app.values "shardCredentials" $credentials }}{{- end }}
-{{- if eq $app.name "connector-registration" }}{{- $_ := set $app.values "shards" $hosts }}{{- end }}
+{{- if eq $app.name "connector-registration" "redis" }}{{- $_ := set $app.values "shards" $hosts }}{{- end }}
 {{- end }}
 {{- end }}
 {{- range $index, $app := $apps }}

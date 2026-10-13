@@ -327,3 +327,28 @@ test("pending approval is never resubmitted automatically after an ambiguous dec
     screen.queryByRole("button", { name: "Approve this exact action" }),
   ).toBeNull();
 });
+
+test.each([
+  [401, "Your session expired. Sign in again to use the agent."],
+  [403, "You do not have access to this request."],
+  [503, "Agent services are temporarily unavailable. Please try again later."],
+  [500, "The agent could not complete this request."],
+])(
+  "preserves safe Agent failure guidance for HTTP %s",
+  async (status, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ code: "private_detail" }, { status }),
+        ),
+    );
+    render(<AssistantAgent getAccessToken={tokenProvider} />);
+    fireEvent.change(screen.getByLabelText("Agent request"), {
+      target: { value: "temperature" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(message);
+  },
+);

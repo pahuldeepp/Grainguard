@@ -61,7 +61,7 @@ class SeedTests(unittest.TestCase):
                              {"CDC_DB_PASSWORD": roles["CDC_DB_PASSWORD"]})
             self.assertEqual(set(json.loads(puts[3].kwargs["payload"])), {"password"})
             self.assertEqual(set(json.loads(puts[4].kwargs["payload"])),
-                             {"writer-password", "reader-password"})
+                             {"writer-password", "reader-password", "acceptance-writer-password", "acceptance-reader-password"})
 
     def test_existing_current_is_not_rotated(self):
         roles = MOD.generated("greenguard-rds-bootstrap")
@@ -101,7 +101,7 @@ class SeedTests(unittest.TestCase):
             self.assertEqual(len(puts), 4)
             self.assertEqual(self.values[f"greenguard/{ENV}/greenguard-opensearch-admin"], admin)
             clients = self.values[f"greenguard/{ENV}/greenguard-opensearch-clients"]
-            self.assertEqual(set(clients), {"writer-password", "reader-password"})
+            self.assertEqual(set(clients), {"writer-password", "reader-password", "acceptance-writer-password", "acceptance-reader-password"})
             self.assertNotEqual(clients["writer-password"], clients["reader-password"])
 
     def test_malformed_existing_opensearch_source_rejected_before_writes(self):

@@ -28,7 +28,7 @@ def validate_route(value: Any, tenant: str, now: float) -> dict[str, str]:
             or not all(isinstance(v, str) for v in value.values())
             or value["tenantId"] != tenant or value["shardId"] not in SHARDS
             or not UUID.fullmatch(value["shardIncarnation"])
-            or not re.fullmatch(r"[1-9][0-9]{0,18}", value["placementEpoch"])
+            or not re.fullmatch(r"[1-9]\d{0,18}", value["placementEpoch"], re.ASCII)
             or int(value["placementEpoch"]) > 9223372036854775807):
         raise StoreError("42501", "invalid placement authority response")
     try:
@@ -74,51 +74,64 @@ def authority_fetcher(base_url: str, token: str, mesh_mtls: bool = False):
     return fetch
 
 
+def _validate_registry(manifest: Any) -> None:
+    if (not isinstance(manifest, dict)
+            or set(manifest) != {"formatVersion", "service", "database", "shards"}
+            or type(manifest["formatVersion"]) is not int or manifest["formatVersion"] != 1
+            or manifest["service"] != "risk-engine" or manifest["database"] != "greenguard_risk"
+            or not isinstance(manifest["shards"], dict) or set(manifest["shards"]) != SHARDS):
+        raise ValueError("invalid risk shard registry")
+
+
+def _primary_endpoint(entry: Any, allow_loopback: bool):
+    if (not isinstance(entry, dict) or set(entry) != {"incarnation", "primaryUrl", "replicaUrls"}
+            or not isinstance(entry["incarnation"], str) or not UUID.fullmatch(entry["incarnation"])
+            or not isinstance(entry["primaryUrl"], str) or not isinstance(entry["replicaUrls"], list)):
+        raise ValueError("invalid risk shard registry")
+    url = urlsplit(entry["primaryUrl"])
+    query = parse_qs(url.query, keep_blank_values=True)
+    local = allow_loopback and url.hostname in {"localhost", "127.0.0.1", "::1"}
+    if (url.scheme not in {"postgres", "postgresql"} or url.username != "risk_app"
+            or url.path != "/greenguard_risk" or not url.hostname or not url.password or url.fragment
+            or (not local and (query.get("sslmode") != ["verify-full"]
+                               or len(query.get("sslrootcert", [])) != 1
+                               or not query["sslrootcert"][0]))
+            or set(query) - {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout"}
+            or any(len(values) != 1 for values in query.values())):
+        raise ValueError("unsafe risk primary configuration")
+    return (url.hostname, url.port or 5432, url.path), local
+
+
+def _active_shards(active_ids, allow_loopback: bool, loopback_endpoints: bool):
+    if active_ids is None:
+        active_ids = sorted(SHARDS)
+    else:
+        if not isinstance(active_ids, list) or any(not isinstance(shard, str) for shard in active_ids):
+            raise ValueError("active shard override must be a list of shard IDs")
+        active_ids = [shard.strip() for shard in active_ids]
+        if (not allow_loopback or not loopback_endpoints or not active_ids
+                or "s1" not in active_ids
+                or len(active_ids) != len(set(active_ids))
+                or any(shard not in SHARDS for shard in active_ids)):
+            raise ValueError("active shard override is allowed only for unique local loopback shards")
+    return active_ids
+
+
 class ShardedDatabase:
     def __init__(self, manifest: Any, fetch: Callable[[str], Any], *, allow_loopback=False,
                  active_ids: list[str] | None = None,
                  database: Callable[[str], Any] = PgDatabase, clock=time.time, observe=None):
-        if (not isinstance(manifest, dict)
-                or set(manifest) != {"formatVersion", "service", "database", "shards"}
-                or type(manifest["formatVersion"]) is not int or manifest["formatVersion"] != 1
-                or manifest["service"] != "risk-engine" or manifest["database"] != "greenguard_risk"
-                or not isinstance(manifest["shards"], dict) or set(manifest["shards"]) != SHARDS):
-            raise ValueError("invalid risk shard registry")
+        _validate_registry(manifest)
         identities, urls, endpoints = {}, {}, set()
         loopback_endpoints = True
         for shard, entry in manifest["shards"].items():
-            if (not isinstance(entry, dict) or set(entry) != {"incarnation", "primaryUrl", "replicaUrls"}
-                    or not isinstance(entry["incarnation"], str) or not UUID.fullmatch(entry["incarnation"])
-                    or not isinstance(entry["primaryUrl"], str) or not isinstance(entry["replicaUrls"], list)):
-                raise ValueError("invalid risk shard registry")
-            url = urlsplit(entry["primaryUrl"])
-            query = parse_qs(url.query, keep_blank_values=True)
-            local = allow_loopback and url.hostname in {"localhost", "127.0.0.1", "::1"}
+            address, local = _primary_endpoint(entry, allow_loopback)
             loopback_endpoints = loopback_endpoints and local
-            if (url.scheme not in {"postgres", "postgresql"} or url.username != "risk_app"
-                    or url.path != "/greenguard_risk" or not url.hostname or not url.password or url.fragment
-                    or (not local and (query.get("sslmode") != ["verify-full"]
-                                       or len(query.get("sslrootcert", [])) != 1
-                                       or not query["sslrootcert"][0]))
-                    or set(query) - {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout"}
-                    or any(len(values) != 1 for values in query.values())):
-                raise ValueError("unsafe risk primary configuration")
-            address = (url.hostname, url.port or 5432, url.path)
             if address in endpoints:
                 raise ValueError("duplicate risk primary")
             endpoints.add(address)
             identities[shard], urls[shard] = entry["incarnation"], entry["primaryUrl"]
-        if active_ids is None:
-            active_ids = sorted(SHARDS)
-        else:
-            if not isinstance(active_ids, list) or any(not isinstance(shard, str) for shard in active_ids):
-                raise ValueError("active shard override must be a list of shard IDs")
-            active_ids = [shard.strip() for shard in active_ids]
-            if (not allow_loopback or not loopback_endpoints or not active_ids
-                    or "s1" not in active_ids
-                    or len(active_ids) != len(set(active_ids))
-                    or any(shard not in SHARDS for shard in active_ids)):
-                raise ValueError("active shard override is allowed only for unique local loopback shards")
+        active_ids = _active_shards(active_ids, allow_loopback, loopback_endpoints)
         # Validate the entire manifest before constructing even one database.
         self.identities, self.fetch, self.clock, self.observe = identities, fetch, clock, observe
         self.active_ids = tuple(active_ids)

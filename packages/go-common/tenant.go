@@ -38,18 +38,21 @@ type TxStarter interface {
 func WithTenantPlacement(ctx context.Context, db TxStarter, route TenantPlacement, fn func(context.Context, pgx.Tx) error) error {
 	if !TenantPattern.MatchString(route.TenantID) || !ShardPattern.MatchString(route.ShardID) ||
 		!TenantPattern.MatchString(route.Incarnation) || !decimalEpochPattern.MatchString(route.PlacementEpoch) || route.State != "active" ||
-		route.ExpiresAt.IsZero() || !time.Now().Before(route.ExpiresAt) {
+		route.ExpiresAt.IsZero() {
 		return ErrInvalidTenantPlacement
 	}
 	if epoch, err := strconv.ParseInt(route.PlacementEpoch, 10, 64); err != nil || epoch <= 0 {
 		return ErrInvalidTenantPlacement
 	}
+	if observed := time.Now(); !observed.Before(route.ExpiresAt) {
+		return placementExpiryError("before transaction begin", route.ExpiresAt, observed)
+	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin placed tenant transaction: %w", err)
 	}
-	if !time.Now().Before(route.ExpiresAt) {
-		return errors.Join(ErrInvalidTenantPlacement, Rollback(tx))
+	if observed := time.Now(); !observed.Before(route.ExpiresAt) {
+		return errors.Join(placementExpiryError("after transaction begin", route.ExpiresAt, observed), Rollback(tx))
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -77,6 +80,13 @@ func WithTenantPlacement(ctx context.Context, db TxStarter, route TenantPlacemen
 		return fmt.Errorf("commit placed tenant transaction: %w", err)
 	}
 	return nil
+}
+
+// Keep expiry failures distinguishable in worker logs without exposing tenant
+// identifiers or weakening the route check. Callers still match the same error.
+func placementExpiryError(stage string, expiresAt, observedAt time.Time) error {
+	return fmt.Errorf("%w: expired %s (expires_at=%s observed_at=%s)", ErrInvalidTenantPlacement,
+		stage, expiresAt.UTC().Format(time.RFC3339Nano), observedAt.UTC().Format(time.RFC3339Nano))
 }
 
 var decimalEpochPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,18})$`)

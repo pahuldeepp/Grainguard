@@ -72,3 +72,5 @@ jobs-worker|topic|literal|greenguard.alerts.lifecycle.v1|Read,Describe
 jobs-worker|group|literal|jobs-worker|Read
 tenant-control-plane|topic|literal|greenguard.billing.lifecycle.v1|Read,Describe
 tenant-control-plane|group|literal|greenguard-control-entitlements-v1|Read
+acceptance-probe|topic|literal|greenguard.acceptance.probe.v1|Read,Write,Describe
+acceptance-probe|group|literal|greenguard-acceptance-probe|Read

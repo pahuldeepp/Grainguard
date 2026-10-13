@@ -216,3 +216,22 @@ is complete. Billing data can lag resource deletion.
 
 This profile is for a disposable environment. Production state needs a
 separate durable backend, recovery policy, and deletion controls.
+
+## Karpenter capacity and lifecycle
+
+The controller and future NodePools are Terraform-owned. Provisioning defaults
+to disabled; enabling a pool requires an explicit budget and pinned AMI.
+Read the [Karpenter capacity and teardown contract](../../gitops/disposable/karpenter-nodepools-chart/README.md)
+for managed update surge, eventually consistent limits, quota reserves, and
+the required live provisioning/interruption/destroy checks.
+
+The verified destroy wrapper captures shard secrets from stable physical IDs
+`s1` through `s4` in Terraform outputs and current state. Each source rejects
+invalid indices, duplicate physical identities, duplicate secret references,
+and ARNs outside the saved account/region or RDS-managed namespace. Historical
+secret generations are retained in the owner-owned mode-0600 cleanup manifest
+across rotations and failed retries. They are used only with `DescribeSecret`
+to prove absence; the cleanup scripts do not delete RDS-managed secrets.
+This retained history can contain more than four ARNs while the physical shard
+cardinality remains four. Native Terraform captures still validate at most four
+current shard secrets before merging with the saved history.

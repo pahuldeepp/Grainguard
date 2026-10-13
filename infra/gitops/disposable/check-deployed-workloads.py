@@ -80,7 +80,7 @@ def inputs(cell, release, contract):
             "gitops_revision", "deployment_image_digests", "migration_image_digests",
             "migration_gate_image_digest", "migration_sql_image_digest", "ml_synthetic_enabled",
             "ml_synthetic_scorer_image_digest", "managed_dex_enabled",
-            "membership_acceptance_enabled", "clickhouse_image_digest"} or
+            "membership_acceptance_enabled", "clickhouse_image_digest", "data_plane_image_digests", "cassandra_image_digest"} or
             not isinstance(release.get("ml_synthetic_enabled"), bool) or
             not isinstance(release.get("managed_dex_enabled"), bool) or
             not isinstance(release.get("membership_acceptance_enabled"), bool) or
@@ -89,6 +89,9 @@ def inputs(cell, release, contract):
             not isinstance(release["deployment_image_digests"], dict) or set(release["deployment_image_digests"]) != expected or
             not isinstance(release["migration_image_digests"], dict) or set(release["migration_image_digests"]) != migration_owners):
         raise ValueError("invalid exact-revision image inventory")
+    data_images = release["data_plane_image_digests"]
+    if not isinstance(data_images, dict) or set(data_images) != {"pgbouncer", "kafka-topics", "kafka-connect", "connector-registration", "redis"}:
+        raise ValueError("data-plane acceptance requires the exact five owned digest inputs")
     clickhouse_image = release["clickhouse_image_digest"]
     clickhouse_ghcr = "ghcr.io/pahuldeepp/grainguard/clickhouse"
     clickhouse_ecr = f"{cell['account_id']}.dkr.ecr.{cell['region']}.amazonaws.com/greenguard/{cell['environment']}/cell-{hashlib.sha256(cell['cluster_name'].encode()).hexdigest()[:16]}/clickhouse"
@@ -114,6 +117,8 @@ def inputs(cell, release, contract):
     expected_images["migration-gate"] = release["migration_gate_image_digest"]
     expected_images["migration-sql"] = release["migration_sql_image_digest"]
     expected_images["clickhouse"] = clickhouse_image
+    expected_images["cassandra"] = release["cassandra_image_digest"]
+    expected_images.update(data_images)
     ecr_scope = f"greenguard/{cell['environment']}/cell-{hashlib.sha256(cell['cluster_name'].encode()).hexdigest()[:16]}"
     for job in acceptance_jobs:
         for image_name in job["images"]:
@@ -162,7 +167,7 @@ def readiness(snapshot, release, contract):
     if release.get("ai_runtime_enabled", False):
         expected_application_names.update({"greenguard-ai-runtime", "greenguard-ai-database-bootstrap"})
     if release["managed_dex_enabled"]:
-        expected_application_names.update({"greenguard-managed-dex", "greenguard-live-acceptance-probes"})
+        expected_application_names.add("greenguard-managed-dex")
     for name in sorted(expected_application_names):
         if application_names.count(name) != 1:
             failures.append(f"{name}: expected exactly one cell-scoped Argo Application")
@@ -497,6 +502,8 @@ def readiness(snapshot, release, contract):
             failures.append(f"{name}: expected exactly one completed acceptance Job")
             continue
         job = selected[0]
+        if "greenguard.io/acceptance-probe" in selector and job.get("metadata", {}).get("labels", {}).get("greenguard.io/acceptance-revision") != release["gitops_revision"]:
+            failures.append(f"{name}: acceptance Job revision differs from the exact release")
         spec = job.get("spec", {})
         template = spec.get("template", {}) if isinstance(spec, dict) else {}
         pod_spec = template.get("spec", {}) if isinstance(template, dict) else {}
@@ -510,6 +517,7 @@ def readiness(snapshot, release, contract):
             "migration-gate": "migration_gate_image_digest",
             "migration-sql": "migration_sql_image_digest",
             "clickhouse": "clickhouse_image_digest",
+            "cassandra": "cassandra_image_digest",
         }
         tool_names = acceptance_job.get("images", [])
         if not isinstance(tool_names, list):
@@ -519,6 +527,8 @@ def readiness(snapshot, release, contract):
         for tool in tool_names:
             if tool in image_fields:
                 expected_images.add(release[image_fields[tool]])
+            elif tool in release["data_plane_image_digests"]:
+                expected_images.add(release["data_plane_image_digests"][tool])
             elif tool in release["deployment_image_digests"]:
                 expected_images.add(release["deployment_image_digests"][tool])
             elif tool.startswith("migration-") and tool.removeprefix("migration-") in release["migration_image_digests"]:
@@ -526,7 +536,7 @@ def readiness(snapshot, release, contract):
             else:
                 failures.append(f"{name}: acceptance image is absent from the immutable release inventory")
         actual_images = {container.get("image") for container in [*init, *containers]}
-        if not expected_images.issubset(actual_images):
+        if expected_images != actual_images:
             failures.append(f"{name}: acceptance tools differ from immutable release inputs")
         status = job.get("status", {})
         conditions = status.get("conditions", []) if isinstance(status, dict) else []

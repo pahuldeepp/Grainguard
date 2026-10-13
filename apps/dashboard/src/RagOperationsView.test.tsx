@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { RagOperationsView } from "./RagOperationsView";
@@ -242,3 +249,95 @@ test.each([
     client.clear();
   },
 );
+
+test.each(["documents", "retrieval", "traces"] as const)(
+  "retains %s row identity across reordered snapshots and changed status",
+  async (section) => {
+    const first = {
+      document_id: "doc-a",
+      version: 1,
+      request_id: "request-a",
+      status: "pending",
+    };
+    const second = {
+      document_id: "doc-b",
+      version: 2,
+      request_id: "request-b",
+      status: "ready",
+    };
+    const client = snapshotView(section, { items: [first, second] });
+    const name = section === "documents" ? "doc-a" : "request-a";
+    const originalRow = (await screen.findByText(name)).closest("tr");
+    await act(async () => {
+      client.setQueryData(["rag-operations", section, "tenant:user"], {
+        items: [second, { ...first, status: "updated" }],
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByText(name).closest("tr")?.textContent).toContain(
+        "updated",
+      ),
+    );
+    const updatedRow = screen.getByText(name).closest("tr");
+    expect(updatedRow).toBe(originalRow);
+    expect(updatedRow?.textContent).toContain("updated");
+    expect(screen.getAllByRole("row")[2]).toBe(originalRow);
+    client.clear();
+  },
+);
+
+test("renders duplicate and sparse RAG records without key collisions or private fields", async () => {
+  const warn = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    const client = snapshotView("retrieval", {
+      items: [
+        { request_id: "same-request", status: "ok", at: 1e20 },
+        { request_id: "same-request", status: "failed" },
+        { question: "PRIVATE QUESTION" },
+        { answer: "PRIVATE ANSWER" },
+        null,
+      ],
+    });
+    const table = await screen.findByRole("table", {
+      name: "Retrieval records",
+    });
+    expect(screen.getAllByRole("row")).toHaveLength(6);
+    expect(table.textContent).not.toContain("PRIVATE");
+    expect(table.textContent).not.toContain("Invalid Date");
+    expect(screen.getAllByText("same-request")).toHaveLength(2);
+    expect(
+      warn.mock.calls.some((args) => String(args[0]).includes("same key")),
+    ).toBe(false);
+    client.clear();
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("shows the operator access error and unavailable empty state", async () => {
+  const api = {
+    snapshot: vi.fn().mockRejectedValue(new Error("operator_access_required")),
+  } as unknown as RagOperationsApi;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <RagOperationsView
+          api={api}
+          sessionId="tenant:user"
+          section="documents"
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(screen.getByRole("status").textContent).toBe(
+    "Loading RAG operations…",
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "RAG operations are available to operators and administrators.",
+  );
+  expect(screen.getByText("Documents data is unavailable.")).toBeTruthy();
+  client.clear();
+});

@@ -22,7 +22,8 @@ resource "terraform_data" "cell_scope" {
 # before it deletes the cluster and network they depend on:
 #   - the CDK serverless stack for this environment (non-prod stacks use DESTROY);
 #   - load balancers and volumes created by Kubernetes controllers, which would
-#     otherwise block VPC deletion and keep billing.
+#     otherwise block VPC deletion and keep billing;
+#   - EC2 instances and launch templates created by Karpenter.
 # Terraform destroys this resource first because it depends on the cluster,
 # node groups and NAT routes, so kubectl and the AWS APIs are still reachable.
 # If cleanup fails, destroy stops before deleting anything else; fix and rerun.
@@ -66,6 +67,20 @@ resource "terraform_data" "pre_destroy_cleanup" {
     helm_release.aws_load_balancer_controller,
     helm_release.keda,
     helm_release.argo_rollouts,
+    helm_release.karpenter,
+    helm_release.karpenter_nodepools,
+    aws_iam_role.karpenter_controller,
+    aws_iam_role_policy.karpenter_controller,
+    aws_eks_pod_identity_association.karpenter,
+    aws_iam_role.karpenter_node,
+    aws_iam_role_policy_attachment.karpenter_node,
+    aws_iam_instance_profile.karpenter_node,
+    aws_eks_access_entry.karpenter_node,
+    aws_sqs_queue.karpenter_interruption,
+    aws_sqs_queue_policy.karpenter_interruption,
+    aws_cloudwatch_event_rule.karpenter_interruption,
+    aws_cloudwatch_event_target.karpenter_interruption,
+    aws_ec2_tag.karpenter_cluster_security_group,
 
     terraform_data.destroy_inventory_sentinel,
     aws_iam_role.alb_controller,

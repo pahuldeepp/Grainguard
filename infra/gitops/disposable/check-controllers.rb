@@ -14,7 +14,7 @@ archive_dir = File.expand_path('../../helm/controller-charts', directory)
 lock = JSON.parse(File.read(File.join(archive_dir, 'lock.json')))
 abort 'unsupported controller archive lock' unless lock.fetch('schemaVersion') == 1
 archives = lock.fetch('archives').to_h { |entry| [entry.fetch('name'), entry] }
-expected = %w[aws-load-balancer-controller istio-base istiod istio-ingressgateway keda argo-rollouts argocd]
+expected = %w[aws-load-balancer-controller istio-base istiod istio-ingressgateway keda karpenter argo-rollouts argocd]
 names = controllers.map { |controller| controller.fetch('name') }
 abort 'controller order drifted' unless names == expected
 abort 'duplicate controller' unless names.uniq == names
@@ -26,7 +26,9 @@ controllers.each do |controller|
   abort "#{controller['name']}: no prerequisites" if controller.fetch('requires').empty?
   archive = archives.fetch(controller.fetch('name'))
   abort "#{controller['name']}: archive version drift" unless archive.fetch('version') == controller.fetch('version')
-  abort "#{controller['name']}: archive source must use HTTPS" unless archive.fetch('source').start_with?('https://')
+  source = archive.fetch('source')
+  abort "#{controller['name']}: archive source must use HTTPS or an OCI registry" unless source.start_with?('https://', 'oci://')
+  abort "#{controller['name']}: OCI archive needs its manifest digest" if source.start_with?('oci://') && !archive['ociDigest'].to_s.match?(/\Asha256:[a-f0-9]{64}\z/)
   path = File.join(archive_dir, archive.fetch('file'))
   abort "#{controller['name']}: archive hash drift" unless File.file?(path) && Digest::SHA256.file(path).hexdigest == archive.fetch('sha256')
   metadata, error, status = Open3.capture3('helm', 'show', 'chart', path)
@@ -35,7 +37,7 @@ controllers.each do |controller|
   abort "#{controller['name']}: archive metadata drift" unless chart.fetch('name') == controller.fetch('chart') && chart.fetch('version') == controller.fetch('version')
 end
 abort 'missing load balancer controller values' unless File.file?(File.join(directory, 'aws-load-balancer-controller-values.yaml'))
-terraform = File.read(File.join(directory, '../../terraform/disposable/controllers.tf'))
+terraform = %w[controllers.tf karpenter.tf].map { |file| File.read(File.join(directory, '../../terraform/disposable', file)) }.join("\n")
 releases = terraform.scan(/^resource "helm_release" "([^"]+)" \{(.*?)^\}/m).to_h
 controllers.each do |controller|
   resource_name = controller.fetch('name').tr('-', '_')
@@ -51,6 +53,9 @@ end
 abort 'Terraform does not own Argo CD release' unless terraform.include?('resource "helm_release" "argocd"')
 teardown = File.read(File.join(directory, '../../terraform/disposable/teardown.tf'))
 abort 'controller cleanup missing from destroy graph' unless teardown.include?('helm_release.argocd')
+controllers.each do |controller|
+  abort "#{controller['name']}: release missing from destroy graph" unless teardown.include?("helm_release.#{controller.fetch('name').tr('-', '_')},")
+end
 puts "Controller inventory valid: #{controllers.length} ordered releases."
 if ARGV == ['--ready']
   unpinned = controllers.reject { |controller| controller['version'].is_a?(String) && controller['version'].match?(/\A\d+\.\d+\.\d+\z/) }

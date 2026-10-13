@@ -3,6 +3,11 @@
 {{- if not (regexMatch "^[a-f0-9]{40}$" .Values.revision) }}{{ fail "live acceptance requires an exact Git revision" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($probes.clickhouseImage | default "")) }}{{ fail "live acceptance requires the pinned ClickHouse client image" }}{{ end }}
 {{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" ($probes.tenantControlPlaneImage | default "")) }}{{ fail "live acceptance requires the pinned tenant-control-plane image" }}{{ end }}
+{{- if not (and .Values.dataPlane.enabled .Values.searchPlane.enabled .Values.cassandraPlane.enabled .Values.clickhousePlane.enabled) }}{{ fail "data acceptance requires Kafka/Redis, OpenSearch, Cassandra and ClickHouse Applications enabled" }}{{ end }}
+{{- if ne $probes.clickhouseImage .Values.clickhousePlane.image }}{{ fail "ClickHouse acceptance must reuse the owned server image" }}{{ end }}
+{{- range $key := list "kafka-topics" "redis" }}
+{{- if not (regexMatch "^[a-z0-9.-]+(?::[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$" (index $.Values.dataPlane.images $key | default "")) }}{{ fail (printf "data acceptance requires owned %s image" $key) }}{{ end }}
+{{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -20,6 +25,10 @@ spec:
     helm:
       releaseName: greenguard-live-acceptance-probes
       valuesObject:
+        dataPlaneEnabled: true
+        kafkaImage: {{ index .Values.dataPlane.images "kafka-topics" | quote }}
+        redisImage: {{ index .Values.dataPlane.images "redis" | quote }}
+        cassandraImage: {{ .Values.cassandraPlane.image | quote }}
         clickhouseEnabled: true
         membershipEnabled: {{ $probes.membershipEnabled | default false }}
         namespace: greenguard

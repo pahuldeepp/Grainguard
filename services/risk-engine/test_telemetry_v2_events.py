@@ -38,6 +38,46 @@ class TelemetryV2ParserTest(unittest.TestCase):
             with self.subTest(payload=event["payload"]), self.assertRaises(InvalidEvent):
                 self.parse_event(event)
 
+    def test_scalar_and_sensor_physical_bounds_and_errors(self):
+        cases = (
+            ("temperature_c", "Cel", (-80, 120), (-81, 121)),
+            ("relative_humidity_percent", "%", (0, 100), (-1, 101)),
+            ("co2_ppm", "ppm", (0, 1e100), (-1,)),
+            ("grain_moisture_percent", "%", (0, 100), (-1, 101)),
+        )
+        for metric, unit, valid, invalid in cases:
+            for sensor in (False, True):
+                for value in (*valid, *invalid, True, float("inf"), float("nan")):
+                    with self.subTest(metric=metric, sensor=sensor, value=value):
+                        self._assert_physical_value(metric, unit, value, sensor, valid, invalid)
+
+    def _physical_event(self, metric, unit, value, sensor):
+        event = copy.deepcopy(self.event)
+        payload = event["payload"]
+        if sensor:
+            observation = payload["sensor_observations"][0]
+            observation.update(metric=metric, unit=unit, value=value)
+            payload["sensor_observations"] = [observation]
+        else:
+            payload["measurements"] = {metric: value}
+            payload["measurement_units"] = {metric: unit}
+        return event
+
+    def _assert_physical_value(self, metric, unit, value, sensor, valid, invalid):
+        event = self._physical_event(metric, unit, value, sensor)
+        if value in valid and not isinstance(value, bool):
+            self.parse_event(event)
+            return
+        if value in invalid and not isinstance(value, bool):
+            detail = ("sensor observation is outside its physical range" if sensor
+                      else f"{metric} is outside its physical range")
+        else:
+            detail = ("sensor observation value must be finite" if sensor
+                      else f"{metric} must be finite numeric")
+        with self.assertRaises(InvalidEvent) as raised:
+            self.parse_event(event)
+        self.assertEqual(str(raised.exception), f"invalid_event: {detail}")
+
     def test_v1_and_v2_topic_schema_versions_are_not_interchangeable(self):
         with self.assertRaises(InvalidEvent):
             self.parse_event(self.event, TELEMETRY_TOPIC)

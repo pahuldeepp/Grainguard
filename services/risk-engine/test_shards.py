@@ -91,14 +91,16 @@ class ShardTest(unittest.TestCase):
         invalid = manifest()
         invalid["shards"]["s4"]["primaryUrl"] = invalid["shards"]["s1"]["primaryUrl"].replace(":p@", ":other@")
         opened = []
+        fetch_route = lambda t: route()
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            ShardedDatabase(invalid, lambda t: route(), allow_loopback=True, database=opened.append)
+            ShardedDatabase(invalid, fetch_route, allow_loopback=True, database=opened.append)
         self.assertEqual(opened, [])
         for bad in ("?sslmode=disable", "?sslmode=verify-full", "?sslmode=verify-full&sslrootcert=/ca&options=-c%20role=admin"):
             invalid = copy.deepcopy(manifest())
             invalid["shards"]["s4"]["primaryUrl"] = "postgresql://risk_app:p@db/greenguard_risk" + bad
+            fetch_route = lambda t: route()
             with self.assertRaises(ValueError):
-                ShardedDatabase(invalid, lambda t: route(), database=opened.append)
+                ShardedDatabase(invalid, fetch_route, database=opened.append)
         self.assertEqual(opened, [])
 
     def test_explicit_transport_ledger_and_all_shard_health_close(self):
@@ -118,12 +120,14 @@ class ShardTest(unittest.TestCase):
         self.assertTrue(db.ping(), "inactive fixture endpoints must not block local readiness")
         with self.assertRaisesRegex(StoreError, "inactive shard"):
             with db.transaction(TENANT):
-                self.fail("authority routed to an inactive local shard")
+                pass
+        self.assertTrue(all(not primary.calls for primary in db.databases.values()))
 
         for active_ids in ([], ["s1", "s1"], ["s5"], ["s2"]):
+            registry = manifest()
+            fetch_route = lambda tenant: route()
             with self.assertRaisesRegex(ValueError, "active shard override"):
-                ShardedDatabase(manifest(), lambda tenant: route(), allow_loopback=True,
-                                active_ids=active_ids, database=FakeDatabase)
+                ShardedDatabase(registry, fetch_route, allow_loopback=True, active_ids=active_ids, database=FakeDatabase)
         normalized = ShardedDatabase(manifest(), lambda tenant: route(), allow_loopback=True,
                                      active_ids=[" s1 "], database=FakeDatabase)
         self.assertTrue(normalized.ping())
@@ -132,9 +136,9 @@ class ShardTest(unittest.TestCase):
             entry["primaryUrl"] = entry["primaryUrl"].replace(
                 "127.0.0.1", "db.example"
             ).replace("sslmode=disable", "sslmode=verify-full&sslrootcert=/ca")
+        fetch_route = lambda tenant: route()
         with self.assertRaisesRegex(ValueError, "active shard override"):
-            ShardedDatabase(remote, lambda tenant: route(), allow_loopback=True,
-                            active_ids=["s1"], database=FakeDatabase)
+            ShardedDatabase(remote, fetch_route, allow_loopback=True, active_ids=["s1"], database=FakeDatabase)
 
     def test_http_requires_tls_or_explicit_loopback_or_mesh(self):
         for url in ("http://control", "https://user:pass@control", "https://control?override=1", "ftp://control"):

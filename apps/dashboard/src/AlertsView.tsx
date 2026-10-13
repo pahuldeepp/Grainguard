@@ -29,6 +29,39 @@ const filters = [
 type Filter = (typeof filters)[number]["value"];
 const countable = ["open", "acknowledged", "resolved"] as const;
 
+function selectedAlertFor(
+  alertId: string | undefined,
+  acknowledgedHere: ReadonlySet<string>,
+  items: AlertView[],
+  seen: ReadonlyMap<string, AlertView>,
+): AlertView | undefined {
+  if (!alertId) return undefined;
+  if (acknowledgedHere.has(alertId)) return seen.get(alertId);
+  return items.find((alert) => alert.alertId === alertId) ?? seen.get(alertId);
+}
+
+function emptyAlertsTitle(state: Filter): string {
+  if (state === "open") return "No open alerts. Bins are within limits.";
+  const qualifier = state === "all" ? "" : `${state} `;
+  return `No ${qualifier}alerts in this view.`;
+}
+
+function historyWarning(status: string, reasonCode?: string | null): string {
+  if (reasonCode === "incomplete_lifecycle")
+    return "Some alert lifecycle transitions are missing from the stored history. The transitions still available are shown below.";
+  const reason = reasonCode ? ` (${reasonCode})` : "";
+  return `History is ${status}${reason}.`;
+}
+
+function historyActorLabel(actor: {
+  isYou: boolean;
+  handle?: string | null;
+}): string {
+  if (actor.isYou) return " · You";
+  if (actor.handle) return ` · ${actor.handle}`;
+  return " · Team member";
+}
+
 function isFilter(value: string | null): value is Filter {
   return filters.some((f) => f.value === value);
 }
@@ -177,11 +210,12 @@ export function AlertsView({
   });
 
   const items = sortAlerts(page.data?.items ?? []);
-  const selected = alertId
-    ? acknowledgedHere.current.has(alertId)
-      ? seen.current.get(alertId)
-      : (items.find((a) => a.alertId === alertId) ?? seen.current.get(alertId))
-    : undefined;
+  const selected = selectedAlertFor(
+    alertId,
+    acknowledgedHere.current,
+    items,
+    seen.current,
+  );
   const inDetail = Boolean(alertId);
 
   // Bring the confirmation into view: the button that caused it may be far down the page.
@@ -284,7 +318,7 @@ export function AlertsView({
             <span>{error}</span>
           </p>
         )}
-        {selected ? (
+        {selected && (
           <AlertDetail
             alert={selected}
             api={api}
@@ -296,14 +330,17 @@ export function AlertsView({
                 : null
             }
           />
-        ) : page.isPending ? (
+        )}
+        {!selected && page.isPending && (
           <Loading label="Loading alert…" rows={2} />
-        ) : page.isError ? (
+        )}
+        {!selected && !page.isPending && page.isError && (
           <ErrorState
             message="Alerts are temporarily unavailable."
             onRetry={() => void page.refetch()}
           />
-        ) : (
+        )}
+        {!selected && !page.isPending && !page.isError && (
           <>
             <PageHeader id="alerts-title" title="Alert not found" />
             <EmptyState title="This alert is not in the current list.">
@@ -325,7 +362,9 @@ export function AlertsView({
       return ` (${total}${more ? "+" : ""})`;
     }
     const data = counts[countable.indexOf(name)].data;
-    return data ? ` (${data.items.length}${data.nextCursor ? "+" : ""})` : "";
+    if (!data) return "";
+    const more = data.nextCursor ? "+" : "";
+    return ` (${data.items.length}${more})`;
   };
 
   return (
@@ -369,13 +408,7 @@ export function AlertsView({
       )}
       {page.isSuccess &&
         (items.length === 0 ? (
-          <EmptyState
-            title={
-              state === "open"
-                ? "No open alerts. Bins are within limits."
-                : `No ${state === "all" ? "" : `${state} `}alerts in this view.`
-            }
-          >
+          <EmptyState title={emptyAlertsTitle(state)}>
             {state === "open"
               ? "New alerts appear here when a bin crosses a risk limit."
               : "Try another state."}
@@ -549,9 +582,10 @@ function AlertDetail({
             {history.data.source.status !== "ok" &&
               history.data.source.status !== "empty" && (
                 <Banner kind="warning">
-                  {history.data.source.reasonCode === "incomplete_lifecycle"
-                    ? "Some alert lifecycle transitions are missing from the stored history. The transitions still available are shown below."
-                    : `History is ${history.data.source.status}${history.data.source.reasonCode ? ` (${history.data.source.reasonCode})` : ""}.`}
+                  {historyWarning(
+                    history.data.source.status,
+                    history.data.source.reasonCode,
+                  )}
                 </Banner>
               )}
             {!history.data.complete && (
@@ -569,11 +603,7 @@ function AlertDetail({
                       {transition.type
                         .replaceAll("_", " ")
                         .replace(/^./, (first) => first.toUpperCase())}
-                      {transition.actor.isYou
-                        ? " · You"
-                        : transition.actor.handle
-                          ? ` · ${transition.actor.handle}`
-                          : " · Team member"}
+                      {historyActorLabel(transition.actor)}
                     </span>
                     <span className="when">
                       <When iso={transition.occurredAt} />

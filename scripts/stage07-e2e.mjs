@@ -24,6 +24,10 @@ import {
   writeServiceRegistry,
 } from "./placement-fixture.mjs";
 import { composeContainerName } from "./ci-compose-project.mjs";
+import {
+  createStage07ProcessMonitor,
+  Stage07ProcessFailure,
+} from "./stage07-process-health.mjs";
 
 process.loadEnvFile(".env");
 const { Kafka, logLevel } = kafkaJs;
@@ -129,6 +133,7 @@ function start(name, command, args, cwd, env = {}) {
     env: { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
   });
+  p.stage07Name = name;
   let log = "";
   p.stderr.on("data", (chunk) => {
     log = (log + chunk.toString()).slice(-5000);
@@ -155,6 +160,7 @@ async function waitFor(predicate, label, timeoutMs = 120_000) {
       const value = await predicate();
       if (value) return value;
     } catch (error) {
+      if (error instanceof Stage07ProcessFailure) throw error;
       last = error;
     }
     await delay(300);
@@ -643,12 +649,6 @@ function startParticipant(name) {
   return procs[name];
 }
 const exited = (p) => p.exitCode !== null || p.signalCode !== null;
-async function kill9(p) {
-  if (exited(p)) return;
-  const closed = new Promise((resolve) => p.once("close", resolve));
-  p.kill("SIGKILL");
-  await closed;
-}
 async function restart(name) {
   if (name === "saga") startSaga(`saga-${Date.now()}`);
   else startParticipant(name);
@@ -674,11 +674,20 @@ async function provision(item, device = item.device) {
   assert.equal(response.status, 202, JSON.stringify(response));
   return response.body.SagaID;
 }
-async function waitState(item, sagaID, states, label, timeoutMs = 120_000) {
+async function waitState(
+  item,
+  sagaID,
+  states,
+  label,
+  timeoutMs = 120_000,
+  assertRunning,
+) {
   const wanted = [states].flat();
   return waitFor(
     async () => {
+      assertRunning?.();
       const state = await status(item, sagaID);
+      assertRunning?.();
       return wanted.includes(state.State) && state;
     },
     label,
@@ -884,25 +893,41 @@ async function gateKill() {
   const sagaID = await provision(item);
   const kills = [];
   const order = ["saga", "hardware", "inventory", "telemetry"];
-  // SIGKILL every service at each newly committed saga version: just after the
-  // transition/outbox commit and around its command publication.
-  const end = Date.now() + 240_000;
-  let seen = 0;
-  while (Date.now() < end) {
-    const state = await status(item, sagaID);
-    if (state.State === "active") break;
-    if (state.Version !== seen) {
-      seen = state.Version;
-      for (const name of order) {
-        kills.push(`${name}@${state.State}/v${state.Version}`);
-        await kill9(procs[name]);
-        await restart(name);
+  const monitor = createStage07ProcessMonitor(procs, logs);
+  try {
+    // SIGKILL every service at each newly committed saga version. Unexpected
+    // exits remain recorded throughout each awaited kill and replacement.
+    const end = Date.now() + 240_000;
+    let seen = 0;
+    while (Date.now() < end) {
+      monitor.assertRunning("SIGKILL rotation");
+      const state = await status(item, sagaID);
+      const context = `SIGKILL rotation state=${state.State}/v${state.Version}`;
+      monitor.assertRunning(context);
+      if (state.State === "active") break;
+      if (state.Version !== seen) {
+        seen = state.Version;
+        for (const name of order) {
+          await monitor.rotate(name, restart, context);
+          kills.push(`${name}@${state.State}/v${state.Version}`);
+        }
       }
+      await delay(150);
     }
-    await delay(150);
+    await waitState(
+      item,
+      sagaID,
+      "active",
+      "active after SIGKILL rotation",
+      120_000,
+      () => monitor.assertRunning("active after SIGKILL rotation"),
+    );
+    const dup = await assertNoDuplicates(item, sagaID);
+    monitor.assertRunning("SIGKILL rotation final duplicate check");
+    out.kill = { kills, dup };
+  } finally {
+    monitor.close();
   }
-  await waitState(item, sagaID, "active", "active after SIGKILL rotation");
-  out.kill = { kills, dup: await assertNoDuplicates(item, sagaID) };
 }
 async function gateOutage() {
   const item = gate.outage;

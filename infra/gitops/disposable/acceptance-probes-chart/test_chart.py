@@ -84,9 +84,7 @@ class ChartContracts(unittest.TestCase):
         clickhouse = jobs["clickhouse-roundtrip"]
         ch_container = clickhouse["spec"]["template"]["spec"]["containers"][0]
         self.assertEqual(ch_container["image"], fixture()["clickhouseImage"])
-        self.assertIn("--multiquery", ch_container["args"][0])
-        self.assertIn('--session_id "gg-acceptance-${HOSTNAME}"', ch_container["args"][0])
-        self.assertIn("--queries-file /probe/clickhouse-roundtrip.sql", ch_container["args"][0])
+        self.assertIn("/probe/clickhouse-roundtrip.sh", ch_container["args"][0])
         self.assertEqual(ch_container["env"][1]["valueFrom"]["secretKeyRef"], {
             "name": "greenguard-telemetry-clickhouse-config", "key": "CLICKHOUSE_PASSWORD"})
 
@@ -107,10 +105,10 @@ class ChartContracts(unittest.TestCase):
         self.assertNotIn("DEX_FIRST_ADMIN_PASSWORD_HASH", rendered)
 
         source = next(obj for obj in objects if obj["kind"] == "ConfigMap")
-        sql = source["data"]["clickhouse-roundtrip.sql"]
+        sql = source["data"]["clickhouse-roundtrip.sh"]
         self.assertIn("CREATE TEMPORARY TABLE", sql)
         self.assertIn("INSERT INTO", sql)
-        self.assertIn("throwIf", sql)
+        self.assertIn("DROP TEMPORARY TABLE", sql)
         script = source["data"]["tenant-membership-readback.mjs"]
         self.assertIn("verifySignature", script)
         self.assertIn("claims.sub", script)
@@ -121,14 +119,14 @@ class ChartContracts(unittest.TestCase):
         values["membershipEnabled"] = False
         objects = render(values)
         names = {obj["metadata"]["name"] for obj in objects if obj["kind"] == "NetworkPolicy"}
-        self.assertEqual(names, {"greenguard-live-acceptance-egress", "greenguard-clickhouse-acceptance-ingress"})
+        self.assertEqual(names, {"greenguard-live-acceptance-egress", "greenguard-clickhouse-acceptance-ingress", "acceptance-clickhouse-roundtrip-egress"})
 
     def test_policies_are_narrow_and_membership_rule_is_get_only(self):
         objects = render(fixture())
         egress = next(obj for obj in objects if obj["kind"] == "NetworkPolicy"
                       and obj["metadata"]["name"] == "greenguard-live-acceptance-egress")
-        self.assertEqual(len(egress["spec"]["egress"]), 3)
-        auth = next(obj for obj in objects if obj["kind"] == "AuthorizationPolicy")
+        self.assertEqual(len(egress["spec"]["egress"]), 2)
+        auth = next(obj for obj in objects if obj["kind"] == "AuthorizationPolicy" and obj["metadata"]["name"] == "tenant-control-plane-acceptance-readback")
         self.assertEqual(auth["spec"]["rules"][0]["to"][0]["operation"], {
             "methods": ["GET"], "paths": ["/v1/internal/memberships"]})
 

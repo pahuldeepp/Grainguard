@@ -1,0 +1,40 @@
+{{- include "karpenter-nodepools.validate" . }}
+{{- if or (ne (toString .Values.pools.compute.cpuLimit) "0") (ne (toString .Values.pools.general.cpuLimit) "0") }}
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: greenguard-disposable
+  labels:
+    greenguard.io/cell: {{ .Values.cell | quote }}
+spec:
+  instanceProfile: {{ .Values.instanceProfile | quote }}
+  amiSelectorTerms:
+    - alias: {{ .Values.amiAlias | quote }}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ .Values.cell | quote }}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ .Values.cell | quote }}
+  associatePublicIPAddress: false
+  metadataOptions:
+    httpEndpoint: enabled
+    httpTokens: required
+    httpPutResponseHopLimit: 1
+    httpProtocolIPv6: disabled
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: {{ .Values.rootVolumeSize | quote }}
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  # Same tags the Terraform provider applies, so teardown inventory by
+  # Project/Environment also sees Karpenter instances, volumes and templates.
+  tags:
+    Project: GreenGuard
+    Environment: {{ .Values.environment | quote }}
+    Cell: {{ .Values.cell | quote }}
+    Lifecycle: Disposable
+    ManagedBy: Karpenter
+{{- end }}

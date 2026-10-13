@@ -34,6 +34,30 @@ membership file, the existing signed
 `tenant_id`/`roles` test-issuer path remains available. Stage 09 replaces the
 local fixture with a durable membership authority and audit.
 
+When `AUTH_MEMBERSHIP_SOURCE=control-plane`, the membership Redis cluster seed
+list (`AUTH_MEMBERSHIP_REDIS_CLUSTER_NODES`) accepts `redis://` or `rediss://`
+URLs with a uniform authentication, TLS and connection-option profile. `rediss`
+verifies each announced node hostname with system trust roots and TLS 1.2 or
+newer, including when a fixture remaps its dial address. Mixed profiles,
+nonzero databases, replica-read routing, hidden additional seeds and TLS
+verification bypasses fail startup. The standalone Redis URL also rejects
+`skip_verify=true`. Credentials in URLs must be supplied through secret
+configuration, never committed.
+
+The membership consumer makes up to three total attempts for the same record
+(the initial attempt plus two retries) after a Redis apply or offset commit failure,
+with a two-second timeout per attempt and waits of 100 ms then 200 ms between
+attempts. Authorization and health checks return 503 while recovering and resume
+after a successful retry.
+Version-floor advancement and repeated commits are idempotent; no later record
+or offset advances during recovery. Exhausted retries or a fetch failure stop
+the consumer and close its Kafka client. Membership authorization then fails
+closed with 503 `membership_unavailable`, and `/healthz` also returns 503;
+restart the API after repairing the dependency. Malformed records receive an
+attempted discard commit with the same bounded retry policy. Valid negative
+or revoked membership retains the existing 401/403 denial behavior. Cached
+authorization is unavailable while the consumer is stopped.
+
 The Stage 07 transport worker (`go run ./cmd/worker`) publishes the durable
 `saga_command_outbox` to `greenguard.saga.commands.v1` and consumes definitive
 participant outcomes from `greenguard.saga.results.v1`. Both topics use

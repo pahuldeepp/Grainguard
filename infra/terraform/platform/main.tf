@@ -94,6 +94,8 @@ resource "aws_subnet" "private" {
     Cell                                        = local.cell_tags.Cell
     "kubernetes.io/role/internal-elb"           = "1"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+    # Karpenter's EC2NodeClass selects node subnets by this tag.
+    "karpenter.sh/discovery" = var.cluster_name
   }
 }
 

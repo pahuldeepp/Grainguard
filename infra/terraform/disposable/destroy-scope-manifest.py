@@ -9,6 +9,15 @@ import tempfile
 from pathlib import Path
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("cleanup manifest has duplicate JSON object keys")
+        result[key] = value
+    return result
+
+
 def validate_document(document):
     if not isinstance(document, dict) or set(document) != {
         "schema", "region", "environment", "cluster_name", "account_id",
@@ -24,7 +33,10 @@ def validate_document(document):
             or not isinstance(account, str) or not re.fullmatch(r"[0-9]{12}", account)):
         raise ValueError("cleanup manifest cell scope is invalid")
     secrets = document.get("shard_master_secret_arns")
-    if (not isinstance(secrets, list) or len(secrets) > 4
+    # This is retained read-only ARN history, not a count of live databases.
+    # capture-shard-secrets.py validates physical s1..s4 identities separately;
+    # generations captured by a mode-0600 same-cell manifest survive retries.
+    if (not isinstance(secrets, list)
             or any(not isinstance(arn, str) for arn in secrets)
             or len(set(secrets)) != len(secrets)):
         raise ValueError("cleanup manifest shard secret inventory is invalid")
@@ -35,7 +47,7 @@ def validate_document(document):
     if master:
         arns.append(master)
     if any(not isinstance(arn, str) or not re.fullmatch(
-            rf"arn:aws[a-z-]*:secretsmanager:{re.escape(region)}:{account}:secret:.+", arn)
+            rf"arn:aws[a-z-]*:secretsmanager:{re.escape(region)}:{account}:secret:[A-Za-z0-9/_+=.@!-]+", arn)
             for arn in arns):
         raise ValueError("cleanup manifest secret ARN scope is invalid")
     return document
@@ -50,7 +62,7 @@ def read_manifest(path):
             raise ValueError("cleanup manifest must be an owner-owned mode-0600 regular file")
         with os.fdopen(descriptor, "r") as stream:
             descriptor = -1
-            document = json.load(stream)
+            document = json.load(stream, object_pairs_hook=unique_object)
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -110,6 +122,11 @@ def main(argv):
             secrets = json.loads(os.environ.get("GG_SHARD_MASTER_SECRET_ARNS", "[]"))
         except json.JSONDecodeError as error:
             raise ValueError("shard secret inventory is not valid JSON") from error
+        # Native Terraform supplies the four current physical shards, not
+        # the manifest's retained historical generations. Validate that
+        # source separately, before save merges it with prior read-only ARNs.
+        if not isinstance(secrets, list) or len(secrets) > 4:
+            raise ValueError("native physical shard inventory must contain at most four secrets")
         save(path, {
             "schema": 1,
             "region": os.environ.get("GG_REGION", ""),

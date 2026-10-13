@@ -11,6 +11,12 @@ import type {
 } from "./read-api";
 import { EmptyState, ErrorState, Glyph, Loading, PageHeader } from "./ui";
 
+const trendWindowLabels = {
+  H1: "1 hour",
+  H6: "6 hours",
+  H24: "24 hours",
+} as const;
+
 const metricNames: Record<string, { label: string; unit: string }> = {
   temperature_c: { label: "Temperature", unit: "°C" },
   relative_humidity_percent: { label: "Relative humidity", unit: "%" },
@@ -262,11 +268,7 @@ export function BinReadings({
                     aria-pressed={window === choice}
                     onClick={() => setWindow(choice)}
                   >
-                    {choice === "H1"
-                      ? "1 hour"
-                      : choice === "H6"
-                        ? "6 hours"
-                        : "24 hours"}
+                    {trendWindowLabels[choice]}
                   </button>
                 ))}
               </div>

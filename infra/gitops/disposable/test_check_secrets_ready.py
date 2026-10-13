@@ -90,13 +90,14 @@ class PreflightTests(unittest.TestCase):
             "greenguard-pgbouncer-auth": {"userlist.txt": "\"inventory_app\" \"dummy-hash\""},
             "greenguard-cdc-credentials": {"CDC_DB_PASSWORD": "dummy-cdc-password"},
             "greenguard-opensearch-admin": {"password": "dummy-search-admin"},
-            "greenguard-opensearch-clients": {"writer-password": "dummy-search-writer", "reader-password": "dummy-search-reader"},
+            "greenguard-opensearch-clients": {"writer-password": "dummy-search-writer", "reader-password": "dummy-search-reader", "acceptance-writer-password": "dummy-acceptance-writer", "acceptance-reader-password": "dummy-acceptance-reader"},
             "greenguard-opensearch-tls": {"ca.crt": "dummy-ca", "node.crt": "dummy-node-cert", "node.key": "dummy-node-key", "admin.crt": "dummy-admin-cert", "admin.key": "dummy-admin-key"},
             "greenguard-opensearch-ca": {"ca.crt": "-----BEGIN CERTIFICATE-----\ndummy\n-----END CERTIFICATE-----"},
             "greenguard-cassandra-auth": {"admin-password": "dummy-admin", "reader-password": "dummy-reader", "writer-password": "dummy-writer"},
             "greenguard-cassandra-tls": {"server.p12": base64.b64encode(b"dummy-p12").decode(), "keystore-password": "dummy-keystore", "ca.crt": "dummy-ca"},
             "greenguard-kafka-auth": {
                 **{key: base64.b64encode(b"dummy-p12").decode() for key in preflight.KAFKA_BINARY_KEYS},
+                "acceptance-client-jaas": 'org.apache.kafka.common.security.plain.PlainLoginModule required username="acceptance-probe" password="' + "a" * 48 + '";',
                 "broker-jaas": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"broker\" password=\"dummy\" user_broker=\"dummy\";",
                 "registry-kafka-jaas": "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"registry\" password=\"dummy\";",
                 "keystore-password": "dummy", "key-password": "dummy", "truststore-password": "dummy",
@@ -117,7 +118,7 @@ class PreflightTests(unittest.TestCase):
         self.values["greenguard-kafka-auth"]["broker-jaas"] += " " + " ".join(
             f'user_{name}="dummy"' for name in clients
         )
-        self.values["greenguard-kafka-auth"]["broker-jaas"] += ' user_billing-service="dummy-kafka-password"'
+        self.values["greenguard-kafka-auth"]["broker-jaas"] += ' user_billing-service="dummy-kafka-password" user_acceptance-probe="' + 'a' * 48 + '"'
         self.missing = set()
         self.kubernetes_overrides = {}
         self.account = "123456789012"
@@ -319,6 +320,23 @@ class PreflightTests(unittest.TestCase):
         status, output = self.run_preflight()
         self.assertEqual(status, 1)
         self.assertIn("runtime Secret is assigned to conflicting Kafka principals", output)
+
+    def test_acceptance_kafka_requires_exact_scoped_matching_jaas(self):
+        original = self.values["greenguard-kafka-auth"]["acceptance-client-jaas"]
+        for invalid in ["", original.replace('acceptance-probe', 'admin'), original.replace('a' * 48, 'b' * 48)]:
+            self.values["greenguard-kafka-auth"]["acceptance-client-jaas"] = invalid
+            with self.subTest(invalid=bool(invalid)):
+                self.assertEqual(self.run_preflight()[0], 1)
+        self.values["greenguard-kafka-auth"]["acceptance-client-jaas"] = original
+
+    def test_opensearch_acceptance_credentials_are_required_and_distinct(self):
+        original = dict(self.values["greenguard-opensearch-clients"])
+        for value in [{k: v for k, v in original.items() if k != "acceptance-reader-password"},
+                      {**original, "acceptance-reader-password": original["reader-password"]}]:
+            self.values["greenguard-opensearch-clients"] = value
+            with self.subTest(keys=set(value)):
+                self.assertEqual(self.run_preflight()[0], 1)
+        self.values["greenguard-opensearch-clients"] = original
 
     def test_broker_jaas_must_match_runtime_client(self):
         self.values["greenguard-kafka-auth"]["broker-jaas"] = self.values["greenguard-kafka-auth"]["broker-jaas"].replace('user_read-api="dummy"', 'user_read-api="wrong"')

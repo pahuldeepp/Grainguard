@@ -53,6 +53,9 @@ values = {
     'tenantControlPlaneImage' => digest,
     'membershipAudience' => 'greenguard-dashboard'
   },
+  'dataPlane' => {'enabled' => true, 'rdsHost' => 'central.example.rds.amazonaws.com', 'images' => %w[pgbouncer kafka-topics kafka-connect connector-registration redis].to_h { |name| [name, digest] }, 'secrets' => {'pgbouncerAuth' => 'greenguard-pgbouncer-auth', 'rdsCa' => 'greenguard-rds-ca', 'cdcCredentials' => 'greenguard-cdc-credentials'}},
+  'searchPlane' => {'enabled' => true, 'image' => digest, 'bootstrapImage' => digest},
+  'cassandraPlane' => {'enabled' => true, 'image' => digest, 'migratorImage' => digest, 'authSecret' => 'greenguard-cassandra-auth', 'tlsSecret' => 'greenguard-cassandra-tls', 'apiServerCIDR' => '10.100.0.1/32'},
   'observabilityImages' => %w[otel-collector prometheus grafana tempo loki].to_h { |name| [name, digest] },
   'clickhousePlane' => {'enabled' => true, 'image' => digest, 'storageClassName' => 'gp3', 'storageSize' => '20Gi', 'authSecret' => 'greenguard-telemetry-clickhouse-config', 'replayS3CIDRs' => %w[52.216.0.0/15 3.5.0.0/20]},
   'ownerMigrations' => {
@@ -132,7 +135,7 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
   abort "application chart failed: #{error}" unless status.success?
   apps = YAML.load_stream(rendered).compact
   actual = apps.map { |app| app.fetch('metadata').fetch('name').delete_prefix('greenguard-') }
-  expected = releases.map { |release| release.fetch('name') } + ['disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate', 'clickhouse', 'edge-routing', 'managed-dex', 'live-acceptance-probes']
+  expected = releases.map { |release| release.fetch('name') } + ['pgbouncer', 'kafka-topics', 'schema-registry', 'kafka-connect', 'connector-registration', 'opensearch', 'cassandra', 'disposable-data', 'observability', 'rds-bootstrap', 'owner-migrations', 'migration-gate', 'clickhouse', 'edge-routing', 'managed-dex', 'live-acceptance-probes']
   abort "application inventory drift: #{actual.sort} != #{expected.sort}" unless actual.sort == expected.sort
   apps.each do |app|
     spec = app.fetch('spec')
@@ -180,6 +183,22 @@ Tempfile.create(['greenguard-apps-', '.yaml']) do |file|
       clickhouse_values = source.dig('helm', 'valuesObject')
       abort 'ClickHouse values must preserve immutable image, persistent storage, and scoped credentials' unless
         clickhouse_values == values.fetch('clickhousePlane').reject { |key, _| key == 'enabled' }
+    elsif %w[greenguard-pgbouncer greenguard-kafka-topics greenguard-schema-registry greenguard-kafka-connect greenguard-connector-registration greenguard-opensearch greenguard-cassandra].include?(app.fetch('metadata').fetch('name'))
+      expected_planes = {
+        'greenguard-pgbouncer' => ['infra/gitops/disposable/pgbouncer-chart', '22'],
+        'greenguard-kafka-topics' => ['infra/gitops/disposable/streaming-topics-chart', '12'],
+        'greenguard-schema-registry' => ['infra/kubernetes/disposable-data/registry', '13'],
+        'greenguard-kafka-connect' => ['infra/gitops/disposable/kafka-connect-chart', '23'],
+        'greenguard-connector-registration' => ['infra/gitops/disposable/connector-registration', '24'],
+        'greenguard-opensearch' => ['infra/helm/greenguard-opensearch', '24'],
+        'greenguard-cassandra' => ['infra/gitops/disposable/cassandra-chart', '24']
+      }
+      expected_path, expected_wave = expected_planes.fetch(app.fetch('metadata').fetch('name'))
+      abort 'acceptance dependency source/order drift' unless source.fetch('path') == expected_path && app.fetch('metadata').fetch('annotations').fetch('argocd.argoproj.io/sync-wave') == expected_wave
+      if source.key?('helm')
+        object = source.fetch('helm').fetch('valuesObject')
+        abort 'acceptance dependency image drift' unless (object['image'] || object['cassandraImage']) == digest
+      end
     else
       object = source.fetch('helm').fetch('valuesObject')
       abort 'mutable image' unless object.fetch('image') == digest

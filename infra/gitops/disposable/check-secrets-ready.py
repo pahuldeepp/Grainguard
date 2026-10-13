@@ -18,7 +18,7 @@ SQL = ROOT / "rds-bootstrap-chart/files/init-databases.sql"
 CONTRACT = ROOT / "contract.json"
 KAFKA_BINARY_KEYS = {"broker.keystore.p12", "broker.truststore.p12", "registry.keystore.p12", "kafka.truststore.p12"}
 KAFKA_KEYS = KAFKA_BINARY_KEYS | {
-    "broker-jaas", "registry-kafka-jaas", "keystore-password", "key-password",
+    "broker-jaas", "registry-kafka-jaas", "acceptance-client-jaas", "keystore-password", "key-password",
     "truststore-password", "registry-keystore-password", "registry-key-password",
     "registry-jaas.conf", "registry-users.properties",
 }
@@ -283,8 +283,10 @@ def expected_secrets(args):
             if set(source) != {"password"}:
                 raise ValueError(f"{name}: OpenSearch admin keys are missing or unexpected")
         elif name == "greenguard-opensearch-clients":
-            if set(source) != {"writer-password", "reader-password"}:
+            if set(source) != {"writer-password", "reader-password", "acceptance-writer-password", "acceptance-reader-password"}:
                 raise ValueError(f"{name}: OpenSearch client keys are missing or unexpected")
+            if len(set(source.values())) != 4:
+                raise ValueError(f"{name}: runtime and acceptance client passwords must be distinct")
         elif name == "greenguard-opensearch-tls":
             if set(source) != {"ca.crt", "node.crt", "node.key", "admin.crt", "admin.key"}:
                 raise ValueError(f"{name}: OpenSearch TLS keys are missing or unexpected")
@@ -421,6 +423,12 @@ def expected_secrets(args):
     broker_password = re.search(r'\busername="broker"\s+password="([^"]+)"', broker_jaas).group(1)
     if f'user_broker="{broker_password}"' not in broker_jaas:
         raise ValueError("greenguard-kafka-auth: broker JAAS must provision the KRaft superuser")
+    acceptance_jaas = expected["greenguard-kafka-auth"]["data"]["acceptance-client-jaas"]
+    match = re.fullmatch(r'org\.apache\.kafka\.common\.security\.plain\.PlainLoginModule required username="acceptance-probe" password="([A-Za-z0-9_-]{32,128})";', acceptance_jaas)
+    if not match or f'user_acceptance-probe="{match.group(1)}"' not in broker_jaas:
+        raise ValueError("greenguard-kafka-auth: acceptance JAAS must use its matching scoped broker credential")
+    if match.group(1) == broker_password:
+        raise ValueError("greenguard-kafka-auth: acceptance password must differ from the broker superuser")
     for name in [*runtime_secrets, "greenguard-kafka-connect-auth", "greenguard-kafka-admin-auth"]:
         source = expected[name]["data"]
         if f'user_{source["KAFKA_SASL_USERNAME"]}="{source["KAFKA_SASL_PASSWORD"]}"' not in broker_jaas:

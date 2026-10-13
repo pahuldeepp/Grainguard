@@ -313,6 +313,9 @@ func TestRouteExpiryDuringPoolAcquisitionRollsBackBeforeAdmission(t *testing.T) 
 	if !errors.Is(err, ErrInvalidTenantPlacement) || called || len(tx.statements) != 0 || tx.rollbacks != 1 {
 		t.Fatal("expired acquisition admitted SQL", err, tx)
 	}
+	if !strings.Contains(err.Error(), "expired after transaction begin") || !strings.Contains(err.Error(), "expires_at=") || !strings.Contains(err.Error(), "observed_at=") {
+		t.Fatalf("transaction acquisition expiry was not identified: %v", err)
+	}
 }
 
 func TestDurableAdmissionFailureIsRepairableAndCannotBecomePoison(t *testing.T) {

@@ -59,15 +59,17 @@ class PolicyOIDCTest(unittest.TestCase):
         for bad in ({"token_use": "id"}, {"client_id": "wrong-client"},
                     {"username": None}, {"auth_time": None},
                     {"grant_type": "client_credentials"}, {"aud": "https://other.example"}):
+            authorization = "Bearer " + self.token(**(human | bad))
             with self.subTest(bad=bad), self.assertRaises(AuthenticationError) as ctx:
-                verifier.verify("Bearer " + self.token(**(human | bad)))
+                verifier.verify(authorization)
             self.assertEqual(ctx.exception.status, 401)
         resource_config = OIDCConfig(ISSUER, "https://api.greenguard.example", "https://id.example.test/jwks",
                                      memberships, False, "cognito-access", ("ios-client",))
         resource_verifier = OIDCVerifier(resource_config, FakeJWKS(self.public))
         resource_verifier.verify("Bearer " + self.token(**(human | {"aud": "https://api.greenguard.example"})))
+        authorization = "Bearer " + self.token(**human)
         with self.assertRaises(AuthenticationError):
-            resource_verifier.verify("Bearer " + self.token(**human))
+            resource_verifier.verify(authorization)
 
     def test_valid_signed_tenant_admin_returns_verified_principal(self):
         principal = self.verifier().verify("Bearer " + self.token())
@@ -88,8 +90,10 @@ class PolicyOIDCTest(unittest.TestCase):
             {"exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
             {"nbf": datetime.now(timezone.utc) + timedelta(minutes=3)},
         ):
+            verifier = self.verifier()
+            authorization = "Bearer " + self.token(**claims)
             with self.subTest(claims=claims), self.assertRaises(AuthenticationError) as ctx:
-                self.verifier().verify("Bearer " + self.token(**claims))
+                verifier.verify(authorization)
             self.assertEqual(ctx.exception.status, 401)
 
     def test_rejects_machine_device_and_non_admin_principals(self):
@@ -101,25 +105,32 @@ class PolicyOIDCTest(unittest.TestCase):
             {"roles": ["device"]},
             {"roles": ["operator"]},
         ):
+            verifier = self.verifier(allow_claims=True)
+            authorization = "Bearer " + self.token(**claims)
             with self.subTest(claims=claims), self.assertRaises(AuthenticationError) as ctx:
-                self.verifier(allow_claims=True).verify("Bearer " + self.token(**claims))
+                verifier.verify(authorization)
             self.assertEqual(ctx.exception.status, 403)
 
     def test_membership_miss_is_denied_and_auth_header_is_strict(self):
+        verifier = self.verifier({})
+        authorization = "Bearer " + self.token()
         with self.assertRaises(AuthenticationError):
-            self.verifier({}).verify("Bearer " + self.token())
+            verifier.verify(authorization)
+        verifier = OIDCVerifier(OIDCConfig(ISSUER, AUDIENCE, "https://id.example.test/jwks"), FakeJWKS(self.public))
+        authorization = "Bearer " + self.token()
         with self.assertRaises(AuthenticationError) as ctx:
-            OIDCVerifier(OIDCConfig(ISSUER, AUDIENCE, "https://id.example.test/jwks"),
-                         FakeJWKS(self.public)).verify("Bearer " + self.token())
+            verifier.verify(authorization)
         self.assertEqual(ctx.exception.status, 503)
         for header in (None, "Basic abc", "Bearer invalid", "Bearer " + self.token() + " trailing"):
+            verifier = self.verifier()
             with self.subTest(header=str(header)[:30]), self.assertRaises(AuthenticationError):
-                self.verifier().verify(header)
+                verifier.verify(header)
 
     def test_algorithm_substitution_is_rejected(self):
         token = jwt.encode({"sub": "human"}, "a test secret that is at least thirty two bytes long", algorithm="HS256", headers={"kid": "test-key"})
+        verifier = self.verifier()
         with self.assertRaises(AuthenticationError):
-            self.verifier().verify("Bearer " + token)
+            verifier.verify("Bearer " + token)
 
     def test_http_publication_binds_verified_tenant_and_rejects_tenant_input(self):
         class Service:
@@ -156,7 +167,7 @@ class PolicyOIDCTest(unittest.TestCase):
         self.assertTrue(api.handle(request))
         self.assertEqual(request.status, 201)
         self.assertEqual(service.calls[0][0].tenant_id, TENANT)
-        self.assertEqual(service.calls[0][1].calibrated, False)
+        self.assertFalse(service.calls[0][1].calibrated)
 
         body["tenant_id"] = "44444444-4444-4444-8444-444444444444"
         request = Handler("POST", "/v1/policies", auth, json.dumps(body).encode())

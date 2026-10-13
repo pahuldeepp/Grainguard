@@ -1,0 +1,47 @@
+{
+  "go": {
+    "url": "https://go.dev/dl/go1.27.2.linux-arm64.tar.gz",
+    "sha256": "94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8",
+    "version": "1.27.2"
+  },
+  "gosu": {
+    "url": "https://codeload.github.com/tianon/gosu/tar.gz/6456aaa0f3c854d199d0f037f068eb97515b7513",
+    "commit": "6456aaa0f3c854d199d0f037f068eb97515b7513",
+    "version": "1.19",
+    "provenanceApproved": false,
+    "sha256": "33d7537d588ea49458b9509bcf4554bdf5ceacc66da71e5caa1058ea3b689c3b"
+  },
+  "modules": [
+    {
+      "url": "https://proxy.golang.org/github.com/moby/sys/user/@v/v0.1.0.mod",
+      "relative": "github.com/moby/sys/user/@v/v0.1.0.mod",
+      "sha256": "91a578705d847c83a40f0e3149724863961cef2b2d7ca4262b40cefe487eff03"
+    },
+    {
+      "url": "https://proxy.golang.org/github.com/moby/sys/user/@v/v0.1.0.zip",
+      "relative": "github.com/moby/sys/user/@v/v0.1.0.zip",
+      "sha256": "85178932dc13b1c404c32e1b9f68fe88bf0b43e57dda39f24c45113e0bcf00ee"
+    },
+    {
+      "url": "https://proxy.golang.org/github.com/moby/sys/user/@v/v0.1.0.info",
+      "relative": "github.com/moby/sys/user/@v/v0.1.0.info",
+      "sha256": "fbd7c2599ef36388330302f30dd4a7a40808acd6b492db42e4db23129ad42a77"
+    },
+    {
+      "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.1.0.mod",
+      "relative": "golang.org/x/sys/@v/v0.1.0.mod",
+      "sha256": "f033333096fe198f3151deed93f2deba74e50bbfe7739134045bc3b7ce4a5024"
+    },
+    {
+      "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.1.0.zip",
+      "relative": "golang.org/x/sys/@v/v0.1.0.zip",
+      "sha256": "e7cbe58ed3745ba63d482fe82603119bd635f9a5dd914ed95a4c1826fdcf54a7"
+    },
+    {
+      "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.1.0.info",
+      "relative": "golang.org/x/sys/@v/v0.1.0.info",
+      "sha256": "e93abfc8737fa1e3f7e88ab6c26cf9e8cea4c2cc5378b829664d9f7948616235"
+    }
+  ],
+  "vendorArchiveSha256": "d875a8482842b3834eb3720649298cec485a6882af8f54c349f92061565fe964"
+}

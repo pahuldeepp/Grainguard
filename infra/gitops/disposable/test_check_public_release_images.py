@@ -28,7 +28,7 @@ class PublicImagePreflightTest(unittest.TestCase):
         runtime = {name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}" for name in ("bff", "dashboard")}
         platform_names = ("otel-collector", "prometheus", "grafana", "tempo", "loki", "pgbouncer",
                           "kafka-topics", "kafka-connect", "connector-registration", "opensearch", "cassandra",
-                          "mqtt", "clickhouse", "clamav")
+                          "mqtt", "clickhouse", "clamav", "redis")
         platform = {name: f"ghcr.io/pahuldeepp/grainguard/{name}@{self.digest}" for name in platform_names}
         self.inputs = {
             "gitops_revision": "b" * 40,
@@ -41,7 +41,7 @@ class PublicImagePreflightTest(unittest.TestCase):
             "migration_sql_image_digest": f"ghcr.io/pahuldeepp/grainguard/migration-sql@{self.digest}",
             "ml_synthetic_scorer_image_digest": f"ghcr.io/pahuldeepp/grainguard/ml-scoring-synthetic@{self.digest}",
             "observability_image_digests": {name: platform[name] for name in ("otel-collector", "prometheus", "grafana", "tempo", "loki")},
-            "data_plane_image_digests": {name: platform[name] for name in ("pgbouncer", "kafka-topics", "kafka-connect", "connector-registration")},
+            "data_plane_image_digests": {name: platform[name] for name in ("pgbouncer", "kafka-topics", "kafka-connect", "connector-registration", "redis")},
             "opensearch_image_digest": platform["opensearch"],
             "cassandra_image_digest": platform["cassandra"],
             "mqtt_image_digest": platform["mqtt"],
@@ -59,7 +59,7 @@ class PublicImagePreflightTest(unittest.TestCase):
         }
 
     def test_exact_inventory(self):
-        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 37)
+        self.assertEqual(len(module.inventory(self.inputs, self.contract)), 38)
 
     def test_rejects_missing_or_foreign_synthetic_scorer_image(self):
         original = self.inputs.pop("ml_synthetic_scorer_image_digest")

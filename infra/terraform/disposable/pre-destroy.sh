@@ -85,6 +85,22 @@ if aws eks describe-cluster --name "$GG_CLUSTER" >/dev/null 2>"$cluster_error"; 
       exit 1
     fi
   fi
+  # Karpenter owns EC2 instances outside this state. As with Argo, an API/RBAC
+  # failure must not masquerade as an absent CRD.
+  karpenter_present=false
+  if k get crd nodepools.karpenter.sh >/dev/null 2>"$crd_error"; then
+    karpenter_present=true
+    for kind in nodepools.karpenter.sh nodeclaims.karpenter.sh; do
+      if [ "$(k auth can-i delete "$kind")" != yes ]; then
+        echo "pre-destroy: Kubernetes identity cannot delete $kind" >&2
+        exit 1
+      fi
+    done
+  elif ! grep -q 'NotFound' "$crd_error"; then
+    cat "$crd_error" >&2
+    echo "pre-destroy: cannot determine whether Karpenter NodePools exist" >&2
+    exit 1
+  fi
 fi
 
 # Exercise every final inventory read before mutating either owner. A denied
@@ -105,7 +121,7 @@ else
   exit 1
 fi
 denied="$(aws iam simulate-principal-policy --policy-source-arn "$principal_arn" \
-  --action-names cloudformation:DeleteStack logs:DeleteLogGroup \
+  --action-names cloudformation:DeleteStack logs:DeleteLogGroup ec2:TerminateInstances ec2:DeleteLaunchTemplate \
   --resource-arns '*' --query 'EvaluationResults[?EvalDecision!=`allowed`].EvalActionName' --output text)" || {
   echo "pre-destroy: AWS delete permission simulation failed" >&2
   exit 1
@@ -208,6 +224,61 @@ for pv in data.get("items", []):
   k delete statefulset -n greenguard redis-cluster rabbitmq kafka --ignore-not-found --wait=true --timeout=10m
   log "deleting persistent volume claims"
   k delete pvc --all --all-namespaces --wait=true --timeout=10m
+  # Workloads are gone, so nothing asks Karpenter for capacity. Deleting the
+  # NodePools makes the controller drain and terminate every node it launched.
+  if [ "$karpenter_present" = true ]; then
+    log "deleting Karpenter NodePools and NodeClaims"
+    k delete nodepools.karpenter.sh --all --wait=true --timeout=20m || karpenter_graceful=false
+    k delete nodeclaims.karpenter.sh --all --wait=true --timeout=20m || karpenter_graceful=false
+  fi
+fi
+
+# 2b. Karpenter-launched EC2 capacity. This runs from the AWS API so it still
+#     works when the cluster is gone or the controller is broken; an instance
+#     left behind keeps billing and holds ENIs in the cell's subnets.
+karpenter_instances() {
+  aws ec2 describe-instances \
+    --filters "Name=tag:kubernetes.io/cluster/$GG_CLUSTER,Values=owned" "Name=tag-key,Values=karpenter.sh/nodepool" \
+      "Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down" \
+    --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | sed '/^$/d;/^None$/d' | sort -u
+}
+remaining="$(karpenter_instances)"
+if [ -n "$remaining" ]; then
+  if printf '%s\n' "$remaining" | grep -Evq '^i-[0-9a-f]+$'; then
+    echo "pre-destroy: invalid Karpenter instance ID in EC2 inventory" >&2
+    exit 1
+  fi
+  log "terminating Karpenter instances that outlived their NodePools: $(echo "$remaining" | wc -l | tr -d ' ')"
+  # shellcheck disable=SC2086 # one validated instance ID per word
+  aws ec2 terminate-instances --instance-ids $remaining >/dev/null
+fi
+deadline=$((SECONDS + WAIT_SECONDS))
+while :; do
+  remaining="$(karpenter_instances)"
+  [ -z "$remaining" ] && break
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "pre-destroy: Karpenter instances still present after ${WAIT_SECONDS}s:" >&2
+    echo "$remaining" >&2
+    exit 1
+  fi
+  log "waiting for Karpenter instances to terminate: $(echo "$remaining" | wc -l | tr -d ' ') left"
+  sleep 15
+done
+karpenter_launch_templates="$(aws ec2 describe-launch-templates \
+  --filters "Name=tag:eks:eks-cluster-name,Values=$GG_CLUSTER" \
+    "Name=tag:kubernetes.io/cluster/$GG_CLUSTER,Values=owned" "Name=tag-key,Values=karpenter.sh/nodepool" \
+  --query 'LaunchTemplates[].LaunchTemplateId' --output text | tr '\t' '\n' | sed '/^$/d;/^None$/d')"
+for launch_template in $karpenter_launch_templates; do
+  if [[ ! "$launch_template" =~ ^lt-[0-9a-f]+$ ]]; then
+    echo "pre-destroy: invalid Karpenter launch template ID in EC2 inventory" >&2
+    exit 1
+  fi
+  log "deleting Karpenter launch template $launch_template"
+  aws ec2 delete-launch-template --launch-template-id "$launch_template" >/dev/null
+done
+if [ "${karpenter_graceful:-true}" != true ]; then
+  echo "pre-destroy: Karpenter NodePools or NodeClaims could not be deleted; their instances were terminated, but a running controller could launch more. Fix the controller or remove the finalizers, then rerun" >&2
+  exit 1
 fi
 
 # 3. Wait until controllers have removed the load balancers they own; these

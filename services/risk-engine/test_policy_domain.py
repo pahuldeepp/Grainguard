@@ -32,20 +32,22 @@ def policy(**changes):
 class PolicyValidationTest(unittest.TestCase):
     def test_unapproved_synthetic_values_are_draft_and_uncalibrated(self):
         validate_policy(policy())
+        policy_value = policy(status="active")
         with self.assertRaisesRegex(ValueError, "cannot be active"):
-            validate_policy(policy(status="active"))
+            validate_policy(policy_value)
 
     def test_calibration_requires_evidence_and_approval(self):
+        policy_value = policy(calibrated=True, status="active")
         with self.assertRaisesRegex(ValueError, "require evidence"):
-            validate_policy(policy(calibrated=True, status="active"))
+            validate_policy(policy_value)
         validate_policy(policy(calibrated=True, status="active", calibration_evidence="AGR-42",
                                approved_by="agronomist", approved_at=NOW))
 
     def test_active_policy_requires_scoring_thresholds_and_reachable_warning(self):
+        policy_value = policy(calibrated=True, status="active", calibration_evidence="AGR-42",
+                              approved_by="agronomist", approved_at=NOW, measurement_thresholds={})
         with self.assertRaisesRegex(ValueError, "active policies require"):
-            validate_policy(policy(calibrated=True, status="active", calibration_evidence="AGR-42",
-                                   approved_by="agronomist", approved_at=NOW,
-                                   measurement_thresholds={}))
+            validate_policy(policy_value)
         for metric in ("temperature_c", "relative_humidity_percent"):
             for bound in ("warning", "critical"):
                 thresholds = {
@@ -53,12 +55,13 @@ class PolicyValidationTest(unittest.TestCase):
                     "relative_humidity_percent": {"warning": 65.0, "critical": 80.0, "unit": "%"},
                 }
                 thresholds[metric][bound] = None
+                policy_value = policy(calibrated=True, status="active", calibration_evidence="AGR-42",
+                                      approved_by="agronomist", approved_at=NOW, measurement_thresholds=thresholds)
                 with self.subTest(metric=metric, bound=bound), self.assertRaisesRegex(ValueError, "finite"):
-                    validate_policy(policy(calibrated=True, status="active", calibration_evidence="AGR-42",
-                                           approved_by="agronomist", approved_at=NOW,
-                                           measurement_thresholds=thresholds))
+                    validate_policy(policy_value)
+        policy_value = policy(risk_thresholds={"warning_score": 76, "critical_score": 90})
         with self.assertRaisesRegex(ValueError, "at most 75"):
-            validate_policy(policy(risk_thresholds={"warning_score": 76, "critical_score": 90}))
+            validate_policy(policy_value)
 
     def test_measurement_validation_is_unit_aware_finite_and_optional(self):
         validate_policy(policy(measurement_thresholds={
@@ -70,8 +73,9 @@ class PolicyValidationTest(unittest.TestCase):
             {"co2_ppm": {"warning": float("inf"), "critical": None, "unit": "ppm"}},
             {"relative_humidity_percent": {"warning": 65.0, "critical": 80.0, "unit": "Cel"}},
         ):
+            policy_value = policy(measurement_thresholds=thresholds)
             with self.subTest(thresholds=thresholds), self.assertRaises(ValueError):
-                validate_policy(policy(measurement_thresholds=thresholds))
+                validate_policy(policy_value)
 
     def test_policy_service_binds_tenant_role_and_calibration_approver(self):
         class Tx:
@@ -91,17 +95,19 @@ class PolicyValidationTest(unittest.TestCase):
         db = DB()
         service = PolicyService(db, clock=lambda: NOW)
         reader = VerifiedPrincipal(TENANT, "reader", frozenset({"viewer"}))
+        policy_value = policy()
         with self.assertRaises(PermissionError):
-            service.publish(reader, policy())
+            service.publish(reader, policy_value)
         wrong_tenant = VerifiedPrincipal("44444444-4444-4444-8444-444444444444",
                                          "admin", frozenset({"admin"}))
+        policy_value = policy(tenant_id=TENANT)
         with self.assertRaises(PermissionError):
-            service.publish(wrong_tenant, policy(tenant_id=TENANT))
+            service.publish(wrong_tenant, policy_value)
         admin = VerifiedPrincipal(TENANT, "admin", frozenset({"admin"}))
         event = service.publish(admin, policy())
         self.assertEqual(db.tenant, TENANT)
         self.assertEqual(event["event_type"], "risk.policy_changed")
-        self.assertEqual(event["payload"]["calibrated"], False)
+        self.assertFalse(event["payload"]["calibrated"])
         self.assertEqual(event["aggregate_version"], "1")
         schema = json.loads((ROOT / "contracts/events/risk-policy-changed.v1.schema.json").read_text())
         jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(event)

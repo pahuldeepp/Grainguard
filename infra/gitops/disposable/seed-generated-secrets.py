@@ -67,7 +67,9 @@ def generated(name):
         return {"password": secrets.token_urlsafe(36)}
     if name == "greenguard-opensearch-clients":
         return {"writer-password": secrets.token_urlsafe(36),
-                "reader-password": secrets.token_urlsafe(36)}
+                "reader-password": secrets.token_urlsafe(36),
+                "acceptance-writer-password": secrets.token_urlsafe(36),
+                "acceptance-reader-password": secrets.token_urlsafe(36)}
     raise RuntimeError("unapproved generated source")
 
 
@@ -129,7 +131,7 @@ def main(argv=None):
     for name, keys in (
         ("grafana-admin", {"GF_SECURITY_ADMIN_USER", "GF_SECURITY_ADMIN_PASSWORD"}),
         ("greenguard-opensearch-admin", {"password"}),
-        ("greenguard-opensearch-clients", {"writer-password", "reader-password"}),
+        ("greenguard-opensearch-clients", {"writer-password", "reader-password", "acceptance-writer-password", "acceptance-reader-password"}),
     ):
         arn, missing = sources[name]
         if not missing:

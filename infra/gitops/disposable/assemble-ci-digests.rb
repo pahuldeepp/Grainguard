@@ -109,7 +109,7 @@ platform_files.each do |file|
 end
 
 observability_names = %w[otel-collector prometheus grafana tempo loki]
-data_plane_names = %w[pgbouncer kafka-topics kafka-connect connector-registration]
+data_plane_names = %w[pgbouncer kafka-topics kafka-connect connector-registration redis]
 observability = observability_names.to_h { |name| [name, platform_images.fetch(name)] }
 data_plane = data_plane_names.to_h { |name| [name, platform_images.fetch(name)] }
 ai_runtime_complete = ai_missing_sources.empty? && ai_repository_names.sort == %w[grain-advisor knowledge-indexer knowledge-parser knowledge-service mcp-gateway model-gateway model-gateway-usage]
@@ -128,16 +128,24 @@ probes = platform_inventory.fetch('acceptance_probes')
 probe_chart_path = File.join(__dir__, 'acceptance-probes-chart', 'templates', 'probes.yaml')
 probe_chart = File.read(probe_chart_path)
 probe_roles = {
+  'kafka' => platform_images.fetch('kafka-topics'),
+  'redis' => platform_images.fetch('redis'),
+  'cassandra' => platform_images.fetch('cassandra'),
+  'opensearch_probe' => platform_images.fetch('cassandra'),
   'clickhouse' => platform_images.fetch('clickhouse'),
   'tenant_membership_readback' => images.fetch('tenant-control-plane')
 }
 probe_ready = probes.fetch('status') == 'ready' &&
   probes.fetch('chart') == 'infra/gitops/disposable/acceptance-probes-chart' &&
   probes.fetch('image_roles') == {
+    'kafka' => 'data_plane_image_digests.kafka-topics',
+    'redis' => 'data_plane_image_digests.redis',
+    'cassandra' => 'cassandra_image_digest',
+    'opensearch_probe' => 'cassandra_image_digest',
     'clickhouse' => 'clickhouse_image_digest',
     'tenant_membership_readback' => 'deployment_image_digests.tenant-control-plane'
-  } && probe_chart.include?('.Values.clickhouseImage') && probe_chart.include?('clickhouse-client') &&
-  probe_chart.include?('.Values.tenantControlPlaneImage') && probe_chart.include?('node /probe/tenant-membership-readback.mjs') &&
+  } && probe_chart.include?('.Values.clickhouseImage') && probe_chart.include?('/probe/clickhouse-roundtrip.sh') &&
+  probe_chart.include?('.Values.tenantControlPlaneImage') && probe_chart.include?('command: [node, /probe/tenant-membership-readback.mjs]') &&
   probe_roles.values.all? { |reference| reference.match?(/@sha256:[a-f0-9]{64}\z/) }
 source_coverage_complete = platform_signature_gaps.empty?
 application_release_gaps = platform_inventory.fetch('application_release_gaps')

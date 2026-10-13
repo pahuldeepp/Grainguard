@@ -29,6 +29,10 @@ abort 'release coverage has unverified vendor provenance' unless coverage['upstr
 abort 'release coverage contains an unprovisioned application image' unless coverage['application_release_gaps'] == []
 probe = coverage.fetch('acceptance_probes')
 expected_probe_images = {
+  'kafka' => inputs.fetch('data_plane_image_digests').fetch('kafka-topics'),
+  'redis' => inputs.fetch('data_plane_image_digests').fetch('redis'),
+  'cassandra' => inputs.fetch('cassandra_image_digest'),
+  'opensearch_probe' => inputs.fetch('cassandra_image_digest'),
   'clickhouse' => inputs.fetch('clickhouse_image_digest'),
   'tenant_membership_readback' => inputs.fetch('deployment_image_digests').fetch('tenant-control-plane')
 }
@@ -65,7 +69,7 @@ else
   abort 'missing AI services must not have an assembled AI image map' unless ai_source == {}
 end
 required_observability = %w[otel-collector prometheus grafana tempo loki]
-required_data_plane = %w[pgbouncer kafka-topics kafka-connect connector-registration]
+required_data_plane = %w[pgbouncer kafka-topics kafka-connect connector-registration redis]
 abort 'observability source inventory mismatch' unless observability_source.is_a?(Hash) && observability_source.keys.sort == required_observability.sort
 abort 'data-plane source inventory mismatch' unless data_plane_source.is_a?(Hash) && data_plane_source.keys.sort == required_data_plane.sort
 abort 'AI runtime source inventory mismatch' unless ai_source.is_a?(Hash)
@@ -189,6 +193,10 @@ File.write(File.join(output_dir, 'migration-images.json'), JSON.pretty_generate(
 File.write(File.join(output_dir, 'platform-images.json'), JSON.pretty_generate(platform_names.to_h { |name| [name, destination.fetch(name)] }) + "\n")
 promoted_coverage = Marshal.load(Marshal.dump(coverage))
 promoted_coverage['acceptance_probes']['images'] = {
+  'kafka' => destination.fetch('kafka-topics'),
+  'redis' => destination.fetch('redis'),
+  'cassandra' => destination.fetch('cassandra'),
+  'opensearch_probe' => destination.fetch('cassandra'),
   'clickhouse' => destination.fetch('clickhouse'),
   'tenant_membership_readback' => destination.fetch('tenant-control-plane')
 }

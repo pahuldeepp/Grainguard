@@ -42,8 +42,12 @@ function citationLabel(citation: AssistantCitation, filename?: string) {
   const version = citation.document_version
     ? ` · v${citation.document_version}`
     : "";
+  const pageEnd =
+    citation.page_end && citation.page_end !== citation.page_start
+      ? `–${citation.page_end}`
+      : "";
   const page = citation.page_start
-    ? ` · p.${citation.page_start}${citation.page_end && citation.page_end !== citation.page_start ? `–${citation.page_end}` : ""}`
+    ? ` · p.${citation.page_start}${pageEnd}`
     : "";
   return `${document}${version}${page}`;
 }
@@ -85,19 +89,59 @@ function isTransientStatusFailure(reason: unknown) {
 
 type AssistantOperation = "send" | "history" | "open" | "delete" | "upload";
 
+function transientFailureText(operation: AssistantOperation): string {
+  switch (operation) {
+    case "send":
+      return "Couldn’t confirm whether your message was saved. Refresh this chat before retrying.";
+    case "history":
+      return "Saved chats are temporarily unavailable. Please retry shortly.";
+    case "open":
+      return "Couldn’t open this chat. Refresh your chat list and try again.";
+    case "delete":
+      return "Couldn’t confirm whether this chat was deleted. Refresh your chat list to check.";
+    case "upload":
+      return "Couldn’t confirm the PDF upload status. Check the document list before uploading again.";
+  }
+}
+
+function fallbackErrorText(operation: AssistantOperation): string {
+  switch (operation) {
+    case "send":
+      return "GreenGuard Assistant is not connected right now. Couldn’t confirm whether your message was saved. Refresh this chat before retrying.";
+    case "history":
+      return "Couldn’t load saved chats right now. Please retry shortly.";
+    case "open":
+      return "Couldn’t open this chat right now. Please retry shortly.";
+    case "delete":
+      return "Couldn’t confirm whether this chat was deleted. Refresh your chat list to check.";
+    case "upload":
+      return "Couldn’t confirm the PDF upload status. Check the document list before uploading again.";
+    default:
+      return "GreenGuard Assistant is temporarily unavailable. Please retry shortly.";
+  }
+}
+
+function retryTextFor(retryAfter: unknown): string {
+  if (
+    typeof retryAfter !== "number" ||
+    Number.isNaN(retryAfter) ||
+    retryAfter <= 0
+  )
+    return "Wait a moment and try again.";
+  const suffix = retryAfter === 1 ? "" : "s";
+  return `Try again in ${retryAfter} second${suffix}.`;
+}
+
+function sendButtonLabel(sending: boolean, retryAfterSeconds: number): string {
+  if (sending) return "Sending…";
+  if (retryAfterSeconds > 0) return `Wait ${retryAfterSeconds}s`;
+  return "Send";
+}
+
 function errorText(reason: unknown, operation: AssistantOperation = "send") {
   const message =
     reason instanceof Error ? reason.message : "assistant_unavailable";
-  const transientFailure =
-    operation === "send"
-      ? "Couldn’t confirm whether your message was saved. Refresh this chat before retrying."
-      : operation === "history"
-        ? "Saved chats are temporarily unavailable. Please retry shortly."
-        : operation === "open"
-          ? "Couldn’t open this chat. Refresh your chat list and try again."
-          : operation === "delete"
-            ? "Couldn’t confirm whether this chat was deleted. Refresh your chat list to check."
-            : "Couldn’t confirm the PDF upload status. Check the document list before uploading again.";
+  const transientFailure = transientFailureText(operation);
   if (message === "document_scope_unavailable")
     return "The selected PDF version is unavailable or you no longer have access. Choose an available PDF and retry.";
   if (message === "summary_document_required")
@@ -130,10 +174,7 @@ function errorText(reason: unknown, operation: AssistantOperation = "send") {
   if (message === "rate_limited") {
     const retryAfter = (reason as Error & { retryAfterSeconds?: number })
       .retryAfterSeconds;
-    const retryText =
-      typeof retryAfter === "number" && retryAfter > 0
-        ? `Try again in ${retryAfter} second${retryAfter === 1 ? "" : "s"}.`
-        : "Wait a moment and try again.";
+    const retryText = retryTextFor(retryAfter);
     if (operation !== "send")
       return `${operation === "upload" ? "PDF upload" : "This Assistant action"} is temporarily rate limited. ${retryText}`;
     if (typeof retryAfter === "number" && retryAfter > 0)
@@ -146,10 +187,7 @@ function errorText(reason: unknown, operation: AssistantOperation = "send") {
   ) {
     const retryAfter = (reason as Error & { retryAfterSeconds?: number })
       .retryAfterSeconds;
-    const retryText =
-      typeof retryAfter === "number" && retryAfter > 0
-        ? `Try again in ${retryAfter} second${retryAfter === 1 ? "" : "s"}.`
-        : "Wait a moment and try again.";
+    const retryText = retryTextFor(retryAfter);
     if (operation !== "send")
       return `The AI service is temporarily busy. ${retryText}`;
     if (typeof retryAfter === "number" && retryAfter > 0)
@@ -175,17 +213,7 @@ function errorText(reason: unknown, operation: AssistantOperation = "send") {
     message === "assistant_upload_unavailable"
   )
     return `GreenGuard Assistant is temporarily unavailable. ${transientFailure}`;
-  return operation === "send"
-    ? "GreenGuard Assistant is not connected right now. Couldn’t confirm whether your message was saved. Refresh this chat before retrying."
-    : operation === "history"
-      ? "Couldn’t load saved chats right now. Please retry shortly."
-      : operation === "open"
-        ? "Couldn’t open this chat right now. Please retry shortly."
-        : operation === "delete"
-          ? "Couldn’t confirm whether this chat was deleted. Refresh your chat list to check."
-          : operation === "upload"
-            ? "Couldn’t confirm the PDF upload status. Check the document list before uploading again."
-            : "GreenGuard Assistant is temporarily unavailable. Please retry shortly.";
+  return fallbackErrorText(operation);
 }
 
 export function AssistantView({
@@ -868,7 +896,7 @@ export function AssistantView({
             Loading saved chats…
           </p>
         ) : null}
-        {conversations.length ? (
+        {conversations.length > 0 && (
           <ul className="assistant-history">
             {conversations.map((chat) => (
               <li key={chat.id}>
@@ -920,11 +948,12 @@ export function AssistantView({
               </li>
             ))}
           </ul>
-        ) : !historyLoading ? (
+        )}
+        {conversations.length === 0 && !historyLoading && (
           <p className="assistant-history-empty">
             {historyError || "Your saved chats will appear here."}
           </p>
-        ) : null}
+        )}
         <p className="assistant-sidebar-foot">
           Your conversations are saved to your account.
         </p>
@@ -948,7 +977,7 @@ export function AssistantView({
               Loading conversation…
             </p>
           ) : null}
-          {messages.length ? (
+          {messages.length > 0 &&
             messages.map((message) => (
               <article
                 className={`assistant-message assistant-message-${message.role}`}
@@ -1000,8 +1029,8 @@ export function AssistantView({
                   </ul>
                 ) : null}
               </article>
-            ))
-          ) : !opening ? (
+            ))}
+          {messages.length === 0 && !opening && (
             <div className="assistant-welcome">
               <p className="assistant-welcome-mark" aria-hidden="true">
                 ✳
@@ -1019,11 +1048,13 @@ export function AssistantView({
                 <EmptyState title="Sign in to ask GreenGuard Assistant." />
               ) : (
                 <div className="assistant-suggestions">
-                  {suggestionsLoading ? (
+                  {suggestionsLoading && (
                     <p className="assistant-suggestions-status" role="status">
                       Loading suggestions…
                     </p>
-                  ) : suggestions.length ? (
+                  )}
+                  {!suggestionsLoading &&
+                    suggestions.length > 0 &&
                     suggestions.map((suggestion) => (
                       <button
                         key={suggestion.id}
@@ -1036,8 +1067,8 @@ export function AssistantView({
                       >
                         {suggestion.label}
                       </button>
-                    ))
-                  ) : (
+                    ))}
+                  {!suggestionsLoading && suggestions.length === 0 && (
                     <p className="assistant-suggestions-status">
                       No suggestions available right now. You can still ask a
                       question.
@@ -1046,7 +1077,7 @@ export function AssistantView({
                 </div>
               )}
             </div>
-          ) : null}
+          )}
           {sending && (
             <p className="assistant-thinking" role="status">
               {summaryMode
@@ -1229,11 +1260,7 @@ export function AssistantView({
               retryAfterSeconds > 0
             }
           >
-            {sending
-              ? "Sending…"
-              : retryAfterSeconds > 0
-                ? `Wait ${retryAfterSeconds}s`
-                : "Send"}
+            {sendButtonLabel(sending, retryAfterSeconds)}
           </button>
           {documentNotice ? (
             <p className="assistant-upload-status" role="status">
