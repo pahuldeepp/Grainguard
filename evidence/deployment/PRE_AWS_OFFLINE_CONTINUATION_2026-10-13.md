@@ -94,6 +94,10 @@ shared GreenGuard Compose/database project was not restarted or modified.
   -lockfile=readonly` plus `terraform validate` passed for all three roots:
   `bootstrap-state`, `platform`, and `disposable`. This checks configuration
   without initializing a backend, reading AWS state, or contacting AWS.
+- `kyverno test infra/kyverno/tests --require-tests` passed (7/7) using the
+  official Kyverno CLI v1.19.1 macOS ARM64 release asset after verifying its
+  published SHA256. The binary/archive were extracted in a temporary directory
+  and removed after the run; no repo dependency or global installation changed.
 - Vendor-image hardening candidate build and scan completed locally. Candidate
   builds retained Kafka 3.9.2 and Cassandra 5.0.9 behavior, and Trivy scanned
   both immutable local image IDs with the current HIGH/CRITICAL fixable policy.
