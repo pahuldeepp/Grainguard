@@ -921,9 +921,16 @@ async function scenarioReads(alice) {
         token,
         `/devices/${it.device}/readings?from=${from}&to=${new Date().toISOString()}&limit=10`,
       );
-      return r.body.source === "cassandra" && r.body.data?.length >= 2;
+      const rows = r.body.data ?? [];
+      const returnedIds = new Set(rows.map((row) => row.reading_id));
+      return (
+        r.body.sources?.postgres === true &&
+        r.body.sources?.cassandra === true &&
+        returnedIds.has(accepted.body.reading_id) &&
+        returnedIds.has(coldRes.body.reading_id)
+      );
     },
-    "Cassandra history holds both readings",
+    "history API merges the hot PostgreSQL and cold Cassandra readings",
     90_000,
   );
   await waitFor(
@@ -1030,9 +1037,13 @@ async function scenarioReads(alice) {
   );
   await shot(page, "s4-history-older-cassandra");
   check(
-    "S4 UI older range served from Cassandra",
-    coldText.includes("12.5") && apiSource.body.source === "cassandra",
-    `ui has 48h-old 12.5 °C=${coldText.includes("12.5")} readApi source=${apiSource.body.source} rows=${apiSource.body.data?.length}`,
+    "S4 UI shows the 48h-old Cassandra reading in a hybrid history range",
+    coldText.includes("12.5") &&
+      apiSource.body.sources?.cassandra === true &&
+      apiSource.body.data?.some(
+        (row) => row.reading_id === coldRes.body.reading_id,
+      ),
+    `ui has 48h-old 12.5 °C=${coldText.includes("12.5")} readApi sources=${JSON.stringify(apiSource.body.sources)} rows=${apiSource.body.data?.length}`,
   );
   return it;
 }
