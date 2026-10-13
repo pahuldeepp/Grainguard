@@ -1121,15 +1121,32 @@ async function scenarioRedisOutage(alice, bobToken) {
       redisCompose("up", "redis-cluster-init");
     }
   }
-  const after = await gql(alice.token(), operations.deviceCurrent, {
-    id: it.device,
-  });
-  const restored =
-    after.body.data?.latestReading?.readingId === accepted?.body.reading_id;
+  let restoredResponse;
+  let restoredError;
+  const restored = await waitFor(
+    async () => {
+      try {
+        restoredResponse = await gql(alice.token(), operations.deviceCurrent, {
+          id: it.device,
+        });
+        restoredError = undefined;
+        return (
+          restoredResponse.status === 200 &&
+          restoredResponse.body.data?.latestReading?.readingId ===
+            accepted?.body.reading_id
+        );
+      } catch (error) {
+        restoredError = error.message;
+        return false;
+      }
+    },
+    "fresh scoped read after Redis restoration",
+    20_000,
+  ).catch(() => false);
   check(
     "S8 Redis outage and browser WebSocket reconnect preserve scoped fresh reads",
     accepted?.status === 202 && reconnected && projected && scoped && restored,
-    `accepted=${accepted?.status} reconnect=${reconnected} projected=${projected} tenantIsolation=${scoped} restored=${restored}`,
+    `accepted=${accepted?.status} reconnect=${reconnected} projected=${projected} tenantIsolation=${scoped} restored=${restored} afterStatus=${restoredResponse?.status ?? "unavailable"} afterReading=${restoredResponse?.body.data?.latestReading?.readingId ?? "unavailable"} transportError=${restoredError ?? "none"}`,
   );
 }
 
