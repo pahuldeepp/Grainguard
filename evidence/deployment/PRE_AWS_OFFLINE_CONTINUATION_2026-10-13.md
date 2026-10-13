@@ -29,6 +29,15 @@ shared GreenGuard Compose/database project was not restarted or modified.
   — 8 passed.
 - `make image-inventory` — passed; required runtime, migration, and tool images
   are mapped to CI builds and immutable ECR repositories.
+- `make bootstrap && make verify` — passed with exit code 0 in a detached,
+  throwaway worktree at commit `2d27c9c`, with a unique Compose project,
+  generated local-only credentials, and its own PostgreSQL volume. This
+  covered database migrations, database-backed service suites, frontend and
+  backend formatting/lint/typecheck/build, Go vet/race suites, and the
+  repository verification checks. The opt-in live Kafka/Redis/object-store
+  cases reported as skipped remain unproven. The test containers, network,
+  volume, generated credentials, and worktree were removed afterward; the
+  shared application database was not used.
 - `terraform fmt -check -recursive infra/terraform` — passed.
 - `terraform init -backend=false -input=false -lockfile=readonly` and
   `terraform validate` passed for `bootstrap-state`, `platform`, and
