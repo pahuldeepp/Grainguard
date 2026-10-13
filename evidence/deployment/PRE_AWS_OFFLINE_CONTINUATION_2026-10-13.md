@@ -97,14 +97,25 @@ shared GreenGuard Compose/database project was not restarted or modified.
   `cleanupComplete: true`; its containers, network, volume, credentials, and
   fixture files were removed. Smoke logs and cleanup receipts remain under
   ignored `.local/vendor-hardening/smoke-20261013/`.
+- Read-only review of GitHub Actions run
+  [38323425491](https://github.com/pahuldeepp/Grainguard/actions/runs/38323425491)
+  on SHA `d7e3079` found four failed jobs and an incomplete quality gate: the
+  MQTT secret test, browser E2E, Stage 07 saga E2E, and RabbitMQ startup failed;
+  Sonar was cancelled before its result. On the current local branch, the MQTT
+  secret suite passes (8/8), Stage 07 E2E has passed as recorded above, and the
+  latest isolated RabbitMQ startup in unique Compose project
+  `greenguard-rabbit-ci-20261013` passed health checks and was fully removed
+  with its unique volume and network. The old run's RabbitMQ container exited 1
+  before the then-current job retained container logs; the current startup
+  wrapper captures sanitized state/logs on failure. A full current-commit
+  browser and remote CI rerun is still unproven. No new GitHub run was
+  dispatched.
 
 ## Still not proven / deployment blockers
 
-- Full current-commit CI has not run. The available remote CI evidence belongs
-  to an older SHA. It reports placement-related E2E failures and a RabbitMQ
-  startup exit, but does not preserve enough RabbitMQ diagnostics to identify
-  its CI-only cause. Local RabbitMQ startup and Stage 07 acceptance passed;
-  these are not substitutes for that CI gate.
+- Full current-commit CI has not run. The latest available remote run is on an
+  older SHA and is summarized above. It does not establish that current-branch
+  browser E2E or Sonar passes.
 - `make verify` ran locally and passed. A full remote CI run for the current
   branch still has not run.
 - The upstream provenance/signature and Kafka/Cassandra vulnerability release
