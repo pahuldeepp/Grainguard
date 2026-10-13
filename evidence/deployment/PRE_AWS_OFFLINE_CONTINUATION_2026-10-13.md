@@ -78,6 +78,22 @@ shared GreenGuard Compose/database project was not restarted or modified.
   Stage 07 Kafka/CDC/MQTT acceptance above supplies its separate live local
   evidence. The temporary project, volume, credentials, and worktree were
   removed afterward.
+- On the exact current release branch HEAD `a004caa`,
+  `node scripts/stage12-compose-gate.mjs run` completed successfully. It ran
+  the full `make verify` target followed by `make smoke` against a newly
+  generated, uniquely named Compose project and PostgreSQL volume. All
+  migrations, lint, typecheck, builds, unit/database suites, Go vet/race suites,
+  and runtime database readiness/privilege smoke checks passed. The full
+  current-HEAD smoke confirmed live DB readiness, 503 for an unreachable DB,
+  restricted application DB roles, and cross-database denial. The gate removed
+  its containers, network, volume, generated local credentials, and scratch
+  workspace on success. Opt-in external-service tests remain separately
+  scoped and are not implied by this gate.
+- On the same current HEAD, `terraform fmt -check -recursive infra/terraform`
+  and isolated `terraform init -backend=false -input=false
+  -lockfile=readonly` plus `terraform validate` passed for all three roots:
+  `bootstrap-state`, `platform`, and `disposable`. This checks configuration
+  without initializing a backend, reading AWS state, or contacting AWS.
 - Vendor-image hardening candidate build and scan completed locally. Candidate
   builds retained Kafka 3.9.2 and Cassandra 5.0.9 behavior, and Trivy scanned
   both immutable local image IDs with the current HIGH/CRITICAL fixable policy.
