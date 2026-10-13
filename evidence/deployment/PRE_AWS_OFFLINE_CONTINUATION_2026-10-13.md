@@ -292,3 +292,21 @@ fresh isolated local database E2E environment for the placement change, and
 reconcile capacity with the quota without dropping required services or
 security controls. A cloud deployment remains gated by the user's no-cost
 instruction and by real credentials/acceptance evidence.
+
+## Isolated local Stage 12 Compose verification — 2026-10-13
+
+- `node scripts/stage12-compose-gate.mjs run` completed successfully against a
+  uniquely named Compose project and freshly generated test credentials. It did
+  not source the shared `.env` or reuse the shared application database.
+- The run passed the complete `make verify` suite, including dashboard/mobile,
+  tenant-control, billing, alerts/notifications, Read API hot/cold history,
+  and Go race/vet/format gates, then built all configured workspaces and ran
+  `scripts/smoke.mjs`.
+- Smoke evidence: PostgreSQL-backed readiness was live; unavailable database
+  readiness returned 503; application-role privileges and cross-database
+  access denial passed.
+- The gate removed its own Compose containers, network, and Postgres volume and
+  reported `PASS: isolated Compose verification and smoke; project and volume
+  removed.` No shared Compose project or volume was targeted.
+- This local run does not cover the opt-in browser E2E, live AWS/EKS, production
+  OIDC/Stripe configuration, real-data ML validation, or production capacity.
