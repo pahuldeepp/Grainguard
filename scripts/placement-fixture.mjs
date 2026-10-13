@@ -169,7 +169,10 @@ export function writeServiceRegistry({
 /** Local placement authority: serves s1 placements for the registered tenants. */
 export async function startPlacementAuthority(incarnations) {
   const token = randomBytes(32).toString("hex");
-  const tenants = new Set();
+  // bootstrapTenantOwnership always creates this trusted system placement in
+  // each database. Consumers that use it for internal projection work need
+  // the same placement from the fixture authority as customer tenants do.
+  const tenants = new Set([INFRASTRUCTURE_TENANT]);
   const server = createServer((req, res) => {
     if (req.headers.authorization !== `Bearer ${token}`) {
       res.writeHead(404).end();
