@@ -1,12 +1,20 @@
 # AWS one-command deployment audit
 
-Status: **not end-to-end ready** (2026-09-27). `terraform apply` in
+Status: **not end-to-end ready** (reconciled 2026-10-13). `terraform apply` in
 `infra/terraform/disposable` currently describes a partial AWS foundation,
-private RDS/S3 data storage, HTTPS edge, Cognito issuer and pinned controller
+private RDS/S3 data storage, HTTPS edge, managed Dex issuer and pinned controller
 bootstrap, not a working
 GreenGuard environment. No authenticated AWS apply/destroy or phone
 test has been run. Do not treat a successful Terraform exit as proof that the
 dashboard, mobile app, login or data flows are operational.
+
+The detailed layer matrix below began as a 2026-09-27 snapshot and contains
+historical implementation descriptions. For current offline results and
+remaining gates, see
+[`evidence/deployment/PRE_AWS_OFFLINE_CONTINUATION_2026-10-13.md`](../evidence/deployment/PRE_AWS_OFFLINE_CONTINUATION_2026-10-13.md)
+and the disposable Terraform runbook. No AWS resources were changed during
+that continuation; the AWS CLI session was expired, so it did not verify the
+account's current inventory.
 
 An explicit readiness gate now makes an ordinary plan/apply fail while this
 root is incomplete. The override is for deliberately inspecting its resources;
@@ -53,12 +61,16 @@ The assigned
 hostname can change after destroy/reapply, so Terraform must register the
 current web callback and emit a matching public mobile configuration each time.
 
-Cognito is an opt-in production issuer for the disposable cell; local Dex
-remains the development issuer. The verifier checks Cognito access-token
-`client_id` and `token_use` while retaining the existing Dex mode. A real
-user still needs an authoritative GreenGuard issuer/subject membership and
-role before any tenant API call can succeed. No such production enrollment
-has been run, so the existing OAuth client code is not proof of deployed login.
+The current disposable-root default is `identity_mode = "managed-dex"`, as
+recorded in `infra/terraform/disposable/README.md` and
+`defaults.auto.tfvars`. It preserves GreenGuard's existing OIDC provider
+architecture by hosting Dex in the disposable cell. Existing OIDC can also be
+provided explicitly; Cognito remains opt-in and is not the default. The local
+Dex demo users are not deployed. A trusted first-owner bootstrap and an
+authoritative GreenGuard issuer/subject membership and role are still needed
+before tenant API access. No production enrollment or live login acceptance
+has been run, so the OIDC code and Terraform configuration are not proof of
+deployed authentication.
 
 ## Required acceptance before changing this status
 
