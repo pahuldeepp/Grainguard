@@ -19,7 +19,7 @@
     {"name":"tempo","kind":"vendor","source":"grafana/tempo@sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3","source_signature_verified":false,"signature_review":"pending"},
     {"name":"loki","kind":"vendor","source":"grafana/loki@sha256:58a6c186ce78ba04d58bfe2a927eff296ba733a430df09645d56cdc158f3ba08","source_signature_verified":false,"signature_review":"pending"},
     {"name":"pgbouncer","kind":"build","dockerfile":"infra/compose/pgbouncer/Dockerfile"},
-    {"name":"kafka-topics","kind":"vendor","source":"apache/kafka@sha256:4ceccc4dca21c33692de00f27b317cce16ac09a785e1eff2c39695b91d79e2f6","source_signature_verified":false,"signature_review":"pending"},
+    {"name":"kafka-topics","kind":"vendor","source":"apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed","source_signature_verified":false,"signature_review":"pending"},
     {"name":"kafka-connect","kind":"build","dockerfile":"infra/kafka/Dockerfile.connect"},
     {"name":"connector-registration","kind":"build","dockerfile":"infra/gitops/disposable/connector-registration/Dockerfile"},
     {"name":"opensearch","kind":"vendor","source":"opensearchproject/opensearch@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd","source_signature_verified":false,"signature_review":"pending"},

@@ -98,6 +98,10 @@ jobs:
         run: python3 -m unittest infra/terraform/disposable/test_disposable_environment_contract.py infra/terraform/disposable/test_shard_runtime_contract.py infra/terraform/disposable/test_shard_routing_required_contract.py infra/terraform/disposable/test_prepare_shard_runtime_bundle.py -v
       - name: Verify disposable teardown guards offline
         run: bash infra/terraform/disposable/teardown_test.sh
+      - name: Verify capacity admission and destroy behavior with mocked AWS metadata
+        run: |
+          python3 -m unittest infra/terraform/disposable/test_capacity_preflight.py -v
+          ruby infra/terraform/disposable/test-minimum-capacity.rb
       - name: Verify runtime secret boundaries and Stripe webhook failure recovery
         run: python3 -m unittest infra/gitops/disposable/test_stripe_webhook_lifecycle.py infra/gitops/disposable/test_check_secrets_ready.py infra/gitops/disposable/test_runtime_secret_lifecycle.py infra/terraform/disposable/test_secret_state_boundary.py -v
       - name: Audit disposable Terraform lifecycle offline
@@ -518,7 +522,7 @@ jobs:
             dockerfile: infra/compose/pgbouncer/Dockerfile
           - image: kafka-topics
             kind: vendor
-            source: apache/kafka@sha256:4ceccc4dca21c33692de00f27b317cce16ac09a785e1eff2c39695b91d79e2f6
+            source: apache/kafka@sha256:4ceccc577f03f51f6af8dbfda55194d0d892f4fa7913ffbded567ce3895622ed
           - image: kafka-connect
             kind: build
             dockerfile: infra/kafka/Dockerfile.connect
