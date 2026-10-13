@@ -105,13 +105,21 @@ and complete successfully. The PostgreSQL owner-migration/RLS Job remains
 mandatory under the exact `greenguard.io/migration-gate=true` selector and
 the immutable kubectl/psql images passed through Terraform. That Job waits for
 all 38 central and shard owner migration Jobs, then checks owner databases and
-roles, runtime grants, forced RLS, and shard placement admission. Additional
-data-plane or user-journey Jobs must be declared with digest-pinned images and
-real executable checks before they are counted; the current contract contains
-only the PostgreSQL gate. Nested Argo Application sync waves are not treated
-as proof that their child resources have converged. The default wait is 2,400
-seconds (configurable from 60 to 3,600) to cover the 900-second owner Jobs and
-1,800-second SQL gate.
+roles, runtime grants, forced RLS, and shard placement admission. The contract
+currently declares six bounded data-plane Jobs: Kafka,
+Redis, Cassandra, OpenSearch, ClickHouse, and optional tenant-membership
+readback. These are separate from the PostgreSQL migration/RLS gate. The
+contract's remaining probes (PostgreSQL replica freshness, PgBouncer, Kafka
+Connect, Schema Registry, RabbitMQ, MQTT, object-storage export, and OAuth
+discovery) and its web/API/alert/telemetry/recovery/iPhone journeys do not yet
+have matching in-cluster acceptance Jobs. They remain separate local, live, or
+human-reviewed acceptance phases as specified in `contract.json`; listing an
+evidence ID does not mean a probe ran. Any additional data-plane or
+user-journey Job must be declared with a digest-pinned image and a real
+executable check before it is counted. Nested Argo Application sync waves are
+not treated as proof that their child resources have converged. The default
+wait is 2,400 seconds (configurable from 60 to 3,600) to cover the
+900-second owner Jobs and 1,800-second SQL gate.
 
 ## Public edge apply gate
 
