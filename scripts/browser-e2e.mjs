@@ -54,6 +54,7 @@ const id = randomUUID().slice(0, 8);
 // Tenant placement (set in stackUp): every DB-writing service resolves ownership
 // through a private shard registry and a placement authority.
 let placementEnv = () => ({});
+let sagaAdmissionContext;
 const tmp = mkdtempSync(path.join(tmpdir(), "greenguard-browser-e2e-"));
 const alias = `greenguard-browser-e2e-${id}`;
 const failures = [];
@@ -596,8 +597,12 @@ async function sagaRows(it) {
 }
 
 async function sagaDb(it, sql, args) {
-  return scoped(process.env.SAGA_DIRECT_URL, it.tenant, (db) =>
-    db.query(sql, args),
+  return scoped(
+    process.env.SAGA_DIRECT_URL,
+    it.tenant,
+    (db) => db.query(sql, args),
+    false,
+    sagaAdmissionContext,
   );
 }
 
@@ -695,15 +700,21 @@ async function scenarioReload(browser, alice) {
     alice.page.getByRole("button", { name: "Sign in" }),
     5000,
   );
-  await signIn(alice.page, "alice");
+  if (needSignIn) {
+    await signIn(alice.page, "alice");
+  } else {
+    await alice.page
+      .getByRole("button", { name: "Sign out" })
+      .waitFor({ timeout: 15_000 });
+  }
   const url = alice.page.url();
   const restored = await waitVisible(
     alice.page.locator(".provisioning-status"),
   );
   const after = await badge(alice.page);
   check(
-    "S2 reload mid-provisioning restores the tracked saga after sign-in",
-    needSignIn && restored && url.includes(it.saga ?? "missing"),
+    "S2 reload mid-provisioning retains sign-in and restores the tracked saga",
+    !needSignIn && restored && url.includes(it.saga ?? "missing"),
     `before=${before || "(not yet rendered)"} signInRequired=${needSignIn} url=${url.replace(DASHBOARD, "")} restoredState=${after}`,
   );
   const again = await startInUi(alice.page, it);
@@ -1378,6 +1389,11 @@ async function stackUp() {
   if (!(await portFree(PORTS.dashboard, "::1")))
     throw new Error("[::1]:5173 is in use");
   const incarnations = await controlIncarnations();
+  sagaAdmissionContext = {
+    shardId: "s1",
+    shardIncarnation: incarnations.s1,
+    placementEpoch: 1,
+  };
   const tenantIds = Object.values(TENANT);
   await bootstrapTenantOwnership(
     tenantIds,

@@ -266,6 +266,24 @@ shared GreenGuard Compose/database project was not restarted or modified.
   every region/service, and it is not proof of billing totals or that a future
   `terraform destroy` has been tested.
 
+## CI follow-up — run 38420818770
+
+- The run on remote SHA `19d4ad6` completed with Event backbone, Search/Kafka,
+  Redis, Saga, Cassandra, Risk/alert, MySQL CDC, OIDC, Helm/GitOps, image
+  inventory, and dependency/IaC scanning green. The required quality gate failed
+  only at Prettier for `scripts/sonar-native.test.mjs`; that file is formatted
+  locally and the check passes. The Terraform schema tests failed before the
+  diagnostic commit was present, so the exact Linux stderr remains unknown.
+- Gateway/dashboard browser acceptance found two harness issues: the reload
+  assertion required an interactive sign-in even when the browser correctly
+  retained the session; and a direct Saga test update supplied tenant context
+  but omitted the trusted fixture's shard ID, incarnation, and placement epoch.
+  The harness now expects session retention and supplies the complete local
+  placement tuple without bypassing the database fence. Four focused Node tests,
+  Node syntax checks, Prettier, and `git diff --check` pass locally. The complete
+  browser E2E rerun is still pending; these fixes are not called end-to-end
+  verified until that gate passes.
+
 ## Next actionable work
 
 Resolve image provenance/vulnerability findings with verifiable upstream

@@ -130,7 +130,26 @@ export async function waitFor(predicate, label, timeoutMs = 120_000) {
   throw new Error(`${label} timed out: ${last?.message ?? "no match"}`);
 }
 
-export async function scoped(url, tenant, work, fixture = false) {
+export function placementSessionSettings(placement) {
+  if (
+    !placement ||
+    placement.shardId !== "s1" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      placement.shardIncarnation,
+    ) ||
+    !Number.isSafeInteger(placement.placementEpoch) ||
+    placement.placementEpoch < 1
+  ) {
+    throw new Error("invalid trusted fixture placement context");
+  }
+  return [
+    ["app.shard_id", placement.shardId],
+    ["app.shard_incarnation", placement.shardIncarnation],
+    ["app.placement_epoch", String(placement.placementEpoch)],
+  ];
+}
+
+export async function scoped(url, tenant, work, fixture = false, placement) {
   // Fixture writes run as the PostgreSQL superuser with the tenant-ownership row
   // fence bypassed for that transaction, then switch back to the service role so
   // RLS still applies. The services under test keep the fence enabled.
@@ -150,6 +169,11 @@ export async function scoped(url, tenant, work, fixture = false) {
       await db.query(`SET LOCAL ROLE "${decodeURIComponent(target.username)}"`);
     }
     await db.query("SELECT set_config('app.tenant_id',$1,true)", [tenant]);
+    if (placement) {
+      for (const [setting, value] of placementSessionSettings(placement)) {
+        await db.query("SELECT set_config($1,$2,true)", [setting, value]);
+      }
+    }
     const result = await work(db);
     await db.query("COMMIT");
     return result;

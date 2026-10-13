@@ -3,7 +3,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { dashboardServer } from "./browser-e2e-stack.mjs";
+import {
+  dashboardServer,
+  placementSessionSettings,
+} from "./browser-e2e-stack.mjs";
 
 async function withDashboard(config, run) {
   const root = mkdtempSync(path.join(tmpdir(), "greenguard-dashboard-server-"));
@@ -46,4 +49,45 @@ test("dashboard server fails closed when runtime OIDC config is absent", async (
     assert.equal(response.status, 404);
     assert.equal(response.headers.get("cache-control"), "no-store");
   });
+});
+
+test("tenant-scoped E2E SQL receives the complete trusted placement fence", () => {
+  assert.deepEqual(
+    placementSessionSettings({
+      shardId: "s1",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 1,
+    }),
+    [
+      ["app.shard_id", "s1"],
+      ["app.shard_incarnation", "20000000-0000-4000-8000-000000000001"],
+      ["app.placement_epoch", "1"],
+    ],
+  );
+});
+
+test("tenant-scoped E2E SQL rejects missing, malformed, or nonlocal placement", () => {
+  for (const placement of [
+    undefined,
+    {
+      shardId: "s2",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 1,
+    },
+    {
+      shardId: "s1",
+      shardIncarnation: "not-a-uuid",
+      placementEpoch: 1,
+    },
+    {
+      shardId: "s1",
+      shardIncarnation: "20000000-0000-4000-8000-000000000001",
+      placementEpoch: 0,
+    },
+  ]) {
+    assert.throws(
+      () => placementSessionSettings(placement),
+      /invalid trusted fixture placement context/,
+    );
+  }
 });
