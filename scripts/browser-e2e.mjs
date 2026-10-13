@@ -1320,6 +1320,11 @@ async function scenarioDegraded(alice, dashboard) {
 
 async function scenarioAlerts(alice, victor, bobToken) {
   const page = alice.page;
+  const alertLink = page.locator(`#alert-link-${alertFixture.id}`);
+  const alertBinSuffix = alertFixture.bin
+    .replace(/[^a-z\d]/gi, "")
+    .slice(-4)
+    .toUpperCase();
   const alertResponses = [];
   const captureAlertResponse = async (response) => {
     if (!response.url().endsWith("/graphql")) return;
@@ -1335,9 +1340,10 @@ async function scenarioAlerts(alice, victor, bobToken) {
   page.on("response", captureAlertResponse);
   try {
     await page.getByRole("link", { name: "Alerts", exact: true }).click();
-    const listed = await waitVisible(
-      page.getByText(`critical · Bin ${alertFixture.bin}`),
-    );
+    const listed = await waitVisible(alertLink);
+    const displayedAlert = (await alertLink.textContent().catch(() => ""))
+      .replace(/\s+/g, " ")
+      .trim();
     const bob = await gql(bobToken, operations.alertList, {
       limit: 25,
       state: "open",
@@ -1350,14 +1356,13 @@ async function scenarioAlerts(alice, victor, bobToken) {
     check(
       "S8 alert list is tenant scoped and viewer cannot acknowledge",
       listed &&
+        displayedAlert.includes(`Critical · Bin ${alertBinSuffix}`) &&
         (bob.body?.data?.alerts?.items ?? []).length === 0 &&
         code(viewer) === "insufficient_role",
-      `listed=${listed} bobItems=${bob.body?.data?.alerts?.items?.length ?? "error"} viewer=${code(viewer)}`,
+      `listed=${listed} title=${displayedAlert} bobItems=${bob.body?.data?.alerts?.items?.length ?? "error"} viewer=${code(viewer)}`,
     );
     await shot(page, "s8-alert-open");
-    const fixtureRow = page
-      .getByRole("listitem")
-      .filter({ hasText: alertFixture.bin });
+    const fixtureRow = page.getByRole("listitem").filter({ has: alertLink });
     await fixtureRow.getByRole("button", { name: "Acknowledge" }).click();
     const gone = await fixtureRow
       .waitFor({ state: "hidden", timeout: 15_000 })
@@ -1365,7 +1370,7 @@ async function scenarioAlerts(alice, victor, bobToken) {
       .catch(() => false);
     await page.locator("#alert-state").selectOption("acknowledged");
     const acknowledged = await waitVisible(
-      page.getByRole("listitem").filter({ hasText: alertFixture.bin }),
+      page.getByRole("listitem").filter({ has: alertLink }),
     );
     check(
       "S8 admin acknowledges an alert through the gateway and UI refreshes",
