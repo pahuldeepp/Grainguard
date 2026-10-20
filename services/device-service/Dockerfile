@@ -1,4 +1,4 @@
-FROM node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
+FROM node@sha256:1b84b89ada025e3b14543cbb837ffaa1c1b5273b841c5b94dd1a8f9c1d8cf7fe AS build
 WORKDIR /app
 COPY package*.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
@@ -12,7 +12,7 @@ RUN npm ci
 COPY packages packages
 COPY services/device-service services/device-service
 RUN npm run build --workspace @greenguard/device-service && npm prune --omit=dev
-FROM node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+FROM node@sha256:1b84b89ada025e3b14543cbb837ffaa1c1b5273b841c5b94dd1a8f9c1d8cf7fe
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001
 WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
