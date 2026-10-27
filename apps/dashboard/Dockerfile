@@ -9,7 +9,7 @@ COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci
 COPY apps/dashboard apps/dashboard
 RUN npm run build --workspace @greenguard/dashboard
-FROM nginxinc/nginx-unprivileged@sha256:04a3275f25d766cff8926d2e57b2ff34a783d6b12a702dc98bb82226d2d9a508
+FROM nginxinc/nginx-unprivileged@sha256:09b0d3eda2aa592d2487f284519419015cab010d7df16cd0fe224b585fc60eb6
 # Rendered with envsubst at start; set CSP_CONNECT_EXTRA to the OIDC issuer origin.
 ENV CSP_CONNECT_EXTRA=""
 COPY apps/dashboard/nginx.conf /etc/nginx/templates/default.conf.template
