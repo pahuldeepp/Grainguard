@@ -1,0 +1,39 @@
+Stage06 host binaries built
+Transformer healthy
+(node:35097) TimeoutNegativeWarning: -1793577562014 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant b9e64f4f-82b4-486a-990f-3653d773db5f
+Alert episode committed for tenant b9e64f4f-82b4-486a-990f-3653d773db5f
+Jobs intent committed for tenant b9e64f4f-82b4-486a-990f-3653d773db5f
+Notification sent for tenant b9e64f4f-82b4-486a-990f-3653d773db5f
+Risk assessment committed for tenant 6a0fc326-8ab6-4674-830c-9b81d1008e90
+Alert episode committed for tenant 6a0fc326-8ab6-4674-830c-9b81d1008e90
+Jobs intent committed for tenant 6a0fc326-8ab6-4674-830c-9b81d1008e90
+Notification sent for tenant 6a0fc326-8ab6-4674-830c-9b81d1008e90
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+{"level":"ERROR","timestamp":"2026-11-02T00:00:09.168Z","logger":"kafkajs","message":"[Connection] Response Fetch(key: 1, version: 11)","broker":"127.0.0.1:59112","clientId":"stage06-e2e-a37c012b","error":"LZ4 compression not implemented","correlationId":0,"size":3726}
+{"level":"ERROR","timestamp":"2026-11-02T00:00:09.169Z","logger":"kafkajs","message":"[Consumer] Crash: KafkaJSNotImplemented: LZ4 compression not implemented","groupId":"flink-risk-observer-857d8171-3355-49fd-a2d1-a0306c482db1","stack":"KafkaJSNotImplemented: LZ4 compression not implemented\n    at 3 (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/message/compression/index.js:19:11)\n    at lookupCodecByAttributes (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/message/compression/index.js:29:18)\n    at module.exports (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/recordBatch/v0/decoder.js:68:17)\n    at decodeMessages (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/requests/fetch/v4/decodeMessages.js:27:35)\n    at decodePartition (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/requests/fetch/v11/response.js:39:19)\n    at Decoder.readArrayAsync (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/decoder.js:230:24)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async decodeResponse (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/requests/fetch/v11/response.js:44:15)\n    at async Decoder.readArrayAsync (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/decoder.js:230:18)\n    at async Object.decode (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/kafkajs/src/protocol/requests/fetch/v11/response.js:52:21)"}
+file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:191
+  throw new Error(
+        ^
+
+Error: capture real Flink anomalies: timed out; (node:36019) TimeoutNegativeWarning: -1793577600515 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+    at until (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:191:9)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processTimers (node:internal/timers:615:9)
+    at async checkFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:49:5)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:622:5
+
+Node.js v24.21.0

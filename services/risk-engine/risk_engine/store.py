@@ -215,12 +215,76 @@ class PgTx:
         return int(row[0]) if row else 0
 
     def insert_assessment(self, values: Mapping[str, Any]) -> None:
-        columns = ("tenant_id",) + _ASSESSMENT_COLUMNS
+        columns = ("tenant_id",) + _ASSESSMENT_COLUMNS + ("source_kind",)
         params = [self.tenant] + [json.dumps(values[c]) if c == "reasons" else values[c]
-                                  for c in _ASSESSMENT_COLUMNS]
+                                  for c in _ASSESSMENT_COLUMNS] + [values.get("source_kind", "threshold")]
         self.cur.execute(
             f"INSERT INTO risk_assessments ({', '.join(columns)})"
             f" VALUES ({', '.join(['%s'] * len(columns))})", params)
+
+    def latest_assessment(self, device_id: str, lot_id: str, not_before: datetime,
+                          source_kind: str | None) -> Mapping[str, Any] | None:
+        """Newest scored, not-invalidated assessment of the device for the lot since not_before.
+
+        ``source_kind`` None means any source (what was last published); 'threshold' restricts to
+        threshold-sourced assessments (the base an anomaly adds to).
+        """
+        row = self._one(
+            "SELECT a.score, a.severity, a.reasons, a.observed_at FROM risk_assessments a"
+            " WHERE a.tenant_id = %s AND a.device_id = %s AND a.lot_id = %s"
+            " AND (%s::text IS NULL OR a.source_kind = %s::text)"
+            " AND a.score IS NOT NULL AND a.severity <> 'insufficient_data' AND a.observed_at >= %s"
+            " AND NOT EXISTS (SELECT 1 FROM risk_assessment_invalidations i"
+            " WHERE i.tenant_id = a.tenant_id AND i.assessment_id = a.assessment_id)"
+            " ORDER BY a.observed_at DESC, a.aggregate_version DESC LIMIT 1",
+            (self.tenant, device_id, lot_id, source_kind, source_kind, not_before))
+        return None if row is None else dict(zip(("score", "severity", "reasons", "observed_at"), row))
+
+    def telemetry_received(self, source_event_id: str, device_id: str, reading_id: str) -> bool:
+        row = self._one(
+            "SELECT EXISTS (SELECT 1 FROM consumer_inbox WHERE tenant_id = %s AND event_id = %s"
+            " AND event_type = 'telemetry.recorded' AND event->'payload'->>'device_id' = %s"
+            " AND event->'payload'->>'reading_id' = %s)",
+            (self.tenant, source_event_id, device_id, reading_id))
+        return bool(row[0])
+
+    def telemetry_rejected(self, source_event_id: str, device_id: str, reading_id: str) -> bool:
+        row = self._one(
+            "SELECT EXISTS (SELECT 1 FROM rejected_telemetry_causes WHERE tenant_id = %s"
+            " AND source_event_id = %s AND device_id = %s AND reading_id = %s)",
+            (self.tenant, source_event_id, device_id, reading_id))
+        return bool(row[0])
+
+    def bin_published_score(self, bin_id: str, lot_id: str) -> int | None:
+        """Bin/lot guard, under lock_bin: latest publication per active bound device.
+
+        Observation time and corroboration age must never hide a published critical
+        signal. Devices have separate stream versions, so take their maximum rather
+        than inventing a total publication order across devices. Retired bindings
+        and earlier lots must not permanently suppress a later advisory episode.
+        A binding index enumerates current devices; each assessment index lookup
+        stops at the first non-invalidated scored publication for this lot.
+        """
+        row = self._one(
+            "SELECT max(latest.score) FROM device_bindings b CROSS JOIN LATERAL ("
+            " SELECT a.score FROM risk_assessments a"
+            " WHERE a.tenant_id = %s AND a.bin_id = %s AND a.lot_id = %s AND a.device_id = b.device_id"
+            " AND a.score IS NOT NULL AND NOT EXISTS ("
+            " SELECT 1 FROM risk_assessment_invalidations i WHERE i.tenant_id = a.tenant_id"
+            " AND i.assessment_id = a.assessment_id)"
+            " ORDER BY a.aggregate_version DESC LIMIT 1) latest"
+            " WHERE b.tenant_id = %s AND b.bin_id = %s AND b.status = 'active'",
+            (self.tenant, bin_id, lot_id, self.tenant, bin_id))
+        return None if row is None or row[0] is None else int(row[0])
+
+    def insert_anomaly_decision(self, values: Mapping[str, Any]) -> None:
+        self.cur.execute(
+            "INSERT INTO anomaly_decisions (tenant_id, anomaly_event_id, device_id, metric, detector, outcome,"
+            " base_score, points, combined_score, assessment_id, observed_at)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (self.tenant, values["anomaly_event_id"], values["device_id"], values["metric"], values["detector"],
+             values["outcome"], values["base_score"], values["points"], values["combined_score"],
+             values["assessment_id"], values["observed_at"]))
 
     def insert_outbox(self, event: Mapping[str, Any]) -> None:
         self.cur.execute(
@@ -279,15 +343,28 @@ class PgDatabase:
                 yield PgTx(cur, tenant_id)
 
     def quarantine(self, consumer_name: str, topic: str, partition: int, offset: int,
-                   reason: str, payload_sha256: str) -> None:
+                   reason: str, payload_sha256: str,
+                   telemetry_identity: tuple[str, str, str, str] | None = None) -> None:
         with self._guard():
-            self._connection().execute(
-                "INSERT INTO quarantine_samples (consumer_name, source_topic, source_partition, slot,"
-                " source_offset, reason, payload_sha256) VALUES (%s,%s,%s,%s,%s,%s,%s)"
-                " ON CONFLICT (consumer_name, source_topic, source_partition, slot) DO UPDATE"
-                " SET source_offset = EXCLUDED.source_offset, reason = EXCLUDED.reason,"
-                " payload_sha256 = EXCLUDED.payload_sha256, quarantined_at = clock_timestamp()",
-                (consumer_name, topic, partition, offset % 1000, offset, reason, payload_sha256))
+            conn = self._connection()
+            with conn.transaction():
+                self._quarantine(conn, consumer_name, topic, partition, offset, reason, payload_sha256)
+                if telemetry_identity is not None:
+                    conn.execute("SELECT set_config('app.tenant_id', %s, true)", (telemetry_identity[0],))
+                    conn.execute(
+                        "INSERT INTO rejected_telemetry_causes (tenant_id, source_event_id, device_id, reading_id, reason)"
+                        " VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", (*telemetry_identity, reason))
+
+    @staticmethod
+    def _quarantine(conn: Any, consumer_name: str, topic: str, partition: int, offset: int,
+                    reason: str, payload_sha256: str) -> None:
+        conn.execute(
+            "INSERT INTO quarantine_samples (consumer_name, source_topic, source_partition, slot,"
+            " source_offset, reason, payload_sha256) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+            " ON CONFLICT (consumer_name, source_topic, source_partition, slot) DO UPDATE"
+            " SET source_offset = EXCLUDED.source_offset, reason = EXCLUDED.reason,"
+            " payload_sha256 = EXCLUDED.payload_sha256, quarantined_at = clock_timestamp()",
+            (consumer_name, topic, partition, offset % 1000, offset, reason, payload_sha256))
 
     def ping(self) -> bool:
         try:

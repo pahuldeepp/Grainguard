@@ -1,0 +1,332 @@
+== up core
+ Image gg-flink-risk-pgbouncer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 722B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 363B 0.0s done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.1s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#5 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 0.0s done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 1.26kB done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S pgbouncer && adduser -S -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:d060824fb4bf6c7d35fbcc95e3cf53086b1e9f682f70711dbaebb29e1d04f280 done
+#9 exporting config sha256:cf60402c78b7cfaa419641c1ff4b9580f16f081fe5da1864f20933fb1fa81b19
+#9 exporting config sha256:cf60402c78b7cfaa419641c1ff4b9580f16f081fe5da1864f20933fb1fa81b19 0.0s done
+#9 exporting attestation manifest sha256:c38af8eace769bcbb37e62f5bd8d5f6fccff671f8e9c55d66934923918b41934 0.0s done
+#9 exporting manifest list sha256:f9817f343afe750251856c5538be07d9e1825d0a9bf21eb07c9b0d582e49889e
+#9 exporting manifest list sha256:f9817f343afe750251856c5538be07d9e1825d0a9bf21eb07c9b0d582e49889e 0.0s done
+#9 naming to docker.io/library/gg-flink-risk-pgbouncer:latest done
+#9 unpacking to docker.io/library/gg-flink-risk-pgbouncer:latest 0.0s done
+#9 DONE 0.2s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.0s
+ Image gg-flink-risk-pgbouncer Built 
+ Network gg-flink-risk_default Creating 
+ Network gg-flink-risk_default Creating 
+ Network gg-flink-risk_default Created 
+ Network gg-flink-risk_default Created 
+ Container gg-flink-risk-rabbitmq-1 Creating 
+ Container gg-flink-risk-postgres-1 Creating 
+ Container gg-flink-risk-kafka-1 Creating 
+ Container gg-flink-risk-kafka-1 Created 
+ Container gg-flink-risk-postgres-1 Created 
+ Container gg-flink-risk-pgbouncer-1 Creating 
+ Container gg-flink-risk-rabbitmq-1 Created 
+ Container gg-flink-risk-pgbouncer-1 Created 
+ Container gg-flink-risk-postgres-1 Starting 
+ Container gg-flink-risk-rabbitmq-1 Starting 
+ Container gg-flink-risk-kafka-1 Starting 
+ Container gg-flink-risk-postgres-1 Started 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-rabbitmq-1 Started 
+ Container gg-flink-risk-kafka-1 Started 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-pgbouncer-1 Starting 
+ Container gg-flink-risk-pgbouncer-1 Started 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-rabbitmq-1 Waiting 
+ Container gg-flink-risk-pgbouncer-1 Waiting 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-pgbouncer-1 Healthy 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-rabbitmq-1 Healthy 
+WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
+WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
+WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
+WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
+== up registry+connect
+ Image grainguard/debezium-connect-avro:3.2.0-local Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 709B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile.connect
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.01kB 0.0s done
+#2 DONE 0.2s
+
+#3 [internal] load metadata for quay.io/debezium/connect@sha256:b79f70f10a4aa97445f61e1c7b6cc8f484018f59d9a90cabc8135d3ae70ad90b
+#3 DONE 0.4s
+
+#4 [internal] load .dockerignore
+#4 transferring context:
+#4 transferring context: 128B 0.0s done
+#4 DONE 0.2s
+
+#5 [1/2] FROM quay.io/debezium/connect@sha256:b79f70f10a4aa97445f61e1c7b6cc8f484018f59d9a90cabc8135d3ae70ad90b
+#5 resolve quay.io/debezium/connect@sha256:b79f70f10a4aa97445f61e1c7b6cc8f484018f59d9a90cabc8135d3ae70ad90b 0.1s done
+#5 DONE 0.1s
+
+#6 [2/2] RUN set -eu;     archive=/tmp/confluent-avro-converter.zip;     curl --fail --silent --show-error --location       https://hub-downloads.confluent.io/api/plugins/confluentinc/kafka-connect-avro-converter/versions/7.9.1/confluentinc-kafka-connect-avro-converter-7.9.1.zip       --output "$archive";     echo 'd2f18788cfcd039bd27442182d3ed52f4ae2611cd49e674fbd869c1a4ec08d47  /tmp/confluent-avro-converter.zip' | sha256sum --check --status;     mkdir -p /kafka/connect/confluent-avro-converter;     unzip -q "$archive" 'confluentinc-kafka-connect-avro-converter-7.9.1/lib/*' -d /tmp/converter;     cp /tmp/converter/confluentinc-kafka-connect-avro-converter-7.9.1/lib/*.jar /kafka/connect/confluent-avro-converter/;     chown -R kafka:kafka /kafka/connect/confluent-avro-converter;     rm -rf "$archive" /tmp/converter
+#6 CACHED
+
+#7 exporting to image
+#7 exporting layers 0.1s done
+#7 exporting manifest sha256:4a7cf95d7b5d593a343e0d646746580cd9d8bdd0c7b71cff336f97feb575c3af 0.1s done
+#7 exporting config sha256:5b6ffeabc3e4f2d0b54bf8b2acc965ebdabcc752d038cea8bf71f86063f7e629 0.0s done
+#7 exporting attestation manifest sha256:67b124449cba5c39ba71daa4b54d7587f548b71f76e9a5d33ca1f5eac214092b 0.1s done
+#7 exporting manifest list sha256:958ad669d785b62871b66bcbde63c4501a00907fc22d6aab77ccf02004a79972 0.0s done
+#7 naming to docker.io/grainguard/debezium-connect-avro:3.2.0-local done
+#7 unpacking to docker.io/grainguard/debezium-connect-avro:3.2.0-local
+#7 unpacking to docker.io/grainguard/debezium-connect-avro:3.2.0-local 0.1s done
+#7 DONE 0.6s
+
+#8 resolving provenance for metadata file
+#8 DONE 0.1s
+ Image grainguard/debezium-connect-avro:3.2.0-local Built 
+ Container gg-flink-risk-kafka-1 Running 
+ Container gg-flink-risk-postgres-1 Running 
+ Container gg-flink-risk-schema-registry-1 Creating 
+ Container gg-flink-risk-schema-registry-1 Created 
+ Container gg-flink-risk-connect-1 Creating 
+ Container gg-flink-risk-connect-1 Created 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-schema-registry-1 Starting 
+ Container gg-flink-risk-schema-registry-1 Started 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-schema-registry-1 Waiting 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-schema-registry-1 Healthy 
+ Container gg-flink-risk-connect-1 Starting 
+ Container gg-flink-risk-connect-1 Started 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-connect-1 Waiting 
+ Container gg-flink-risk-schema-registry-1 Waiting 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-schema-registry-1 Healthy 
+ Container gg-flink-risk-connect-1 Healthy 
+== prepare
+risk migrations applied: none (up to date)
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55741"
+
+2 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build -w @greenguard/feature-flags && tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+(node:51716) TimeoutNegativeWarning: -1793584055766 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":"ERROR","timestamp":"2026-11-02T01:47:35.862Z","logger":"kafkajs","message":"[Connection] Response CreateTopics(key: 19, version: 3)","broker":"127.0.0.1:59112","clientId":"flink-risk-prepare","error":"Topic creation errors","correlationId":2,"size":2018}
+risk-outbox: RUNNING
+alerts-outbox: RUNNING
+== up flink
+ Image grainguard/stream-processor:local Building 
+ Image grainguard/stream-processor:local Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.38kB done
+#1 DONE 0.0s
+
+#2 [flink-taskmanager internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.03kB 0.0s done
+#2 DONE 0.1s
+
+#3 [flink-jobmanager internal] load metadata for docker.io/library/flink@sha256:d51a693da76581f2483d3f83d5997d3226b076a9f990a7f7d1eed144434b8e1e
+#3 DONE 1.4s
+
+#4 [flink-jobmanager internal] load metadata for docker.io/library/maven@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584
+#4 DONE 1.4s
+
+#5 [flink-taskmanager internal] load .dockerignore
+#5 transferring context: 128B done
+#5 DONE 0.0s
+
+#6 [flink-jobmanager internal] load build context
+#6 DONE 0.0s
+
+#7 [flink-jobmanager stage-1 1/3] FROM docker.io/library/flink@sha256:d51a693da76581f2483d3f83d5997d3226b076a9f990a7f7d1eed144434b8e1e
+#7 resolve docker.io/library/flink@sha256:d51a693da76581f2483d3f83d5997d3226b076a9f990a7f7d1eed144434b8e1e
+#7 resolve docker.io/library/flink@sha256:d51a693da76581f2483d3f83d5997d3226b076a9f990a7f7d1eed144434b8e1e 0.2s done
+#7 resolve docker.io/library/flink@sha256:d51a693da76581f2483d3f83d5997d3226b076a9f990a7f7d1eed144434b8e1e 0.2s done
+#7 DONE 0.3s
+
+#8 [flink-jobmanager build 1/6] FROM docker.io/library/maven@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584
+#8 resolve docker.io/library/maven@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584 0.2s done
+#8 DONE 0.3s
+
+#6 [flink-jobmanager internal] load build context
+#6 transferring context: 109.00kB 0.1s done
+#6 DONE 0.1s
+
+#9 [flink-jobmanager build 5/6] COPY services/stream-processor/src ./src
+#9 CACHED
+
+#10 [flink-jobmanager build 6/6] RUN mvn -B -q package -DskipTests -Djacoco.skip=true
+#10 CACHED
+
+#11 [flink-jobmanager stage-1 2/3] RUN mkdir -p /opt/flink/usrlib /checkpoints && chown -R flink:flink /opt/flink/usrlib /checkpoints
+#11 CACHED
+
+#12 [flink-jobmanager build 2/6] WORKDIR /src/services/stream-processor
+#12 CACHED
+
+#13 [flink-jobmanager build 3/6] COPY services/stream-processor/pom.xml ./pom.xml
+#13 CACHED
+
+#14 [flink-jobmanager build 4/6] RUN mvn -B -q dependency:go-offline -DskipTests
+#14 CACHED
+
+#15 [flink-jobmanager stage-1 3/3] COPY --from=build --chown=flink:flink /src/services/stream-processor/target/stream-processor.jar /opt/flink/usrlib/stream-processor.jar
+#15 CACHED
+
+#9 [flink-taskmanager build 5/6] COPY services/stream-processor/src ./src
+#9 CACHED
+
+#10 [flink-taskmanager build 6/6] RUN mvn -B -q package -DskipTests -Djacoco.skip=true
+#10 CACHED
+
+#13 [flink-taskmanager build 3/6] COPY services/stream-processor/pom.xml ./pom.xml
+#13 CACHED
+
+#14 [flink-taskmanager build 4/6] RUN mvn -B -q dependency:go-offline -DskipTests
+#14 CACHED
+
+#11 [flink-taskmanager stage-1 2/3] RUN mkdir -p /opt/flink/usrlib /checkpoints && chown -R flink:flink /opt/flink/usrlib /checkpoints
+#11 CACHED
+
+#12 [flink-taskmanager build 2/6] WORKDIR /src/services/stream-processor
+#12 CACHED
+
+#16 [flink-jobmanager] exporting to image
+#16 exporting layers 0.1s done
+#16 exporting manifest sha256:89faf9c1dd87c48fc18dc84131e0662d057c2ce1b56df788fbcaecc0f3b44b29 0.0s done
+#16 exporting config sha256:9b5687a96fc9ac1a35f29e645c17bfa0033850e1bc3d3b48085f81c57f98996e
+#16 exporting config sha256:9b5687a96fc9ac1a35f29e645c17bfa0033850e1bc3d3b48085f81c57f98996e done
+#16 exporting attestation manifest sha256:935b624c7ec9994fdb4c47bd4694dcb6fb473b801df769a29452c621598fa78a 0.1s done
+#16 exporting manifest list sha256:bf1166a62ad9149e47e75ac0240be236129e5edd0ba659ff33fa8289faf56b7c
+#16 exporting manifest list sha256:bf1166a62ad9149e47e75ac0240be236129e5edd0ba659ff33fa8289faf56b7c 0.0s done
+#16 naming to docker.io/grainguard/stream-processor:local done
+#16 unpacking to docker.io/grainguard/stream-processor:local 0.0s done
+#16 DONE 0.4s
+
+#17 [flink-taskmanager] exporting to image
+#17 exporting layers 0.1s done
+#17 exporting manifest sha256:58376b546159f793bf218379888761202d7684e464b9304b7efa5a64fac728d6 0.0s done
+#17 exporting config sha256:4afa80fc3c3e53d948af77dedda48e2f2d23c73f0b018db1583d2bca7313c869 0.0s done
+#17 exporting attestation manifest sha256:2ea6c28cd38ad6da1d99fc054f5508b9497bdda723e71e3f3989bd4bf9ffdb12 0.1s done
+#17 exporting manifest list sha256:c1c10fc6089d94d6ad315953a9ac2598ea707f12545d3f50b4838c668e659ed1 0.1s done
+#17 naming to docker.io/grainguard/stream-processor:local done
+#17 unpacking to docker.io/grainguard/stream-processor:local 0.0s done
+#17 DONE 0.6s
+
+#18 [flink-jobmanager] resolving provenance for metadata file
+#18 DONE 0.0s
+
+#19 [flink-taskmanager] resolving provenance for metadata file
+#19 DONE 0.0s
+ Image grainguard/stream-processor:local Built 
+ Image grainguard/stream-processor:local Built 
+ Container gg-flink-risk-kafka-1 Running 
+ Container gg-flink-risk-flink-jobmanager-1 Creating 
+ Container gg-flink-risk-flink-jobmanager-1 Created 
+ Container gg-flink-risk-flink-taskmanager-1 Creating 
+ Container gg-flink-risk-flink-taskmanager-1 Created 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-flink-jobmanager-1 Starting 
+ Container gg-flink-risk-flink-jobmanager-1 Started 
+ Container gg-flink-risk-kafka-1 Waiting 
+ Container gg-flink-risk-kafka-1 Healthy 
+ Container gg-flink-risk-flink-taskmanager-1 Starting 
+ Container gg-flink-risk-flink-taskmanager-1 Started 
+== e2e
+Stage06 host binaries built
+Transformer healthy
+(node:52420) TimeoutNegativeWarning: -1793584082049 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant 54368994-6040-4be4-8573-8af326f16a27
+Alert episode committed for tenant 54368994-6040-4be4-8573-8af326f16a27
+Jobs intent committed for tenant 54368994-6040-4be4-8573-8af326f16a27
+Notification sent for tenant 54368994-6040-4be4-8573-8af326f16a27
+Risk assessment committed for tenant 9bc7f977-d2cc-46b8-ba2c-ce372e88511a
+Alert episode committed for tenant 9bc7f977-d2cc-46b8-ba2c-ce372e88511a
+Jobs intent committed for tenant 9bc7f977-d2cc-46b8-ba2c-ce372e88511a
+Notification sent for tenant 9bc7f977-d2cc-46b8-ba2c-ce372e88511a
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+PASS Flink integration: two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS
+PASS Flink integration: risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification
+PASS Flink integration: stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival
+PASS Flink integration: delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert
+PASS Flink integration: Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries
+PASS Flink integration: PostgreSQL outage leaves offsets uncommitted; explicit worker recovery applies queued anomaly once and preserves notification deduplication
+Flink integration evidence: evidence/flink/risk-integration-5757c39c-4387-42d8-a420-06de174485b1.json
+E2E_EXIT_OK

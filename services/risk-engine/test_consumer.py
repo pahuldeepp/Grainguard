@@ -226,6 +226,9 @@ class FakeMessage:
     def value(self):
         return b"{}"
 
+    def key(self):
+        return b"k"
+
 
 class FakeKafka:
     def __init__(self, config):
@@ -384,7 +387,21 @@ class SinkTest(unittest.TestCase):
         db = FakeDatabase()
         rec = Record("t", 2, 1234, b"payload")
         DatabaseSink(db, "g").quarantine(rec, "invalid_event")
-        self.assertEqual(db.quarantined, [("g", "t", 2, 1234, "invalid_event", payload_digest(rec))])
+        self.assertEqual(db.quarantined, [("g", "t", 2, 1234, "invalid_event", payload_digest(rec), None)])
+
+    def test_rejection_identity_requires_exact_canonical_routing(self):
+        event = telemetry(new_id(), new_id(), new_id(), new_id(), "2026-09-24T12:00:00Z")
+        event["payload"]["measurements"] = {"temperature_c": True}
+        rec = record(event)
+        expected = (event["tenant_id"], event["event_id"], event["aggregate_id"], event["payload"]["reading_id"])
+        self.assertEqual(events.rejected_telemetry_identity(rec.topic, rec.value, rec.key), expected)
+        for value, key in ((b"{", rec.key), (b"null", rec.key), (b"[]", rec.key),
+                           (rec.value, None), (rec.value, b"wrong")):
+            self.assertIsNone(events.rejected_telemetry_identity(rec.topic, value, key))
+        for field, replacement in (("event_type", "other"), ("payload", None),
+                                    ("event_id", "bad"), ("aggregate_id", new_id()), ("schema_version", True)):
+            changed = {**event, field: replacement}
+            self.assertIsNone(events.rejected_telemetry_identity(rec.topic, json.dumps(changed).encode(), rec.key))
 
 
 if __name__ == "__main__":

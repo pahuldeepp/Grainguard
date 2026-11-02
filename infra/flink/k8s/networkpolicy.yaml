@@ -1,0 +1,19 @@
+# The job needs only DNS, the Kafka brokers and the object store (checkpoints). No ingress except metrics scraping.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stream-processor
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } }
+      ports: [{ port: 9249, protocol: TCP }]
+    - from:
+        - podSelector: {}   # JobManager and TaskManagers talk to each other
+  egress:
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to: [{ podSelector: {} }]
+    - ports: [{ port: 9094, protocol: TCP }, { port: 443, protocol: TCP }]  # Kafka (TLS listener) and S3 over HTTPS

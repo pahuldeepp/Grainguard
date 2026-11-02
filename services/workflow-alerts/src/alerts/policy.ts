@@ -37,6 +37,7 @@ export interface RiskSignal {
   score: number | null;
   severity: RiskSeverity;
   alertEligible: boolean;
+  advisory?: boolean;
 }
 
 // Default policy seeded per tenant on its first risk event. Hysteresis: an episode
@@ -73,6 +74,14 @@ export function decide(
   const { score } = signal;
   if (score === null) return { kind: "none" };
   const severity = alertSeverity(signal);
+  if (
+    active &&
+    signal.advisory &&
+    (score <= active.score ||
+      !severity ||
+      (active.severity === "critical" && severity !== "critical"))
+  )
+    return { kind: "none" };
   if (!active)
     return severity && score >= rule.openScore
       ? { kind: "open", severity, score }

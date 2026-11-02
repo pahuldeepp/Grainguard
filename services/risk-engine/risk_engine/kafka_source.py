@@ -52,7 +52,7 @@ class KafkaSource:
             return None
         if message.error():
             raise KafkaError(f"Kafka poll failed: {message.error()}")
-        return Record(message.topic(), message.partition(), message.offset(), message.value())
+        return Record(message.topic(), message.partition(), message.offset(), message.value(), message.key())
 
     def commit(self, record: Record) -> None:
         committed = self._consumer.commit(

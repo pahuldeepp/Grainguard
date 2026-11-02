@@ -1,0 +1,35 @@
+test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration (test_anomaly.ApplyTest.test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration) ... FAIL
+test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed (test_anomaly.ApplyTest.test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed) ... FAIL
+
+======================================================================
+FAIL: test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration (test_anomaly.ApplyTest.test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/test_anomaly.py", line 175, in test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration
+    self.assertEqual((first.outcome, first.reason), (NOT_READY, "threshold_state_unavailable"))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: ('skipped', 'no_corroboration') != ('not_ready', 'threshold_state_unavailable')
+
+First differing element 0:
+'skipped'
+'not_ready'
+
+- ('skipped', 'no_corroboration')
++ ('not_ready', 'threshold_state_unavailable')
+
+======================================================================
+FAIL: test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed (test_anomaly.ApplyTest.test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/test_anomaly.py", line 188, in test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed
+    self.assertEqual(sc.apply(record(event)).outcome, NOT_READY)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'applied' != 'not_ready'
+- applied
++ not_ready
+
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.003s
+
+FAILED (failures=2)

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:stream:stream-dlq:v1",
+  "title": "GreenGuard stream DLQ record v1",
+  "$comment": "Bounded, ACL-restricted operational record. Tenant is a header hint taken only from a validated UUID, never authorization context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reason",
+    "source_topic",
+    "source_partition",
+    "source_offset",
+    "detail",
+    "raw_base64",
+    "truncated"
+  ],
+  "properties": {
+    "reason": {
+      "enum": [
+        "bad_json",
+        "bad_envelope",
+        "bad_field",
+        "key_mismatch",
+        "late"
+      ]
+    },
+    "source_topic": {
+      "type": "string"
+    },
+    "source_partition": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "raw_base64": {
+      "type": "string",
+      "maxLength": 87384
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

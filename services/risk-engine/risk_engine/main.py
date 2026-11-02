@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from risk_engine import events
+from risk_engine import anomaly, events
 from risk_engine.apply import Applier
 from risk_engine.consumer import Consumer, DatabaseSink, LotFeed
 from risk_engine.health import Metrics, serve
@@ -33,6 +33,8 @@ class Config:
     health_port: int
     lot_feed_gate: bool
     max_wait_s: float
+    flink_anomalies: bool = False
+    anomaly_policy: anomaly.AnomalyPolicy = anomaly.AnomalyPolicy()
 
 
 def load_config(getenv: Callable[[str], str | None]) -> Config:
@@ -47,8 +49,12 @@ def load_config(getenv: Callable[[str], str | None]) -> Config:
     max_wait = float(getenv("RISK_NOT_READY_MAX_WAIT_S") or "300")
     if not 0 < port < 65536 or not 1 <= max_wait <= 86400:
         raise ValueError("RISK_HEALTH_PORT or RISK_NOT_READY_MAX_WAIT_S out of range")
+    flink = getenv("RISK_FLINK_ANOMALIES") or "off"
+    if flink not in ("on", "off"):
+        raise ValueError("RISK_FLINK_ANOMALIES must be on or off")
     return Config(database_url, brokers, getenv("RISK_KAFKA_GROUP") or "greenguard.risk-engine.v1",
-                  getenv("RISK_KAFKA_OFFSET_RESET") or "error", port, gate == "checkpoint", max_wait)
+                  getenv("RISK_KAFKA_OFFSET_RESET") or "error", port, gate == "checkpoint", max_wait,
+                  flink == "on", anomaly.from_env(getenv))
 
 
 def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None,
@@ -58,10 +64,11 @@ def run(getenv: Callable[[str], str | None], stop: threading.Event | None = None
     stop = stop or threading.Event()
     db = database(config.database_url)
     health_db = database(config.database_url)
-    kafka = source(config.kafka_brokers, config.group, events.TOPICS, config.offset_reset)
+    kafka = source(config.kafka_brokers, config.group, events.topics(config.flink_anomalies), config.offset_reset)
     metrics = Metrics()
+    metrics.inc("risk_configuration_info", flink_anomalies="on" if config.flink_anomalies else "off")
     lot_feed = LotFeed(enabled=config.lot_feed_gate)
-    applier = Applier(db, config.group, lot_feed.value)
+    applier = Applier(db, config.group, lot_feed.value, anomaly=config.anomaly_policy)
     consumer = Consumer(kafka, DatabaseSink(db, config.group), applier, lot_feed, metrics,
                         max_wait_s=config.max_wait_s)
     last_step_at: float | None = None

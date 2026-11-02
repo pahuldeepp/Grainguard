@@ -1,0 +1,12 @@
+# DISABLED BY DEFAULT (ADR-0030). Nothing in infra/gitops, infra/helm or any Argo application references this
+# directory. To enable: build and sign the image, replace the image digest and the three placeholders in
+# flinkdeployment.yaml, install the Flink Kubernetes Operator, then `kubectl apply -k infra/flink/k8s`
+# and set `job.state: running`. Rollback: set `job.state: suspended` (or `kubectl delete -k infra/flink/k8s`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: greenguard-stream
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - flinkdeployment.yaml
+  - networkpolicy.yaml

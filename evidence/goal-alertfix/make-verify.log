@@ -1,0 +1,503 @@
+python3 scripts/check_plan.py
+Planning scaffold checks passed: 368 catalog/disposition entries, 141 unique coverage rows, component READMEs and local Markdown links.
+This check validates planning files only. Run make verify and make smoke for application checks.
+python3 /Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/flink-risk-compose.py up -d --wait --build
+ Image gg-flink-risk-pgbouncer Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 722B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 363B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#3 DONE 0.0s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 1.26kB done
+#5 DONE 0.0s
+
+#6 [1/3] FROM docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+#6 resolve docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 0.0s done
+#6 DONE 0.0s
+
+#7 [2/3] RUN apk add --no-cache pgbouncer=1.24.0-r0  && addgroup -S pgbouncer && adduser -S -G pgbouncer pgbouncer
+#7 CACHED
+
+#8 [3/3] COPY pgbouncer.ini /etc/pgbouncer/pgbouncer.ini
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:d060824fb4bf6c7d35fbcc95e3cf53086b1e9f682f70711dbaebb29e1d04f280 done
+#9 exporting config sha256:cf60402c78b7cfaa419641c1ff4b9580f16f081fe5da1864f20933fb1fa81b19 done
+#9 exporting attestation manifest sha256:35efd4f621eda4132b4f14418710d460d392ea8a5a61c6e112c6085f7ce2227f 0.1s done
+#9 exporting manifest list sha256:7d0189d4fbc08a9ad70a52722c70c19e45069a8fe59d653b6bdc575e578b28dd
+#9 exporting manifest list sha256:7d0189d4fbc08a9ad70a52722c70c19e45069a8fe59d653b6bdc575e578b28dd 0.0s done
+#9 naming to docker.io/library/gg-flink-risk-pgbouncer:latest done
+#9 unpacking to docker.io/library/gg-flink-risk-pgbouncer:latest 0.0s done
+#9 DONE 0.2s
+
+#10 resolving provenance for metadata file
+#10 DONE 0.0s
+ Image gg-flink-risk-pgbouncer Built 
+ Container gg-flink-risk-postgres-1 Recreate 
+ Container gg-flink-risk-postgres-1 Recreated 
+ Container gg-flink-risk-pgbouncer-1 Recreate 
+ Container gg-flink-risk-pgbouncer-1 Recreated 
+ Container gg-flink-risk-postgres-1 Starting 
+ Container gg-flink-risk-postgres-1 Started 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-pgbouncer-1 Starting 
+ Container gg-flink-risk-pgbouncer-1 Started 
+ Container gg-flink-risk-postgres-1 Waiting 
+ Container gg-flink-risk-pgbouncer-1 Waiting 
+ Container gg-flink-risk-postgres-1 Healthy 
+ Container gg-flink-risk-pgbouncer-1 Healthy 
+python3 /Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/flink-risk-compose.py exec -T postgres psql -q -U postgres -d postgres -f /docker-entrypoint-initdb.d/001-databases.sql
+npm run migrate -w services/device-service
+
+> @greenguard/device-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_inventory", schema "public" at "127.0.0.1:55741"
+
+17 migrations found in prisma/migrations
+
+Applying migration `20260923000000_inventory_foundation`
+Applying migration `20260924000000_cdc_access`
+Applying migration `20260924010000_facility_versions`
+Applying migration `20260924020000_grain_lots`
+Applying migration `20260924030000_lot_fk_names`
+Applying migration `20260924040000_grain_lot_tenant_fk`
+Applying migration `20260924050000_saga_inventory`
+Applying migration `20260924060000_saga_owner`
+Applying migration `20260924070000_saga_owner_grant`
+Applying migration `20260924080000_saga_result_tenant_selector`
+Applying migration `20260925090000_saga_result_trace`
+Applying migration `20260925110000_tenant_projection`
+Applying migration `20260925130000_entitlements`
+Applying migration `20260925170000_audit_export_read`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260926010000_mysql_import_admission`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260923000000_inventory_foundation/
+    └─ migration.sql
+  └─ 20260924000000_cdc_access/
+    └─ migration.sql
+  └─ 20260924010000_facility_versions/
+    └─ migration.sql
+  └─ 20260924020000_grain_lots/
+    └─ migration.sql
+  └─ 20260924030000_lot_fk_names/
+    └─ migration.sql
+  └─ 20260924040000_grain_lot_tenant_fk/
+    └─ migration.sql
+  └─ 20260924050000_saga_inventory/
+    └─ migration.sql
+  └─ 20260924060000_saga_owner/
+    └─ migration.sql
+  └─ 20260924070000_saga_owner_grant/
+    └─ migration.sql
+  └─ 20260924080000_saga_result_tenant_selector/
+    └─ migration.sql
+  └─ 20260925090000_saga_result_trace/
+    └─ migration.sql
+  └─ 20260925110000_tenant_projection/
+    └─ migration.sql
+  └─ 20260925130000_entitlements/
+    └─ migration.sql
+  └─ 20260925170000_audit_export_read/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260926010000_mysql_import_admission/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w services/workflow-alerts
+
+> @greenguard/workflow-alerts@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_alerts", schema "public" at "127.0.0.1:55741"
+
+2 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+npm run migrate -w services/tenant-control-plane
+
+> @greenguard/tenant-control-plane@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_control", schema "public" at "127.0.0.1:55741"
+
+19 migrations found in prisma/migrations
+
+Applying migration `20260925090000_control_plane`
+Applying migration `20260925110000_membership_revocation`
+Applying migration `20260925120000_membership_identity_lookup_index`
+Applying migration `20260925130000_machine_credentials`
+Applying migration `20260925131000_machine_lookup_policy`
+Applying migration `20260925140000_flag_configurations`
+Applying migration `20260925141000_global_flags`
+Applying migration `20260925150000_entitlements`
+Applying migration `20260925160000_audit_exports`
+Applying migration `20260925160000_identity_connections`
+Applying migration `20260925170000_audit_csv`
+Applying migration `20260925180000_entitlement_feed_health`
+Applying migration `20260925181000_entitlement_feed_health_rls`
+Applying migration `20260925181000_identity_domain_expiry`
+Applying migration `20260925185000_oauth_client_tenant_binding`
+Applying migration `20260925190000_audit_export_failures`
+Applying migration `20260925200000_jit_seat_denial_audit`
+Applying migration `20260925210000_notification_contacts`
+Applying migration `20260925220000_notification_contacts_cdc`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925090000_control_plane/
+    └─ migration.sql
+  └─ 20260925110000_membership_revocation/
+    └─ migration.sql
+  └─ 20260925120000_membership_identity_lookup_index/
+    └─ migration.sql
+  └─ 20260925130000_machine_credentials/
+    └─ migration.sql
+  └─ 20260925131000_machine_lookup_policy/
+    └─ migration.sql
+  └─ 20260925140000_flag_configurations/
+    └─ migration.sql
+  └─ 20260925141000_global_flags/
+    └─ migration.sql
+  └─ 20260925150000_entitlements/
+    └─ migration.sql
+  └─ 20260925160000_audit_exports/
+    └─ migration.sql
+  └─ 20260925160000_identity_connections/
+    └─ migration.sql
+  └─ 20260925170000_audit_csv/
+    └─ migration.sql
+  └─ 20260925180000_entitlement_feed_health/
+    └─ migration.sql
+  └─ 20260925181000_entitlement_feed_health_rls/
+    └─ migration.sql
+  └─ 20260925181000_identity_domain_expiry/
+    └─ migration.sql
+  └─ 20260925185000_oauth_client_tenant_binding/
+    └─ migration.sql
+  └─ 20260925190000_audit_export_failures/
+    └─ migration.sql
+  └─ 20260925200000_jit_seat_denial_audit/
+    └─ migration.sql
+  └─ 20260925210000_notification_contacts/
+    └─ migration.sql
+  └─ 20260925220000_notification_contacts_cdc/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+npm run migrate -w @greenguard/billing-service
+
+> @greenguard/billing-service@0.1.0 migrate
+> prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "greenguard_billing", schema "public" at "127.0.0.1:55741"
+
+9 migrations found in prisma/migrations
+
+Applying migration `20260925140000_billing`
+Applying migration `20260925150000_billing_command_work`
+Applying migration `20260925160000_billing_conflict_grants`
+Applying migration `20260925170000_audit_export_read`
+Applying migration `20260925170000_billing_source_rejections`
+Applying migration `20260925180000_billing_due_work`
+Applying migration `20260925190000_billing_hardening`
+Applying migration `20260925200000_billing_queue_id_selectors`
+Applying migration `20260925210000_billing_queue_write_procedures`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260925140000_billing/
+    └─ migration.sql
+  └─ 20260925150000_billing_command_work/
+    └─ migration.sql
+  └─ 20260925160000_billing_conflict_grants/
+    └─ migration.sql
+  └─ 20260925170000_audit_export_read/
+    └─ migration.sql
+  └─ 20260925170000_billing_source_rejections/
+    └─ migration.sql
+  └─ 20260925180000_billing_due_work/
+    └─ migration.sql
+  └─ 20260925190000_billing_hardening/
+    └─ migration.sql
+  └─ 20260925200000_billing_queue_id_selectors/
+    └─ migration.sql
+  └─ 20260925210000_billing_queue_write_procedures/
+    └─ migration.sql
+
+All migrations have been successfully applied.
+cd services/telemetry-ingest && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make projection-migrate
+cd services/projection-builder && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-migrate
+python3 -m venv .local/risk-owner-venv
+.local/risk-owner-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+
+[notice] A new release of pip is available: 26.2.1 -> 26.2.2
+[notice] To update, run: /Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/.local/risk-owner-venv/bin/python3.14 -m pip install --upgrade pip
+cd services/risk-engine && ../../.local/risk-owner-venv/bin/python -m risk_engine.migrate
+risk migrations applied: 000011
+/Applications/Xcode.app/Contents/Developer/usr/bin/make jobs-migrate
+cd services/jobs-worker && go run ./cmd/migrate
+npm run migrate -w services/notification-service
+
+> @greenguard/notification-service@0.1.0 migrate
+> npm run build && node dist/migrate.js
+
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build -w @greenguard/feature-flags && tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+
+notification migrations applied: 0
+/Applications/Xcode.app/Contents/Developer/usr/bin/make saga-migrate
+cd services/saga-orchestrator && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make hardware-migrate
+cd services/hardware-service && go run ./cmd/migrate
+/Applications/Xcode.app/Contents/Developer/usr/bin/make risk-test
+python3 -m venv .local/risk-owner-venv
+.local/risk-owner-venv/bin/pip install -q -r services/risk-engine/requirements-dev.txt
+
+[notice] A new release of pip is available: 26.2.1 -> 26.2.2
+[notice] To update, run: /Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/.local/risk-owner-venv/bin/python3.14 -m pip install --upgrade pip
+cd services/risk-engine && ../../.local/risk-owner-venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
+test_a_delayed_anomaly_cannot_resurrect_a_condition_that_already_cleared (test_anomaly.ApplyTest.test_a_delayed_anomaly_cannot_resurrect_a_condition_that_already_cleared) ... ok
+test_anomaly_alone_cannot_reach_critical (test_anomaly.ApplyTest.test_anomaly_alone_cannot_reach_critical) ... ok
+test_anomaly_arriving_after_an_alert_exists_only_raises_it (test_anomaly.ApplyTest.test_anomaly_arriving_after_an_alert_exists_only_raises_it) ... ok
+test_anomaly_cannot_publish_a_warning_before_its_critical_trigger (test_anomaly.ApplyTest.test_anomaly_cannot_publish_a_warning_before_its_critical_trigger) ... ok
+test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed (test_anomaly.ApplyTest.test_anomaly_cannot_use_an_old_warning_before_its_normal_trigger_is_processed) ... ok
+test_anomaly_never_publishes_without_corroboration_or_below_the_alert_score (test_anomaly.ApplyTest.test_anomaly_never_publishes_without_corroboration_or_below_the_alert_score) ... ok
+test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration (test_anomaly.ApplyTest.test_anomaly_waits_for_its_triggering_reading_instead_of_losing_corroboration) ... ok
+test_another_consumer_replaying_the_same_anomaly_finds_the_existing_assessment (test_anomaly.ApplyTest.test_another_consumer_replaying_the_same_anomaly_finds_the_existing_assessment) ... ok
+test_backdated_lot_replacement_retracts_an_anomaly_assessment_too (test_anomaly.ApplyTest.test_backdated_lot_replacement_retracts_an_anomaly_assessment_too) ... ok
+test_corroborated_anomaly_publishes_a_valid_warning_through_the_outbox (test_anomaly.ApplyTest.test_corroborated_anomaly_publishes_a_valid_warning_through_the_outbox) ... ok
+test_critical_threshold_alert_is_never_suppressed_repeated_or_downgraded (test_anomaly.ApplyTest.test_critical_threshold_alert_is_never_suppressed_repeated_or_downgraded) ... ok
+test_cross_tenant_anomaly_cannot_touch_another_tenants_device (test_anomaly.ApplyTest.test_cross_tenant_anomaly_cannot_touch_another_tenants_device) ... ok
+test_device_state_gates (test_anomaly.ApplyTest.test_device_state_gates) ... ok
+test_humidity_anomaly_adds_the_humidity_reason (test_anomaly.ApplyTest.test_humidity_anomaly_adds_the_humidity_reason) ... ok
+test_interleaved_threshold_and_anomaly_assessments_keep_one_ordered_stream (test_anomaly.ApplyTest.test_interleaved_threshold_and_anomaly_assessments_keep_one_ordered_stream) ... ok
+test_missing_context_is_not_ready_and_leaves_no_trace (test_anomaly.ApplyTest.test_missing_context_is_not_ready_and_leaves_no_trace) ... ok
+test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications (test_anomaly.ApplyTest.test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications) ... ok
+test_policy_unavailable_for_the_lot_grain_is_quarantined (test_anomaly.ApplyTest.test_policy_unavailable_for_the_lot_grain_is_quarantined) ... ok
+test_publication_guard_keeps_critical_after_an_out_of_order_reading (test_anomaly.ApplyTest.test_publication_guard_keeps_critical_after_an_out_of_order_reading) ... ok
+test_publication_guard_protects_another_device_in_the_same_bin (test_anomaly.ApplyTest.test_publication_guard_protects_another_device_in_the_same_bin) ... ok
+test_recovered_assessment_without_receipt_is_not_published_again (test_anomaly.ApplyTest.test_recovered_assessment_without_receipt_is_not_published_again) ... ok
+test_redelivery_is_a_duplicate_and_a_changed_replay_is_quarantined (test_anomaly.ApplyTest.test_redelivery_is_a_duplicate_and_a_changed_replay_is_quarantined) ... ok
+test_repeated_anomalies_do_not_create_repeated_assessments (test_anomaly.ApplyTest.test_repeated_anomalies_do_not_create_repeated_assessments) ... ok
+test_skipped_anomaly_replay_and_conflict_across_consumer_names (test_anomaly.ApplyTest.test_skipped_anomaly_replay_and_conflict_across_consumer_names) ... ok
+test_stale_and_seven_day_late_anomalies_cannot_open_alerts (test_anomaly.ApplyTest.test_stale_and_seven_day_late_anomalies_cannot_open_alerts) ... ok
+test_threshold_assessment_is_identical_with_or_without_anomaly_support (test_anomaly.ApplyTest.test_threshold_assessment_is_identical_with_or_without_anomaly_support) ... ok
+test_unexpected_lot_selection_results_fail_closed (test_anomaly.ApplyTest.test_unexpected_lot_selection_results_fail_closed) ... ok
+test_anomaly_record_flows_through_the_consumer_and_is_counted (test_anomaly.ConsumerTest.test_anomaly_record_flows_through_the_consumer_and_is_counted) ... ok
+test_anomaly_waits_for_its_binding_without_blocking_other_topics (test_anomaly.ConsumerTest.test_anomaly_waits_for_its_binding_without_blocking_other_topics) ... ok
+test_crash_after_apply_before_commit_then_replay_publishes_once (test_anomaly.ConsumerTest.test_crash_after_apply_before_commit_then_replay_publishes_once) ... ok
+test_invalid_and_mis_keyed_anomalies_are_quarantined_and_never_block (test_anomaly.ConsumerTest.test_invalid_and_mis_keyed_anomalies_are_quarantined_and_never_block) ... ok
+test_kafka_replay_of_the_whole_anomaly_history_changes_nothing (test_anomaly.ConsumerTest.test_kafka_replay_of_the_whole_anomaly_history_changes_nothing) ... ok
+test_missing_or_mismatched_trigger_receipt_wait_is_bounded (test_anomaly.ConsumerTest.test_missing_or_mismatched_trigger_receipt_wait_is_bounded) ... ok
+test_waiting_trigger_expires_as_too_old_when_wall_clock_advances (test_anomaly.ConsumerTest.test_waiting_trigger_expires_as_too_old_when_wall_clock_advances) ... ok
+test_configuration_metric_reports_the_effective_optional_flag (test_anomaly.MainConfigTest.test_configuration_metric_reports_the_effective_optional_flag) ... ok
+test_flag_is_off_by_default_and_the_subscription_is_unchanged (test_anomaly.MainConfigTest.test_flag_is_off_by_default_and_the_subscription_is_unchanged) ... ok
+test_invalid_flag_or_policy_stops_startup (test_anomaly.MainConfigTest.test_invalid_flag_or_policy_stops_startup) ... ok
+test_invalid_events_are_rejected_with_stable_reasons (test_anomaly.ParseTest.test_invalid_events_are_rejected_with_stable_reasons) ... ok
+test_other_topics_are_unchanged (test_anomaly.ParseTest.test_other_topics_are_unchanged) ... ok
+test_schema_version_requires_an_integer_and_never_accepts_boolean_true (test_anomaly.ParseTest.test_schema_version_requires_an_integer_and_never_accepts_boolean_true) ... ok
+test_valid_events_for_both_metrics_and_detectors (test_anomaly.ParseTest.test_valid_events_for_both_metrics_and_detectors) ... ok
+test_decision_table (test_anomaly.PolicyTest.test_decision_table) ... ok
+test_environment_configuration (test_anomaly.PolicyTest.test_environment_configuration) ... ok
+test_invalid_policy_is_rejected (test_anomaly.PolicyTest.test_invalid_policy_is_rejected) ... ok
+test_crash_before_commit_leaves_nothing_then_redelivery_applies_once (test_apply.ApplyFailureTest.test_crash_before_commit_leaves_nothing_then_redelivery_applies_once) ... ok
+test_data_rejections_quarantine_and_rls_denial_is_hard (test_apply.ApplyFailureTest.test_data_rejections_quarantine_and_rls_denial_is_hard) ... ok
+test_transient_errors_retry_with_bounded_backoff (test_apply.ApplyFailureTest.test_transient_errors_retry_with_bounded_backoff) ... ok
+test_transient_exhaustion_stops_without_commit (test_apply.ApplyFailureTest.test_transient_exhaustion_stops_without_commit) ... ok
+test_zero_attempt_policy_is_explicit (test_apply.ApplyFailureTest.test_zero_attempt_policy_is_explicit) ... ok
+test_backdated_lot_change_reports_affected_assessments (test_apply.ApplyInventoryTest.test_backdated_lot_change_reports_affected_assessments) ... ok
+test_binding_versions_never_regress (test_apply.ApplyInventoryTest.test_binding_versions_never_regress) ... ok
+test_invalidation_outbox_failure_rolls_back_lot_and_ledger (test_apply.ApplyInventoryTest.test_invalidation_outbox_failure_rolls_back_lot_and_ledger) ... ok
+test_lot_versions (test_apply.ApplyInventoryTest.test_lot_versions) ... ok
+test_stale_older_lot_version_is_ignored (test_apply.ApplyInventoryTest.test_stale_older_lot_version_is_ignored) ... ok
+test_binding_mismatch_and_missing_binding (test_apply.ApplyTelemetryTest.test_binding_mismatch_and_missing_binding) ... ok
+test_duplicate_delivery_preserves_result_and_writes_nothing (test_apply.ApplyTelemetryTest.test_duplicate_delivery_preserves_result_and_writes_nothing) ... ok
+test_late_reading_scores_against_wheat_and_emits_valid_event (test_apply.ApplyTelemetryTest.test_late_reading_scores_against_wheat_and_emits_valid_event) ... ok
+test_not_ready_and_quarantine_roll_back_everything (test_apply.ApplyTelemetryTest.test_not_ready_and_quarantine_roll_back_everything) ... ok
+test_same_event_id_with_different_payload_is_quarantined (test_apply.ApplyTelemetryTest.test_same_event_id_with_different_payload_is_quarantined) ... ok
+test_unknown_grain_and_unbound_device (test_apply.ApplyTelemetryTest.test_unknown_grain_and_unbound_device) ... ok
+test_fixture_shape_round_trips_through_contract (test_apply.BuildEventTest.test_fixture_shape_round_trips_through_contract) ... ok
+test_record_is_immutable (test_apply.BuildEventTest.test_record_is_immutable) ... ok
+test_commits_only_after_effect_and_handles_duplicates (test_consumer.ConsumerTest.test_commits_only_after_effect_and_handles_duplicates) ... ok
+test_invalid_records_are_quarantined_and_do_not_block (test_consumer.ConsumerTest.test_invalid_records_are_quarantined_and_do_not_block) ... ok
+test_late_lot_change_is_counted (test_consumer.ConsumerTest.test_late_lot_change_is_counted) ... backdated lot change affects 1 earlier assessments
+ok
+test_not_ready_is_quarantined_only_after_the_bound (test_consumer.ConsumerTest.test_not_ready_is_quarantined_only_after_the_bound) ... ok
+test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives (test_consumer.ConsumerTest.test_not_ready_pauses_partition_retries_then_scores_when_lot_arrives) ... ok
+test_quarantine_and_unavailable_fallback_reasons (test_consumer.ConsumerTest.test_quarantine_and_unavailable_fallback_reasons) ... ok
+test_quarantine_failure_stops_without_commit (test_consumer.ConsumerTest.test_quarantine_failure_stops_without_commit) ... ok
+test_endpoints_and_labels (test_consumer.HealthTest.test_endpoints_and_labels) ... ok
+test_adapter_contract (test_consumer.KafkaSourceTest.test_adapter_contract) ... ok
+test_default_client_factories (test_consumer.KafkaSourceTest.test_default_client_factories) ... %3|1793581454.272|FAIL|rdkafka#consumer-1| [thrd:127.0.0.1:1/bootstrap]: 127.0.0.1:1/bootstrap: Connect to ipv4#127.0.0.1:1 failed: Connection refused (after 0ms in state CONNECT)
+ok
+test_failures_are_hard (test_consumer.KafkaSourceTest.test_failures_are_hard) ... ok
+test_checkpoint_becomes_watermark_once_lot_partitions_are_applied (test_consumer.LotFeedTest.test_checkpoint_becomes_watermark_once_lot_partitions_are_applied) ... ok
+test_disabled_gate_trusts_open_intervals (test_consumer.LotFeedTest.test_disabled_gate_trusts_open_intervals) ... ok
+test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited (test_consumer.LotFeedTest.test_pending_checkpoints_are_bounded_and_metadata_is_rate_limited) ... ok
+test_config_validation (test_consumer.MainTest.test_config_validation) ... ok
+test_main_installs_signal_handlers (test_consumer.MainTest.test_main_installs_signal_handlers) ... ok
+test_run_wires_collaborators_and_shuts_down (test_consumer.MainTest.test_run_wires_collaborators_and_shuts_down) ... ok
+test_database_sink_records_coordinates_and_digest (test_consumer.SinkTest.test_database_sink_records_coordinates_and_digest) ... ok
+test_rejection_identity_requires_exact_canonical_routing (test_consumer.SinkTest.test_rejection_identity_requires_exact_canonical_routing) ... ok
+test_checkpoint (test_join.EventParsingTest.test_checkpoint) ... ok
+test_fields_reject_trailing_newlines (test_join.EventParsingTest.test_fields_reject_trailing_newlines) ... ok
+test_fixtures_parse (test_join.EventParsingTest.test_fixtures_parse) ... ok
+test_inventory_rejections (test_join.EventParsingTest.test_inventory_rejections) ... ok
+test_rejections_have_stable_reasons (test_join.EventParsingTest.test_rejections_have_stable_reasons) ... ok
+test_binding_state (test_join.EventTimeJoinTest.test_binding_state) ... ok
+test_exact_boundaries_are_half_open (test_join.EventTimeJoinTest.test_exact_boundaries_are_half_open) ... ok
+test_late_wheat_reading_after_canola_replacement_uses_wheat (test_join.EventTimeJoinTest.test_late_wheat_reading_after_canola_replacement_uses_wheat) ... ok
+test_missing_or_overlapping_lot_state_is_not_ready (test_join.EventTimeJoinTest.test_missing_or_overlapping_lot_state_is_not_ready) ... ok
+test_open_interval_needs_a_fresh_lot_feed (test_join.EventTimeJoinTest.test_open_interval_needs_a_fresh_lot_feed) ... ok
+test_reading_after_replacement_uses_canola (test_join.EventTimeJoinTest.test_reading_after_replacement_uses_canola) ... ok
+test_anomaly_waits_for_its_exact_trigger_and_uses_the_committed_new_score (test_live_anomaly.LiveAnomalyTest.test_anomaly_waits_for_its_exact_trigger_and_uses_the_committed_new_score) ... ok
+test_another_devices_critical_assessment_protects_the_whole_bin (test_live_anomaly.LiveAnomalyTest.test_another_devices_critical_assessment_protects_the_whole_bin) ... ok
+test_bin_publication_guard_does_not_mix_tenants_with_the_same_resource_ids (test_live_anomaly.LiveAnomalyTest.test_bin_publication_guard_does_not_mix_tenants_with_the_same_resource_ids) ... ok
+test_concurrent_anomalies_and_readings_keep_one_gapless_ordered_stream (test_live_anomaly.LiveAnomalyTest.test_concurrent_anomalies_and_readings_keep_one_gapless_ordered_stream) ... ok
+test_concurrent_anomalies_publish_exactly_one_assessment (test_live_anomaly.LiveAnomalyTest.test_concurrent_anomalies_publish_exactly_one_assessment) ... ok
+test_concurrent_skipped_replay_across_groups_has_one_decision (test_live_anomaly.LiveAnomalyTest.test_concurrent_skipped_replay_across_groups_has_one_decision) ... ok
+test_decisions_are_tenant_isolated_and_insert_only (test_live_anomaly.LiveAnomalyTest.test_decisions_are_tenant_isolated_and_insert_only) ... ok
+test_delayed_anomaly_for_replaced_lot_is_audited_without_reopening_alerts (test_live_anomaly.LiveAnomalyTest.test_delayed_anomaly_for_replaced_lot_is_audited_without_reopening_alerts) ... ok
+test_forward_index_cleanup_preserves_current_lot_lookup_index (test_live_anomaly.LiveAnomalyTest.test_forward_index_cleanup_preserves_current_lot_lookup_index) ... ok
+test_future_lot_placement_does_not_suppress_a_current_lot_advisory (test_live_anomaly.LiveAnomalyTest.test_future_lot_placement_does_not_suppress_a_current_lot_advisory) ... ok
+test_late_critical_reading_is_protected_by_publication_order (test_live_anomaly.LiveAnomalyTest.test_late_critical_reading_is_protected_by_publication_order) ... ok
+test_moved_device_cannot_suppress_a_new_advisory_episode_after_clear (test_live_anomaly.LiveAnomalyTest.test_moved_device_cannot_suppress_a_new_advisory_episode_after_clear) ... ok
+test_previous_lots_critical_score_cannot_suppress_a_new_lot_advisory (test_live_anomaly.LiveAnomalyTest.test_previous_lots_critical_score_cannot_suppress_a_new_lot_advisory) ... ok
+test_published_anomaly_is_persisted_contract_valid_and_idempotent (test_live_anomaly.LiveAnomalyTest.test_published_anomaly_is_persisted_contract_valid_and_idempotent) ... ok
+test_published_outcome_requires_an_assessment (test_live_anomaly.LiveAnomalyTest.test_published_outcome_requires_an_assessment) ... ok
+test_receipt_from_another_device_or_reading_does_not_satisfy_trigger_context (test_live_anomaly.LiveAnomalyTest.test_receipt_from_another_device_or_reading_does_not_satisfy_trigger_context) ... ok
+test_rejected_trigger_identity_is_tenant_device_reading_scoped_and_atomic (test_live_anomaly.LiveAnomalyTest.test_rejected_trigger_identity_is_tenant_device_reading_scoped_and_atomic) ... ok
+test_rejected_trigger_releases_partition_and_never_uses_older_corroboration (test_live_anomaly.LiveAnomalyTest.test_rejected_trigger_releases_partition_and_never_uses_older_corroboration) ... ok
+test_skipped_anomalies_leave_an_audit_row_and_no_outbox_event (test_live_anomaly.LiveAnomalyTest.test_skipped_anomalies_leave_an_audit_row_and_no_outbox_event) ... ok
+test_skipped_decisions_are_idempotent_across_groups_and_reject_changed_replays (test_live_anomaly.LiveAnomalyTest.test_skipped_decisions_are_idempotent_across_groups_and_reject_changed_replays) ... ok
+test_successful_trigger_receipt_wins_over_rejection_from_changed_replay (test_live_anomaly.LiveAnomalyTest.test_successful_trigger_receipt_wins_over_rejection_from_changed_replay) ... ok
+test_unidentifiable_quarantine_commits_without_poisoning_cause_state (test_live_anomaly.LiveAnomalyTest.test_unidentifiable_quarantine_commits_without_poisoning_cause_state) ... ok
+test_upgrade_backfills_skipped_and_published_receipts_and_restores_forced_rls (test_live_anomaly.LiveAnomalyTest.test_upgrade_backfills_skipped_and_published_receipts_and_restores_forced_rls) ... ok
+test_backdated_placement_retracts_assessment_atomically_and_once (test_live_db.LiveRiskDatabaseTest.test_backdated_placement_retracts_assessment_atomically_and_once) ... ok
+test_connection_failures_are_transient_store_errors (test_live_db.LiveRiskDatabaseTest.test_connection_failures_are_transient_store_errors) ... ok
+test_duplicate_crash_and_replay (test_live_db.LiveRiskDatabaseTest.test_duplicate_crash_and_replay) ... ERROR
+test_event_time_join_and_contract_valid_outbox (test_live_db.LiveRiskDatabaseTest.test_event_time_join_and_contract_valid_outbox) ... ok
+test_every_unique_key_on_tenant_tables_is_tenant_scoped (test_live_db.LiveRiskDatabaseTest.test_every_unique_key_on_tenant_tables_is_tenant_scoped) ... ok
+test_forced_rls_isolates_tenants (test_live_db.LiveRiskDatabaseTest.test_forced_rls_isolates_tenants) ... ok
+test_invalid_measurements_quarantine_through_database_sink (test_live_db.LiveRiskDatabaseTest.test_invalid_measurements_quarantine_through_database_sink) ... ok
+test_overlapping_interval_is_excluded (test_live_db.LiveRiskDatabaseTest.test_overlapping_interval_is_excluded) ... ok
+test_runtime_role_limits (test_live_db.LiveRiskDatabaseTest.test_runtime_role_limits) ... ok
+test_same_ids_in_two_tenants_neither_collide_nor_leak (test_live_db.LiveRiskDatabaseTest.test_same_ids_in_two_tenants_neither_collide_nor_leak) ... ok
+test_stale_inventory_cannot_regress (test_live_db.LiveRiskDatabaseTest.test_stale_inventory_cannot_regress) ... ok
+test_sqlstate_classes (test_migrate.ClassifyTest.test_sqlstate_classes) ... ok
+test_applies_in_order_once_and_rejects_modified_history (test_migrate.MigrateTest.test_applies_in_order_once_and_rejects_modified_history) ... ok
+test_live_entry_point_is_idempotent (test_migrate.MigrateTest.test_live_entry_point_is_idempotent) ... <frozen runpy>:130: RuntimeWarning: 'risk_engine.migrate' found in sys.modules after import of package 'risk_engine', but prior to execution of 'risk_engine.migrate'; this may result in unpredictable behaviour
+ok
+test_main (test_migrate.MigrateTest.test_main) ... ok
+test_rejects_duplicate_versions_and_bad_names (test_migrate.MigrateTest.test_rejects_duplicate_versions_and_bad_names) ... ok
+test_repository_migrations_are_forward_only_and_named (test_migrate.MigrateTest.test_repository_migrations_are_forward_only_and_named) ... ok
+test_connection_loss_closes_and_reconnects (test_migrate.PgDatabaseUnitTest.test_connection_loss_closes_and_reconnects) ... ok
+test_batch_change_selects_a_different_grain_policy (test_scoring.ScoringTest.test_batch_change_selects_a_different_grain_policy) ... ok
+test_boundaries_and_replay (test_scoring.ScoringTest.test_boundaries_and_replay) ... ok
+test_highest_allowed_threshold_keeps_critical_alert_eligible (test_scoring.ScoringTest.test_highest_allowed_threshold_keeps_critical_alert_eligible) ... ok
+test_invalid_inputs_and_policy_fail_closed (test_scoring.ScoringTest.test_invalid_inputs_and_policy_fail_closed) ... ok
+test_missing_inputs_do_not_generate_alerts (test_scoring.ScoringTest.test_missing_inputs_do_not_generate_alerts) ... ok
+
+======================================================================
+ERROR: test_duplicate_crash_and_replay (test_live_db.LiveRiskDatabaseTest.test_duplicate_crash_and_replay)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 330, in _guard
+    yield
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 340, in transaction
+    conn = self._connection()
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 323, in _connection
+    self._conn = self._connect(self._conninfo)
+                 ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 304, in _connect
+    return psycopg.connect(conninfo, autocommit=True, prepare_threshold=None)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/.local/risk-owner-venv/lib/python3.14/site-packages/psycopg/connection.py", line 126, in connect
+    raise last_ex.with_traceback(None)
+psycopg.OperationalError: connection failed: connection to server at "127.0.0.1", port 56741 failed: FATAL:  SASL authentication failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/apply.py", line 129, in apply
+    return self._once(record, event)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/apply.py", line 154, in _once
+    with self.db.transaction(envelope.tenant_id) as tx:
+         ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.8/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 339, in transaction
+    with self._guard():
+         ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.8/Frameworks/Python.framework/Versions/3.14/lib/python3.14/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/store.py", line 335, in _guard
+    raise StoreError(state, str(exc).strip()) from exc
+risk_engine.store.StoreError: connection: connection failed: connection to server at "127.0.0.1", port 56741 failed: FATAL:  SASL authentication failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/test_live_db.py", line 149, in test_duplicate_crash_and_replay
+    replay = self.apply(reading, Applier(pooled, "risk-replay", lambda: LATE))
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/test_live_db.py", line 71, in apply
+    return (applier or self.applier).apply(rec, events.parse(rec.topic, rec.value))
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/risk_engine/apply.py", line 137, in apply
+    raise self._stop(kind, error) from error
+risk_engine.apply.TransientExhausted: transient database failures exhausted: connection: connection failed: connection to server at "127.0.0.1", port 56741 failed: FATAL:  SASL authentication failed
+
+----------------------------------------------------------------------
+Ran 138 tests in 9.607s
+
+FAILED (errors=1)
+make[1]: *** [risk-test] Error 1
+make: *** [verify] Error 2

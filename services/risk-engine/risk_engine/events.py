@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,15 @@ TELEMETRY_TOPIC = "greenguard.telemetry.recorded.v1"
 DEVICE_TOPIC = "greenguard.inventory.device.v1"
 LOT_TOPIC = "greenguard.inventory.lot.v1"
 TOPICS = (TELEMETRY_TOPIC, DEVICE_TOPIC, LOT_TOPIC)
+# Optional Flink output (ADR-0031). Subscribed only when RISK_FLINK_ANOMALIES=on.
+ANOMALY_TOPIC = "greenguard.telemetry.anomaly.v1"
+ANOMALY_METRICS = ("temperature_c", "relative_humidity_percent")
+ANOMALY_DETECTORS = ("zscore", "rapid_change")
+
+
+def topics(include_anomalies: bool = False) -> tuple[str, ...]:
+    return TOPICS + (ANOMALY_TOPIC,) if include_anomalies else TOPICS
+
 CHECKPOINT_TYPE = "binding.feed_checkpoint"
 DEVICE_EVENT_TYPES = ("device.registered", "device.binding_changed", "device.status_changed")
 
@@ -29,6 +39,12 @@ _MAX_BIGINT = 9223372036854775807
 _ENVELOPE_KEYS = frozenset({
     "event_id", "event_type", "schema_version", "occurred_at", "tenant_id", "aggregate_type",
     "aggregate_id", "aggregate_version", "correlation_id", "causation_id", "traceparent", "payload",
+})
+# Derived (Flink) events have no source-of-truth aggregate_version.
+_DERIVED_ENVELOPE_KEYS = _ENVELOPE_KEYS - {"aggregate_version"}
+_ANOMALY_KEYS = frozenset({
+    "device_id", "reading_id", "site_id", "bin_id", "metric", "detector", "observed_at", "value",
+    "baseline_mean", "baseline_stddev", "score", "advisory",
 })
 
 
@@ -133,16 +149,31 @@ class LotChange:
 
 
 @dataclass(frozen=True)
+class Anomaly:
+    """Advisory Flink anomaly (contracts/stream/telemetry-anomaly.v1)."""
+
+    envelope: Envelope
+    device_id: str
+    reading_id: str
+    site_id: str
+    bin_id: str | None
+    metric: str
+    detector: str
+    observed_at: datetime
+    value: float
+
+
+@dataclass(frozen=True)
 class Checkpoint:
     """Transformer source checkpoint (ADR-0009); infrastructure data, no tenant."""
 
     source_time: datetime
 
 
-def parse_envelope(event: Any) -> Envelope:
-    if not isinstance(event, dict) or set(event) != _ENVELOPE_KEYS:
+def parse_envelope(event: Any, derived: bool = False) -> Envelope:
+    if not isinstance(event, dict) or set(event) != (_DERIVED_ENVELOPE_KEYS if derived else _ENVELOPE_KEYS):
         raise _fail("envelope fields do not match v1")
-    if event["schema_version"] != 1 or not isinstance(event["payload"], dict):
+    if type(event["schema_version"]) is not int or event["schema_version"] != 1 or not isinstance(event["payload"], dict):
         raise _fail("unsupported schema version or payload")
     traceparent = event["traceparent"]
     if not isinstance(traceparent, str) or not _TRACEPARENT.fullmatch(traceparent):
@@ -151,7 +182,7 @@ def parse_envelope(event: Any) -> Envelope:
     return Envelope(
         event_id=uuid_field(event, "event_id"), event_type=str(event["event_type"]),
         tenant_id=uuid_field(event, "tenant_id"), aggregate_id=uuid_field(event, "aggregate_id"),
-        aggregate_version=version_field(event, "aggregate_version"),
+        aggregate_version=0 if derived else version_field(event, "aggregate_version"),
         correlation_id=uuid_field(event, "correlation_id"),
         causation_id=uuid_field(event, "causation_id"), traceparent=traceparent,
         payload=event["payload"], raw=event,
@@ -217,11 +248,72 @@ def _lot(envelope: Envelope) -> LotChange:
     )
 
 
+def _finite(payload: Mapping[str, Any], key: str, minimum: float | None = None) -> float:
+    raw = payload.get(key)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise _fail(f"{key} must be a number")
+    try:
+        value = float(raw)
+    except OverflowError:
+        raise _fail(f"{key} is out of range") from None
+    if not math.isfinite(value) or (minimum is not None and value < minimum):
+        raise _fail(f"{key} is out of range")
+    return value
+
+
+def _anomaly(envelope: Envelope, key: bytes | None) -> Anomaly:
+    if envelope.event_type != "telemetry.anomaly" or envelope.raw["aggregate_type"] != "device_telemetry_stream":
+        raise InvalidEvent("unsupported_event", envelope.event_type)
+    payload = envelope.payload
+    if set(payload) != _ANOMALY_KEYS:
+        raise _fail("anomaly payload fields do not match v1")
+    device_id = uuid_field(payload, "device_id")
+    if device_id != envelope.aggregate_id:
+        raise _fail("aggregate_id must equal payload.device_id")
+    # The Kafka key is the tenant boundary on the wire: a record whose key disagrees with its
+    # body is never applied, so a mis-keyed or forged record cannot cross tenants.
+    if key is None or key != f"{envelope.tenant_id}:{envelope.aggregate_id}".encode():
+        raise InvalidEvent("key_mismatch", "Kafka key must equal tenant_id:aggregate_id")
+    if payload.get("metric") not in ANOMALY_METRICS or payload.get("detector") not in ANOMALY_DETECTORS:
+        raise _fail("metric or detector is not supported")
+    if payload.get("advisory") is not True:
+        raise _fail("advisory must be true")
+    _finite(payload, "baseline_mean")
+    _finite(payload, "baseline_stddev", minimum=0)
+    _finite(payload, "score")
+    return Anomaly(
+        envelope=envelope, device_id=device_id, reading_id=uuid_field(payload, "reading_id"),
+        site_id=uuid_field(payload, "site_id"), bin_id=uuid_field(payload, "bin_id", nullable=True),
+        metric=payload["metric"], detector=payload["detector"],
+        observed_at=parse_time(payload.get("observed_at"), "observed_at"),
+        value=_finite(payload, "value"))
+
+
 _PARSERS = {TELEMETRY_TOPIC: _telemetry, DEVICE_TOPIC: _binding, LOT_TOPIC: _lot}
 
 
-def parse(topic: str, value: bytes | None) -> Telemetry | BindingChange | LotChange | Checkpoint:
-    if topic not in _PARSERS:
+def rejected_telemetry_identity(topic: str, value: bytes | None,
+                                key: bytes | None) -> tuple[str, str, str, str] | None:
+    """Extract routing identity only for rejection evidence, never successful scoring.
+
+    Require a strictly parsed Telemetry envelope and canonical key. Measurements
+    may still fail domain scoring, but malformed routing/schema never creates state.
+    """
+    if topic != TELEMETRY_TOPIC:
+        return None
+    try:
+        event = parse(topic, value, key)
+        tenant, device = event.envelope.tenant_id, event.device_id
+        if key != f"{tenant}:{device}".encode():
+            return None
+        return tenant, event.envelope.event_id, device, event.reading_id
+    except InvalidEvent:
+        return None
+
+
+def parse(topic: str, value: bytes | None,
+          key: bytes | None = None) -> Telemetry | BindingChange | LotChange | Anomaly | Checkpoint:
+    if topic not in _PARSERS and topic != ANOMALY_TOPIC:
         raise InvalidEvent("unsupported_topic", topic)
     try:
         event = json.loads(value or b"")
@@ -229,4 +321,6 @@ def parse(topic: str, value: bytes | None) -> Telemetry | BindingChange | LotCha
         raise _fail("record value is not JSON") from exc
     if topic == DEVICE_TOPIC and isinstance(event, dict) and event.get("event_type") == CHECKPOINT_TYPE:
         return Checkpoint(parse_time(event.get("source_time"), "source_time"))
+    if topic == ANOMALY_TOPIC:
+        return _anomaly(parse_envelope(event, derived=True), key)
     return _PARSERS[topic](parse_envelope(event))

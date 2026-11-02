@@ -1,0 +1,58 @@
+{
+  "runId": "3955250f-eae8-4a78-aa9d-77997c1fbe58",
+  "started": "2026-11-02T00:22:29.502Z",
+  "finished": "2026-11-02T00:26:27.153Z",
+  "status": "failed",
+  "error": "new real Flink anomaly after restart reaches farmer channels: timed out; \":\"[Connection] Response Heartbeat(key: 12, version: 3)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":56,\"size\":10}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:26.683Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response Heartbeat(key: 12, version: 3)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":57,\"size\":10}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:26.688Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response Heartbeat(key: 12, version: 3)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":58,\"size\":10}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:26.692Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response Heartbeat(key: 12, version: 3)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":59,\"size\":10}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:26.696Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response Heartbeat(key: 12, version: 3)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":60,\"size\":10}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:26.744Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response JoinGroup(key: 11, version: 5)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":62,\"size\":76}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:27.023Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response JoinGroup(key: 11, version: 5)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":64,\"size\":76}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:27.517Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response JoinGroup(key: 11, version: 5)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":66,\"size\":76}\n{\"level\":\"ERROR\",\"timestamp\":\"2026-11-02T00:24:28.356Z\",\"logger\":\"kafkajs\",\"message\":\"[Connection] Response JoinGroup(key: 11, version: 5)\",\"broker\":\"127.0.0.1:59112\",\"clientId\":\"workflow-alerts\",\"error\":\"This is not the correct coordinator for this group\",\"correlationId\":68,\"size\":76}\n",
+  "composeProject": "gg-flink-risk",
+  "notificationProvider": "local",
+  "maxOutOfOrder": "1s",
+  "checkpointInterval": "2s",
+  "baseStage06": "passed before Flink assertions",
+  "expectedChecks": 8,
+  "checks": [
+    {
+      "name": "two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS",
+      "ok": true,
+      "at": "2026-11-02T00:22:29.614Z"
+    },
+    {
+      "name": "risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification",
+      "ok": true,
+      "at": "2026-11-02T00:23:13.526Z"
+    },
+    {
+      "name": "stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival",
+      "ok": true,
+      "at": "2026-11-02T00:23:16.420Z"
+    },
+    {
+      "name": "delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert",
+      "ok": true,
+      "at": "2026-11-02T00:23:25.502Z"
+    },
+    {
+      "name": "Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:23:26.696Z"
+    },
+    {
+      "name": "Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:23:32.934Z"
+    }
+  ],
+  "passed": 6,
+  "sourceHashes": {
+    "services/risk-engine/risk_engine/apply.py": "e420c4262d4dee00f9b4152f95df73b93e15c3ba78f9c566dfe96591fc81ae14",
+    "services/risk-engine/risk_engine/store.py": "18bc35e3be4fdd8dc1f0243262714631f230ec609bf69631186eefda6057d710",
+    "services/risk-engine/risk_engine/events.py": "e30661f8da6e4be270d795e683b2bc643fd6a3bda5e5e5ce049273b88ad0b9fb",
+    "services/workflow-alerts/src/consumer/handler.ts": "74b60eba97e5f9f238b93693c0e3c2275586c6a8c36af9cca3fdfb155f5f78e1",
+    "services/workflow-alerts/src/alerts/policy.ts": "323f9ac70b53f874ae3c78fcd45702042a30ea28afe3a5c595f47751bfd74f79",
+    "services/workflow-alerts/src/alerts/lifecycle.ts": "60c17a32372c55c9473eb9591b576cb4b36d766c6eb21495c060ea01bb07d5dc",
+    "scripts/stage06-e2e.mjs": "c724500c5cc9c0c4e47b36c2d0e264b18bb7e9559caed91abc17021ea06aca02",
+    "scripts/flink-risk-assertions.mjs": "c1c227e3fcc5e7fe59e1c858c1f3a5b51d015d2f58d29c5f9ba633ba75a579b5",
+    "scripts/flink-risk-helpers.mjs": "8665f564873fc4c2cbea8821de3b095c127d349d234a6dc09481b228044f73b0",
+    "scripts/flink-risk-postgres-fault.mjs": "dfb1f6eb4fab399d90ea6f7c34d5fe3a2635865c369cf0ec8a9e398449dfd975"
+  }
+}

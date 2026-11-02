@@ -21,7 +21,8 @@ from risk_engine.events import Checkpoint, InvalidEvent
 from risk_engine.health import Metrics
 
 log = logging.getLogger("risk_engine")
-UNAVAILABLE_REASONS = {"binding_state_unavailable": "binding_state_unavailable"}
+UNAVAILABLE_REASONS = {"binding_state_unavailable": "binding_state_unavailable",
+                       "threshold_state_unavailable": "threshold_state_unavailable"}
 DEFAULT_UNAVAILABLE = "lot_state_unavailable"
 MAX_PENDING_CHECKPOINTS = 128
 
@@ -105,6 +106,7 @@ class Consumer:
                  monotonic: Callable[[], float] = time.monotonic):
         self.source, self.sink, self.applier, self.lot_feed = source, sink, applier, lot_feed
         self.metrics, self.max_wait_s, self.backoff_s, self.now = metrics, max_wait_s, backoff_s, monotonic
+        self.trigger_max_wait_s = max(max_wait_s, float(applier.anomaly.max_age_s))
         self.waiting: dict[tuple[str, int], _Waiting] = {}
         self._next_promotion_at = float("-inf")
 
@@ -134,7 +136,7 @@ class Consumer:
 
     def handle(self, record: Record) -> None:
         try:
-            event = events.parse(record.topic, record.value)
+            event = events.parse(record.topic, record.value, record.key)
         except InvalidEvent as exc:
             self._quarantine(record, exc.reason)
             return
@@ -142,7 +144,11 @@ class Consumer:
             self.lot_feed.observe(event, self.source.high_watermarks(events.LOT_TOPIC))
             self._commit(record, "checkpoint")
             return
+        if isinstance(event, events.Anomaly):
+            self.metrics.inc("risk_anomaly_records_started_total")
         result = self.applier.apply(record, event)
+        if isinstance(event, events.Anomaly) and result.outcome != QUARANTINE and result.outcome != NOT_READY:
+            self.metrics.inc("risk_anomaly_decisions_total", outcome=result.reason or result.outcome)
         if result.late_assessments:
             self.metrics.inc("risk_late_lot_changes_total")
             log.warning("backdated lot change affects %d earlier assessments", result.late_assessments)
@@ -166,7 +172,8 @@ class Consumer:
         wait.attempts += 1
         wait.reason = reason
         self.metrics.inc("risk_not_ready_total", reason=reason)
-        if now - wait.first_at >= self.max_wait_s:
+        limit = self.trigger_max_wait_s if reason == "threshold_state_unavailable" else self.max_wait_s
+        if now - wait.first_at >= limit:
             self._quarantine(record, UNAVAILABLE_REASONS.get(reason, DEFAULT_UNAVAILABLE))
             return
         wait.resume_at = now + min(self.backoff_s * wait.attempts, 30.0)
@@ -194,4 +201,5 @@ class DatabaseSink:
 
     def quarantine(self, record: Record, reason: str) -> None:
         self.database.quarantine(self.consumer_name, record.topic, record.partition, record.offset,  # type: ignore[attr-defined]
-                                 reason, payload_digest(record))
+                                 reason, payload_digest(record),
+                                 events.rejected_telemetry_identity(record.topic, record.value, record.key))

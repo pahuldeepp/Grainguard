@@ -1,0 +1,75 @@
+{
+  "run": 88271,
+  "started": "2026-11-02T01:07:15.704Z",
+  "checks": [
+    {
+      "name": "A1 tenant A sliding windows equal the independent reference (duplicates counted once)",
+      "ok": true,
+      "detail": "4 windows match the reference"
+    },
+    {
+      "name": "A2 tenant B sliding windows equal the independent reference",
+      "ok": true,
+      "detail": "4 windows match the reference"
+    },
+    {
+      "name": "A3 tenant isolation: key, header and body agree and B never contains A values (same device UUID)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A4 anomaly: one rapid_change for tenant A tied to the causing event, none for tenant B",
+      "ok": true,
+      "detail": "A=1 B=0"
+    },
+    {
+      "name": "A5 DLQ holds bad_json, key_mismatch, bad_field and the beyond-lateness event",
+      "ok": true,
+      "detail": "bad_json,key_mismatch,bad_field,late"
+    },
+    {
+      "name": "A6 DLQ records are bounded and carry a validated tenant hint or 'unknown'",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A7 aggregate event IDs are deterministic (same window, same ID across revisions)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "B1 after a TaskManager kill every window is present and correct (no loss, no double count)",
+      "ok": true,
+      "detail": "9 windows match the reference"
+    },
+    {
+      "name": "B2 any replayed output is byte-identical to the original (idempotent for downstream inboxes)",
+      "ok": true,
+      "detail": "0 replayed duplicates"
+    },
+    {
+      "name": "C1 restore script found a retained checkpoint and restarted the JobManager",
+      "ok": true,
+      "detail": "restoring from /checkpoints/fe578e2e6a2c52800c40a6581946ff70/chk-44"
+    },
+    {
+      "name": "C2 after JobManager loss and restore, windows are complete and correct",
+      "ok": true,
+      "detail": "11 windows match the reference"
+    },
+    {
+      "name": "C3 a pre-failure event replayed after restore is dropped as a duplicate (dedupe state survived)",
+      "ok": true,
+      "detail": "no DLQ record for the replayed event"
+    }
+  ],
+  "timings": {
+    "startToRunningMs": 17757,
+    "taskManagerKillToRecoveredMs": 29342,
+    "taskManagerReplayedDuplicates": 0,
+    "jobManagerRestoreToRunningMs": 49770
+  },
+  "finished": "2026-11-02T01:12:10.980Z",
+  "passed": 12,
+  "total": 12
+}

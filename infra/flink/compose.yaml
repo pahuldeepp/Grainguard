@@ -1,0 +1,68 @@
+# Opt-in overlay (ADR-0030): every service is in the `flink` profile, so a plain `docker compose up`,
+# make dev, make verify and make smoke never start it. Needs a Kafka service named `kafka` listening on
+# kafka:29092 (infra/kafka/compose.yaml or infra/flink/compose.standalone.yaml) and the derived topics
+# (make flink-topics). Scale workers with: docker compose ... up -d --scale flink-taskmanager=N
+x-job-env: &job-env
+  KAFKA_BROKERS: kafka:29092
+  INPUT_TOPIC: ${FLINK_INPUT_TOPIC:-greenguard.telemetry.recorded.v1}
+  GROUP_ID: ${FLINK_GROUP_ID:-greenguard-flink-telemetry-v1}
+  TOPIC_AGGREGATE: ${FLINK_TOPIC_AGGREGATE:-greenguard.telemetry.aggregate.v1}
+  TOPIC_ANOMALY: ${FLINK_TOPIC_ANOMALY:-greenguard.telemetry.anomaly.v1}
+  TOPIC_DLQ: ${FLINK_TOPIC_DLQ:-greenguard.stream.dlq.v1}
+  PARALLELISM: ${FLINK_PARALLELISM:-2}
+  MAX_OUT_OF_ORDER: ${FLINK_MAX_OUT_OF_ORDER:-2m}
+  IDLE_TIMEOUT: ${FLINK_IDLE_TIMEOUT:-30s}
+  ANOMALY_MIN_SAMPLES: ${FLINK_ANOMALY_MIN_SAMPLES:-30}
+  ALLOWED_LATENESS: ${FLINK_ALLOWED_LATENESS:-10m}
+  WINDOW_SIZE: ${FLINK_WINDOW_SIZE:-15m}
+  WINDOW_SLIDE: ${FLINK_WINDOW_SLIDE:-1m}
+  CHECKPOINT_INTERVAL: ${FLINK_CHECKPOINT_INTERVAL:-10s}
+  CHECKPOINT_DIR: file:///checkpoints
+  STATE_BACKEND: ${FLINK_STATE_BACKEND:-hashmap}
+  SINK_DELIVERY: ${FLINK_SINK_DELIVERY:-at-least-once}
+x-flink-common: &flink-common
+  image: ${IMAGE_PREFIX:-grainguard}/stream-processor:${IMAGE_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: services/stream-processor/Dockerfile
+  profiles: [flink]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  volumes: [flink-checkpoints:/checkpoints]
+  depends_on:
+    kafka: { condition: service_healthy }
+x-flink-properties: &flink-properties |
+  jobmanager.rpc.address: flink-jobmanager
+  jobmanager.memory.process.size: 1024m
+  taskmanager.memory.process.size: ${FLINK_TM_MEMORY:-1536m}
+  taskmanager.numberOfTaskSlots: ${FLINK_TM_SLOTS:-2}
+  state.checkpoints.dir: file:///checkpoints
+  state.checkpoints.num-retained: 3
+  taskmanager.network.memory.buffer-debloat.enabled: true
+  metrics.reporters: prom
+  metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+  metrics.reporter.prom.port: 9249
+  rest.bind-address: 0.0.0.0
+services:
+  flink-jobmanager:
+    <<: *flink-common
+    # FLINK_RESTORE_ARGS is empty normally; infra/flink/restore.sh sets "--fromSavepoint <retained checkpoint>".
+    command: standalone-job --job-classname com.greenguard.stream.Main ${FLINK_RESTORE_ARGS:-}
+    environment:
+      <<: *job-env
+      FLINK_PROPERTIES: *flink-properties
+    ports:
+      - "127.0.0.1:${FLINK_UI_PORT:-58084}:8081" # web UI and REST, loopback only
+      - "127.0.0.1:${FLINK_JM_METRICS_PORT:-59249}:9249"
+  flink-taskmanager:
+    <<: *flink-common
+    command: taskmanager
+    environment:
+      <<: *job-env
+      FLINK_PROPERTIES: *flink-properties
+    depends_on:
+      kafka: { condition: service_healthy }
+      flink-jobmanager: { condition: service_started }
+volumes:
+  flink-checkpoints: {}

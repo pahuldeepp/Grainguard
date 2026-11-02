@@ -1,0 +1,43 @@
+rule_files: [risk-prometheus-rules.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'risk_configuration_info{job="risk",instance="enabled",flink_anomalies="on"}'
+        values: '1+0x20'
+      - series: 'risk_configuration_info{job="risk",instance="disabled",flink_anomalies="off"}'
+        values: '1+0x20'
+      - series: 'risk_not_ready_total{job="risk",instance="enabled",reason="threshold_state_unavailable"}'
+        values: '0+60x20'
+      - series: 'risk_not_ready_total{job="risk",instance="disabled",reason="threshold_state_unavailable"}'
+        values: '0+60x20'
+      - series: 'risk_quarantined_total{job="risk",instance="enabled",reason="threshold_state_unavailable"}'
+        values: '0+1x20'
+      - series: 'risk_quarantined_total{job="risk",instance="disabled",reason="threshold_state_unavailable"}'
+        values: '0+1x20'
+      - series: 'risk_anomaly_decisions_total{job="risk",instance="enabled",outcome="too_old"}'
+        values: '0+120x20'
+      - series: 'risk_anomaly_decisions_total{job="risk",instance="disabled",outcome="too_old"}'
+        values: '0+120x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: RiskAnomalyContextBlocked
+        exp_alerts:
+          - exp_labels: {job: risk, instance: enabled, severity: warn}
+            exp_annotations:
+              summary: "Derived anomalies are waiting for triggering telemetry"
+              description: "Check telemetry consumer lag, receipts and bindings before changing wait limits. Threshold processing must continue."
+      - eval_time: 15m
+        alertname: RiskAnomalyQuarantine
+        exp_alerts:
+          - exp_labels: {job: risk, instance: enabled, severity: warn}
+            exp_annotations:
+              summary: "An anomaly exhausted its triggering telemetry wait"
+              description: "Investigate the causal event and quarantine before authorizing replay; do not alter the payload under its existing event ID."
+      - eval_time: 15m
+        alertname: RiskAnomalyRejected
+        exp_alerts:
+          - exp_labels: {job: risk, instance: enabled, severity: warn}
+            exp_annotations:
+              summary: "Sustained advisory rejection"
+              description: "Check upstream lag, occupancy changes and binding history. Never bypass tenant or critical-severity guards to reduce rejections."

@@ -11,11 +11,17 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
+import { checkFlinkIntegration } from "./flink-risk-assertions.mjs";
+import { eventTimeBatches, kafkaMessage } from "./flink-risk-helpers.mjs";
 
-process.loadEnvFile(".env");
+process.loadEnvFile(process.env.STAGE06_ENV_FILE ?? ".env");
+const flinkMode = process.env.STAGE06_FLINK === "1";
+const pendingFlinkReadings = [];
+let maxProducedObservedAt = 0;
 const work = mkdtempSync(path.join(tmpdir(), "greenguard-stage06-e2e-"));
 const children = [];
-const broker = "127.0.0.1:59092";
+const childSpecs = new Map();
+const broker = process.env.STAGE06_KAFKA_BROKER ?? "127.0.0.1:59092";
 const stamp = Date.now();
 const testId = randomUUID().slice(0, 8);
 const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -78,15 +84,31 @@ function start(name, command, args, cwd, env = {}) {
     logs.set(name, log);
   });
   children.push(p);
+  childSpecs.set(p, { name, command, args, cwd, env });
   return p;
 }
 async function stop(p) {
+  const index = children.indexOf(p);
+  if (index >= 0) children.splice(index, 1);
+  childSpecs.delete(p);
   if (p.exitCode !== null || p.signalCode !== null) return;
   const done = new Promise((resolve) => p.once("close", resolve));
   p.kill("SIGTERM");
   await Promise.race([done, delay(7000).then(() => p.kill("SIGKILL"))]);
-  const index = children.indexOf(p);
-  if (index >= 0) children.splice(index, 1);
+  await done; // SIGKILL delivery is asynchronous; wait before reusing worker ports.
+}
+async function restartHosts() {
+  const specs = children.map((child) => childSpecs.get(child));
+  await Promise.all([...children].map(stop));
+  for (const spec of specs)
+    start(spec.name, spec.command, spec.args, spec.cwd, spec.env);
+  await Promise.all([
+    ready(18083, "healthz"),
+    ready(18084),
+    ready(18086),
+    ready(18095, "healthz"),
+    ready(18096, "healthz"),
+  ]);
 }
 async function seedFreshOffsets() {
   admin = kafka.admin();
@@ -96,6 +118,7 @@ async function seedFreshOffsets() {
       "greenguard.inventory.device.v1",
       "greenguard.inventory.lot.v1",
       "greenguard.telemetry.recorded.v1",
+      ...(flinkMode ? ["greenguard.telemetry.anomaly.v1"] : []),
     ],
     [groups.alerts]: [
       "greenguard.risk.assessment.v1",
@@ -228,15 +251,15 @@ function envelope(tenant, type, aggregateType, aggregate, version, payload) {
     payload,
   };
 }
-async function send(topic, event) {
-  await producer.send({
+async function send(topic, event, wireValue) {
+  if (event.event_type === "telemetry.recorded")
+    maxProducedObservedAt = Math.max(
+      maxProducedObservedAt,
+      Date.parse(event.payload.observed_at),
+    );
+  return producer.send({
     topic,
-    messages: [
-      {
-        key: `${event.tenant_id}:${event.aggregate_id}`,
-        value: JSON.stringify(event),
-      },
-    ],
+    messages: [kafkaMessage(event, wireValue)],
   });
 }
 function stream() {
@@ -306,13 +329,39 @@ async function feed(s) {
       // Wheat policy: 25 points per metric at warning level, 50 at critical, alert at 50,
       // critical from 75. Stage 10d routes critical alerts through the serverless path,
       // so this RabbitMQ delivery E2E must drive a warning-severity alert (30 C, 70 % = 50).
-      measurements: { temperature_c: 30, relative_humidity_percent: 70 },
+      measurements: flinkMode
+        ? { temperature_c: 28, relative_humidity_percent: 50 }
+        : { temperature_c: 30, relative_humidity_percent: 70 },
     },
   );
   await send("greenguard.inventory.device.v1", registered);
   await send("greenguard.inventory.lot.v1", lot1);
   await send("greenguard.inventory.lot.v1", lot2);
-  await send("greenguard.telemetry.recorded.v1", reading);
+  if (flinkMode) {
+    const baseline = structuredClone(reading);
+    baseline.event_id = randomUUID();
+    baseline.payload.reading_id = randomUUID();
+    baseline.payload.observed_at = iso(stamp - 20_000);
+    baseline.payload.received_at = baseline.payload.observed_at;
+    baseline.payload.measurements.temperature_c = 20;
+    pendingFlinkReadings.push(baseline);
+    reading.aggregate_version = "2";
+  }
+  if (flinkMode) pendingFlinkReadings.push(reading);
+  else await send("greenguard.telemetry.recorded.v1", reading);
+  if (flinkMode) {
+    // Advance event time explicitly: idle partitions cannot advance a watermark
+    // beyond the newest event. These readings add no threshold risk or anomaly.
+    for (let i = 1; i <= 2; i++) {
+      const progress = structuredClone(reading);
+      progress.event_id = randomUUID();
+      progress.payload.reading_id = randomUUID();
+      progress.aggregate_version = String(2 + i);
+      progress.payload.observed_at = iso(stamp + i * 5000);
+      progress.payload.received_at = progress.payload.observed_at;
+      pendingFlinkReadings.push(progress);
+    }
+  }
   return reading;
 }
 function token(tenant) {
@@ -358,7 +407,7 @@ try {
   console.log("Transformer healthy");
   await waitTransformerCaughtUp();
   await seedFreshOffsets();
-  start(
+  let riskProcess = start(
     "risk",
     path.resolve(".local/risk-venv/bin/python"),
     ["-m", "risk_engine.main"],
@@ -368,6 +417,7 @@ try {
       RISK_KAFKA_GROUP: groups.risk,
       RISK_KAFKA_OFFSET_RESET: "error",
       RISK_HEALTH_PORT: "18086",
+      RISK_FLINK_ANOMALIES: flinkMode ? "on" : "off",
     },
   );
   await ready(18086);
@@ -417,10 +467,44 @@ try {
   console.log("Notification worker healthy");
   producer = kafka.producer({ allowAutoTopicCreation: false });
   await producer.connect();
+  if (flinkMode) {
+    admin = kafka.admin();
+    await admin.connect();
+  }
   const a = stream(),
     b = stream();
   const ra = await feed(a),
     rb = await feed(b);
+  // Seed every tenant's detector history before any later reading can advance
+  // the shared watermark. Tenant-by-tenant batches make the second baseline late.
+  for (const batch of eventTimeBatches(pendingFlinkReadings)) {
+    const targets = new Map();
+    for (const reading of batch) {
+      const [sent] = await send("greenguard.telemetry.recorded.v1", reading);
+      const next = BigInt(sent.baseOffset) + 1n;
+      const previous = targets.get(sent.partition) ?? 0n;
+      targets.set(sent.partition, next > previous ? next : previous);
+    }
+    // Wait for both tenants' records to reach checkpointed operator state
+    // before later progress may move the watermark past this timestamp.
+    await until(
+      "Flink checkpoint covers both tenants' event-time phase",
+      async () => {
+        const offsets = await admin.fetchOffsets({
+          groupId:
+            process.env.FLINK_GROUP_ID ?? "greenguard-flink-telemetry-v1",
+          topics: ["greenguard.telemetry.recorded.v1"],
+        });
+        return [...targets].every(
+          ([partition, next]) =>
+            BigInt(
+              offsets[0].partitions.find((p) => p.partition === partition)
+                ?.offset ?? "-1",
+            ) >= next,
+        );
+      },
+    );
+  }
   console.log("Published two tenant binding, lot and telemetry streams");
   for (const [s, reading] of [
     [a, ra],
@@ -511,7 +595,7 @@ try {
   const killed = new Promise((resolve) => jobsProcess.once("close", resolve));
   jobsProcess.kill("SIGKILL");
   await killed;
-  children.splice(children.indexOf(jobsProcess), 1);
+  await stop(jobsProcess);
   jobsProcess = start("jobs-restarted", jobs, [], ".", {
     KAFKA_BROKERS: broker,
     JOBS_KAFKA_GROUP: groups.jobs,
@@ -589,6 +673,23 @@ try {
   console.log(
     "PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay",
   );
+  if (flinkMode) {
+    await checkFlinkIntegration({
+      kafka,
+      query,
+      send,
+      stream,
+      envelope,
+      until,
+      start,
+      stop,
+      restartHosts,
+      maxObservedAt: () => maxProducedObservedAt,
+      tenants: [a, b],
+      riskProcess,
+      riskGroup: groups.risk,
+    });
+  }
 } finally {
   const boundedDisconnect = async (client) => {
     if (!client) return;

@@ -1,0 +1,14 @@
+✔ manual Kafka fixtures carry the production consumer's required headers (0.745625ms)
+✔ historical DLQ records cannot satisfy a fresh run's missing rejection cases (0.58125ms)
+✔ Go benchmark binaries target the Docker server and reject unknown architectures (0.279792ms)
+✔ anomaly replay preserves decimal JSON instead of changing the payload digest (3.756292ms)
+✔ all tenants' baselines precede triggers and watermark progress (2.701833ms)
+✔ duplicate evidence counters support zero and counts above nine (0.278083ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 113.436

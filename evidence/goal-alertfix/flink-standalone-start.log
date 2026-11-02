@@ -1,0 +1,20 @@
+docker compose -p gg-flink -f infra/flink/compose.standalone.yaml up -d --wait kafka
+ Network gg-flink_default Creating 
+ Network gg-flink_default Creating 
+ Volume gg-flink_kafka-data Creating 
+ Volume gg-flink_kafka-data Creating 
+ Volume gg-flink_kafka-data Created 
+ Volume gg-flink_kafka-data Created 
+ Network gg-flink_default Created 
+ Network gg-flink_default Created 
+ Container gg-flink-kafka-1 Creating 
+ Container gg-flink-kafka-1 Created 
+ Container gg-flink-kafka-1 Starting 
+ Container gg-flink-kafka-1 Started 
+ Container gg-flink-kafka-1 Waiting 
+ Container gg-flink-kafka-1 Healthy 
+CREATE_INPUT=1 infra/flink/topics.sh "docker compose -p gg-flink -f infra/flink/compose.standalone.yaml"
+greenguard.telemetry.recorded.v1: 6 partitions
+greenguard.telemetry.aggregate.v1: 6 partitions
+greenguard.telemetry.anomaly.v1: 6 partitions
+greenguard.stream.dlq.v1: 3 partitions

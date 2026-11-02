@@ -1,0 +1,51 @@
+Stage06 host binaries built
+Transformer healthy
+(node:38248) TimeoutNegativeWarning: -1793580928060 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant 33ca5863-97f4-46aa-82df-f4bf58871477
+Alert episode committed for tenant 33ca5863-97f4-46aa-82df-f4bf58871477
+Jobs intent committed for tenant 33ca5863-97f4-46aa-82df-f4bf58871477
+Notification sent for tenant 33ca5863-97f4-46aa-82df-f4bf58871477
+Risk assessment committed for tenant 866ea1cd-ad06-4a1e-bac7-ee7644d62ab7
+Alert episode committed for tenant 866ea1cd-ad06-4a1e-bac7-ee7644d62ab7
+Jobs intent committed for tenant 866ea1cd-ad06-4a1e-bac7-ee7644d62ab7
+Notification sent for tenant 866ea1cd-ad06-4a1e-bac7-ee7644d62ab7
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+PASS Flink integration: two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS
+PASS Flink integration: risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification
+PASS Flink integration: stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival
+PASS Flink integration: delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert
+PASS Flink integration: Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries
+Flink integration evidence: evidence/flink/risk-integration-5bb5d7b6-b47c-4c24-ae9e-a29192209307.json
+file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:199
+        throw new Error(
+              ^
+
+Error: queued anomaly is durable after PostgreSQL and consumer recovery: process exited 45072; (node:39453) TimeoutNegativeWarning: -1793580966071 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+2026/11/01 19:58:48 ERROR dispatch scan failed error="scan due: begin transaction: context canceled"
+2026/11/01 19:58:49 ERROR jobs-worker failed error="listen tcp 127.0.0.1:18095: bind: address already in use"
+
+2026/11/01 19:58:49 ERROR alert intake failed error="poll: topic greenguard.alerts.lifecycle.v1 partition 0 lost records; the client consumed to offset 7 epoch 0 but was reset to offset 1 epoch 0\ntopic greenguard.alerts.lifecycle.v1 partition 4 lost records; the client consumed to offset 15 epoch 0 but was reset to offset 3 epoch 0"
+
+    at Object.until (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:199:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async checkPostgresRecovery (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-postgres-fault.mjs:128:5)
+    at async runFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:627:3)
+    at async checkFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:34:5)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:670:5
+
+Node.js v24.21.0

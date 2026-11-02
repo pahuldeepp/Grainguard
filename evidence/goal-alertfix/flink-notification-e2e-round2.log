@@ -1,0 +1,31 @@
+Stage06 host binaries built
+Transformer healthy
+(node:38549) TimeoutNegativeWarning: -1793577784060 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant 55c268dc-3ba5-4693-aed3-3911369c8e02
+Alert episode committed for tenant 55c268dc-3ba5-4693-aed3-3911369c8e02
+Jobs intent committed for tenant 55c268dc-3ba5-4693-aed3-3911369c8e02
+Notification sent for tenant 55c268dc-3ba5-4693-aed3-3911369c8e02
+Risk assessment committed for tenant 84fa1790-ca98-48b1-9423-de6dd4528b1f
+file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:191
+  throw new Error(
+        ^
+
+Error: alert 84fa1790-ca98-48b1-9423-de6dd4528b1f: timed out; (node:40985) TimeoutNegativeWarning: -1793577823869 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+    at until (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:191:9)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processTimers (node:internal/timers:615:9)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:470:5
+
+Node.js v24.21.0

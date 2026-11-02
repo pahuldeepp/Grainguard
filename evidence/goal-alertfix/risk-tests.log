@@ -1,0 +1,7 @@
+backdated lot change affects 1 earlier assessments
+%3|1793581307.724|FAIL|rdkafka#consumer-1| [thrd:127.0.0.1:1/bootstrap]: 127.0.0.1:1/bootstrap: Connect to ipv4#127.0.0.1:1 failed: Connection refused (after 0ms in state CONNECT)
+<frozen runpy>:130: RuntimeWarning: 'risk_engine.migrate' found in sys.modules after import of package 'risk_engine', but prior to execution of 'risk_engine.migrate'; this may result in unpredictable behaviour
+----------------------------------------------------------------------
+Ran 138 tests in 4.134s
+
+OK

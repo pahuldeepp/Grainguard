@@ -152,6 +152,10 @@ export async function applyRisk(
     input.binId,
   );
   const decision = decide(rule, active, input.signal);
+  // An ignored advisory must not become the causal owner of an existing alert:
+  // invalidating it later must not resolve the threshold-driven episode.
+  if (active && input.signal.advisory && decision.kind === "none")
+    return { outcome: "no_change", episodeId: active.episodeId, eventIds: [] };
   const event = await applyDecision(tx, rule, active, decision, input, now);
   if (!event)
     return { outcome: "no_change", episodeId: active?.episodeId, eventIds: [] };

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:stream:telemetry-aggregate:v1",
+  "$comment": "Optional derived stream contract (ADR-0030). Advisory only; risk-engine remains the alert authority. event_id is a deterministic UUIDv5, so replay and restart produce identical IDs.",
+  "title": "GreenGuard telemetry.aggregate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "aggregate_type",
+    "aggregate_id",
+    "correlation_id",
+    "causation_id",
+    "traceparent",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "event_type": {
+      "const": "telemetry.aggregate"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "tenant_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "aggregate_type": {
+      "const": "device_telemetry_stream"
+    },
+    "aggregate_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "causation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "traceparent": {
+      "$ref": "#/$defs/traceparent"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "site_id",
+        "bin_id",
+        "window_start",
+        "window_end",
+        "window_size_seconds",
+        "slide_seconds",
+        "revision",
+        "reading_count",
+        "last_observed_at",
+        "temperature_c",
+        "relative_humidity_percent"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "site_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "bin_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_start": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "window_end": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "window_size_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "slide_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revision": {
+          "description": "1 for the first firing of a window; incremented each time an accepted late reading refires it. Consumers keep the highest revision.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "reading_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last_observed_at": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/stats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relative_humidity_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/stats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "min",
+        "max",
+        "mean"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "mean": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}
