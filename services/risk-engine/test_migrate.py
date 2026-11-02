@@ -107,6 +107,10 @@ class PgDatabaseUnitTest(unittest.TestCase):
         class Conn:
             closed = False
 
+            def transaction(self):
+                from contextlib import nullcontext
+                return nullcontext()
+
             def execute(self, *args):
                 raise Boom("server closed the connection")
 

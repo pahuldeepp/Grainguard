@@ -35,7 +35,7 @@
         "score": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 100 }, { "type": "null" }] },
         "severity": { "enum": ["normal", "warning", "critical", "insufficient_data"] },
         "alert_eligible": { "type": "boolean" },
-        "reasons": { "type": "array", "uniqueItems": true, "items": { "enum": ["elevated_temperature", "elevated_humidity", "temperature_c", "relative_humidity_percent"] }, "maxItems": 4 }
+        "reasons": { "type": "array", "uniqueItems": true, "items": { "enum": ["elevated_temperature", "elevated_humidity", "temperature_c", "relative_humidity_percent", "anomalous_temperature", "anomalous_humidity"] }, "maxItems": 4 }
       }
     }
   },

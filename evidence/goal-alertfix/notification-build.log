@@ -1,0 +1,8 @@
+
+> @greenguard/notification-service@0.1.0 build
+> npm run build -w @greenguard/feature-flags && tsc
+
+
+> @greenguard/feature-flags@0.1.0 build
+> tsc
+

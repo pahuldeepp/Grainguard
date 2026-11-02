@@ -1,0 +1,25 @@
+# Load only with the optional integration. Match the flag on the same scrape target.
+# Outcomes/reasons are bounded enums; never add tenant, device, bin or event labels.
+groups:
+  - name: greenguard-risk-flink
+    rules:
+      - alert: RiskAnomalyContextBlocked
+        expr: sum by (job, instance) (rate(risk_not_ready_total{reason="threshold_state_unavailable"}[5m])) > 0 and on (job, instance) risk_configuration_info{flink_anomalies="on"} == 1
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Derived anomalies are waiting for triggering telemetry"
+          description: "Check telemetry consumer lag, receipts and bindings before changing wait limits. Threshold processing must continue."
+      - alert: RiskAnomalyQuarantine
+        expr: sum by (job, instance) (increase(risk_quarantined_total{reason="threshold_state_unavailable"}[10m])) > 0 and on (job, instance) risk_configuration_info{flink_anomalies="on"} == 1
+        labels: { severity: warn }
+        annotations:
+          summary: "An anomaly exhausted its triggering telemetry wait"
+          description: "Investigate the causal event and quarantine before authorizing replay; do not alter the payload under its existing event ID."
+      - alert: RiskAnomalyRejected
+        expr: sum by (job, instance) (rate(risk_anomaly_decisions_total{outcome=~"too_old|binding_mismatch|superseded_lot"}[5m])) > 1 and on (job, instance) risk_configuration_info{flink_anomalies="on"} == 1
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Sustained advisory rejection"
+          description: "Check upstream lag, occupancy changes and binding history. Never bypass tenant or critical-severity guards to reduce rejections."

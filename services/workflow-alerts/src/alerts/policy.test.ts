@@ -71,6 +71,34 @@ test("escalation is due only after the rule timeout", () => {
   assert.equal(escalationDue(rule, active, new Date(900_000)), true);
 });
 
+test("advisories cannot downgrade or clear a critical bin; threshold behavior is unchanged", () => {
+  const critical = { ...active, severity: "critical", score: 75 } as Episode;
+  for (const score of [0, 24, 25, 50, 74, 75])
+    assert.deepEqual(
+      decide(rule, critical, { ...signal(score), advisory: true }),
+      { kind: "none" },
+    );
+  for (const severity of ["warning", "insufficient_data"] as const)
+    assert.deepEqual(
+      decide(rule, critical, { ...signal(80, severity), advisory: true }),
+      { kind: "none" },
+    );
+  assert.deepEqual(decide(rule, critical, signal(50)), {
+    kind: "update",
+    severity: "warning",
+    score: 50,
+  });
+  assert.deepEqual(decide(rule, critical, signal(0)), {
+    kind: "resolve",
+    score: 0,
+  });
+  assert.deepEqual(decide(rule, active, { ...signal(60), advisory: true }), {
+    kind: "update",
+    severity: "warning",
+    score: 60,
+  });
+});
+
 test("deterministic IDs are stable, distinct and RFC 4122 shaped", () => {
   const a = deterministicId("t", "e", "1", "opened");
   assert.equal(a, deterministicId("t", "e", "1", "opened"));

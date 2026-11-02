@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:greenguard:contracts:stream:telemetry-anomaly:v1",
+  "$comment": "Optional derived stream contract (ADR-0030). Advisory only; risk-engine remains the alert authority. event_id is a deterministic UUIDv5, so replay and restart produce identical IDs.",
+  "title": "GreenGuard telemetry.anomaly v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tenant_id",
+    "aggregate_type",
+    "aggregate_id",
+    "correlation_id",
+    "causation_id",
+    "traceparent",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "event_type": {
+      "const": "telemetry.anomaly"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "$ref": "#/$defs/utcTimestamp"
+    },
+    "tenant_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "aggregate_type": {
+      "const": "device_telemetry_stream"
+    },
+    "aggregate_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "causation_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "traceparent": {
+      "$ref": "#/$defs/traceparent"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "reading_id",
+        "site_id",
+        "bin_id",
+        "metric",
+        "detector",
+        "observed_at",
+        "value",
+        "baseline_mean",
+        "baseline_stddev",
+        "score",
+        "advisory"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reading_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "site_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "bin_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metric": {
+          "enum": [
+            "temperature_c",
+            "relative_humidity_percent"
+          ]
+        },
+        "detector": {
+          "enum": [
+            "zscore",
+            "rapid_change"
+          ]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "value": {
+          "type": "number"
+        },
+        "baseline_mean": {
+          "type": "number"
+        },
+        "baseline_stddev": {
+          "type": "number",
+          "minimum": 0
+        },
+        "score": {
+          "description": "z-score for zscore; absolute change per minute for rapid_change",
+          "type": "number"
+        },
+        "advisory": {
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-(00|01)$"
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "min",
+        "max",
+        "mean"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "mean": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

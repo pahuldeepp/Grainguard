@@ -1,0 +1,22 @@
+[
+  {
+    "path": "scripts/stage06-e2e.mjs",
+    "sha256": "d7a8155ee0b0b1630e624977bd691aa12946c47848c18dd3b28e7926fa971d95",
+    "source": "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/stage06-e2e.mjs"
+  },
+  {
+    "path": "scripts/flink-risk-prepare.mjs",
+    "sha256": "05e31b2892efe0b175cbfefda51bfd4b50c25b52dbbe17da4e96384d3a387e1f",
+    "source": "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/flink-risk-prepare.mjs"
+  },
+  {
+    "path": "scripts/flink-risk-assertions.mjs",
+    "sha256": "9ddc141918bd4b0c266ce80fa495ed4ae5cda2875297938a1df662ad31328295",
+    "source": "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/scripts/flink-risk-assertions.mjs"
+  },
+  {
+    "path": "infra/flink/integration.compose.yaml",
+    "sha256": "40126b435fa2220595df00bc99e0449953ec449c6181ccdf1d3ad2f51ae76650",
+    "source": "/Users/pahuldeepsingh/Documents/Codex/2026-09-21/can-you-go-on-my-github/outputs/GreenGuard/infra/flink/integration.compose.yaml"
+  }
+]

@@ -1,0 +1,161 @@
+
+> @greenguard/workflow-alerts@0.1.0 coverage
+> npm run build && c8 --all --src dist --extension .js --exclude "**/*.test.js" --exclude "**/generated/**" --exclude "**/testing/**" --reporter lcov --reporter text node --test --test-concurrency=1 "dist/**/*.test.js"
+
+
+> @greenguard/workflow-alerts@0.1.0 build
+> npm run build:deps && prisma generate && tsc
+
+
+> @greenguard/workflow-alerts@0.1.0 build:deps
+> npm run build -w @greenguard/otel -w @greenguard/tenant-auth -w @greenguard/contracts
+
+
+> @greenguard/otel@0.1.0 build
+> tsc
+
+
+> @greenguard/tenant-auth@0.1.0 build
+> tsc
+
+
+> @greenguard/contracts@0.1.0 build
+> tsc
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+
+✔ Generated Prisma Client (7.10.0) to ./src/generated/prisma in 21ms
+
+▶ acknowledge
+  ✔ transitions once, writes audit and alert.acknowledged (467.269791ms)
+  ✔ a retried Idempotency-Key returns the original outcome; reuse for another request conflicts (120.671ms)
+  ✔ stale If-Match version and unknown alert are rejected (32.186625ms)
+✔ acknowledge (621.123541ms)
+▶ acknowledge versus escalation
+  ✔ ack first: the later escalation is suppressed with a no-op receipt (85.08275ms)
+  ✔ escalation first: an acknowledge with the old version gets 412, then succeeds on the new one (74.466375ms)
+  ✔ not yet due: no escalation, no receipt (58.125833ms)
+  ✔ concurrent race: exactly one of ack or escalation takes effect (416.019333ms)
+  ✔ a held row lock makes a racing command fail fast instead of waiting forever (2269.945167ms)
+✔ acknowledge versus escalation (2906.730917ms)
+✔ opens only at or above the open threshold with an alert-eligible severity (3.05325ms)
+✔ an active episode updates, holds and resolves with hysteresis (0.238625ms)
+✔ escalation is due only after the rule timeout (0.346084ms)
+✔ advisories cannot downgrade or clear a critical bin; threshold behavior is unchanged (0.563542ms)
+✔ deterministic IDs are stable, distinct and RFC 4122 shaped (0.271791ms)
+▶ alerts HTTP API
+  ✔ read, acknowledge with Idempotency-Key and If-Match, replay the same answer (205.070625ms)
+  ✔ preconditions: 428 without If-Match, 412 with a stale one, 400 without a key (33.629792ms)
+  ✔ roles: viewer reads but cannot acknowledge; no token is 401 (43.484458ms)
+  ✔ tenant B cannot list, read or acknowledge tenant A's alert (99.645875ms)
+  ✔ keyset pagination and state filter stay inside the tenant (131.574125ms)
+  ✔ health and readiness probes (10.040875ms)
+✔ alerts HTTP API (754.802917ms)
+▶ row-level security at the SQL layer
+  ✔ alerts_app without tenant context sees nothing; with B's context sees none of A (260.082542ms)
+  ✔ alerts_app cannot write another tenant's rows or delete anything (137.642834ms)
+✔ row-level security at the SQL layer (397.968542ms)
+✔ problem mapping covers auth, state, lock and unknown errors (3.856209ms)
+✔ page defaults and correlation IDs (0.836125ms)
+✔ sqlState reads only the driver adapter SQLSTATE (0.163792ms)
+✔ defaults and required database URL (2.43175ms)
+✔ AUTH_* is all-or-nothing and JWKS needs https outside loopback (0.243667ms)
+▶ risk.assessed consumer
+  ✔ a reordered advisory from either device cannot downgrade or own a critical bin alert (525.435ms)
+  ✔ invalidation resolves only the causally current alert and is replay-safe (188.465584ms)
+  ✔ invalidation cannot resolve a newer assessment or another tenant's alert (382.672333ms)
+  ✔ hysteresis: opens at 40, updates, holds above 25, resolves below 25 (540.156834ms)
+  ✔ every outbox row is a valid alert lifecycle event and matches its audit row (157.549042ms)
+  ✔ duplicate delivery is a no-op that returns the original effect (100.592709ms)
+  ✔ the same event_id with different content is a conflict and changes nothing (206.680375ms)
+  ✔ invalid or foreign events are rejected before any write (5.075792ms)
+  ✔ stale or reordered assessments cannot regress an episode (122.6765ms)
+  ✔ a crash before COMMIT leaves no inbox, episode, transition or outbox row (210.294208ms)
+  ✔ event IDs derive from (tenant, episode, version, type) and survive redelivery (127.2855ms)
+  ✔ concurrent scores for one bin create exactly one episode (185.349458ms)
+✔ risk.assessed consumer (2754.335916ms)
+﹣ live Kafka assessment and invalidation resolve once across two tenants (0.544583ms) # set ALERTS_KAFKA_LIVE=1 with Kafka and alerts Postgres running
+✔ Snappy codec decodes raw and Kafka Xerial-framed batches (10.91175ms)
+✔ a non-restartable consumer crash removes readiness (0.148958ms)
+✔ commits only after the effect is durable (1.334666ms)
+✔ invalid, conflicting, malformed and header-mismatched records are quarantined before commit (0.257291ms)
+✔ transient failures retry; exhausted retries stop without committing (5.191667ms)
+✔ a failed quarantine write does not commit the offset (0.712542ms)
+✔ the loop drains records, idles, and stops on abort (6.577458ms)
+✔ starts probes only without AUTH_* and reports not ready without a database (325.616ms)
+[Nest] 35054  - 11/01/2026, 5:59:12 PM   ERROR Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16) {
+  errno: -61,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 1
+}
+Error: connect ECONNREFUSED 127.0.0.1:1
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:2021:16)
+✔ mounts the authenticated API and tracing when configured (8707.661125ms)
+✔ consumer crash removes readiness and shutdown closes consumer before database (98.332666ms)
+[Nest] 35054  - 11/01/2026, 5:59:13 PM   ERROR Error: consumer failed
+    at Object.close (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/main.test.js:88:23)
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/app.js:74:40
+    at Shutdown.onApplicationShutdown (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/app.js:80:23)
+    at MapIterator.iteratee (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:21:43)
+    at MapIterator.next (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/map.js:13:39)
+    at IteratorWithOperators.next (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/iterate.js:21:28)
+    at Array.from (<anonymous>)
+    at IteratorWithOperators.toArray (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/iterate.js:180:22)
+    at callOperator (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:22:10)
+    at callAppShutdownHook (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:39:50)
+Error: consumer failed
+    at Object.close (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/main.test.js:88:23)
+    at file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/app.js:74:40
+    at Shutdown.onApplicationShutdown (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/workflow-alerts/dist/app.js:80:23)
+    at MapIterator.iteratee (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:21:43)
+    at MapIterator.next (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/map.js:13:39)
+    at IteratorWithOperators.next (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/iterate.js:21:28)
+    at Array.from (<anonymous>)
+    at IteratorWithOperators.toArray (/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/iterare/lib/iterate.js:180:22)
+    at callOperator (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:22:10)
+    at callAppShutdownHook (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/node_modules/@nestjs/core/hooks/on-app-shutdown.hook.js:39:50)
+✔ shutdown closes the verifier even if an earlier cleanup fails (33.042ms)
+✔ every table has forced RLS and alerts_app holds no DELETE or ownership (712.59325ms)
+✔ the episode window key and one-active index reject a second episode (334.829542ms)
+✔ hysteresis thresholds are enforced by the database (94.0995ms)
+ℹ tests 53
+ℹ suites 5
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 23278.300667
+-----------------------|---------|----------|---------|---------|-------------------
+File                   | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-----------------------|---------|----------|---------|---------|-------------------
+All files              |   94.08 |    96.27 |   98.82 |   94.08 |                   
+ src                   |   92.16 |    96.77 |     100 |   92.16 |                   
+  app.ts               |     100 |      100 |     100 |     100 |                   
+  config.ts            |     100 |      100 |     100 |     100 |                   
+  main.ts              |   71.66 |       75 |     100 |   71.66 | 39-55             
+ src/alerts            |     100 |    99.13 |     100 |     100 |                   
+  errors.ts            |     100 |      100 |     100 |     100 |                   
+  ids.ts               |     100 |      100 |     100 |     100 |                   
+  lifecycle.ts         |     100 |    98.21 |     100 |     100 | 199               
+  policy.ts            |     100 |      100 |     100 |     100 |                   
+  store.ts             |     100 |      100 |     100 |     100 |                   
+  trace.ts             |     100 |      100 |     100 |     100 |                   
+ src/api               |     100 |    94.36 |     100 |     100 |                   
+  alerts.controller.ts |     100 |      100 |     100 |     100 |                   
+  auth.ts              |     100 |      100 |     100 |     100 |                   
+  parse.ts             |     100 |    90.32 |     100 |     100 | 52,68-70          
+  problem.ts           |     100 |    94.73 |     100 |     100 | 75                
+ src/consumer          |   71.42 |    92.72 |    90.9 |   71.42 |                   
+  handler.ts           |   97.11 |    95.65 |     100 |   97.11 | 79-81             
+  kafka.ts             |    28.2 |      100 |   66.66 |    28.2 | 34-117            
+  runner.ts            |   98.85 |    89.65 |     100 |   98.85 | 59                
+ src/db                |     100 |    94.44 |     100 |     100 |                   
+  client.ts            |     100 |      100 |     100 |     100 |                   
+  tenant.ts            |     100 |    94.11 |     100 |     100 | 40                
+-----------------------|---------|----------|---------|---------|-------------------

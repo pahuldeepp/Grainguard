@@ -1,0 +1,55 @@
+# Flink Kubernetes Operator resource (flink.apache.org/v1beta1). The job is SUSPENDED: applying this manifest
+# creates no pods until job.state is changed to running. The image digest placeholder makes an accidental
+# apply fail closed (admission policy requires digests; the registry rejects the literal).
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: greenguard-telemetry-stream
+  labels: { app.kubernetes.io/name: stream-processor, app.kubernetes.io/part-of: greenguard }
+spec:
+  image: REPLACE_REGISTRY/greenguard/stream-processor@sha256:REPLACE_WITH_DIGEST
+  flinkVersion: v1_20
+  serviceAccount: flink
+  mode: native
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "2"
+    state.backend.type: rocksdb
+    state.backend.incremental: "true"
+    state.checkpoints.dir: REPLACE_S3_URI/checkpoints   # e.g. s3://greenguard-stream-prod/checkpoints
+    state.savepoints.dir: REPLACE_S3_URI/savepoints
+    state.checkpoints.num-retained: "3"
+    high-availability.type: kubernetes
+    high-availability.storageDir: REPLACE_S3_URI/ha
+    kubernetes.operator.job.restart.failed: "true"
+    kubernetes.operator.periodic.savepoint.interval: 1h
+    taskmanager.network.memory.buffer-debloat.enabled: "true"
+    metrics.reporters: prom
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: "9249"
+  jobManager:
+    resource: { memory: 1024m, cpu: 0.5 }
+  taskManager:
+    resource: { memory: 2048m, cpu: 1 }
+  podTemplate:
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9249" }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 9999, runAsGroup: 9999, fsGroup: 9999, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: flink-main-container
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          env:
+            - { name: KAFKA_BROKERS, value: "REPLACE_BOOTSTRAP:9094" }
+            - { name: GROUP_ID, value: greenguard-flink-telemetry-v1 }
+            - { name: STATE_BACKEND, value: rocksdb }
+            - { name: CHECKPOINT_DIR, value: REPLACE_S3_URI/checkpoints }
+            - { name: PARALLELISM, value: "6" }
+            # TLS/SASL: set KAFKA_PROP_SECURITY_PROTOCOL, KAFKA_PROP_SASL_MECHANISM and mount the JAAS secret.
+  job:
+    jarURI: local:///opt/flink/usrlib/stream-processor.jar
+    entryClass: com.greenguard.stream.Main
+    parallelism: 6
+    upgradeMode: last-state
+    state: suspended

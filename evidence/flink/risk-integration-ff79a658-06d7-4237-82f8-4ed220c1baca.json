@@ -1,0 +1,64 @@
+{
+  "runId": "ff79a658-06d7-4237-82f8-4ed220c1baca",
+  "started": "2026-11-02T00:51:55.145Z",
+  "finished": "2026-11-02T00:53:31.361Z",
+  "status": "failed",
+  "error": "queued anomaly is durable after PostgreSQL and consumer recovery: process exited 35275; (node:15607) TimeoutNegativeWarning: -1793580669147 is a negative number.\nTimeout duration was set to 1.\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n2026/11/01 19:53:30 ERROR dispatch scan failed error=\"scan due: begin transaction: context canceled\"\n2026/11/01 19:53:31 ERROR jobs-worker failed error=\"listen tcp 127.0.0.1:18095: bind: address already in use\"\n\n2026/11/01 19:53:30 ERROR dispatch scan failed error=\"scan due: begin transaction: FATAL: server login has been failing, cached error: the database system is shutting down (server_login_retry) (SQLSTATE 08P01)\"\n2026/11/01 19:53:30 ERROR alert intake failed error=\"poll: topic greenguard.alerts.lifecycle.v1 partition 3 lost records; the client consumed to offset 14 epoch 0 but was reset to offset 9 epoch 0\\ntopic greenguard.alerts.lifecycle.v1 partition 4 lost records; the client consumed to offset 10 epoch 0 but was reset to offset 3 epoch 0\\ntopic greenguard.alerts.lifecycle.v1 partition 0 lost records; the client consumed to offset 2 epoch 0 but was reset to offset 1 epoch 0\"\n",
+  "composeProject": "gg-flink-risk",
+  "notificationProvider": "local",
+  "maxOutOfOrder": "1s",
+  "checkpointInterval": "2s",
+  "latestFixtureObservation": "2026-11-02T00:53:22.929Z",
+  "baseStage06": "passed before Flink assertions",
+  "expectedChecks": 8,
+  "checks": [
+    {
+      "name": "two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS",
+      "ok": true,
+      "at": "2026-11-02T00:51:55.238Z"
+    },
+    {
+      "name": "risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification",
+      "ok": true,
+      "at": "2026-11-02T00:52:40.582Z"
+    },
+    {
+      "name": "stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival",
+      "ok": true,
+      "at": "2026-11-02T00:52:43.961Z"
+    },
+    {
+      "name": "delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert",
+      "ok": true,
+      "at": "2026-11-02T00:52:49.590Z"
+    },
+    {
+      "name": "Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:52:50.013Z"
+    },
+    {
+      "name": "Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:52:55.080Z"
+    },
+    {
+      "name": "Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries",
+      "ok": true,
+      "at": "2026-11-02T00:53:16.124Z"
+    }
+  ],
+  "passed": 7,
+  "sourceHashes": {
+    "services/risk-engine/risk_engine/apply.py": "2392946febfe1e73996196ae554018dbb987784a5094cc364bdb2eab7f260529",
+    "services/risk-engine/risk_engine/store.py": "ce7f372b374b4176607734cef081276fd8214117b606c3a8e05a37b28aeab41f",
+    "services/risk-engine/risk_engine/events.py": "e30661f8da6e4be270d795e683b2bc643fd6a3bda5e5e5ce049273b88ad0b9fb",
+    "services/workflow-alerts/src/consumer/handler.ts": "74b60eba97e5f9f238b93693c0e3c2275586c6a8c36af9cca3fdfb155f5f78e1",
+    "services/workflow-alerts/src/alerts/policy.ts": "323f9ac70b53f874ae3c78fcd45702042a30ea28afe3a5c595f47751bfd74f79",
+    "services/workflow-alerts/src/alerts/lifecycle.ts": "60c17a32372c55c9473eb9591b576cb4b36d766c6eb21495c060ea01bb07d5dc",
+    "scripts/stage06-e2e.mjs": "57371f2832c846cd55b58ab0ec59d679cf2f9bf226b8cf2f08f5ac2778016ad9",
+    "scripts/flink-risk-assertions.mjs": "a1f19ad083deaef34c79d664259b6ab5cdcb71cc91ecc5875b838186e3121b8c",
+    "scripts/flink-risk-helpers.mjs": "6b3c3eec8884f4cca613ca4480f2c74ec17fe3012c4dbbbe5945e67e4d8aff7e",
+    "scripts/flink-risk-postgres-fault.mjs": "f62302b9a99deddeb172660438e469ff66e05d9cc4688be411f7d09e759d1929"
+  }
+}

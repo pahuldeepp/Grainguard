@@ -1,0 +1,26 @@
+test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications (test_anomaly.ApplyTest.test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications) ... FAIL
+
+======================================================================
+FAIL: test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications (test_anomaly.ApplyTest.test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/services/risk-engine/test_anomaly.py", line 161, in test_payload_and_envelope_versions_match_across_threshold_and_anomaly_publications
+    self.assertEqual([e["payload"]["assessment_version"] for e in sc.outbox], ["1", "2", "3", "4"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['1', '1', '1', '1'] != ['1', '2', '3', '4']
+
+First differing element 1:
+'1'
+'2'
+
+- ['1', '1', '1', '1']
+?        ^    ^    ^
+
++ ['1', '2', '3', '4']
+?        ^    ^    ^
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (failures=1)

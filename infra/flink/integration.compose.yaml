@@ -1,0 +1,18 @@
+# Dedicated integration project only; ports do not overlap the dev or standalone stack.
+services:
+  postgres:
+    ports: !override ["127.0.0.1:55741:5432"]
+  pgbouncer:
+    ports: !override ["127.0.0.1:56741:6432"]
+  kafka:
+    ports: !override ["127.0.0.1:59112:9092"]
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://127.0.0.1:59112
+  schema-registry:
+    ports: !override ["127.0.0.1:58111:8081"]
+  connect:
+    ports: !override ["127.0.0.1:58113:8083"]
+  rabbitmq:
+    ports: !override ["127.0.0.1:55772:5672"]
+  flink-jobmanager:
+    ports: !override ["127.0.0.1:58114:8081", "127.0.0.1:59349:9249"]

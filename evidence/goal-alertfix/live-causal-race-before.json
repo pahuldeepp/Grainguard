@@ -1,0 +1,11 @@
+[
+  {
+    "tenant_id": "c87030af-ea7d-4ba5-bc82-4bb2b44045ac",
+    "anomaly_event_id": "76d82de6-f10a-5784-98b4-d8c21195ab9c",
+    "outcome": "no_corroboration",
+    "decided_at": "2026-11-02T00:25:15.358Z",
+    "cause_event_id": "48abb92f-4625-42fa-89ff-8c743283b2ed",
+    "cause_assessed_at": "2026-11-02T00:25:16.091Z",
+    "score": 25
+  }
+]

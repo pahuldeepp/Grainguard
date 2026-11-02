@@ -1,0 +1,31 @@
+Stage06 host binaries built
+Transformer healthy
+(node:47711) TimeoutNegativeWarning: -1793581194979 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant 8b542be9-64e4-4a72-81aa-4993e3a2255f
+Alert episode committed for tenant 8b542be9-64e4-4a72-81aa-4993e3a2255f
+Jobs intent committed for tenant 8b542be9-64e4-4a72-81aa-4993e3a2255f
+Notification sent for tenant 8b542be9-64e4-4a72-81aa-4993e3a2255f
+Risk assessment committed for tenant bf9e1dce-d3f4-40cb-a0a9-d4c5d9d38205
+Alert episode committed for tenant bf9e1dce-d3f4-40cb-a0a9-d4c5d9d38205
+Jobs intent committed for tenant bf9e1dce-d3f4-40cb-a0a9-d4c5d9d38205
+Notification sent for tenant bf9e1dce-d3f4-40cb-a0a9-d4c5d9d38205
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+PASS Flink integration: two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS
+PASS Flink integration: risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification
+PASS Flink integration: stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival
+PASS Flink integration: delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert
+PASS Flink integration: Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries
+PASS Flink integration: PostgreSQL outage leaves offsets uncommitted; explicit worker recovery applies queued anomaly once and preserves notification deduplication
+Flink integration evidence: evidence/flink/risk-integration-924a0e16-5c2f-4639-9df1-b904f5fd5573.json

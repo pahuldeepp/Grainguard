@@ -1,0 +1,18 @@
+job RUNNING after 17757 ms
+PASS  A1 tenant A sliding windows equal the independent reference (duplicates counted once)  (4 windows match the reference)
+PASS  A2 tenant B sliding windows equal the independent reference  (4 windows match the reference)
+PASS  A3 tenant isolation: key, header and body agree and B never contains A values (same device UUID)
+PASS  A4 anomaly: one rapid_change for tenant A tied to the causing event, none for tenant B  (A=1 B=0)
+PASS  A5 DLQ holds bad_json, key_mismatch, bad_field and the beyond-lateness event  (bad_json,key_mismatch,bad_field,late)
+PASS  A6 DLQ records are bounded and carry a validated tenant hint or 'unknown'
+PASS  A7 aggregate event IDs are deterministic (same window, same ID across revisions)
+TaskManager killed (container restarted after 3 s); job restarted and RUNNING again 29342 ms after the kill (checkpoints before kill: 28)
+PASS  B1 after a TaskManager kill every window is present and correct (no loss, no double count)  (9 windows match the reference)
+PASS  B2 any replayed output is byte-identical to the original (idempotent for downstream inboxes)  (0 replayed duplicates)
+JobManager stopped (job lost); restoring from the newest retained checkpoint
+PASS  C1 restore script found a retained checkpoint and restarted the JobManager  (restoring from /checkpoints/fe578e2e6a2c52800c40a6581946ff70/chk-44)
+job RUNNING again 49770 ms after restore
+PASS  C2 after JobManager loss and restore, windows are complete and correct  (11 windows match the reference)
+PASS  C3 a pre-failure event replayed after restore is dropped as a duplicate (dedupe state survived)  (no DLQ record for the replayed event)
+
+12/12 checks passed; evidence/flink/e2e-88271.json

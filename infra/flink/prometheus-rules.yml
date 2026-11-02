@@ -1,0 +1,45 @@
+# Alert rules for the optional Flink job (ADR-0030). Metric names come from the Flink Prometheus reporter;
+# job/operator scoped user metrics are prefixed flink_taskmanager_job_task_operator_. Tenant and device IDs are
+# never metric labels. Load with rule_files in the Prometheus that scrapes the Flink pods on port 9249.
+groups:
+  - name: greenguard-flink
+    rules:
+      - alert: FlinkJobNotRunning
+        expr: absent(flink_jobmanager_job_uptime) or flink_jobmanager_job_uptime < 0
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Telemetry stream job is not running (derived topics stall; core pipeline unaffected)" }
+      - alert: FlinkCheckpointsFailing
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[10m]) > 0
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "Checkpoints are failing; recovery would replay from an older checkpoint" }
+      - alert: FlinkCheckpointSlow
+        expr: flink_jobmanager_job_lastCheckpointDuration > 60000
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "Last checkpoint took over 60 s (often backpressure or state size)" }
+      - alert: FlinkRestartLoop
+        expr: increase(flink_jobmanager_job_numRestarts[15m]) >= 3
+        labels: { severity: page }
+        annotations: { summary: "Job restarted 3 or more times in 15 minutes" }
+      - alert: FlinkBackpressure
+        expr: max(flink_taskmanager_job_task_backPressuredTimeMsPerSecond) > 800
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "A task is backpressured more than 80 percent of the time; scale TaskManagers or Kafka partitions" }
+      - alert: FlinkSourceLag
+        expr: max(flink_taskmanager_job_task_operator_KafkaSourceReader_KafkaConsumer_records_lag_max) > 100000
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "The job is more than 100k records behind the canonical topic" }
+      - alert: FlinkRejectionSpike
+        expr: sum(rate(flink_taskmanager_job_task_operator_greenguard_rejected[5m])) > 1
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "Sustained rejected input; check the stream DLQ reasons and the upstream transformer" }
+      - alert: FlinkWatermarkStalled
+        expr: max(flink_taskmanager_job_task_operator_currentOutputWatermark) - min(flink_taskmanager_job_task_operator_currentOutputWatermark) > 1800000
+        for: 15m
+        labels: { severity: warn }
+        annotations: { summary: "Watermarks differ by more than 30 minutes across subtasks; an idle or stuck partition" }

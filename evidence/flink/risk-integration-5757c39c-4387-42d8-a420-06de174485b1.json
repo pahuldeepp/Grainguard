@@ -1,0 +1,69 @@
+{
+  "runId": "5757c39c-4387-42d8-a420-06de174485b1",
+  "started": "2026-11-02T01:49:39.901Z",
+  "finished": "2026-11-02T01:52:01.463Z",
+  "status": "passed",
+  "error": null,
+  "composeProject": "gg-flink-risk",
+  "notificationProvider": "local",
+  "maxOutOfOrder": "1s",
+  "checkpointInterval": "2s",
+  "latestFixtureObservation": "2026-11-02T01:51:13.506Z",
+  "baseStage06": "passed before Flink assertions",
+  "expectedChecks": 8,
+  "checks": [
+    {
+      "name": "two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS",
+      "ok": true,
+      "at": "2026-11-02T01:49:40.088Z"
+    },
+    {
+      "name": "risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification",
+      "ok": true,
+      "at": "2026-11-02T01:50:25.649Z"
+    },
+    {
+      "name": "stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival",
+      "ok": true,
+      "at": "2026-11-02T01:50:30.332Z"
+    },
+    {
+      "name": "delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert",
+      "ok": true,
+      "at": "2026-11-02T01:50:37.103Z"
+    },
+    {
+      "name": "Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T01:50:38.077Z"
+    },
+    {
+      "name": "Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T01:50:44.057Z"
+    },
+    {
+      "name": "Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries",
+      "ok": true,
+      "at": "2026-11-02T01:51:09.231Z"
+    },
+    {
+      "name": "PostgreSQL outage leaves offsets uncommitted; explicit worker recovery applies queued anomaly once and preserves notification deduplication",
+      "ok": true,
+      "at": "2026-11-02T01:52:01.461Z"
+    }
+  ],
+  "passed": 8,
+  "sourceHashes": {
+    "services/risk-engine/risk_engine/apply.py": "3baf62e2f27b3ec1467a549417784c72c0ad675a959abef17e15b4b1f4086134",
+    "services/risk-engine/risk_engine/store.py": "e9cd88ec35fb1f38b9a8ec6111b8a089ab984bc100428ec1fc7d83d31fedb11a",
+    "services/risk-engine/risk_engine/events.py": "0cc6d870fc154935645bc32c583945cc170f38d744c5cd4260bdee962cb7f8e2",
+    "services/workflow-alerts/src/consumer/handler.ts": "74b60eba97e5f9f238b93693c0e3c2275586c6a8c36af9cca3fdfb155f5f78e1",
+    "services/workflow-alerts/src/alerts/policy.ts": "323f9ac70b53f874ae3c78fcd45702042a30ea28afe3a5c595f47751bfd74f79",
+    "services/workflow-alerts/src/alerts/lifecycle.ts": "60c17a32372c55c9473eb9591b576cb4b36d766c6eb21495c060ea01bb07d5dc",
+    "scripts/stage06-e2e.mjs": "b4db30366abe8bfbb5fc9360fa872f8790d755f402d19b8eb3fb4ce458d3b864",
+    "scripts/flink-risk-assertions.mjs": "a1f19ad083deaef34c79d664259b6ab5cdcb71cc91ecc5875b838186e3121b8c",
+    "scripts/flink-risk-helpers.mjs": "b26037ce45b7bc69d720c2631371958938e36a802bdc6393527cd25c369b0bed",
+    "scripts/flink-risk-postgres-fault.mjs": "f62302b9a99deddeb172660438e469ff66e05d9cc4688be411f7d09e759d1929"
+  }
+}

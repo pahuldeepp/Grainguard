@@ -1,0 +1,49 @@
+Stage06 host binaries built
+Transformer healthy
+(node:10167) TimeoutNegativeWarning: -1793578898227 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant a2e15fa4-c3d1-4c29-90b5-3dbebab97932
+Alert episode committed for tenant a2e15fa4-c3d1-4c29-90b5-3dbebab97932
+Jobs intent committed for tenant a2e15fa4-c3d1-4c29-90b5-3dbebab97932
+Notification sent for tenant a2e15fa4-c3d1-4c29-90b5-3dbebab97932
+Risk assessment committed for tenant 99fc553f-4a02-4efd-9504-2a5b236ee3f9
+Alert episode committed for tenant 99fc553f-4a02-4efd-9504-2a5b236ee3f9
+Jobs intent committed for tenant 99fc553f-4a02-4efd-9504-2a5b236ee3f9
+Notification sent for tenant 99fc553f-4a02-4efd-9504-2a5b236ee3f9
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+PASS Flink integration: two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS
+PASS Flink integration: risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification
+PASS Flink integration: stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival
+PASS Flink integration: delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert
+PASS Flink integration: Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work
+PASS Flink integration: Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work
+Flink integration evidence: evidence/flink/risk-integration-3955250f-eae8-4a78-aa9d-77997c1fbe58.json
+file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:202
+  throw new Error(
+        ^
+
+Error: new real Flink anomaly after restart reaches farmer channels: timed out; ":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":56,"size":10}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:26.683Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":57,"size":10}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:26.688Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":58,"size":10}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:26.692Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":59,"size":10}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:26.696Z","logger":"kafkajs","message":"[Connection] Response Heartbeat(key: 12, version: 3)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":60,"size":10}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:26.744Z","logger":"kafkajs","message":"[Connection] Response JoinGroup(key: 11, version: 5)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":62,"size":76}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:27.023Z","logger":"kafkajs","message":"[Connection] Response JoinGroup(key: 11, version: 5)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":64,"size":76}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:27.517Z","logger":"kafkajs","message":"[Connection] Response JoinGroup(key: 11, version: 5)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":66,"size":76}
+{"level":"ERROR","timestamp":"2026-11-02T00:24:28.356Z","logger":"kafkajs","message":"[Connection] Response JoinGroup(key: 11, version: 5)","broker":"127.0.0.1:59112","clientId":"workflow-alerts","error":"This is not the correct coordinator for this group","correlationId":68,"size":76}
+
+    at until (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:202:9)
+    at async runFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:579:3)
+    at async checkFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:34:5)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:633:5
+
+Node.js v24.21.0

@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from risk_engine.apply import Record
-from risk_engine.events import DEVICE_TOPIC, LOT_TOPIC, TELEMETRY_TOPIC
+from risk_engine.events import ANOMALY_TOPIC, DEVICE_TOPIC, LOT_TOPIC, TELEMETRY_TOPIC
 from risk_engine.join import covers
 from risk_engine.store import StoreError
 
@@ -59,6 +59,20 @@ def lot_changed(tenant, site, bin_id, lot, grain, version, effective_from, previ
         "occupancy_version": str(version), "effective_from": effective_from, "previous_lot_id": previous})
 
 
+def anomaly(tenant, device, site, bin_id, observed_at, metric="temperature_c", detector="rapid_change",
+            value=31.0, reading_id=None, event_id=None, source=None):
+    """A Flink telemetry.anomaly v1 event (no aggregate_version, as published by the job)."""
+    event = _envelope(tenant, "telemetry.anomaly", "device_telemetry_stream", device, 1, {
+        "device_id": device, "reading_id": reading_id or new_id(), "site_id": site, "bin_id": bin_id,
+        "metric": metric, "detector": detector, "observed_at": observed_at, "value": value,
+        "baseline_mean": 20.0, "baseline_stddev": 0.1, "score": 6.0, "advisory": True}, event_id)
+    del event["aggregate_version"]
+    if source is not None:
+        event["causation_id"] = source["event_id"]
+        event["payload"]["reading_id"] = reading_id or source["payload"]["reading_id"]
+    return event
+
+
 def telemetry(tenant, device, site, bin_id, observed_at, measurements=None, binding_version=1, version=1):
     return _envelope(tenant, "telemetry.recorded", "device_telemetry_stream", device, version, {
         "reading_id": new_id(), "device_id": device, "site_id": site, "bin_id": bin_id,
@@ -70,12 +84,14 @@ def telemetry(tenant, device, site, bin_id, observed_at, measurements=None, bind
 _offsets = iter(range(1, 10**9))
 
 
-def record(event, topic=None, offset=None, partition=0) -> Record:
+def record(event, topic=None, offset=None, partition=0, key="auto") -> Record:
     if topic is None:
-        topic = {"telemetry.recorded": TELEMETRY_TOPIC, "lot.changed": LOT_TOPIC}.get(
-            event.get("event_type"), DEVICE_TOPIC)
+        topic = {"telemetry.recorded": TELEMETRY_TOPIC, "lot.changed": LOT_TOPIC,
+                 "telemetry.anomaly": ANOMALY_TOPIC}.get(event.get("event_type"), DEVICE_TOPIC)
     value = event if isinstance(event, bytes) else json.dumps(event).encode()
-    return Record(topic, partition, next(_offsets) if offset is None else offset, value)
+    if key == "auto":  # the Kafka key the Flink job writes: tenant_id:aggregate_id
+        key = None if isinstance(event, bytes) else f"{event['tenant_id']}:{event['aggregate_id']}".encode()
+    return Record(topic, partition, next(_offsets) if offset is None else offset, value, key)
 
 
 class FakeTx:
@@ -98,7 +114,16 @@ class FakeTx:
         if key in self.s["inbox"]:
             return self.s["inbox"][key]
         self.s["inbox"][key] = entry.sha256
+        if entry.event_type == "telemetry.recorded":
+            payload = entry.event["payload"]
+            self.s["telemetry_receipts"].add((self.tenant, entry.event_id, payload["device_id"], payload["reading_id"]))
         return None
+
+    def telemetry_received(self, source_event_id, device_id, reading_id):
+        return (self.tenant, source_event_id, device_id, reading_id) in self.s["telemetry_receipts"]
+
+    def telemetry_rejected(self, source_event_id, device_id, reading_id):
+        return (self.tenant, source_event_id, device_id, reading_id) in self.s["telemetry_rejections"]
 
     def binding_for_update(self, device_id):
         return self.s["bindings"].get((self.tenant, device_id))
@@ -166,13 +191,48 @@ class FakeTx:
         self._hook("insert_outbox")
         self.s["outbox"].append(event)
 
+    def latest_assessment(self, device_id, lot_id, not_before, source_kind):
+        rows = [a for a in self.s["assessments"].values()
+                if a["tenant"] == self.tenant and a["device_id"] == device_id and a["lot_id"] == lot_id
+                and (source_kind is None or a.get("source_kind", "threshold") == source_kind)
+                and a["score"] is not None
+                and a["severity"] != "insufficient_data" and a["observed_at"] >= not_before
+                and (self.tenant, a["assessment_id"]) not in self.s["invalidations"]]
+        if not rows:
+            return None
+        best = max(rows, key=lambda a: (a["observed_at"], a["aggregate_version"]))
+        return {"score": best["score"], "severity": best["severity"], "reasons": best["reasons"],
+                "observed_at": best["observed_at"]}
+
+    def bin_published_score(self, bin_id, lot_id):
+        latest = {}
+        for a in self.s["assessments"].values():
+            binding = self.s["bindings"].get((self.tenant, a["device_id"]))
+            if (a["tenant"] != self.tenant or a["bin_id"] != bin_id or a["lot_id"] != lot_id
+                    or binding is None or binding.bin_id != bin_id or binding.status != "active"
+                    or a["score"] is None
+                    or (self.tenant, a["assessment_id"]) in self.s["invalidations"]):
+                continue
+            prior = latest.get(a["device_id"])
+            if prior is None or a["aggregate_version"] > prior["aggregate_version"]:
+                latest[a["device_id"]] = a
+        return max((a["score"] for a in latest.values()), default=None)
+
+    def insert_anomaly_decision(self, values):
+        self._hook("insert_anomaly_decision")
+        key = (self.tenant, values["anomaly_event_id"])
+        if key in self.s["decisions"]:
+            raise StoreError("23505", "anomaly_decisions_pkey")
+        self.s["decisions"][key] = dict(values)
+
 
 class FakeDatabase:
     """Commits staged state only when the transaction body completes."""
 
     def __init__(self):
         self.state = {"inbox": {}, "bindings": {}, "lots": {}, "streams": {}, "assessments": {},
-                      "invalidations": {}, "outbox": []}
+                      "invalidations": {}, "outbox": [], "decisions": {}, "telemetry_receipts": set(),
+                      "telemetry_rejections": set()}
         self.staged = None
         self.failures: dict[str, list] = {}
         self.locks: list = []

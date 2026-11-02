@@ -39,6 +39,13 @@ function riskInput(event: DomainEvent) {
       score: p["score"] as number | null,
       severity: p["severity"] as RiskSeverity,
       alertEligible: p["alert_eligible"] as boolean,
+      advisory:
+        event.event_type === "risk.assessed" &&
+        (p["reasons"] as string[]).some(
+          (reason) =>
+            reason === "anomalous_temperature" ||
+            reason === "anomalous_humidity",
+        ),
     },
   };
 }

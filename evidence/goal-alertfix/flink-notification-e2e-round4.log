@@ -1,0 +1,39 @@
+Stage06 host binaries built
+Transformer healthy
+(node:77609) TimeoutNegativeWarning: -1793578239259 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Transformer caught up with all four raw outbox topics
+Fresh consumer groups positioned at current topic tails
+Risk engine ready
+Alert service ready
+Jobs worker healthy
+Notification worker healthy
+Published two tenant binding, lot and telemetry streams
+Risk assessment committed for tenant cd895ccc-e301-4b66-82af-86c9447a618d
+Alert episode committed for tenant cd895ccc-e301-4b66-82af-86c9447a618d
+Jobs intent committed for tenant cd895ccc-e301-4b66-82af-86c9447a618d
+Notification sent for tenant cd895ccc-e301-4b66-82af-86c9447a618d
+Risk assessment committed for tenant 397dba50-3483-4249-a204-f91e6a2023b8
+Alert episode committed for tenant 397dba50-3483-4249-a204-f91e6a2023b8
+Jobs intent committed for tenant 397dba50-3483-4249-a204-f91e6a2023b8
+Notification sent for tenant 397dba50-3483-4249-a204-f91e6a2023b8
+Replayed the original alert.opened event after jobs-worker SIGKILL/restart
+PASS Stage06: two tenants, canonical reading → risk → CDC → alert → CDC → jobs → RabbitMQ → delivery; tenant-isolated ack and replay
+PASS Flink integration: two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS
+PASS Flink integration: risk restart and Kafka anomaly replay create no extra assessment, decision or notification
+file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:192
+  throw new Error(
+        ^
+
+Error: in-flight cross-device advisory consumed: timed out; (node:83174) TimeoutNegativeWarning: -1793578276529 is a negative number.
+Timeout duration was set to 1.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+    at until (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:192:9)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processTimers (node:internal/timers:615:9)
+    at async checkFlinkIntegration (file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/flink-risk-assertions.mjs:332:9)
+    at async file:///Users/pahuldeepsingh/Documents/Codex/2026-11-01/claude-code-ran-9-commands-1/work/GreenGuard-fixes/scripts/stage06-e2e.mjs:631:5
+
+Node.js v24.21.0

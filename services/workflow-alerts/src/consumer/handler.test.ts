@@ -47,6 +47,31 @@ const count = async (table: string, tenantId: string) =>
   );
 
 describe("risk.assessed consumer", () => {
+  test("a reordered advisory from either device cannot downgrade or own a critical bin alert", async () => {
+    const s = newStream();
+    const critical = riskEvent(s, 75);
+    await handleRiskEvent(db, critical);
+    for (const deviceId of [s.deviceId, randomUUID()]) {
+      const other = { ...s, deviceId };
+      const advisory = riskEvent(other, 50);
+      advisory.payload.reasons = ["anomalous_temperature"];
+      assert.equal(
+        applied(await handleRiskEvent(db, advisory)).outcome,
+        "no_change",
+      );
+      assert.equal(
+        applied(await handleRiskEvent(db, invalidationEvent(other, advisory)))
+          .outcome,
+        "no_change",
+      );
+      assert.equal((await episodes(s.tenantId))[0].score, 75);
+      assert.equal((await episodes(s.tenantId))[0].state, "open");
+      s.version = Math.max(s.version, other.version);
+    }
+    assert.equal((await outboxFor(s.tenantId)).length, 1);
+    await handleRiskEvent(db, riskEvent(s, 0));
+    assert.equal((await episodes(s.tenantId))[0].state, "resolved");
+  });
   test("invalidation resolves only the causally current alert and is replay-safe", async () => {
     const s = newStream();
     const assessed = riskEvent(s, 75);

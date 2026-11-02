@@ -414,3 +414,25 @@ mysql-cdc-test: db-migrate
 design-check:
 	node --test scripts/design-check.test.mjs
 	node scripts/design-check.mjs --report=evidence/design-check-latest.md $(ARGS)
+
+# Optional Flink stream processing (ADR-0030): never part of verify, dev or smoke.
+FLINK_MAVEN_CACHE ?= gg-flink-risk-m2
+FLINK_COMPOSE = docker compose -p gg-flink -f infra/flink/compose.standalone.yaml -f infra/flink/compose.yaml --profile flink
+.PHONY: flink-check flink-test flink-topics flink-up flink-down flink-restore flink-e2e flink-bench
+flink-check:
+	ruby infra/flink/check-manifests.rb
+flink-test: flink-check
+	docker run --rm -v $(FLINK_MAVEN_CACHE):/root/.m2 -v "$(CURDIR)":/repo -w /repo/services/stream-processor maven@sha256:1a352420f7aba21f5ad08df31bab55f74c013fb491f1ae8ab1dd7ff9ed698584 mvn -B verify
+flink-topics:
+	docker compose -p gg-flink -f infra/flink/compose.standalone.yaml up -d --wait kafka
+	CREATE_INPUT=1 infra/flink/topics.sh "docker compose -p gg-flink -f infra/flink/compose.standalone.yaml"
+flink-up: flink-topics
+	$(FLINK_COMPOSE) up -d --build flink-jobmanager flink-taskmanager
+flink-down:
+	$(FLINK_COMPOSE) stop flink-taskmanager flink-jobmanager
+flink-restore:
+	infra/flink/restore.sh "$(FLINK_COMPOSE)"
+flink-e2e:
+	node scripts/flink-e2e.mjs
+flink-bench:
+	node scripts/flink-bench.mjs

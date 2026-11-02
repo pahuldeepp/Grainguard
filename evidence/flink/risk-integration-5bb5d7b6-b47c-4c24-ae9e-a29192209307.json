@@ -1,0 +1,64 @@
+{
+  "runId": "5bb5d7b6-b47c-4c24-ae9e-a29192209307",
+  "started": "2026-11-02T00:56:52.607Z",
+  "finished": "2026-11-02T00:58:50.103Z",
+  "status": "failed",
+  "error": "queued anomaly is durable after PostgreSQL and consumer recovery: process exited 45072; (node:39453) TimeoutNegativeWarning: -1793580966071 is a negative number.\nTimeout duration was set to 1.\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n2026/11/01 19:58:48 ERROR dispatch scan failed error=\"scan due: begin transaction: context canceled\"\n2026/11/01 19:58:49 ERROR jobs-worker failed error=\"listen tcp 127.0.0.1:18095: bind: address already in use\"\n\n2026/11/01 19:58:49 ERROR alert intake failed error=\"poll: topic greenguard.alerts.lifecycle.v1 partition 0 lost records; the client consumed to offset 7 epoch 0 but was reset to offset 1 epoch 0\\ntopic greenguard.alerts.lifecycle.v1 partition 4 lost records; the client consumed to offset 15 epoch 0 but was reset to offset 3 epoch 0\"\n",
+  "composeProject": "gg-flink-risk",
+  "notificationProvider": "local",
+  "maxOutOfOrder": "1s",
+  "checkpointInterval": "2s",
+  "latestFixtureObservation": "2026-11-02T00:58:37.232Z",
+  "baseStage06": "passed before Flink assertions",
+  "expectedChecks": 8,
+  "checks": [
+    {
+      "name": "two tenants: real Flink anomalies alone make sub-threshold readings alert-eligible and deliver email plus SMS",
+      "ok": true,
+      "at": "2026-11-02T00:56:52.654Z"
+    },
+    {
+      "name": "risk SIGKILL/restart and Kafka anomaly replay create no extra assessment, decision or notification",
+      "ok": true,
+      "at": "2026-11-02T00:57:38.041Z"
+    },
+    {
+      "name": "stale and mismatched anomalies are audited; missing bindings retry without committing and resume on context arrival",
+      "ok": true,
+      "at": "2026-11-02T00:57:42.176Z"
+    },
+    {
+      "name": "delayed anomaly and in-flight cross-device advisory cannot downgrade or replace a critical bin alert",
+      "ok": true,
+      "at": "2026-11-02T00:57:53.471Z"
+    },
+    {
+      "name": "Flink stopped, flag=on: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:57:54.381Z"
+    },
+    {
+      "name": "Flink stopped, flag=off: threshold notification, critical escalation and normal clear still work",
+      "ok": true,
+      "at": "2026-11-02T00:58:02.370Z"
+    },
+    {
+      "name": "Flink restart and flag restoration produce a fresh advisory alert and exactly two local farmer-channel deliveries",
+      "ok": true,
+      "at": "2026-11-02T00:58:33.079Z"
+    }
+  ],
+  "passed": 7,
+  "sourceHashes": {
+    "services/risk-engine/risk_engine/apply.py": "3baf62e2f27b3ec1467a549417784c72c0ad675a959abef17e15b4b1f4086134",
+    "services/risk-engine/risk_engine/store.py": "e9cd88ec35fb1f38b9a8ec6111b8a089ab984bc100428ec1fc7d83d31fedb11a",
+    "services/risk-engine/risk_engine/events.py": "0cc6d870fc154935645bc32c583945cc170f38d744c5cd4260bdee962cb7f8e2",
+    "services/workflow-alerts/src/consumer/handler.ts": "74b60eba97e5f9f238b93693c0e3c2275586c6a8c36af9cca3fdfb155f5f78e1",
+    "services/workflow-alerts/src/alerts/policy.ts": "323f9ac70b53f874ae3c78fcd45702042a30ea28afe3a5c595f47751bfd74f79",
+    "services/workflow-alerts/src/alerts/lifecycle.ts": "60c17a32372c55c9473eb9591b576cb4b36d766c6eb21495c060ea01bb07d5dc",
+    "scripts/stage06-e2e.mjs": "3551b16df00540dd5b22343bcd202b807e6e5b0e06f26a269bf5509298c5d653",
+    "scripts/flink-risk-assertions.mjs": "a1f19ad083deaef34c79d664259b6ab5cdcb71cc91ecc5875b838186e3121b8c",
+    "scripts/flink-risk-helpers.mjs": "6b3c3eec8884f4cca613ca4480f2c74ec17fe3012c4dbbbe5945e67e4d8aff7e",
+    "scripts/flink-risk-postgres-fault.mjs": "f62302b9a99deddeb172660438e469ff66e05d9cc4688be411f7d09e759d1929"
+  }
+}
