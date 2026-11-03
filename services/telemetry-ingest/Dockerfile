@@ -1,4 +1,4 @@
-FROM golang@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
+FROM golang@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src/services/telemetry-ingest
 COPY services/telemetry-ingest/go.* ./
 COPY packages/go-migrations/ /src/packages/go-migrations/
